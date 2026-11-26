@@ -1,8 +1,11 @@
-/** The pure half of `scrollTo` on a device: the drag toward an edge, and what a container shows between drags. */
+/**
+ * `scrollTo` on a device, apart from the surface: the loop that drags toward
+ * an edge until a drag moves nothing, and what a container shows between drags.
+ */
 
-import type { ScrollEdge } from '@e2e-dev/core/engine';
+import { EngineError, type ScrollDirection, type ScrollEdge } from '@e2e-dev/core/engine';
 import type { ProjectedNode } from './nodes.ts';
-import type { Point, Rect } from './support.ts';
+import type { Rect } from './support.ts';
 
 /**
  * Roles left out of what a container shows: a spinner (a pull-to-refresh
@@ -11,27 +14,58 @@ import type { Point, Rect } from './support.ts';
  */
 const RESTLESS_ROLES: ReadonlySet<string> = new Set(['progressbar', 'status']);
 
+/** Most drags sent between two reads: a read costs more than a drag. */
+const MAX_EDGE_DRAGS = 3;
+
 /**
- * The finger's path that moves a container's content toward `edge`: to reach
- * the bottom the finger travels up. It runs from a quarter in from one side
- * of the region to a quarter in from the other, along its middle, released
- * without a hold so the content keeps going: an edge needs no row seen on the
- * way. The quarter keeps the start off a sticky footer or a tab bar.
+ * The direction that moves content toward `edge`, for `swipeWithin`: to reach
+ * the bottom the content scrolls down, so the finger travels up. Without
+ * momentum it runs from a quarter in from one side of the region to a quarter
+ * in from the other, released without a hold so the content keeps going; the
+ * quarter keeps the start off a sticky footer or a tab bar.
  */
-export function edgeDrag(region: Rect, edge: ScrollEdge): { from: Point; to: Point } {
-  const x = region.x + region.width / 2;
-  const y = region.y + region.height / 2;
-  const near = (start: number, extent: number): number => start + extent * 0.25;
-  const far = (start: number, extent: number): number => start + extent * 0.75;
-  switch (edge) {
-    case 'bottom':
-      return { from: { x, y: far(region.y, region.height) }, to: { x, y: near(region.y, region.height) } };
-    case 'top':
-      return { from: { x, y: near(region.y, region.height) }, to: { x, y: far(region.y, region.height) } };
-    case 'right':
-      return { from: { x: far(region.x, region.width), y }, to: { x: near(region.x, region.width), y } };
-    case 'left':
-      return { from: { x: near(region.x, region.width), y }, to: { x: far(region.x, region.width), y } };
+export const EDGE_DIRECTION: Readonly<Record<ScrollEdge, ScrollDirection>> = { top: 'up', bottom: 'down', left: 'left', right: 'right' };
+
+/** What the drag loop needs from the device. */
+export interface EdgeDevice {
+  /** Sends `count` drags toward the edge, back to back. */
+  drag(count: number): Promise<void>;
+  /** What the region shows after the content rests, or `undefined` for a read that left nodes out. */
+  read(): Promise<string | undefined>;
+  /** What is left of the input budget. */
+  remainingMs(): number;
+}
+
+/**
+ * Drags toward an edge until a drag leaves what the region shows unchanged,
+ * starting from `before`, the first read. The first pass is one drag, since a
+ * container already at its edge needs no more; one that moves gets up to
+ * three per read. No pass starts that the budget cannot finish, estimated
+ * from the last read and the last drags' time per drag, since the drag count
+ * grows between passes. A read that left nodes out never reads as unchanged.
+ */
+export async function dragToEdge(device: EdgeDevice, before: string | undefined): Promise<void> {
+  let last = before;
+  let drags = 0;
+  let readMs = 0;
+  let dragMs = 0;
+  for (let passes = 0; ; passes += 1) {
+    const count = Math.min(passes + 1, MAX_EDGE_DRAGS);
+    if (passes > 0 && device.remainingMs() < readMs + dragMs * count) {
+      const reason = last === undefined
+        ? `the screen was read with nodes left out (agent-device truncated it) after ${drags} drags, so the edge could not be confirmed`
+        : `the content was still moving after ${drags} drags when the budget ran out`;
+      throw new EngineError('OPERATION_TIMEOUT', reason, { retryable: false });
+    }
+    const dragStarted = Date.now();
+    await device.drag(count);
+    drags += count;
+    const readStarted = Date.now();
+    dragMs = (readStarted - dragStarted) / count;
+    const after = await device.read();
+    readMs = Date.now() - readStarted;
+    if (after !== undefined && after === last) return;
+    last = after;
   }
 }
 

@@ -25,11 +25,18 @@ const NODES = [TITLE, FEED];
 function feedScreen(options: {
   actions?: readonly LocatorActionKind[];
   perform?: (action: LocatorAction, operation: OperationContext) => Promise<void>;
+  /** Answers the locate after the first; every locate resolves the list when absent. */
+  relocate?: () => Promise<never>;
   observeMs?: number;
   timeoutMs?: number;
 } = {}) {
   const received: { ref: string; action: LocatorAction }[] = [];
-  const locate = vi.fn(async (expression: LocatorExpression) => resolveExpression(expression, NODES));
+  let locates = 0;
+  const locate = vi.fn(async (expression: LocatorExpression) => {
+    locates += 1;
+    if (locates > 1 && options.relocate !== undefined) return options.relocate();
+    return resolveExpression(expression, NODES);
+  });
   const { screen, steps } = screenOver({
     locate,
     observe: async () => {
@@ -58,6 +65,38 @@ describe('scrollTo', () => {
     let budget = 0;
     const { screen } = feedScreen({ observeMs: 300, perform: async (_action, operation) => { budget = operation.timeoutMs; } });
     await screen.scrollTo('bottom', { timeout: 1_000 });
+    expect(budget).toBeLessThanOrEqual(720);
+  });
+
+  it('keeps a first observation that outlasts the timeout as what it is, and scrolls nothing', async () => {
+    const { screen, received } = feedScreen({ observeMs: 300 });
+    const failure = await screen.scrollTo('bottom', { timeout: 100 }).catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({ code: expect.any(String) });
+    expect(String((failure as Error).message)).not.toMatch(/did not reach the edge/);
+    expect(received).toEqual([]);
+  });
+
+  it('keeps a locate that times out after a stale retry as the locate failure, not the edge not reached', async () => {
+    let performs = 0;
+    const { screen } = feedScreen({
+      perform: async () => {
+        performs += 1;
+        if (performs === 1) throw new EngineError('NODE_STALE', 'replaced', { retryable: true });
+      },
+      relocate: async () => {
+        throw new EngineError('OPERATION_TIMEOUT', 'locate timed out', { retryable: false });
+      },
+    });
+    const failure = await screen.getByTestId('feed').scrollTo('bottom').catch((cause: unknown) => cause);
+    expect(performs).toBe(1);
+    expect(String((failure as Error).message)).not.toMatch(/did not reach the edge/);
+  });
+
+  it('gives a first screen swipe only what the observation left of the timeout', async () => {
+    let budget = 0;
+    const { screen } = feedScreen({ observeMs: 300, perform: async (_action, operation) => { budget = operation.timeoutMs; } });
+    await screen.swipe({ direction: 'down' });
+    expect(budget).toBeGreaterThan(0);
     expect(budget).toBeLessThanOrEqual(720);
   });
 

@@ -19,7 +19,6 @@ import type {
   PointerAction,
   PointerActionKind,
   ScrollDirection,
-  ScrollEdge,
   SemanticNode,
   ViewportIntersection,
   ViewportPoint,
@@ -223,10 +222,11 @@ export interface TargetSession {
     operation: OperationContext,
   ): Promise<void>;
   /**
-   * Scrolls the screen's container to an edge: `perform(root, scrollTo)` on
-   * the observation root, observing first when no observation has named it yet.
+   * The observation root's ref, which a screen-wide action such as
+   * `scrollTo` is performed on; observes first when no observation has
+   * named it yet.
    */
-  scrollTo(edge: ScrollEdge, operation: OperationContext): Promise<void>;
+  rootRef(operation: OperationContext): Promise<NodeRef>;
   /** Performs one pointer action at a viewport point, in CSS pixels, with no node behind it. */
   performAt(point: ViewportPoint, action: PointerAction, operation: OperationContext): Promise<void>;
   /** Input to whatever holds focus; each member fails with UNSUPPORTED_CAPABILITY when the engine lacks it. */

@@ -215,6 +215,15 @@ const KINDS_BY_VERB: readonly (readonly [GrammarVerb, readonly LocatorActionKind
   ['upload', ['setInputFiles']],
 ];
 
+/**
+ * `operation` with what is left of its budget since `startedMs`, for the
+ * second call of a step that first observes for the root ref: `timeout`
+ * bounds the whole step, so the observe's time comes out of the action's.
+ */
+function leftSince(operation: OperationContext, startedMs: number): OperationContext {
+  return { ...operation, timeoutMs: Math.max(1, operation.timeoutMs - (Date.now() - startedMs)) };
+}
+
 /** The grammar verbs an engine declaration can honor. */
 function declaredVerbs(engine: EngineHandle | undefined): ReadonlySet<GrammarVerb> {
   const verbs = new Set<GrammarVerb>();
@@ -490,11 +499,8 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       const target = root ?? (await session.observe(operation)).root;
       await performRaw(target, { kind: 'swipe', direction, ...(momentum === undefined ? {} : { momentum }) }, leftSince(operation, startedMs));
     },
-    async scrollTo(edge, operation) {
-      if (!actions.has('scrollTo')) unsupported('the "scrollTo" action');
-      const startedMs = Date.now();
-      const target = root ?? (await session.observe(operation)).root;
-      await performRaw(target, { kind: 'scrollTo', edge }, leftSince(operation, startedMs));
+    async rootRef(operation) {
+      return root ?? (await session.observe(operation)).root;
     },
     async performAt(point, action, operation) {
       if (!pointerActions.has(action.kind)) unsupported(`the "${action.kind}" action at a point`);
@@ -527,15 +533,6 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
  * must never pass on a ratio outside 0 to 1, a missing verdict, or a ratio
  * that contradicts the verdict (`{ intersects: false, ratio: 1 }`).
  */
-/**
- * `operation` with what is left of its budget since `startedMs`, for the
- * second call of a step that first observes for the root ref: `timeout`
- * bounds the whole step, so the observe's time comes out of the action's.
- */
-function leftSince(operation: OperationContext, startedMs: number): OperationContext {
-  return { ...operation, timeoutMs: Math.max(1, operation.timeoutMs - (Date.now() - startedMs)) };
-}
-
 function checkIntersection(value: ViewportIntersection, engineName: string): ViewportIntersection {
   const { intersects, ratio } = (value ?? {}) as Partial<Record<keyof ViewportIntersection, unknown>>;
   const validRatio =

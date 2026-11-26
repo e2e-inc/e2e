@@ -564,56 +564,71 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
 
   /**
    * Scrolls a container to an edge within one deadline: the node `expression`
-   * names, or the screen's container when there is none. Once the scroll is
-   * sent, an engine that ran out of budget (reported as a timeout, or as input
-   * that may have landed) did not reach the edge; an engine stops a little
-   * before the deadline, so that is said whether or not it has passed, with
-   * the engine's reason, which tells a list still moving from a stuck read. A
-   * locate that timed out before the scroll was sent stays what it was.
+   * names, or the screen's container when there is none. A scroll that ran
+   * out of budget (an engine timeout, or input that may have landed) did not
+   * reach the edge; an engine stops a little before the deadline, so that is
+   * said whether or not it has passed, with the engine's reason, which tells
+   * a list still moving from a stuck read. Only the scroll's own failure is
+   * read that way: a locate or a first observation that ran out stays what
+   * it was.
    */
   async scrollTo(expression: LocatorExpression | undefined, edge: ScrollEdge, timeoutMs?: number): Promise<void> {
     const action = { kind: 'scrollTo', edge } as const;
     this.checkAction(action);
     const deadline = this.deadline(timeoutMs);
-    let sent = expression === undefined;
-    try {
-      if (expression === undefined) await this.scrollScreenTo(action, deadline);
-      else {
-        await this.performUntil(expression, async () => {
-          sent = true;
-          return action;
-        }, deadline);
-      }
-    } catch (cause) {
-      const engineError = isE2EError(cause) ? asEngineError(cause.cause) : undefined;
-      if (!sent || (engineError?.code !== 'OPERATION_TIMEOUT' && engineError?.code !== 'ACTION_MAY_HAVE_COMMITTED')) throw cause;
-      const target = expression === undefined ? '' : `: ${describeExpression(expression)}`;
-      throw new TestError('ACTION_FAILED', `scrollTo('${edge}') did not reach the edge within ${deadline.elapsed()}ms (${engineError.message})${target}`, { cause });
-    }
+    const target = expression === undefined ? '' : `: ${describeExpression(expression)}`;
+    const notReached = (cause: unknown): TestError | undefined => {
+      const engineError = asEngineError(cause);
+      if (engineError?.code !== 'OPERATION_TIMEOUT' && engineError?.code !== 'ACTION_MAY_HAVE_COMMITTED') return undefined;
+      return new TestError('ACTION_FAILED', `scrollTo('${edge}') did not reach the edge within ${deadline.elapsed()}ms (${engineError.message})${target}`, { cause });
+    };
+    if (expression === undefined) await this.scrollScreenTo(action, deadline, notReached);
+    else await this.performUntil(expression, action, deadline, notReached);
   }
 
-  /** The screen's `scrollTo`, on the observation root, recorded as an engine event like a node action. */
-  private async scrollScreenTo(action: Extract<LocatorAction, { kind: 'scrollTo' }>, deadline: Deadline): Promise<void> {
+  /**
+   * The screen's `scrollTo`: on the observation root, observing first when
+   * none has named it, recorded as an engine event like a node action.
+   */
+  private async scrollScreenTo(
+    action: Extract<LocatorAction, { kind: 'scrollTo' }>,
+    deadline: Deadline,
+    notReached: (cause: unknown) => TestError | undefined,
+  ): Promise<void> {
     const startedAt = timestamp();
     const startedMs = Date.now();
-    const record = (status: StepEvent['status'], code?: string): void =>
+    const fail = (failure: Error & { readonly code: string }): never => {
       this.recordEvent({
         kind: 'engine',
         name: action.kind,
         startedAt,
         durationMs: Date.now() - startedMs,
-        status,
-        ...(code === undefined ? {} : { code }),
+        status: this.signal.aborted ? 'cancelled' : 'failed',
+        code: failure.code,
         detail: `scrollTo ${action.edge} on the screen`,
       });
-    try {
-      await this.session.scrollTo(action.edge, this.operationWithin(deadline));
-    } catch (cause) {
-      const failure = translateLocatorError(cause);
-      record(this.signal.aborted ? 'cancelled' : 'failed', failure.code);
       throw failure;
+    };
+    let root: NodeRef;
+    try {
+      root = await this.session.rootRef(this.operationWithin(deadline));
+    } catch (cause) {
+      return fail(translateLocatorError(cause));
     }
-    record('passed');
+    if (deadline.expired()) return fail(this.lateAction(action.kind, 'the screen'));
+    try {
+      await this.session.perform(root, action, this.operationWithin(deadline));
+    } catch (cause) {
+      return fail(notReached(cause) ?? translateLocatorError(cause));
+    }
+    this.recordEvent({
+      kind: 'engine',
+      name: action.kind,
+      startedAt,
+      durationMs: Date.now() - startedMs,
+      status: 'passed',
+      detail: `scrollTo ${action.edge} on the screen`,
+    });
   }
 
   /** Performs one pointer action at a viewport point, with no node behind it. */
@@ -771,11 +786,17 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     }
   }
 
-  /** `perform` within a deadline a caller shares across steps, such as the swipes of one scroll. */
+  /**
+   * `perform` within a deadline a caller shares across steps, such as the
+   * swipes of one scroll. `performFailure` reads a failure of the perform
+   * itself, never of the locate before it; `undefined` leaves it to the usual
+   * translation.
+   */
   async performUntil(
     expression: LocatorExpression,
     action: LocatorAction | ActionBuilder,
     deadline: Deadline,
+    performFailure?: (cause: unknown) => (Error & { readonly code: string }) | undefined,
   ): Promise<void> {
     if (typeof action !== 'function') this.checkAction(action);
     const startedAt = timestamp();
@@ -807,7 +828,7 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
           stale += 1;
           continue;
         }
-        const failure = translateLocatorError(cause, expression);
+        const failure = performFailure?.(cause) ?? translateLocatorError(cause, expression);
         record(this.signal.aborted ? 'cancelled' : 'failed', failure.code);
         throw failure;
       }

@@ -5,11 +5,18 @@
  * nothing scrolls.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { EngineError, type ScrollEdge } from '@e2e-dev/core/engine';
+import { EngineError, type EngineHandle, type NodeRef, type ScrollEdge } from '@e2e-dev/core/engine';
 import { CLOSED_SHADOW_ROOTS_INIT_SCRIPT } from '../../src/closed-shadow.ts';
+import { web } from '../../src/index.ts';
 import { scrollToEdge } from '../../src/scroll-to.ts';
+import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 let browser: Browser;
 let page: Page;
@@ -179,6 +186,82 @@ describe('scrollTo on the screen', () => {
     const bottom = await offsets();
     expect(await page.locator('text=Batch 3').count()).toBe(1);
     expect(bottom.top).toBe(bottom.maxTop);
+  });
+});
+
+describe('scrollTo out of budget', () => {
+  it('says the budget ran out, not that content kept loading, on a static page with too little budget', async () => {
+    await page.setContent(ROWS);
+    const failure = await scroll('bottom', undefined, 40).catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    expect((failure as Error).message).toMatch(/^the budget ran out (before the first jump|after 1 jump, before a jump confirmed) /);
+  });
+
+  it('fails a node that leaves the page as stale, and leaves the page where it was', async () => {
+    // The pane replaces itself on its first scroll, so the next jump finds it gone.
+    await page.setContent(`<div id="pane" style="height: 300px; overflow-y: auto">${ROWS}</div>${ROWS}
+      <script>
+        document.getElementById('pane').addEventListener('scroll', (event) => event.target.replaceWith(event.target.cloneNode(true)), { once: true });
+      </script>`);
+    const pane = await page.$('#pane');
+    const failure = await scrollToEdge(page, { kind: 'element', element: pane! }, 'bottom', { timeoutMs: 2_000, signal: new AbortController().signal })
+      .catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({ code: 'NODE_STALE', retryable: true });
+    expect((await offsets()).top).toBe(0);
+  });
+
+  it('fails as stale when the located node is gone and the container left with it', async () => {
+    await page.setContent(`<div id="pane" style="height: 300px; overflow-y: auto">${ROWS}</div>
+      <script>
+        document.getElementById('pane').addEventListener('scroll', (event) => event.target.remove(), { once: true });
+      </script>`);
+    const failure = await scroll('bottom', '#pane', 1_000).catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({ code: 'NODE_STALE', retryable: true });
+  });
+});
+
+describe('scrollTo through the engine', () => {
+  let server: Server;
+  let origin: string;
+  let artifactsDir: string;
+  let engine: EngineHandle;
+  const ENDLESS = `<!doctype html><div data-testid="feed">${ROWS}</div>
+    <script>addEventListener('scroll', () => document.body.insertAdjacentHTML('beforeend', '<p style="height: 400px">More</p>'));</script>`;
+  const operation = (timeoutMs = 1_000) => ({ signal: new AbortController().signal, timeoutMs, runId: 'run-scroll', attemptId: 'scroll', origin: 'test' as const });
+
+  beforeAll(async () => {
+    server = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end(ENDLESS);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-scroll-to-'));
+    engine = web();
+    await engine.init!({
+      runId: 'run-scroll', targetName: 'web', projectRoot: process.cwd(), app: { site: '127.0.0.1' }, env: {},
+      headed: false, workerSlot: 0, log: () => undefined, signal: new AbortController().signal,
+    });
+    await engine.startAttempt!({ attemptId: 'scroll', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+  });
+
+  afterAll(async () => {
+    const cleanup = { signal: new AbortController().signal, timeoutMs: 10_000 };
+    await engine.endAttempt!(cleanup);
+    await engine.dispose!(cleanup);
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(artifactsDir, { recursive: true, force: true });
+  });
+
+  it.each(['screen', 'locator'] as const)('keeps the reason an endless feed ran out of budget on the %s form', async (form) => {
+    await engine.session!.open!(`${origin}/`, operation(10_000));
+    const { root } = await engine.observe!(operation(10_000));
+    const ref = form === 'screen'
+      ? root.ref
+      : (await engine.locate!({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'feed', exact: true } } }, operation(10_000)))[0]!.ref;
+    const failure = await engine.perform!(ref as NodeRef, { kind: 'scrollTo', edge: 'bottom' }, operation()).catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT', message: expect.stringContaining('more content kept loading at the bottom edge') });
   });
 });
 

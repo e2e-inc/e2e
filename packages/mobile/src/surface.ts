@@ -70,7 +70,7 @@ import {
 import { keyboardDragStart, keyboardShownIn, type KeyboardUnknown } from './keyboard.ts';
 import { DEVICE_PERMISSIONS, type AgentDeviceClient, type ClientFactory, type DevicePermission, type LaunchPermissions, type MobileOptions, type MobilePlatform, type PermissionState } from './options.ts';
 import { maskPng } from './png.ts';
-import { above, clipTo, edgeDrag, regionSignature } from './scroll-to.ts';
+import { above, clipTo, dragToEdge, EDGE_DIRECTION, regionSignature } from './scroll-to.ts';
 import { mobileDoctor } from './doctor.ts';
 import { deviceLabel, deviceSelection, pinnedApp, type DeviceSelection, type SlotBinding } from './bindings.ts';
 import { assertAppId } from './links.ts';
@@ -232,10 +232,6 @@ interface NodeBinding {
   /** Whether `fill` and `clear` may type into the node, judged with the children `node` leaves out. */
   readonly takesText: boolean;
 }
-
-
-/** The most drags `scrollTo` sends between two reads of the container. */
-const MAX_EDGE_DRAGS = 3;
 
 /**
  * How long a control that appeared or moved with the last action is given to
@@ -1716,14 +1712,12 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   /**
    * `scrollTo` on a device: drags toward `edge` inside a region (the node's
    * box, else the screen, clipped to the screen and cut off above the soft
-   * keyboard) until a drag leaves what the region shows unchanged, on two
-   * captures that left no node out. The region
-   * is measured once, before the first drag: a list's own label can change
-   * as it scrolls, and the node is never looked up again once input went out.
-   * Each drag keeps agent-device's post-gesture stabilization, which holds the
-   * next read until the content rests, so a list still coasting is never read
-   * as at its edge. A container already there costs one drag. No drag starts
-   * once what is left of the budget is shorter than the last drag and its read.
+   * keyboard) until a drag leaves what the region shows unchanged
+   * (`dragToEdge`). The region is measured once, before the first drag: a
+   * list's own label can change as it scrolls, and the node is never looked
+   * up again once input went out. Each drag keeps agent-device's post-gesture
+   * stabilization, which holds the next read until the content rests, so a
+   * list still coasting is never read as at its edge.
    */
   private async scrollToEdge(entry: NodeBinding | undefined, edge: ScrollEdge, operation: OperationContext, input: InputBudget): Promise<void> {
     const client = this.requireClient();
@@ -1731,33 +1725,19 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       const raw = await this.snapshotOrEmpty(operation, false, input);
       return { raw, projected: this.project(raw) };
     };
-    // A capture that leaves nodes out never reads as unchanged, so it never ends the scroll.
-    const signature = ({ raw, projected }: { raw: RawSnapshot; projected: ProjectedScreen }, region: Rect): string | undefined =>
-      isTruncated(raw) ? undefined : regionSignature(projected.index, region);
     const first = await capture();
     const region = this.scrollRegion(entry, first.raw, first.projected);
-    let before = signature(first, region);
-    let passMs = 0;
-    let drags = 0;
-    for (let passes = 0; ; passes += 1) {
-      if (passes > 0 && input.remainingMs() < passMs) {
-        // No read since the first that left no node out: the region was never seen whole, not seen moving.
-        const reason = before === undefined
-          ? `the screen was read with nodes left out (agent-device truncated it) after ${drags} drags, so the edge could not be confirmed`
-          : `the content was still moving after ${drags} drags when the budget ran out`;
-        throw new EngineError('OPERATION_TIMEOUT', reason, { retryable: false });
-      }
-      const startedMs = Date.now();
-      // The first pass is one drag, since a container at its edge already needs
-      // no more; one that moves gets up to three per read, as reads cost more than drags.
-      const count = Math.min(passes + 1, MAX_EDGE_DRAGS);
-      await input.send(() => client.interactions.swipe({ ...edgeDrag(region, edge), count, pauseMs: 0 }));
-      drags += count;
-      const after = signature(await capture(), region);
-      passMs = Date.now() - startedMs;
-      if (after !== undefined && after === before) return;
-      before = after;
-    }
+    // A capture that leaves nodes out never reads as unchanged, so it never ends the scroll.
+    const signature = ({ raw, projected }: { raw: RawSnapshot; projected: ProjectedScreen }): string | undefined =>
+      isTruncated(raw) ? undefined : regionSignature(projected.index, region);
+    const gesture = swipeWithin(region, EDGE_DIRECTION[edge], undefined);
+    await dragToEdge({
+      drag: async (count) => {
+        await input.send(() => client.interactions.swipe({ ...gesture, count, pauseMs: 0 }));
+      },
+      read: async () => signature(await capture()),
+      remainingMs: () => input.remainingMs(),
+    }, signature(first));
   }
 
   /**

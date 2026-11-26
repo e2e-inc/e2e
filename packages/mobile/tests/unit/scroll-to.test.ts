@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { OperationContext, SemanticNode } from '@e2e-dev/core/engine';
 import { ORIGIN_WARNING } from '../../src/errors.ts';
 import { projectSnapshot, type RawNode } from '../../src/nodes.ts';
-import { above, clipTo, edgeDrag, regionSignature } from '../../src/scroll-to.ts';
+import { above, clipTo, regionSignature } from '../../src/scroll-to.ts';
 import { SETTINGS_NODES, SETTINGS_SNAPSHOT } from '../helpers/fake-client.ts';
 import { boot, harness, type Harness } from '../helpers/harness.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
@@ -43,17 +43,6 @@ function named(root: SemanticNode, name: string): SemanticNode {
   if (found === undefined) throw new Error(`no node named ${name}`);
   return found;
 }
-
-describe('edgeDrag', () => {
-  it.each([
-    ['bottom', { x: 200, y: 700 }, { x: 200, y: 300 }],
-    ['top', { x: 200, y: 300 }, { x: 200, y: 700 }],
-    ['right', { x: 300, y: 500 }, { x: 100, y: 500 }],
-    ['left', { x: 100, y: 500 }, { x: 300, y: 500 }],
-  ] as const)('moves the finger away from the %s edge, a quarter in from each side of the region', (edge, from, to) => {
-    expect(edgeDrag(REGION, edge)).toEqual({ from, to });
-  });
-});
 
 describe('regionSignature', () => {
   const project = (raw: readonly RawNode[]) => {
@@ -183,18 +172,24 @@ describe('scrollTo on the device surface', () => {
     });
   });
 
-  it('fails within its budget when the content never stops moving', async () => {
+  it('starts no pass the budget cannot finish, so it fails with its own reason, within the budget', async () => {
     const h = await opened();
     const { root } = await h.engine.observe!(operation());
     let loaded = 0;
-    // A feed that loads one more row on every drag: the region never reads the same twice.
-    h.fake.respond('capture.snapshot', () => {
+    // Each drag takes 100 ms and a read 10 ms, so a pass grows with its drag count: 110, 210, then 310 ms.
+    h.fake.respond('interactions.swipe', async (args) => {
+      await new Promise((resolve) => setTimeout(resolve, 100 * (args as { count: number }).count));
+      return {};
+    });
+    h.fake.respond('capture.snapshot', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
       const base = scrolled(0);
       return { ...base, nodes: base.nodes.map((node) => (node.label === 'About' ? { ...node, label: `About ${(loaded += 1)}` } : node)) };
     });
-    await expect(h.engine.perform!(root.ref, { kind: 'scrollTo', edge: 'bottom' }, operation(200))).rejects.toMatchObject({
-      code: expect.stringMatching(/^(OPERATION_TIMEOUT|ACTION_MAY_HAVE_COMMITTED)$/),
-    });
+    const started = Date.now();
+    const failure = await h.engine.perform!(root.ref, { kind: 'scrollTo', edge: 'bottom' }, operation(600)).catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT', message: expect.stringMatching(/^the content was still moving after 3 drags when the budget ran out$/) });
+    expect(Date.now() - started).toBeLessThanOrEqual(600);
   });
 
   /** Swipes sent since call `from`, counting each drag of a multi-drag swipe. */

@@ -10,14 +10,23 @@ import { isPwTimeout, type ActionTarget } from './support.ts';
  * One jump: `settled` when it moved nothing and the container still held that
  * end, with the same extent, after the next rendered frame; `moved` when it
  * moved or the end did; `detached` when the container left the document.
+ * `from` is the scrollable extent before the jump, `extent` the one after.
  */
-type JumpResult = 'settled' | 'moved' | 'detached';
+interface JumpResult {
+  readonly state: 'settled' | 'moved' | 'detached';
+  readonly from: number;
+  readonly extent: number;
+}
 
 interface FindArgs {
   readonly edge: ScrollEdge;
   readonly fromCenter: boolean;
   readonly closedRootsKey: string;
+  /** What the page function throws for a start node no longer in the document. */
+  readonly detached: string;
 }
+
+const DETACHED = 'e2e: scrollTo start node is not in the document';
 
 /**
  * Below this much budget no jump starts: a jump is a round trip and a
@@ -43,32 +52,50 @@ export async function scrollToEdge(page: Page, target: ActionTarget | undefined,
   // yet (still arriving, or display: none) is waited on, not taken as at its edge.
   if (target?.kind === 'locator') await target.locator.waitFor({ state: 'visible', timeout: operation.timeoutMs });
   else if (target?.kind === 'element') await target.element.waitForElementState('visible', { timeout: operation.timeoutMs });
-  const args: FindArgs = { edge, fromCenter: target === undefined, closedRootsKey: CLOSED_SHADOW_ROOTS_KEY };
-  const outOfBudget = (jumps: number): EngineError =>
-    new EngineError('OPERATION_TIMEOUT', `more content kept loading at the ${edge} edge after ${jumps} jumps, until the budget ran out`, { retryable: false });
+  const args: FindArgs = { edge, fromCenter: target === undefined, closedRootsKey: CLOSED_SHADOW_ROOTS_KEY, detached: DETACHED };
+  let jumps = 0;
+  let firstExtent: number | undefined;
+  let grew = false;
+  // Three causes, three reasons: no jump fit the budget, the end kept moving, or the budget ended before a jump confirmed it.
+  const outOfBudget = (): EngineError => {
+    const done = `${jumps} ${jumps === 1 ? 'jump' : 'jumps'}`;
+    const reason = jumps === 0
+      ? `the budget ran out before the first jump toward the ${edge} edge`
+      : grew
+        ? `more content kept loading at the ${edge} edge after ${done}, until the budget ran out`
+        : `the budget ran out after ${done}, before a jump confirmed the ${edge} edge`;
+    return new EngineError('OPERATION_TIMEOUT', reason, { retryable: false });
+  };
+  const stale = (what: string): EngineError => new EngineError('NODE_STALE', `${what} left the page during scrollTo; re-resolve`, { retryable: true });
   let container: JSHandle<Element | null> | undefined;
+  let found = false;
   try {
-    for (let jumps = 0; ; ) {
+    for (;;) {
       operation.signal.throwIfAborted();
       if (container === undefined) {
         try {
           container = await findContainer(page, target, args, Math.max(1, deadline.remaining()));
         } catch (cause) {
-          if (isPwTimeout(cause)) throw outOfBudget(jumps);
+          if (cause instanceof Error && cause.message.includes(DETACHED)) throw stale('the node');
+          // A locate that ran out once a container was found means the node it came from is gone.
+          if (isPwTimeout(cause)) throw found ? stale('the scroll container') : outOfBudget();
           throw cause;
         }
+        found = true;
       }
       const element = container.asElement();
       if (element === null) return;
       const result = await element.evaluate(jumpOnce, edge);
-      if (result === 'settled') return;
-      if (result === 'detached') {
+      if (result.state === 'settled') return;
+      if (result.state === 'detached') {
         await container.dispose();
         container = undefined;
       } else {
         jumps += 1;
+        firstExtent ??= result.from;
+        if (result.extent > firstExtent) grew = true;
       }
-      if (deadline.remaining() < MIN_JUMP_MS) throw outOfBudget(jumps);
+      if (deadline.remaining() < MIN_JUMP_MS) throw outOfBudget();
     }
   } finally {
     await container?.dispose().catch(() => undefined);
@@ -90,6 +117,8 @@ function findContainer(page: Page, target: ActionTarget | undefined, args: FindA
  * center; `null` when nothing does.
  */
 function scrollContainer(start: Element, args: FindArgs): Element | null {
+  // A node out of the document has no ancestor that scrolls; the page is not its container.
+  if (!start.isConnected) throw new Error(args.detached);
   const vertical = args.edge === 'top' || args.edge === 'bottom';
   const doc = start.ownerDocument;
   const view = doc.defaultView ?? window;
@@ -163,7 +192,7 @@ function scrollContainer(start: Element, args: FindArgs): Element | null {
  * iframe) reads after 100 ms.
  */
 function jumpOnce(container: Element, edge: ScrollEdge): Promise<JumpResult> {
-  if (!container.isConnected) return Promise.resolve('detached');
+  if (!container.isConnected) return Promise.resolve({ state: 'detached', from: 0, extent: 0 });
   const vertical = edge === 'top' || edge === 'bottom';
   const view = container.ownerDocument.defaultView ?? window;
   const extentOf = (): number => (vertical ? container.scrollHeight : container.scrollWidth);
@@ -179,7 +208,11 @@ function jumpOnce(container: Element, edge: ScrollEdge): Promise<JumpResult> {
   const landed = offsetOf();
   // Content that loads at the end grows the extent; a scroll handler that pulls
   // the container back moves the offset. Either means the end was not held.
-  const read = (): JumpResult => (landed === start && extentOf() === extent && offsetOf() === landed ? 'settled' : 'moved');
+  const read = (): JumpResult => ({
+    state: landed === start && extentOf() === extent && offsetOf() === landed ? 'settled' : 'moved',
+    from: far,
+    extent: extentOf(),
+  });
   if (container.ownerDocument.visibilityState === 'hidden') return Promise.resolve(read());
   return new Promise((resolve) => {
     let done = false;

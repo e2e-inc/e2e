@@ -507,6 +507,9 @@ function actionabilitySummary(text: string): string {
  * resolves after the press.
  */
 export function classifyActionError(rawCause: unknown, action: LocatorAction): Error {
+  // `scrollTo` reports its own budget with the reason it ran out, which core
+  // quotes; a scroll toward an edge is safe to repeat, so it is not input to guard.
+  if (action.kind === 'scrollTo' && rawCause instanceof EngineError) return rawCause;
   const cut = inputCutOff(rawCause, action.kind);
   if (cut !== undefined) return cut;
   if (isClassified(rawCause)) return rawCause;
