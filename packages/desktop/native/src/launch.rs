@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 pub const TOKEN_VARIABLE: &str = "E2E_DESKTOP_LAUNCH";
 
 /// The argument that carries a launch's token into an app whose environment macOS hides, followed by the token.
-const TOKEN_ARGUMENT: &str = "-E2EDesktopLaunch";
+pub const TOKEN_ARGUMENT: &str = "-E2EDesktopLaunch";
 
 /// What `launch` was asked to start.
 pub struct LaunchRequest {

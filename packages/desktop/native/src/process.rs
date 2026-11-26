@@ -102,7 +102,13 @@ pub fn carrying(marker: &str) -> Option<Vec<i32>> {
     }
     pids.truncate(filled as usize);
     let own = std::process::id() as i32;
-    Some(pids.into_iter().filter(|pid| *pid > 0 && *pid != own && carries(*pid, marker) == Some(true)).collect())
+    // A launch token also rides in the arguments of an app whose environment macOS hides.
+    let token = marker.strip_prefix(crate::launch::TOKEN_VARIABLE).and_then(|rest| rest.strip_prefix('='));
+    let holds = |pid: i32| match carries(pid, marker) {
+        Some(carried) => carried,
+        None => token.is_some_and(|token| argument_pair(pid, crate::launch::TOKEN_ARGUMENT, token)),
+    };
+    Some(pids.into_iter().filter(|pid| *pid > 0 && *pid != own && holds(*pid)).collect())
 }
 
 #[cfg(test)]
