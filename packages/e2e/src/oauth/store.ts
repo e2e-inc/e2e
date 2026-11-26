@@ -132,7 +132,7 @@ export class EnvCredentialStore implements CredentialStore {
   async remove(): Promise<void> {
     return this.set();
   }
-  async replace(): Promise<boolean> {
+  async replace(_providerId: string, _expected: OAuthCredentials, _next: OAuthCredentials): Promise<boolean> {
     this.assertWritable();
   }
   async list(): Promise<string[]> {
