@@ -84,9 +84,15 @@ pub fn characters(command: bool) -> Option<Vec<(u16, char)>> {
     }
 }
 
-/// The key code that types `character` in a layout's table, the lowest when several do.
+/// The key code that types `character` in a layout's table, the lowest when several do. A keypad key is no match: an
+/// app can tell a keypad shortcut apart, and the main keys are what a shortcut names.
 pub fn code_for(character: char, table: &[(u16, char)]) -> Option<u16> {
-    table.iter().filter(|(_, typed)| *typed == character).map(|(code, _)| *code).min()
+    table.iter().filter(|(code, typed)| *typed == character && !keypad(*code)).map(|(code, _)| *code).min()
+}
+
+/// Whether a virtual key code is on the numeric keypad (`kVK_ANSI_Keypad*`), which every layout maps the same way.
+fn keypad(code: u16) -> bool {
+    matches!(code, 65 | 67 | 69 | 71 | 75 | 76 | 78 | 81..=89 | 91 | 92)
 }
 
 #[cfg(test)]
@@ -101,5 +107,8 @@ mod tests {
         assert_eq!(code_for('q', &french), Some(0));
         assert_eq!(code_for('z', &french), Some(13));
         assert_eq!(code_for('k', &french), None);
+        // AZERTY types é on the 2 key without Shift; only the keypad types 2, and that is no shortcut key.
+        assert_eq!(code_for('2', &[(19, 'é'), (84, '2')]), None);
+        assert_eq!(code_for('2', &[(19, '2'), (84, '2')]), Some(19));
     }
 }
