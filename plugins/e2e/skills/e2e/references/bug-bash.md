@@ -109,6 +109,11 @@ password before it can be a credential. Pass `--config e2e.bugbash.config.ts`
 to every command below, and `open_session {config: "e2e.bugbash.config.ts"}`
 over MCP.
 
+`web({ dialogs })` is newer than `@e2e-dev/web` 0.17.0, which fails the
+config at load with `INVALID_CONFIG`. On an older package, upgrade
+`@e2e-dev/web` and `e2e` together, or leave the option out: a native dialog
+then fails the explorer's action instead of being accepted.
+
 ## 2. Plan charters
 
 A charter is one `e2e explore` goal: one area, one posture, one sentence,
