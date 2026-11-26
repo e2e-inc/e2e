@@ -181,13 +181,14 @@ When a test calls it, the process that started the services runs the real
 function and sends back a copy of the result. That's the runner process in
 `e2e run`, the server in `e2e mcp`, and the host's process in `openHost`.
 
-All workers share the same service instance, so one test can see emails sent
-by other tests. If you reset the service between tests (for example, clearing
-every email in `afterEach`), you also clear data for tests running in other
-workers at the same time. Instead, have the service give each test a unique ID
-and keep each test's data apart by that ID. In the test above, `createInbox()`
-returns an inbox with a unique address, and the test reads only the emails
-sent to it.
+In `e2e run` and `e2e explore`, all workers share the same service instance,
+so one test can see emails sent by other tests. With `openHost`, each host
+starts its own instance. If you reset a shared service between tests (for
+example, clearing every email in `afterEach`), you also clear data for tests
+running in other workers at the same time. Instead, have the service give
+each test a unique ID and keep each test's data apart by that ID. In the test
+above, `createInbox()` returns an inbox with a unique address, and the test
+reads only the emails sent to it.
 
 ## What a service can yield
 
