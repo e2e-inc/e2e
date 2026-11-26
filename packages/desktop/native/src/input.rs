@@ -248,6 +248,8 @@ pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time:
         for down in [true, false] {
             let event =
                 CGEvent::new_keyboard_event(source.clone(), 0, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
+            // No modifiers: a key the user holds would otherwise ride along on an HID-state event and turn text into a shortcut.
+            event.set_flags(CGEventFlags::CGEventFlagNull);
             event.set_string_from_utf16_unchecked(chunk);
             post(&event, route);
         }
