@@ -4,8 +4,12 @@
  * and its keyboard and mouse.
  */
 
+import type { Deadline } from '@e2e-dev/core/engine';
 import type { Session } from './cdp/connection.ts';
 import { Keyboard, Mouse, type InputTarget } from './cdp/input.ts';
+
+/** How long past its operation's end a gesture may still hold the page's input, to release what it pressed. */
+const RELEASE_MS = 1_000;
 
 /** The isolated world the engine's own page-side reads run in, apart from the app's globals. */
 export const WORLD_NAME = '__e2e_electron__';
@@ -117,11 +121,21 @@ export class PageTarget implements InputTarget {
   /**
    * Runs one gesture after the ones before it have let go. A gesture its
    * caller stopped waiting for still has keys and buttons to release once
-   * the page answers; the next one starts with none held.
+   * the page answers; the next one starts with none held. One that never
+   * lets go (a page that stopped drawing frames answers no wait for one)
+   * holds its turn only a moment past `deadline`, its operation's end.
    */
-  exclusive<T>(gesture: () => Promise<T>): Promise<T> {
+  exclusive<T>(gesture: () => Promise<T>, deadline: Deadline): Promise<T> {
     const run = this.gestures.then(gesture, gesture);
-    this.gestures = run.catch(() => undefined);
+    const turn = new Promise<void>((resolve) => {
+      const lapsed = setTimeout(resolve, deadline.remaining() + RELEASE_MS);
+      lapsed.unref();
+      void run.catch(() => undefined).then(() => {
+        clearTimeout(lapsed);
+        resolve();
+      });
+    });
+    this.gestures = turn;
     return run;
   }
 

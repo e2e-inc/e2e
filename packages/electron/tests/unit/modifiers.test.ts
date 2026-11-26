@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { OperationContext } from '@e2e-dev/core/engine';
+import { Deadline, type OperationContext } from '@e2e-dev/core/engine';
 import { withModifiers } from '../../src/actions.ts';
 import { Budget } from '../../src/budget.ts';
 import type { Session } from '../../src/cdp/connection.ts';
@@ -59,11 +59,11 @@ describe('withModifiers', () => {
     const page = new PageTarget('target', session, 'about:blank');
     const window = { page } as unknown as AppWindow;
     const cancel = new AbortController();
-    const chord = page.exclusive(() => withModifiers(new Budget(operation(cancel.signal), 'press'), window, ['Meta'], () => page.keyboard.press('Enter'))).catch(() => undefined);
+    const chord = page.exclusive(() => withModifiers(new Budget(operation(cancel.signal), 'press'), window, ['Meta'], () => page.keyboard.press('Enter')), new Deadline(50)).catch(() => undefined);
     // The modifier is out, unanswered, when the caller stops waiting.
     await new Promise((resolve) => setTimeout(resolve, 1));
     cancel.abort();
-    const tap = page.exclusive(() => page.mouse.move(1, 1));
+    const tap = page.exclusive(() => page.mouse.move(1, 1), new Deadline(50));
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(events).toEqual(['rawKeyDown Meta 4']);
     const answering = setInterval(() => waiting.shift()?.(), 1);
@@ -83,14 +83,29 @@ describe('withModifiers', () => {
     } as unknown as Session;
     const page = new PageTarget('target', session, 'about:blank');
     // Never answered: the renderer is gone.
-    void page.exclusive(() => page.keyboard.down('Meta'));
+    void page.exclusive(() => page.keyboard.down('Meta'), new Deadline(50));
     await new Promise((resolve) => setTimeout(resolve, 1));
     page.crashed();
-    const moved = page.exclusive(() => page.mouse.move(1, 1));
+    const moved = page.exclusive(() => page.mouse.move(1, 1), new Deadline(50));
     await new Promise((resolve) => setTimeout(resolve, 1));
     waiting.at(-1)?.();
     await moved;
     expect(events).toEqual(['rawKeyDown 4', 'mouseMoved 0']);
     expect(page.generation).toBe(1);
   });
+
+  it('gives up its turn a moment after its operation ended, when the page never answers it', async () => {
+    const session = { send: () => new Promise<object>(() => undefined) } as unknown as Session;
+    const page = new PageTarget('target', session, 'about:blank');
+    void page.exclusive(() => page.keyboard.down('Shift'), new Deadline(1));
+    let ran = false;
+    const next = page.exclusive(() => {
+      ran = true;
+      return Promise.resolve();
+    }, new Deadline(5000));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(ran).toBe(false);
+    await next;
+    expect(ran).toBe(true);
+  }, 5000);
 });

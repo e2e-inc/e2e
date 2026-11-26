@@ -142,7 +142,6 @@ export class Connection {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   private readonly sessions = new Map<string, Session>();
-  private readonly closeHandlers: (() => void)[] = [];
   private closed = false;
 
   constructor(private readonly transport: Transport) {
@@ -161,10 +160,6 @@ export class Connection {
     transport.onClose(() => this.handleClose());
   }
 
-  get isClosed(): boolean {
-    return this.closed;
-  }
-
   /** The session of an attached target, by the id `Target.attachToTarget` answered with. */
   session(sessionId: string): Session {
     let session = this.sessions.get(sessionId);
@@ -173,12 +168,6 @@ export class Connection {
       this.sessions.set(sessionId, session);
     }
     return session;
-  }
-
-  /** Runs `handler` once the transport closes: the process exited, or `close()` was called. */
-  onClose(handler: () => void): void {
-    if (this.closed) handler();
-    else this.closeHandlers.push(handler);
   }
 
   send(method: string, params: unknown, sessionId: string): Promise<unknown> {
@@ -230,7 +219,6 @@ export class Connection {
     this.pending.clear();
     for (const session of this.sessions.values()) session.markDetached();
     this.sessions.clear();
-    for (const handler of this.closeHandlers) handler();
   }
 }
 
@@ -243,11 +231,6 @@ export class Session {
     private readonly connection: Connection,
     readonly id: string,
   ) {}
-
-  /** Whether the target behind this session went away. */
-  get isDetached(): boolean {
-    return this.detached || this.connection.isClosed;
-  }
 
   send<M extends keyof Commands>(method: M, ...params: Commands[M]['paramsType']): Promise<Commands[M]['returnType']> {
     if (this.detached) return Promise.reject(new ProtocolError(method, 'session detached'));

@@ -419,7 +419,7 @@ async function loaded(pages: () => PageTarget[], deadline: Deadline, signal: Abo
     negated: false,
     evaluate: async () => {
       const open = pages();
-      const ready = await Promise.all(open.map(parsed));
+      const ready = await Promise.all(open.map((page) => parsed(page, Math.min(ANSWER_MS, deadline.remaining()))));
       first = open.find((page, index) => ready[index] === true && !page.isClosed());
       return first !== undefined;
     },
@@ -435,9 +435,9 @@ async function loaded(pages: () => PageTarget[], deadline: Deadline, signal: Abo
  * once: the target's own address, which names the page being loaded, says the
  * window is not there yet.
  */
-async function parsed(page: PageTarget): Promise<boolean> {
+async function parsed(page: PageTarget, withinMs: number): Promise<boolean> {
   // A renderer that crashed or is busy never answers, and a window that closed fails the read: neither is loaded.
-  const read = await answerWithin(page.session.send('Runtime.evaluate', { expression: '[document.readyState, location.href]', returnByValue: true }), ANSWER_MS);
+  const read = await answerWithin(page.session.send('Runtime.evaluate', { expression: '[document.readyState, location.href]', returnByValue: true }), withinMs);
   if (read === undefined) return false;
   const [state, address] = read.result.value as [string, string];
   if (address === 'about:blank' && page.url() !== address && page.url() !== '') return false;

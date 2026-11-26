@@ -69,7 +69,8 @@ least 6 characters, for the config to load.
 ## Write a test
 
 Import `test` from `@e2e-dev/electron`. `app.open()` launches the app and
-waits for its first window. Every test starts on an empty user-data
+waits for a window to load its page; with a splash screen still loading, that
+is the app's next window. Every test starts on an empty user-data
 directory and ends with the app quit. `app.restart()` launches it again on
 the same data, and `app.clearState()` on empty data. `app.open()` while the
 app runs relaunches it on the same data, as `app.restart()` does.
@@ -157,7 +158,7 @@ it receives, or `process.getBuiltinModule('node:fs')`.
 | `executablePath` | `string` | the project's `electron` | The binary to start, such as a packaged app's |
 | `args` | `string[]` | `[]` | Electron and Chromium switches, passed before the app path. Not `--user-data-dir`, `--inspect`, `--inspect-brk`, `--remote-debugging-port`, or `--remote-debugging-pipe`, which the engine sets; `app.launchArguments` cannot set them either |
 | `env` | `Record<string, string>` | `{}` | Variables added to the app's environment: the run's, without `ELECTRON_RUN_AS_NODE`, which this option cannot set either |
-| `launchTimeout` | `number` | `30000` | How long `app.open()` waits for the first window, in milliseconds. The config's own `launchTimeout` bounds something else: the engine's start |
+| `launchTimeout` | `number` | `30000` | How long `app.open()` waits for a window to load, in milliseconds. The config's own `launchTimeout` bounds something else: the engine's start |
 | `testIdAttribute` | `string` | `'data-testid'` | The attribute `getByTestId` reads |
 | `settle` | `number \| false` | `100` | How long the engine waits after an agent action before the agent reads the screen |
 

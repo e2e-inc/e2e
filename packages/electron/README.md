@@ -51,7 +51,7 @@ test('signs in', async ({ app, screen }) => {
 ## How it works
 
 - `app.open()` launches the app on an empty user-data directory of the test's
-  own and waits for its first window. `app.restart()` launches it again on the
+  own and waits for a window to load its page. `app.restart()` launches it again on the
   same data, `app.clearState()` on empty data. Every test ends with the app
   quit.
 - An observation joins Chromium's accessibility tree with one DOM snapshot of

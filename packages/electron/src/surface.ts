@@ -246,7 +246,7 @@ export class ElectronSurface {
    * it left for the trace.
    */
   private async act(operation: OperationContext, label: string, window: AppWindow, input: (budget: Budget) => Promise<void>): Promise<void> {
-    await withBudget(operation, label, (budget) => window.page.exclusive(() => input(budget)));
+    await withBudget(operation, label, (budget) => window.page.exclusive(() => input(budget), budget.deadline));
     if (operation.origin === 'agent') await sleep(Math.min(this.options.settleMs, operation.timeoutMs), operation.signal);
     await this.traceScreen();
   }
@@ -260,7 +260,11 @@ export class ElectronSurface {
       return;
     }
     const { window, backendNodeId } = this.windowList.bind(ref);
-    await this.act(operation, action.kind, window, (budget) => performOnNode(this.actions(), window, backendNodeId, action, budget));
+    await this.act(operation, action.kind, window, (budget) => {
+      // Bound again once its turn has come: the gesture before it may have loaded another document.
+      this.windowList.bind(ref);
+      return performOnNode(this.actions(), window, backendNodeId, action, budget);
+    });
   }
 
   async performAt(point: ViewportPoint, action: PointerAction, operation: OperationContext): Promise<void> {

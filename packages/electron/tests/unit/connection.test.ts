@@ -72,28 +72,18 @@ describe('Connection', () => {
     const other = connection.root.send('Browser.getVersion');
     receive({ method: 'Target.detachedFromTarget', params: { sessionId: 'S1' } });
     await expect(pending).rejects.toThrow('Accessibility.getFullAXTree: session detached');
-    expect(session.isDetached).toBe(true);
     await expect(session.send('Page.enable')).rejects.toThrow(/session detached/);
     receive({ id: 2, result: { product: 'Chrome/1' } });
     expect((await other).product).toBe('Chrome/1');
   });
 
-  it('fails everything pending, and tells its close handlers, when the transport closes', async () => {
+  it('fails everything pending, and everything sent after, when the transport closes', async () => {
     const { transport, drop } = fakeTransport();
     const connection = new Connection(transport);
-    let closed = 0;
-    connection.onClose(() => {
-      closed += 1;
-    });
     const pending = connection.root.send('Browser.getVersion');
     drop();
     await expect(pending).rejects.toThrow('Browser.getVersion: connection closed');
     await expect(connection.root.send('Browser.getVersion')).rejects.toThrow(/connection closed/);
-    expect(closed).toBe(1);
-    connection.onClose(() => {
-      closed += 1;
-    });
-    expect(closed).toBe(2);
   });
 });
 
@@ -105,7 +95,7 @@ describe('a broken stream', () => {
     const pending = connection.root.send('Browser.getVersion');
     read.write('{"id":1,"result"\0');
     await expect(pending).rejects.toThrow(/connection closed/);
-    expect(connection.isClosed).toBe(true);
+    await expect(connection.root.send('Browser.getVersion')).rejects.toThrow(/connection closed/);
   });
 
   it('closes the connection when the browser can no longer be written to', async () => {

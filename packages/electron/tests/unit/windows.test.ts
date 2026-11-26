@@ -81,7 +81,7 @@ describe('Windows', () => {
     const first = open(windows);
     const second = open(windows);
     const shown = windows.current()!;
-    expect(windows.bind({ id: nodeId(shown, 42), revision: '' })).toEqual({ window: shown, backendNodeId: 42 });
+    expect(windows.bind({ id: nodeId(shown, 0, 42), revision: '' })).toEqual({ window: shown, backendNodeId: 42 });
     expect(() => windows.bind({ id: `${second.serial}.0.42`, revision: '' })).toThrow(/not shown now/);
     expect(() => windows.bind({ id: 'window', revision: '' })).toThrow(/not a node of this app/);
     expect(first.serial).not.toBe(second.serial);
@@ -91,10 +91,10 @@ describe('Windows', () => {
     const windows = new Windows();
     const { page } = open(windows);
     const shown = windows.current()!;
-    const before = nodeId(shown, 7);
+    const before = nodeId(shown, page.generation, 7);
     page.generation += 1;
     expect(() => windows.bind({ id: before, revision: '' })).toThrow(/a document the window no longer shows/);
-    expect(windows.bind({ id: nodeId(shown, 7), revision: '' })).toEqual({ window: shown, backendNodeId: 7 });
+    expect(windows.bind({ id: nodeId(shown, page.generation, 7), revision: '' })).toEqual({ window: shown, backendNodeId: 7 });
   });
 
   it('refuses to close the only window, and a window that is not there', () => {

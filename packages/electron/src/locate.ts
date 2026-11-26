@@ -18,6 +18,8 @@ export interface RawRead {
   readonly ax: readonly AXNode[];
   readonly dom: DomSnapshot;
   readonly geometry: WindowGeometry;
+  /** Which of the page's documents was read. */
+  readonly generation: number;
   readonly title: string;
   readonly url: string;
 }
@@ -32,6 +34,7 @@ export interface ProjectionContext {
 /** Reads the window: its accessibility tree and a DOM snapshot of the same document, with the geometry joining them. */
 export async function readWindow(devtools: DevTools, window: AppWindow): Promise<RawRead> {
   const { session } = window.page;
+  const { generation } = window.page;
   const [{ nodes }, snapshot, metrics] = await Promise.all([
     session.send('Accessibility.getFullAXTree'),
     devtools.snapshot(window.page),
@@ -40,10 +43,13 @@ export async function readWindow(devtools: DevTools, window: AppWindow): Promise
   const css = metrics.cssLayoutViewport;
   const device = metrics.layoutViewport;
   if (snapshot === undefined) throw stale('the window has no document yet');
+  // Its three parts may come from either side of a navigation: only a read of one document is a read.
+  if (window.page.generation !== generation) throw stale('the window loaded another document while it was read');
   return {
     window,
     ax: nodes,
     dom: snapshot.dom,
+    generation,
     geometry: {
       scale: css.clientWidth > 0 ? device.clientWidth / css.clientWidth : 1,
       scrollX: metrics.cssVisualViewport.pageX,
@@ -62,7 +68,7 @@ export function projectRead(raw: RawRead, mode: ProjectionMode, context: Project
     mode,
     ...(keep === undefined ? {} : { keep }),
     testIdAttribute: context.testIdAttribute,
-    idOf: (backendNodeId) => nodeId(raw.window, backendNodeId),
+    idOf: (backendNodeId) => nodeId(raw.window, raw.generation, backendNodeId),
     rootId: ROOT_ID,
     baseUrl: raw.url,
     ...(raw.title === '' ? {} : { title: raw.title }),
@@ -87,16 +93,17 @@ export async function locateIn(devtools: DevTools, raw: RawRead, expression: Loc
   const { window } = raw;
   const selected = new Map<string, ReadonlySet<number>>();
   for (const selector of expressionSelectors(expression)) selected.set(selector, await devtools.querySelectorAll(window.page, selector));
+  if (window.page.generation !== raw.generation) throw stale('the window loaded another document while it was read');
   const keep = new Set([...selected.values()].flatMap((ids) => [...ids]));
   const { root } = projectRead(raw, 'node', context, keep);
   // The hook answers in document order, as `querySelectorAll` does; `aria-owns` can put the tree in another one.
-  const domOrder = new Map([...keep].map((backendNodeId) => [nodeId(window, backendNodeId), raw.dom.element(backendNodeId)?.index]));
+  const domOrder = new Map([...keep].map((backendNodeId) => [nodeId(window, raw.generation, backendNodeId), raw.dom.element(backendNodeId)?.index]));
   const position = (node: SemanticNode): number => domOrder.get(node.ref.id) ?? Number.MAX_SAFE_INTEGER;
   return resolveExpression(expression, [root], {
     // The tree carries every element's text, so a text query reads it alone, as web() does.
     textQuery: 'text',
     selector: (selector, candidates) => {
-      const ids = new Set([...(selected.get(selector) ?? [])].map((backendNodeId) => nodeId(window, backendNodeId)));
+      const ids = new Set([...(selected.get(selector) ?? [])].map((backendNodeId) => nodeId(window, raw.generation, backendNodeId)));
       return candidates.filter((node) => ids.has(node.ref.id)).toSorted((a, b) => position(a) - position(b));
     },
   });

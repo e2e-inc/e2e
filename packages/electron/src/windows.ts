@@ -24,9 +24,14 @@ export interface AppWindow {
 /** Reads the OS window's title of a window's page; undefined for a view with no window of its own. */
 export type WindowTitle = (page: PageTarget) => Promise<string | undefined>;
 
-/** The node id a window's node carries: the window's serial, which of its documents the node is in, and the node's backend id. */
-export function nodeId(window: AppWindow, backendNodeId: number): string {
-  return `${window.serial}.${window.page.generation}.${backendNodeId}`;
+/**
+ * The node id a window's node carries: the window's serial, which of its
+ * documents the node was read in, and the node's backend id. `generation` is
+ * the page's when the read began, not when the id is made: a navigation may
+ * have landed in between.
+ */
+export function nodeId(window: AppWindow, generation: number, backendNodeId: number): string {
+  return `${window.serial}.${generation}.${backendNodeId}`;
 }
 
 export class Windows {
