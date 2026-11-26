@@ -1610,6 +1610,21 @@ describe('scheduler fault handling', () => {
     expect(collected.results.map((result) => [result.status, result.skip?.reason])).toEqual([['passed', undefined]]);
   });
 
+  it('fails the target when its workers keep reporting a fatal error before becoming ready', async () => {
+    const target = makeTarget('web', 0);
+    const pair = makePair(makeTest('tests/a.e2e.ts', 'a'), target);
+    const fleet = new FakeFleet({ fatalBeforeReadyBelow: 2, killExitMs: 20 });
+
+    vi.useFakeTimers();
+    const running = run(makeSelection([{ target, pairs: [pair] }]), makeCollection([pair.test.file], [pair]), fleet, { workers: 1 });
+    await vi.runAllTimersAsync();
+    const collected = await running;
+
+    expect(fleet.spawned).toHaveLength(2);
+    expect(collected.runErrors.map((error) => error.error.code)).toEqual(['ERROR', 'ERROR', 'WORKER_INIT_FAILED']);
+    expect(collected.results.map((result) => [result.status, result.skip?.cause])).toEqual([['skipped', 'infrastructure-unavailable']]);
+  });
+
   it('fails a target whose worker dies holding a setup unit, without deadlocking', async () => {
     // Regression: the setup unit is already off its queue and owned by a
     // worker that never becomes ready. If it is not requeued before the
