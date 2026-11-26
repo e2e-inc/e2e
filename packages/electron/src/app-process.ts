@@ -291,7 +291,7 @@ export class AppProcess {
     // reload starts answers on it, in a new document.
     session.on('Inspector.targetCrashed', () => {
       this.windows.markCrashed(page);
-      page.documentChanged();
+      page.crashed();
       log({ source: 'error', level: 'error', text: 'a window\'s renderer crashed' });
       page.emit('crash');
     });

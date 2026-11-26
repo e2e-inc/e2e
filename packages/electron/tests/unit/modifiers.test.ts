@@ -71,4 +71,26 @@ describe('withModifiers', () => {
     clearInterval(answering);
     expect(events).toEqual(['rawKeyDown Meta 4', 'keyUp Meta 0', 'mouseMoved  0']);
   });
+
+  it('lets the next gesture through, with nothing held, once the renderer that owed an answer crashed', async () => {
+    const events: string[] = [];
+    const waiting: (() => void)[] = [];
+    const session = {
+      send: (_method: string, params: { readonly type: string; readonly modifiers: number }) => {
+        events.push(`${params.type} ${params.modifiers}`);
+        return new Promise<object>((resolve) => void waiting.push(() => resolve({})));
+      },
+    } as unknown as Session;
+    const page = new PageTarget('target', session, 'about:blank');
+    // Never answered: the renderer is gone.
+    void page.exclusive(() => page.keyboard.down('Meta'));
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    page.crashed();
+    const moved = page.exclusive(() => page.mouse.move(1, 1));
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    waiting.at(-1)?.();
+    await moved;
+    expect(events).toEqual(['rawKeyDown 4', 'mouseMoved 0']);
+    expect(page.generation).toBe(1);
+  });
 });

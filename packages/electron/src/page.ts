@@ -103,6 +103,18 @@ export class PageTarget implements InputTarget {
   }
 
   /**
+   * The renderer crashed: its document is gone, and so is every answer it
+   * owed. A gesture still waiting for one would hold the next back for good,
+   * and nothing it pressed is held in the renderer that comes next.
+   */
+  crashed(): void {
+    this.documentChanged();
+    this.gestures = Promise.resolve();
+    this.keyboard.reset();
+    this.mouse.reset();
+  }
+
+  /**
    * Runs one gesture after the ones before it have let go. A gesture its
    * caller stopped waiting for still has keys and buttons to release once
    * the page answers; the next one starts with none held.

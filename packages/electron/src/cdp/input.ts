@@ -54,6 +54,12 @@ export class Keyboard {
     return this.heldModifiers;
   }
 
+  /** Forgets what is held: the renderer that held it is gone. */
+  reset(): void {
+    this.heldModifiers.clear();
+    this.heldKeys.clear();
+  }
+
   /** Presses a key down and leaves it held; a held modifier applies to the keys and mouse events after it. */
   async down(key: string): Promise<void> {
     const description = this.describe(key);
@@ -142,6 +148,12 @@ export class Mouse {
     private readonly target: InputTarget,
     private readonly keyboard: Keyboard,
   ) {}
+
+  /** Forgets the buttons held: the renderer that held them is gone. */
+  reset(): void {
+    this.buttons.clear();
+    this.lastButton = 'none';
+  }
 
   async move(x: number, y: number): Promise<void> {
     this.x = x;
