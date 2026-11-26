@@ -3799,7 +3799,8 @@ describe('device fixture', () => {
       closed = true;
       return {};
     });
-    await h.engine.dispose!({ signal: new AbortController().signal, timeoutMs: 200 });
+    // An odd budget halves to a fraction, which AbortSignal.timeout refuses.
+    await h.engine.dispose!({ signal: new AbortController().signal, timeoutMs: 201 });
     expect(closed).toBe(true);
   });
 
