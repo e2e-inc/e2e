@@ -171,6 +171,12 @@ describe('device.addMedia', () => {
     await expect(device.addMedia([])).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     await expect(device.addMedia(['ok.jpg', ''])).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     await expect(device.addMedia(42 as unknown as string)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    // A list with a hole: `every` skips it, and on Android the name check then fails with a TypeError on `undefined`.
+    const holes: string[] = [];
+    holes.length = 1;
+    const android = await setup({ platform: 'android', kind: 'emulator', id: 'emulator-5554' });
+    await expect(android.device.addMedia(holes)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(android.ran).toEqual([]);
     expect(ran).toEqual([]);
   });
 

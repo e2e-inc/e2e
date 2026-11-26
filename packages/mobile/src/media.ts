@@ -54,7 +54,8 @@ export const runHostCommand: HostRunner = (command, { env, signal }) =>
 
 /** The files `device.addMedia` was given, as a list; anything but one or more non-empty strings is `INVALID_ARGUMENT`. */
 export function mediaFiles(files: unknown): readonly string[] {
-  const list: unknown[] = typeof files === 'string' ? [files] : Array.isArray(files) ? files : [];
+  // `Array.from` turns a hole into `undefined`, which `every` would otherwise skip.
+  const list: unknown[] = typeof files === 'string' ? [files] : Array.isArray(files) ? Array.from(files as unknown[]) : [];
   if (list.length === 0 || !list.every((file): file is string => typeof file === 'string' && file !== '')) {
     throw new TestError('INVALID_ARGUMENT', 'device.addMedia takes a file path or a non-empty list of file paths');
   }
