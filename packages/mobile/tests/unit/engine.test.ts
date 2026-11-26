@@ -3707,6 +3707,11 @@ describe('device fixture', () => {
     await openAttempt(h);
     const device = fixture(h);
     const before = h.fake.calls.length;
+    // A foreground-only open launches nothing for the locale to take effect on.
+    await expect(device.openApp('com.other', { locale: 'fr-FR' })).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: 'device.openApp({ locale }) needs relaunch: true: a locale takes effect when the open launches the app fresh',
+    });
     await expect(device.openApp('com.other', { relaunch: true, locale: 'fr_FR' })).rejects.toMatchObject({
       code: 'INVALID_ARGUMENT',
       message: 'device.openApp({ locale }) must be a BCP 47 language tag such as "fr-FR", got "fr_FR"',

@@ -137,8 +137,8 @@ export interface OpenAppOptions {
    * (`fr-FR`). Replaces the target's `app.locale` for a relaunch of the
    * pinned app. On iOS it is this launch's `AppleLanguages` and `AppleLocale`;
    * on Android the app's own locale (Android 13 and newer), set through this
-   * machine's adb before the launch. It takes effect when this open launches
-   * the app, which `relaunch` makes sure of.
+   * machine's adb before the launch. Needs `relaunch: true`: a locale takes
+   * effect when the open launches the app fresh.
    */
   readonly locale?: string;
 }
@@ -925,6 +925,11 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     assertAppId(app);
     if (options.permissions !== undefined) assertPermissions('device.openApp({ permissions })', options.permissions, 'INVALID_ARGUMENT');
     const relaunch = options.relaunch === true;
+    // A locale is the launch's (iOS arguments, an Android app's own locale set before it starts): a
+    // foreground-only open of a running app would leave iOS as it is and recreate an Android screen.
+    if (options.locale !== undefined && !relaunch) {
+      throw new TestError('INVALID_ARGUMENT', 'device.openApp({ locale }) needs relaunch: true: a locale takes effect when the open launches the app fresh');
+    }
     // The engine's own launch options belong to a fresh launch of the pinned
     // app. A foreground-only open of a running app takes no arguments, and a
     // permission change there would terminate the app it means to keep.
