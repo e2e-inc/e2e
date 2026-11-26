@@ -18,7 +18,7 @@ const MAX_NODES: usize = 8_000;
 const MAX_CHILDREN: usize = MAX_NODES;
 
 /// Every attribute one request reads of a node.
-const ATTRIBUTES: [&str; 17] = [
+const ATTRIBUTES: [&str; 18] = [
     "AXRole",
     "AXSubrole",
     "AXTitle",
@@ -36,6 +36,7 @@ const ATTRIBUTES: [&str; 17] = [
     "AXTitleUIElement",
     "AXVerticalScrollBar",
     "AXHorizontalScrollBar",
+    "AXHeadingLevel",
 ];
 
 #[derive(Serialize)]
@@ -58,6 +59,9 @@ pub struct RawNode {
     description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     hint: Option<String>,
+    /// A heading's level, 1-based, from `AXHeadingLevel` (macOS 26).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     placeholder: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -152,6 +156,7 @@ struct Read {
     help: Option<String>,
     title_element: Option<Element>,
     scrollbar: bool,
+    heading_level: Option<u32>,
 }
 
 fn read(element: &Element) -> Result<Read, ax::AXError> {
@@ -176,6 +181,7 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
     let title_element = take(14).and_then(|value| value.element().cloned());
     // Only an element is a scroll bar: macOS may answer an attribute the area does not support with null.
     let scrollbar = matches!(take(15), Some(Value::Element(_))) || matches!(take(16), Some(Value::Element(_)));
+    let heading_level = level_of(take(17));
     let role = roles::role(&ax_role, subrole.as_deref());
     Ok(Read {
         role,
@@ -194,7 +200,16 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
         help,
         title_element,
         scrollbar,
+        heading_level,
     })
+}
+
+/// A heading level an app answered: a whole number from 1 up. Anything else is no level.
+fn level_of(value: Option<Value>) -> Option<u32> {
+    match value {
+        Some(Value::Number(number)) if number.fract() == 0.0 && (1.0..=f64::from(u32::MAX)).contains(&number) => Some(number as u32),
+        _ => None,
+    }
 }
 
 /// The text of the element that labels another (`AXTitleUIElement`).
@@ -442,6 +457,7 @@ impl Walk {
                     help: None,
                     title_element: None,
                     scrollbar: false,
+                    heading_level: None,
                 }
             }
         };
@@ -530,6 +546,7 @@ impl Walk {
             value: text_value,
             description,
             hint: read.help.clone(),
+            level: if role == "heading" { read.heading_level } else { None },
             placeholder: read.placeholder.clone(),
             native_id: read.identifier.clone().map(|value| NativeId { kind: "ax_identifier", value }),
             states,
@@ -648,11 +665,19 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::{expanded, inner_clip, missed, outside, selected};
+    use super::{expanded, inner_clip, level_of, missed, outside, selected};
     use crate::ax;
     use crate::windows::Rect;
 
     const WINDOW: Rect = Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+
+    #[test]
+    fn reads_a_heading_level_only_from_a_whole_number_from_one() {
+        assert_eq!(level_of(Some(ax::Value::Number(2.0))), Some(2));
+        for value in [Some(ax::Value::Number(0.0)), Some(ax::Value::Number(1.5)), Some(ax::Value::Number(-1.0)), Some(ax::Value::Bool(true)), None] {
+            assert_eq!(level_of(value), None);
+        }
+    }
 
     #[test]
     fn reads_a_node_past_the_clip_as_outside() {
