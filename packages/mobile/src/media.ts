@@ -61,8 +61,20 @@ export function mediaFiles(files: unknown): readonly string[] {
   return list;
 }
 
-/** Throws `INVALID_ARGUMENT` for the first path that is not a readable file. */
-export async function assertMediaFiles(files: readonly string[]): Promise<void> {
+/**
+ * Throws `INVALID_ARGUMENT` for the first path that is not a readable file,
+ * and on Android for two paths with one file name: both would go to the same
+ * place on the device, and the second would replace the first.
+ */
+export async function assertMediaFiles(platform: MobilePlatform, files: readonly string[]): Promise<void> {
+  if (platform === 'android') {
+    const names = new Set<string>();
+    for (const file of files) {
+      const name = path.basename(file);
+      if (names.has(name)) throw new TestError('INVALID_ARGUMENT', `device.addMedia: two files are named ${name}; Android keeps them under their names in ${ANDROID_MEDIA_DIR}, so rename one`);
+      names.add(name);
+    }
+  }
   for (const file of files) {
     const info = await stat(file).catch(() => undefined);
     const readable = info?.isFile() === true && (await access(file, constants.R_OK).then(() => true, () => false));

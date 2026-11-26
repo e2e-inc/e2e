@@ -163,6 +163,19 @@ describe('device.addMedia', () => {
     expect(ran).toEqual([]);
   });
 
+  it('is INVALID_ARGUMENT on Android for two files with one name, which would land on the same path; iOS adds both', async () => {
+    mkdirSync(path.join(dir, 'a'));
+    mkdirSync(path.join(dir, 'b'));
+    photo('a/photo.jpg');
+    photo('b/photo.jpg');
+    const android = await setup({ platform: 'android', kind: 'emulator', id: 'emulator-5554' });
+    await expect(android.device.addMedia(['a/photo.jpg', 'b/photo.jpg'])).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('two files are named photo.jpg') });
+    expect(android.ran).toEqual([]);
+    const ios = await setup({ platform: 'ios', kind: 'simulator', id: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' });
+    await ios.device.addMedia(['a/photo.jpg', 'b/photo.jpg']);
+    expect(ios.ran).toHaveLength(1);
+  });
+
   it("reports the program's stderr as ENGINE_FAILURE, a missing program with how to install it, and stops at the first failure", async () => {
     photo('a.jpg');
     photo('b.jpg');

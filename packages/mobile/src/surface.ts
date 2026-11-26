@@ -1968,7 +1968,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     const refusal = mediaRefusal(platform, this.boundKind, this.device, [this.env, process.env]);
     if (refusal !== undefined) throw unsupported(refusal);
     const { deviceId } = this.boundDevice;
-    await assertMediaFiles(resolved);
+    await assertMediaFiles(platform, resolved);
     const timeout = AbortSignal.timeout(timeoutMs);
     const stop = AbortSignal.any([signal, timeout]);
     const adb = platform === 'android' ? await findAdb(this.env) : 'adb';

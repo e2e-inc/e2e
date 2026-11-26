@@ -951,7 +951,8 @@ await device.openApp('com.example.app'); // launches fresh, on its first screen
  * machine: `xcrun simctl addmedia` on an iOS simulator, which adds a copy
  * on every call, and on Android `adb push` to `/sdcard/Pictures` under the
  * file's own name, which replaces an earlier file of that name, then a
- * media scan. A physical iPhone, a device a provider leased, and a device
+ * media scan; two paths with one file name in a call are
+ * `INVALID_ARGUMENT` there. A physical iPhone, a device a provider leased, and a device
  * behind a remote agent-device daemon are `UNSUPPORTED_CAPABILITY`; a path
  * that is not a readable file is `INVALID_ARGUMENT`. The library sorts by
  * the capture date in a photo's metadata, not the day it was added. Call
@@ -975,7 +976,7 @@ await app.open();
 | Throws | When |
 | --- | --- |
 | `UNSUPPORTED_CAPABILITY` | A physical iPhone, a device a provider leased, or a device behind another agent-device daemon (`AGENT_DEVICE_DAEMON_BASE_URL` in the run's environment or the runner's included), before anything runs. |
-| `INVALID_ARGUMENT` | No paths, an empty path, or a path that is not a readable file. |
+| `INVALID_ARGUMENT` | No paths, an empty path, a path that is not a readable file, or on Android two paths with the same file name. |
 | `OPERATION_TIMEOUT` | `xcrun` or `adb` still runs at `config.actionTimeout`; it is stopped, and nothing after it runs. |
 | `ENGINE_FAILURE` | `xcrun` or `adb` is missing, or fails; the message carries what it wrote to stderr, left out when longer than 2,000 characters. |
 

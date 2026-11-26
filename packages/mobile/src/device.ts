@@ -182,7 +182,8 @@ export interface Device {
    * machine: `xcrun simctl addmedia` on an iOS simulator, which adds a copy
    * on every call, and on Android `adb push` to `/sdcard/Pictures` under the
    * file's own name, which replaces an earlier file of that name, then a
-   * media scan. A physical iPhone, a device a provider leased, and a device
+   * media scan; two paths with one file name in a call are
+   * `INVALID_ARGUMENT` there. A physical iPhone, a device a provider leased, and a device
    * behind a remote agent-device daemon are `UNSUPPORTED_CAPABILITY`; a path
    * that is not a readable file is `INVALID_ARGUMENT`. The library sorts by
    * the capture date in a photo's metadata, not the day it was added. Call
