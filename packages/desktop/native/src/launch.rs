@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 /// The variable that carries a launch's token into the process it starts.
 pub const TOKEN_VARIABLE: &str = "E2E_DESKTOP_LAUNCH";
 
-/// How long a lone new copy whose environment cannot be read must stay the only one before it is taken.
-const LONE_COPY_SETTLE: Duration = Duration::from_millis(300);
+/// The argument that carries a launch's token into an app whose environment macOS hides, followed by the token.
+const TOKEN_ARGUMENT: &str = "-E2EDesktopLaunch";
 
 /// What `launch` was asked to start.
 pub struct LaunchRequest {
@@ -89,11 +89,25 @@ fn bundle_id_of(url: &NSURL) -> Option<String> {
     Some(string.to_string())
 }
 
+/// Whether macOS hides the environment of the bundle's process from other
+/// processes: Apple's own apps (a platform identifier in the signature) and
+/// builds signed with the `restrict` flag.
+fn hides_environment(bundle: &str) -> bool {
+    let output =
+        Command::new("/usr/bin/codesign").arg("-dv").arg(bundle).env_clear().stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).output();
+    let Ok(output) = output else { return false };
+    String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .any(|line| line.starts_with("Platform identifier=") || (line.starts_with("CodeDirectory ") && line.contains("restrict")))
+}
+
 /// Starts a new instance of the app with `open -n`, run with exactly the
 /// environment given (LaunchServices hands the app the environment of the
 /// process that asks), and finds the process it started: the new copy whose
-/// environment carries the launch token. A copy whose environment macOS
-/// hides (a system app) is taken only when it is the one new copy.
+/// environment carries the launch token. An app whose environment macOS
+/// hides also gets the token as its last arguments (`-E2EDesktopLaunch
+/// <token>`, a user default AppKit ignores), which stay readable. A copy
+/// with neither is never taken: it may be one the user opened meanwhile.
 pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     let started = Instant::now();
     let url = match (&request.path, &request.bundle_id) {
@@ -121,6 +135,9 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     }
     command.arg("--env").arg(format!("{TOKEN_VARIABLE}={token}"));
     command.arg(&bundle).arg("--args").args(&request.arguments);
+    if hides_environment(&bundle) {
+        command.arg(TOKEN_ARGUMENT).arg(&token);
+    }
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let mut child = command.spawn().map_err(|error| Failure::refused(codes::INTERNAL, format!("could not run open: {error}")))?;
     loop {
@@ -145,25 +162,16 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     }
 
     let marker = format!("{TOKEN_VARIABLE}={token}");
-    let mut lone_since: Option<(i32, Instant)> = None;
     loop {
         let fresh: Vec<i32> = running_copies(&bundle_id).into_iter().filter(|pid| !before.contains(pid)).collect();
-        let mut hidden = Vec::new();
         for pid in &fresh {
-            match crate::process::carries(*pid, &marker) {
-                Some(true) => return Ok(launched(*pid, &bundle, &bundle_id)),
-                Some(false) => {}
-                None => hidden.push(*pid),
+            let ours = match crate::process::carries(*pid, &marker) {
+                Some(carried) => carried,
+                None => crate::process::argument_pair(*pid, TOKEN_ARGUMENT, &token),
+            };
+            if ours {
+                return Ok(launched(*pid, &bundle, &bundle_id));
             }
-        }
-        // One new copy whose environment cannot be read, and no other new copy for a moment: the launch's own.
-        match (hidden.as_slice(), fresh.len()) {
-            ([pid], 1) => match lone_since {
-                Some((seen, since)) if seen == *pid && since.elapsed() >= LONE_COPY_SETTLE => return Ok(launched(*pid, &bundle, &bundle_id)),
-                Some((seen, _)) if seen == *pid => {}
-                _ => lone_since = Some((*pid, Instant::now())),
-            },
-            _ => lone_since = None,
         }
         if started.elapsed() >= request.timeout {
             return Err(Failure::unconfirmed(codes::TIMEOUT, format!("{bundle} was opened, but no new process carries this launch's token"))
