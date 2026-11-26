@@ -18,6 +18,9 @@ const BLOCKING_ACTION_SECONDS: f32 = 0.5;
 /// How long an effect is polled for before the action is reported unconfirmed.
 const EFFECT_WAIT: Duration = Duration::from_millis(1_000);
 
+/// How long an action that opens a menu waits for it to show.
+const MENU_SHOW_WAIT: Duration = Duration::from_millis(1_000);
+
 /// How often an effect is polled.
 const POLL: Duration = Duration::from_millis(30);
 
@@ -156,11 +159,23 @@ fn physical(entry: &Entry, action: Pointer) -> Outcome<()> {
     input::pointer(x, y, action).map_err(Failure::delivered)
 }
 
+/// Waits a moment for a menu an action opened to show, so the next read finds it; an action that opens none waits it out and is still done.
+fn menu_shown(pid: i32, before: usize, deadline: Instant) {
+    until(deadline.min(Instant::now() + MENU_SHOW_WAIT), || windows::open_menus(pid) > before);
+}
+
 fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
     let names = element.actions().map_err(|error| refused(error, "click"))?;
     if let Some(action) = ["AXPress", "AXOpen", "AXConfirm"].into_iter().find(|name| names.iter().any(|candidate| candidate == name)) {
-        return perform(element, action, "click");
+        let (ax_role, _) = raw_role(element);
+        let opens_menu = ax_role == "AXPopUpButton" || ax_role == "AXMenuButton";
+        let before = windows::open_menus(entry.pid);
+        perform(element, action, "click")?;
+        if opens_menu {
+            menu_shown(entry.pid, before, deadline);
+        }
+        return Ok(());
     }
     let (_, role) = raw_role(element);
     if matches!(role, "row" | "cell" | "treeitem" | "option" | "tab") && element.settable("AXSelected").unwrap_or(false) {
@@ -385,7 +400,10 @@ pub fn act(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         Action::RightClick => {
             let names = element.actions().map_err(|error| refused(error, "right click"))?;
             if names.iter().any(|name| name == "AXShowMenu") {
-                perform(element, "AXShowMenu", "right click")
+                let before = windows::open_menus(entry.pid);
+                perform(element, "AXShowMenu", "right click")?;
+                menu_shown(entry.pid, before, deadline);
+                Ok(())
             } else {
                 Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "this element has no context menu"))
             }

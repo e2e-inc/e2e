@@ -115,7 +115,6 @@ struct Walk {
     interactive: bool,
     deadline: Instant,
     focused: Option<Element>,
-    window_bounds: Option<Rect>,
     nodes: usize,
     complete: bool,
     truncated: bool,
@@ -212,6 +211,15 @@ fn parse_toggle(value: Option<&Value>) -> Option<u8> {
     }
 }
 
+/// The overlap of two rectangles, empty when they do not meet.
+fn intersect(a: Rect, b: Rect) -> Rect {
+    let x = a.x.max(b.x);
+    let y = a.y.max(b.y);
+    let right = (a.x + a.width).min(b.x + b.width);
+    let bottom = (a.y + a.height).min(b.y + b.height);
+    Rect { x, y, width: (right - x).max(0.0), height: (bottom - y).max(0.0) }
+}
+
 /// Whether `inner` lies wholly outside `outer`.
 fn outside(inner: Rect, outer: Rect) -> bool {
     outer.width <= 0.0
@@ -296,7 +304,8 @@ impl Walk {
     }
 
     /// Reads one node and the levels under it. `None` for a node an interactive read leaves out, or one that is gone.
-    fn node(&mut self, element: &Element, level: usize, root: bool) -> Option<RawNode> {
+    /// `clip` is the part of the screen the node can show in: the window, cut by every scroll area above it.
+    fn node(&mut self, element: &Element, level: usize, root: bool, clip: Option<Rect>) -> Option<RawNode> {
         if self.nodes >= MAX_NODES {
             self.truncated = true;
             return None;
@@ -341,7 +350,12 @@ impl Walk {
         let description = read.description.clone().filter(|description| Some(description) != name.as_ref());
 
         let mut states = Vec::new();
-        if read.focused == Some(true) || self.focused.as_ref() == Some(element) {
+        // The app's focused element is the one source: a table's cells report the table's focus as their own.
+        let focused = match &self.focused {
+            Some(focused) => focused == element,
+            None => read.focused == Some(true),
+        };
+        if focused {
             states.push("focused");
         }
         if read.enabled == Some(false) {
@@ -370,8 +384,8 @@ impl Walk {
         if matches!(role, "textfield" | "combobox") && !actions.contains(&"SetValue") {
             states.push("readonly");
         }
-        if let (false, Some(bounds), Some(window)) = (root, read.bounds, self.window_bounds)
-            && outside(bounds, window)
+        if let (false, Some(bounds), Some(clip)) = (root, read.bounds, clip)
+            && outside(bounds, clip)
         {
             states.push("offscreen");
         }
@@ -404,7 +418,14 @@ impl Walk {
             children: Vec::new(),
         };
 
-        if level >= self.max_depth {
+        // What a scroll area shows is its own frame: its children outside it are scrolled out of view.
+        let inner = match (role, read.bounds) {
+            ("scrollarea", Some(bounds)) => clip.map(|clip| intersect(clip, bounds)).or(Some(bounds)),
+            _ => clip,
+        };
+        if role == "scrollbar" {
+            // A scroll bar's arrows and page areas are its parts, not controls of their own.
+        } else if level >= self.max_depth {
             let count = element.count("AXChildren").unwrap_or(0);
             if count > 0 {
                 node.children_count = Some(count);
@@ -428,7 +449,7 @@ impl Walk {
                     node.subtree_truncated = true;
                     break;
                 }
-                if let Some(child) = self.node(child, level + 1, false) {
+                if let Some(child) = self.node(child, level + 1, false, inner) {
                     node.children.push(child);
                 }
             }
@@ -463,7 +484,6 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         interactive: request.interactive,
         deadline: request.deadline,
         focused,
-        window_bounds,
         nodes: 0,
         complete: true,
         truncated: false,
@@ -478,7 +498,9 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         }
         Err(_) => {}
     }
-    let tree = walk.node(&window, 1, true).ok_or_else(|| Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {} could not be read", request.window)))?;
+    let tree = walk
+        .node(&window, 1, true, window_bounds)
+        .ok_or_else(|| Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {} could not be read", request.window)))?;
     let ref_count = walk.refs.len();
     refs::insert_all(std::mem::take(&mut walk.refs));
     Ok(RawSnapshot {
