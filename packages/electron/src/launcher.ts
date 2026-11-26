@@ -11,6 +11,9 @@ import { Connection, pipeTransport } from './cdp/connection.ts';
 /** How many of the app's last stderr lines a failed launch can quote. */
 const STDERR_LINES = 50;
 
+/** How long Windows' taskkill gets to end the process tree before the process alone is killed. */
+const TASKKILL_MS = 5_000;
+
 /** How long a process that exited gets to hand over the rest of its stderr. */
 const STDERR_DRAIN_MS = 500;
 
@@ -157,8 +160,12 @@ export class ElectronProcess {
     const { pid } = this.child;
     if (pid === undefined) return;
     try {
-      if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' });
-      else process.kill(-pid, 'SIGKILL');
+      if (process.platform === 'win32') {
+        const { status, error } = spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', timeout: TASKKILL_MS });
+        if (error !== undefined || status !== 0) throw error ?? new Error(`taskkill exited with ${status}`);
+      } else {
+        process.kill(-pid, 'SIGKILL');
+      }
     } catch {
       // The group is gone already, or was never the process's own: the process itself is still killed.
       if (this.exit === undefined) this.child.kill('SIGKILL');

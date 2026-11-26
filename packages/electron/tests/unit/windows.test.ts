@@ -1,7 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import type { PageTarget } from '../../src/page.ts';
-import { nodeId, Windows } from '../../src/windows.ts';
+import { inDocument } from '../../src/locate.ts';
+import { nodeId, Windows, type AppWindow } from '../../src/windows.ts';
 
 /** The part of a page target the registry reads: its URL, whether it closed, and its close event. */
 class FakePage extends EventEmitter {
@@ -117,5 +118,25 @@ describe('Windows', () => {
     windows.clear();
     expect(windows.open()).toEqual([]);
     expect(windows.current()).toBeUndefined();
+  });
+});
+
+describe('inDocument', () => {
+  const windowAt = (page: { generation: number }): AppWindow => ({ page, serial: 1 }) as unknown as AppWindow;
+
+  it('answers a read the document stayed under, and passes on its own failure', async () => {
+    const page = { generation: 3 };
+    expect(await inDocument(windowAt(page), 3, () => Promise.resolve('read'))).toBe('read');
+    await expect(inDocument(windowAt(page), 3, () => Promise.reject(new Error('its own')))).rejects.toThrow('its own');
+  });
+
+  it('makes a read stale when the document changed under it, whether it answered or failed', async () => {
+    const page = { generation: 3 };
+    const navigate = <T>(outcome: () => Promise<T>) => (): Promise<T> => {
+      page.generation += 1;
+      return outcome();
+    };
+    await expect(inDocument(windowAt(page), 3, navigate(() => Promise.resolve('mixed')))).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
+    await expect(inDocument(windowAt(page), 4, navigate(() => Promise.reject(new Error('Cannot find context with specified id'))))).rejects.toMatchObject({ code: 'NODE_STALE' });
   });
 });

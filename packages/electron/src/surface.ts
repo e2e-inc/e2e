@@ -163,7 +163,16 @@ export class ElectronSurface {
       const window = this.windowList.current();
       if (window === undefined) return undefined;
       if (this.windowList.isCrashed(window)) {
-        await answerWithin(window.page.next('load'), deadline.remaining());
+        const { page } = window;
+        let stopListening: () => void = () => undefined;
+        const loadedOrClosed = new Promise<void>((resolve) => {
+          const stops = [page.on('load', resolve), page.on('close', resolve)];
+          stopListening = () => stops.forEach((stop) => stop());
+        });
+        await answerWithin(loadedOrClosed, deadline.remaining());
+        stopListening();
+        // A crashed window that closed leaves the one shown in its place to read.
+        if (page.isClosed()) continue;
         if (this.windowList.isCrashed(window)) throw crashed();
       }
       // A read the renderer's crash leaves pending would never settle: the crash ends it, and the next pass waits.

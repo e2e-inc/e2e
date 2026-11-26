@@ -9,7 +9,7 @@ import { ConfigurationError, readPngSize, type EngineSnapshot, type ObservationP
 import type { DevTools } from './devtools.ts';
 import { pixelRatio, placeMasks, removeMasks, type MaskState } from './in-page/masks.ts';
 import { viewportSize } from './in-page/node-ops.ts';
-import type { RawRead } from './locate.ts';
+import { inDocument, type RawRead } from './locate.ts';
 import type { PageTarget } from './page.ts';
 import { MASKED_TAGS } from './snapshot.ts';
 import type { AppWindow } from './windows.ts';
@@ -91,7 +91,8 @@ async function captureViewport(window: AppWindow, scale: 'css' | 'device'): Prom
 
 /** Adds the pixels to an observation of a read window, or leaves them out when they are withheld. */
 export async function withPixels(devtools: DevTools, raw: RawRead, snapshot: EngineSnapshot): Promise<EngineSnapshot> {
-  const capture = await maskedCapture(devtools, raw.window, raw.dom.unmaskableCount(), 'css');
+  // The pixels are of the document the snapshot describes, or the observation is taken again.
+  const capture = await inDocument(raw.window, raw.generation, () => maskedCapture(devtools, raw.window, raw.dom.unmaskableCount(), 'css'));
   if ('withheld' in capture) return { ...snapshot, maskedRegionCount: capture.masked };
   const data = new Uint8Array(capture.image);
   const { width: css } = await raw.window.page.evaluate(viewportSize);

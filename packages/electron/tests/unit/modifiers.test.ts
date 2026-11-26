@@ -108,4 +108,20 @@ describe('withModifiers', () => {
     await next;
     expect(ran).toBe(true);
   }, 5000);
+
+  it('lets no gesture past one still holding input, however soon a gesture queued behind it gives up', async () => {
+    const session = { send: () => new Promise<object>(() => undefined) } as unknown as Session;
+    const page = new PageTarget('target', session, 'about:blank');
+    let release: () => void = () => undefined;
+    const order: string[] = [];
+    const holding = page.exclusive(() => new Promise<void>((resolve) => void (release = resolve)).then(() => void order.push('first')), new Deadline(5000));
+    const impatient = page.exclusive(() => Promise.resolve(void order.push('second')), new Deadline(1));
+    const third = page.exclusive(() => Promise.resolve(void order.push('third')), new Deadline(5000));
+    // Long past the second gesture's own deadline and grace: the first still holds its turn.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(order).toEqual([]);
+    release();
+    await Promise.all([holding, impatient, third]);
+    expect(order).toEqual(['first', 'second', 'third']);
+  }, 5000);
 });

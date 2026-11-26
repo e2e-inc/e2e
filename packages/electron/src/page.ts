@@ -123,19 +123,25 @@ export class PageTarget implements InputTarget {
    * caller stopped waiting for still has keys and buttons to release once
    * the page answers; the next one starts with none held. One that never
    * lets go (a page that stopped drawing frames answers no wait for one)
-   * holds its turn only a moment past `deadline`, its operation's end.
+   * holds its turn only a moment past `deadline`, its operation's end. Its
+   * turn starts when the one before it ends, however long it waited: a
+   * gesture that gave up waiting lets none past the one still holding input.
    */
   exclusive<T>(gesture: () => Promise<T>, deadline: Deadline): Promise<T> {
-    const run = this.gestures.then(gesture, gesture);
-    const turn = new Promise<void>((resolve) => {
-      const lapsed = setTimeout(resolve, deadline.remaining() + RELEASE_MS);
-      lapsed.unref();
-      void run.catch(() => undefined).then(() => {
-        clearTimeout(lapsed);
-        resolve();
-      });
-    });
-    this.gestures = turn;
+    const before = this.gestures;
+    const run = before.then(gesture);
+    const settled = run.then(() => undefined, () => undefined);
+    this.gestures = before.then(
+      () =>
+        new Promise<void>((resolve) => {
+          const lapsed = setTimeout(resolve, Math.max(0, deadline.remaining()) + RELEASE_MS);
+          lapsed.unref();
+          void settled.then(() => {
+            clearTimeout(lapsed);
+            resolve();
+          });
+        }),
+    );
     return run;
   }
 

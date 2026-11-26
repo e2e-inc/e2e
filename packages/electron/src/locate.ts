@@ -35,16 +35,13 @@ export interface ProjectionContext {
 export async function readWindow(devtools: DevTools, window: AppWindow): Promise<RawRead> {
   const { session } = window.page;
   const { generation } = window.page;
-  const [{ nodes }, snapshot, metrics] = await Promise.all([
-    session.send('Accessibility.getFullAXTree'),
-    devtools.snapshot(window.page),
-    session.send('Page.getLayoutMetrics'),
-  ]);
+  // Its three parts may come from either side of a navigation: only a read of one document is a read.
+  const [{ nodes }, snapshot, metrics] = await inDocument(window, generation, () =>
+    Promise.all([session.send('Accessibility.getFullAXTree'), devtools.snapshot(window.page), session.send('Page.getLayoutMetrics')]),
+  );
   const css = metrics.cssLayoutViewport;
   const device = metrics.layoutViewport;
   if (snapshot === undefined) throw stale('the window has no document yet');
-  // Its three parts may come from either side of a navigation: only a read of one document is a read.
-  if (window.page.generation !== generation) throw stale('the window loaded another document while it was read');
   return {
     window,
     ax: nodes,
@@ -60,6 +57,25 @@ export async function readWindow(devtools: DevTools, window: AppWindow): Promise
     title: snapshot.title,
     url: window.page.url(),
   };
+}
+
+/**
+ * Runs a read that belongs to one document of the window, the one of
+ * `generation`. A navigation under it makes the read stale whether it then
+ * answers, with parts of two documents, or fails, in whatever way the
+ * document going away made it fail: the caller reads again.
+ */
+export async function inDocument<T>(window: AppWindow, generation: number, read: () => Promise<T>): Promise<T> {
+  const moved = (): boolean => window.page.generation !== generation;
+  let result: T;
+  try {
+    result = await read();
+  } catch (cause) {
+    if (moved()) throw stale('the window loaded another document while it was read', cause);
+    throw cause;
+  }
+  if (moved()) throw stale('the window loaded another document while it was read');
+  return result;
 }
 
 /** Projects a read into the snapshot the harness receives; `keep` holds elements a selector matched, kept where the tree leaves them out. */
@@ -92,8 +108,9 @@ export function projectRead(raw: RawRead, mode: ProjectionMode, context: Project
 export async function locateIn(devtools: DevTools, raw: RawRead, expression: LocatorExpression, context: ProjectionContext): Promise<readonly SemanticNode[]> {
   const { window } = raw;
   const selected = new Map<string, ReadonlySet<number>>();
-  for (const selector of expressionSelectors(expression)) selected.set(selector, await devtools.querySelectorAll(window.page, selector));
-  if (window.page.generation !== raw.generation) throw stale('the window loaded another document while it was read');
+  await inDocument(window, raw.generation, async () => {
+    for (const selector of expressionSelectors(expression)) selected.set(selector, await devtools.querySelectorAll(window.page, selector));
+  });
   const keep = new Set([...selected.values()].flatMap((ids) => [...ids]));
   const { root } = projectRead(raw, 'node', context, keep);
   // The hook answers in document order, as `querySelectorAll` does; `aria-owns` can put the tree in another one.
