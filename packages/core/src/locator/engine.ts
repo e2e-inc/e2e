@@ -22,7 +22,7 @@ import {
   type ErrorDetails,
 } from '../internal/errors.ts';
 import { requireKey } from '../internal/keys.ts';
-import { isPixelPoint, resolveScreenPoint } from '../internal/geometry.ts';
+import { isPixelPoint, pixelsInViewport, resolveScreenPoint } from '../internal/geometry.ts';
 import { describeExpression, expressionHints, filterSpine } from './expression.ts';
 import { abortError, cancelledError, Deadline, POLL_INTERVAL_MS, pollDelay, pollReads, ReadWindow, sleep, StepDeadline, stepTimeout } from '../internal/time.ts';
 import { timestamp } from '../internal/ids.ts';
@@ -606,12 +606,15 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
   /**
    * Performs one pointer action at an offset into exactly one match: a pixel
    * coordinate is measured from the node's origin (`SemanticNode.origin`,
-   * else its box's top-left corner), a percentage is that share of its box
-   * from the box's top-left corner. The node is scrolled into view when the
-   * engine can, then its box is read and the pointer dispatched at the
-   * point, with no node behind the gesture. The node has to be visible with a box within
-   * the deadline; one that never is fails as LOCATOR_NOT_FOUND, as `waitFor`
-   * does.
+   * else its box's top-left corner), a percentage is that share of the
+   * whole pixels its box covers inside the viewport, from their top-left
+   * corner. The engine clips the box to every frame around the node, so
+   * `'100%'` always lands on a pixel of the node the screen shows.
+   * The node is scrolled into view when the engine can, then its box is read
+   * and the pointer dispatched at the point, with no node behind the
+   * gesture. The node has to be visible with a box, and for a percentage
+   * with some of it in the viewport, within the deadline; one that never is
+   * fails as LOCATOR_NOT_FOUND, as `waitFor` does.
    */
   async performWithin(
     expression: LocatorExpression,
@@ -624,6 +627,7 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     if (this.session.actions.has('scrollIntoView')) {
       await this.performUntil(expression, { kind: 'scrollIntoView' }, deadline);
     }
+    const viewport = isPixelPoint(offset) ? undefined : await this.viewport(deadline);
     let point: ViewportPoint | undefined;
     await pollReads({
       deadline,
@@ -635,16 +639,18 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
         if (deadline.expired()) return false;
         const { node } = await this.tryRead(expression, reads);
         if (!isNodeVisible(node) || node.rect === undefined) return false;
+        const box = viewport === undefined ? node.rect : pixelsInViewport(node.rect, viewport);
+        if (box === undefined) return false;
         const origin = node.origin ?? node.rect;
-        const into = resolveScreenPoint(offset, node.rect);
+        const into = resolveScreenPoint(offset, box);
         point = {
-          x: (typeof offset.x === 'number' ? origin.x : node.rect.x) + into.x,
-          y: (typeof offset.y === 'number' ? origin.y : node.rect.y) + into.y,
+          x: (typeof offset.x === 'number' ? origin.x : box.x) + into.x,
+          y: (typeof offset.y === 'number' ? origin.y : box.y) + into.y,
         };
         return true;
       },
       onTimeout: (cause) =>
-        new TestError('LOCATOR_NOT_FOUND', `locator did not become visible with a box to act within: ${describeExpression(expression)}`, {
+        new TestError('LOCATOR_NOT_FOUND', `locator did not become visible with a box${viewport === undefined ? '' : ' in the viewport'} to act within: ${describeExpression(expression)}`, {
           details: locatorDetails(expression, deadline.elapsed()),
           ...(cause === undefined ? {} : { cause }),
         }),

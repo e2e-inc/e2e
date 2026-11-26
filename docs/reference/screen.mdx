@@ -718,16 +718,19 @@ The options are [`TapOptions`](#types):
 - `modifiers`: the browser engine holds them.
 - `position`: a point in the node, as a [`ScreenPoint`](#types). A pixel
   coordinate is measured from the node's top-left corner, inside its border.
-  A percentage from `'0%'` through `'100%'` is a share of the node's box,
-  rounded to the nearest pixel (`'100%'` is its last one). In a frame, the
-  box is the part the frame shows. They may mix:
-  `{ x: '50%', y: 4 }`. `doubleTap`, `dblclick`, `secondaryTap`, and `hover`
-  take it with the same rules.
+  A percentage from `'0%'` through `'100%'` is a share of the part of the
+  node's border box the screen shows: the whole pixels inside the viewport
+  and every frame around the node, rounded to the nearest pixel (`'100%'` is
+  the last one). So `{ x: '0%', y: '0%' }` is the outer corner of the border,
+  while `{ x: 0, y: 0 }` is inside it. They may mix: `{ x: '50%', y: 4 }`.
+  `doubleTap`, `dblclick`, `secondaryTap`, and `hover` take it with the same
+  rules.
 
 With `position`, the engine scrolls the node into view when it lists
 `scrollIntoView`. Then it reads the node's box and dispatches the pointer at
-the point. No node is behind the gesture, so the platform's other
-actionability checks (enabled, not covered) do not run.
+the point. A percentage also reads the screen once for the viewport's size.
+No node is behind the gesture, so the platform's other actionability checks
+(enabled, not covered) do not run.
 
 | Throws | When |
 | --- | --- |
@@ -740,7 +743,7 @@ actionability checks (enabled, not covered) do not run.
 | `UNSUPPORTED_CAPABILITY` | A single right tap on an engine that doesn't list `secondaryTap`. A `secondaryTap()` call fails the same way. |
 | `UNSUPPORTED_CAPABILITY` | `position` on an engine without the pointer action for the tap: `tap`, `doubleTap` for a `count` of 2, `multiTap` for 3 or more, or `secondaryTap` for a single right tap. |
 | `ACTION_FAILED` | `position` on a node the browser engine cannot bring into view; its scroll waits for visibility. Other engines fail as they report it. |
-| `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout. |
+| `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout, or for a percentage, never shows a pixel of it inside the viewport. |
 
 #### `doubleTap`
 
@@ -974,7 +977,7 @@ await screen.getByRole('slider', 'Volume').hover({ position: { x: '75%', y: '50%
 | `INVALID_ARGUMENT` | A `position` coordinate that is negative, not finite, or a string that is not a percentage from `'0%'` through `'100%'`. |
 | `UNSUPPORTED_CAPABILITY` | `position` on an engine without the `hover` pointer action, such as mobile. Thrown before the node is resolved. |
 | `ACTION_FAILED` | `position` on a node the browser engine cannot bring into view. |
-| `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout. |
+| `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout, or for a percentage, never shows a pixel of it inside the viewport. |
 
 #### `setInputFiles`
 
@@ -1539,7 +1542,7 @@ export type Point = ViewportPoint; // { x: number; y: number }
 /**
  * CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`),
  * `'0%'` through `'100%'`. In a locator action's `position`, a percentage is
- * of the node's box instead.
+ * of the part of the node's box the screen shows instead.
  */
 export type ScreenCoordinate = number | `${number}%`;
 
@@ -1554,9 +1557,12 @@ export interface ClickOptions extends ActionOptions {
   /**
    * Where to tap in the node. A pixel coordinate is measured from the node's
    * top-left corner, inside its border on a document platform. A percentage
-   * is a share of the node's box as the screen shows it, the part inside its
-   * frame when a frame clips it, so `{ x: '50%', y: '50%' }` is its center
-   * and `'100%'` stays on its last pixel. Without it the platform picks a
+   * is a share of the part of the node's box the screen shows: the whole
+   * pixels inside the viewport and every frame around the node. On a
+   * document platform that box includes the border, so `{ x: '0%', y: '0%' }`
+   * is the border's outer corner while `{ x: 0, y: 0 }` is inside the
+   * border. `{ x: '50%', y: '50%' }` is the center of the part shown, and
+   * `'100%'` stays on its last pixel. Without it the platform picks a
    * point of the node, usually its center, behind its own actionability
    * checks; with it the pointer is dispatched at that point once the node is
    * in view and has a box. The engine needs the matching pointer action:

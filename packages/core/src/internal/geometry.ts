@@ -93,6 +93,19 @@ export function containsPoint(box: Box, point: ViewportPoint): boolean {
 }
 
 /**
+ * The whole CSS pixels of the box inside the viewport, undefined when it
+ * covers none. A pixel the box covers only in part is left out: a browser
+ * hit-tests the edge of a box at a fractional position as outside it.
+ */
+export function pixelsInViewport(box: Box, viewport: ViewportSize): Box | undefined {
+  const x = Math.max(Math.ceil(box.x), 0);
+  const y = Math.max(Math.ceil(box.y), 0);
+  const width = Math.min(Math.floor(box.x + box.width), viewport.width) - x;
+  const height = Math.min(Math.floor(box.y + box.height), viewport.height) - y;
+  return width > 0 && height > 0 ? { x, y, width, height } : undefined;
+}
+
+/**
  * How much two boxes are the same box: the area they share over the area
  * either covers, 0 for boxes apart and 1 for the same box.
  */

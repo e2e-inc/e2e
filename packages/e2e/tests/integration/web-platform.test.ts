@@ -360,6 +360,60 @@ test('double taps, secondary taps, and hovers land at the position they name', a
   expect((await last()).mousemove).toBe('207 0 b0');
 });
 
+test('a percentage position is of the part of the node the frames and the viewport show', async ({ app, screen, browser }) => {
+  await app.open();
+  await browser.evaluate(() => {
+    document.body.innerHTML =
+      '<iframe id="outer" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 100px; border: 0"></iframe>' +
+      '<iframe id="single" style="position: absolute; left: 20px; top: 150px; width: 100px; height: 60px; border: 0"></iframe>' +
+      '<div role="button" aria-label="Tall" style="position: absolute; left: 300px; top: 0; width: 200px; height: 3000px"></div>';
+    document.querySelector<HTMLIFrameElement>('#outer')!.srcdoc =
+      '<body style="margin: 0; overflow: hidden"><iframe id="inner" style="display: block; width: 300px; height: 60px; border: 0" ' +
+      'srcdoc="<body style=&quot;margin: 0&quot;><button style=&quot;display: block; width: 300px; height: 60px; border: 0; padding: 0&quot;>Wide</button></body>">' +
+      '</iframe></body>';
+    document.querySelector<HTMLIFrameElement>('#single')!.srcdoc =
+      '<body style="margin: 0; overflow: hidden"><button style="display: block; margin-left: -50px; width: 150px; height: 60px; border: 0; padding: 0">Shifted</button></body>';
+    return null;
+  });
+  const wide = browser.frameLocator('#outer').frameLocator('#inner').getByRole('button', { name: 'Wide' });
+  const shifted = browser.frameLocator('#single').getByRole('button', { name: 'Shifted' });
+  const tall = screen.getByRole('button', { name: 'Tall' });
+  await expect(wide).toBeVisible();
+  await expect(shifted).toBeVisible();
+  await browser.evaluate(() => {
+    const hits: string[] = [];
+    (window as unknown as { hits: string[] }).hits = hits;
+    const outer = document.querySelector<HTMLIFrameElement>('#outer')!.contentDocument!;
+    const nodes = {
+      wide: outer.querySelector<HTMLIFrameElement>('#inner')!.contentDocument!.querySelector('button')!,
+      shifted: document.querySelector<HTMLIFrameElement>('#single')!.contentDocument!.querySelector('button')!,
+      tall: document.querySelector('div')!,
+    };
+    for (const [name, node] of Object.entries(nodes)) {
+      node.addEventListener('click', (event) => {
+        const box = node.getBoundingClientRect();
+        const shown = event.clientY >= 0 && event.clientY < node.ownerDocument.defaultView!.innerHeight;
+        hits.push([name, Math.round(event.clientX - box.left), Math.round(event.clientY - box.top), shown ? 'shown' : 'off screen'].join(' '));
+      });
+    }
+    return null;
+  });
+  const tapped = async (target: typeof tall, position: Parameters<typeof screen.tapAt>[0]) => {
+    await browser.evaluate(() => {
+      (window as unknown as { hits: string[] }).hits.length = 0;
+      return null;
+    });
+    await target.tap({ position });
+    return browser.evaluate(() => (window as unknown as { hits: string[] }).hits);
+  };
+  expect(await tapped(wide, { x: '100%', y: '50%' })).toEqual(['wide 99 30 shown']);
+  expect(await tapped(wide, { x: 10, y: '0%' })).toEqual(['wide 10 0 shown']);
+  expect(await tapped(shifted, { x: '0%', y: '50%' })).toEqual(['shifted 50 30 shown']);
+  expect(await tapped(shifted, { x: '100%', y: 0 })).toEqual(['shifted 149 0 shown']);
+  expect(await tapped(shifted, { x: 60, y: 5 })).toEqual(['shifted 60 5 shown']);
+  expect(await tapped(tall, { x: '50%', y: '50%' })).toEqual([expect.stringMatching(/^tall 100 \\d+ shown$/)]);
+});
+
 test('a trigger that starts no download times out saying so', async ({ app, browser }) => {
   await app.open('/downloads');
   await browser.waitForDownload(() => new Promise((resolve) => setTimeout(resolve, 200)), { timeout: 500 });
@@ -676,6 +730,7 @@ describe('web platform integration', () => {
     'clicks hold the modifiers they name',
     'taps use the requested mouse button, count, and position',
     'double taps, secondary taps, and hovers land at the position they name',
+    'a percentage position is of the part of the node the frames and the viewport show',
     'a viewport set before the first navigation holds through app.open',
     'an empty class attribute is an empty class list',
     'reads wait for a node that arrives late',

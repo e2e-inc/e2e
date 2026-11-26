@@ -85,9 +85,14 @@ function tapScreen(flags: Pick<ScreenOverOptions, 'actions' | 'tapModifiers' | '
 }
 
 /** Creates a screen with a positioned box and all pointer actions, recording lookups and point actions. */
-function pointScreen(flags: Pick<ScreenOverOptions, 'tapButtons' | 'pointerActions'> & { origin?: { x: number; y: number } } = {}) {
-  const { origin, ...engine } = flags;
-  const box = { ...BOX, rect: { x: 10, y: 20, width: 100, height: 40 }, ...(origin === undefined ? {} : { origin }) };
+function pointScreen(
+  flags: Pick<ScreenOverOptions, 'tapButtons' | 'pointerActions'> & {
+    origin?: { x: number; y: number };
+    rect?: { x: number; y: number; width: number; height: number };
+  } = {},
+) {
+  const { origin, rect = { x: 10, y: 20, width: 100, height: 40 }, ...engine } = flags;
+  const box = { ...BOX, rect, ...(origin === undefined ? {} : { origin }) };
   const at: { action: PointerAction; point: { x: number; y: number } }[] = [];
   const locate = vi.fn(async (expression: LocatorExpression) => resolveExpression(expression, [box]));
   const { screen, steps } = screenOver({
@@ -469,6 +474,36 @@ describe('locator action options', () => {
         { action: { kind: 'tap' }, point: { x: 15, y: 40 } },
         { action: { kind: 'hover' }, point: { x: 20, y: 27 } },
       ]);
+    });
+
+    it('reads a percentage as a share of the part of the box inside the viewport', async () => {
+      const { screen, at } = pointScreen({ rect: { x: 1200, y: -500, width: 200, height: 3000 } });
+      await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } });
+      await screen.getByLabel('Agree').hover({ position: { x: '100%', y: 10 } });
+      expect(at).toEqual([
+        { action: { kind: 'tap' }, point: { x: 1240, y: 360 } },
+        { action: { kind: 'hover' }, point: { x: 1279, y: -490 } },
+      ]);
+    });
+
+    it('keeps a percentage on the whole pixels of a box at a fractional position', async () => {
+      const { screen, at } = pointScreen({ rect: { x: 10.5, y: 20.25, width: 100, height: 40 } });
+      await screen.getByLabel('Agree').tap({ position: { x: '0%', y: '0%' } });
+      await screen.getByLabel('Agree').tap({ position: { x: '100%', y: '100%' } });
+      expect(at).toEqual([
+        { action: { kind: 'tap' }, point: { x: 11, y: 21 } },
+        { action: { kind: 'tap' }, point: { x: 109, y: 59 } },
+      ]);
+    });
+
+    it('waits for a box outside the viewport to come into it before taking a percentage of it, and fails with LOCATOR_NOT_FOUND', async () => {
+      const { screen, at } = pointScreen({ rect: { x: 10, y: 800, width: 100, height: 40 } });
+      await expect(screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' }, timeout: 300 })).rejects.toMatchObject({
+        code: 'LOCATOR_NOT_FOUND',
+        message: expect.stringContaining('did not become visible with a box in the viewport to act within'),
+      });
+      await screen.getByLabel('Agree').tap({ position: { x: 5, y: 5 } });
+      expect(at).toEqual([{ action: { kind: 'tap' }, point: { x: 15, y: 805 } }]);
     });
 
     it('refuses a positioned hover on an engine without the hover pointer action before resolving the node', async () => {

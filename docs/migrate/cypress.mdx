@@ -98,7 +98,7 @@ describe('todos', () => {
 | `.click()`, `.dblclick()`, `.clear()`, `.check()`, `.uncheck()`, `.focus()`, `.blur()`, `.first()`, `.last()`, `.scrollIntoView()` | The same |
 | `.rightclick()`, `.eq(n)`, `.selectFile(path)` | `.secondaryTap()`, `.nth(n)`, `.setInputFiles(path)` |
 | `.click(x, y)`, `.dblclick(x, y)`, `.rightclick(x, y)` | `.tap({ position: { x, y } })`, `.doubleTap({ position })`, `.secondaryTap({ position })`. Cypress measures from the outer edge of the border, e2e from inside it, so the two match on an element without a border |
-| `.click('topLeft')` and the other position names | A percentage `position` of the box: `topLeft` is `{ x: '0%', y: '0%' }`, `top` is `{ x: '50%', y: '0%' }`, `center` is `{ x: '50%', y: '50%' }`, `bottomRight` is `{ x: '100%', y: '100%' }`, and so on |
+| `.click('topLeft')` and the other position names | A percentage `position` of the box: `topLeft` is `{ x: '0%', y: '0%' }`, `top` is `{ x: '50%', y: '0%' }`, `center` is `{ x: '50%', y: '50%' }`, `bottomRight` is `{ x: '100%', y: '100%' }`, and so on. The two round differently, so a point can be a pixel apart: on a 101px wide element, Cypress's `center` is at x 50 and `'50%'` at x 51. A test that checks the exact coordinates should use pixel offsets |
 | `.type('text')`, `.type('{enter}')`, `.clear().type('text')` | `.pressSequentially('text')` appends with key events, `.press('Enter')`, `.fill('text')` |
 | `.select('Pro')` | `.selectOption('Pro')` matches the label; a value needs `{ value: 'pro' }`, an index `{ index: 1 }` |
 | `.should('be.visible')`, `be.checked`, `be.disabled`, `be.focused`, `exist` | `await expect(locator).toBeVisible()`, `toBeChecked()`, `toBeDisabled()`, `toBeFocused()`, `toBeAttached()` |
