@@ -60,6 +60,19 @@ test.describe('control inventory', () => {
     expect(await screen.getByTestId('name-input').getAttribute('placeholder')).toBe('Type your name');
   });
 
+  test('getAttribute reads the label, resource id, and class an Appium suite asks for', async ({ platform, screen }) => {
+    const field = screen.getByTestId('name-input');
+    expect(await field.getAttribute('resource-id')).toBe('name-input');
+    await expect(field).toHaveAttribute('label', 'Name field');
+    if (platform === 'ios') {
+      await expect(field).toHaveAttribute('class', 'TextField');
+      expect(await field.getAttribute('content-desc')).toBeNull();
+    } else {
+      await expect(field).toHaveAttribute('class', 'android.widget.EditText');
+      await expect(field).toHaveAttribute('content-desc', 'Name field');
+    }
+  });
+
   // The keyboard stays up on purpose: Return on a secure field makes iOS
   // offer to save the password, a sheet the next test never sees because
   // every attempt relaunches the app.
@@ -331,6 +344,15 @@ test.describe('control inventory', () => {
     await screen.getByRole('button', 'Double-tap me').doubleTap();
     await expect(screen.getByTestId('tap-count')).toContainText('2 taps');
     await expect(screen.getByTestId('gesture-status')).toHaveText('gesture: double tap');
+  });
+
+  // tap({ count: 3 }) is agent-device's press with count 3: three presses at
+  // the double-tap cadence. The scenario counts what arrives; the 300 ms
+  // window is left alone, since iOS lands presses about 285 ms apart.
+  test('tap({ count: 3 }) lands three presses', async ({ screen }) => {
+    await showSection(screen, 'Gestures');
+    await screen.getByRole('button', 'Double-tap me').tap({ count: 3 });
+    await expect(screen.getByTestId('tap-count')).toContainText('3 taps');
   });
 
   // Android bounds and points are the screen's physical pixels: agent-device

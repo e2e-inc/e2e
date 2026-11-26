@@ -47,6 +47,8 @@ export interface WriteTracePagesOptions {
   readonly projectRoot: string;
   /** `<output>/results`: the report's artifact paths are relative to it, and each page goes in its test's directory there. */
   readonly resultsRoot: string;
+  /** Published results directory when the pages are written into staging. */
+  readonly publishedResultsRoot?: string;
   /** Absolute replay cache directory, where the test's recording file is; absent when a custom store holds the cache. */
   readonly cacheDir?: string | undefined;
 }
@@ -70,13 +72,14 @@ export async function writeTracePages(report: Report1Document, traced: ReadonlyS
       return undefined;
     }
   };
+  const publishedResults = options.publishedResultsRoot ?? options.resultsRoot;
   const pages = new Map<string, string>();
   const store = options.cacheDir === undefined ? undefined : new FileCacheStore({ directory: options.cacheDir, maxBytes: MAX_CACHE_WIRE_BYTES, writable: false });
   for (const result of tracedResults(report, traced)) {
     const dir = resultSegment(result);
     const file = path.join(options.resultsRoot, dir, TRACE_PAGE);
     const page = renderTracePage(report, result, outcome(result, serialGroups), {
-      artifactsDir: relative(options.resultsRoot),
+      artifactsDir: relative(publishedResults),
       pageDir: dir,
       readArtifact,
       ...(store === undefined || options.cacheDir === undefined
@@ -84,7 +87,7 @@ export async function writeTracePages(report: Report1Document, traced: ReadonlyS
         : { cacheFile: displayPath(options.projectRoot, path.join(options.cacheDir, await store.recordingFile(result.testId))) }),
     });
     await writeTextReport(file, page);
-    pages.set(result.id, relative(file));
+    pages.set(result.id, relative(path.join(publishedResults, dir, TRACE_PAGE)));
   }
   return pages;
 }

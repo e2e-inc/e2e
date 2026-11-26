@@ -142,7 +142,7 @@ await screen.getByRole('button', 'Increment').tap();`,
     expect(host.text).toMatch(/^Returned: \["object","function","file\.txt"\]\n/);
     const page = await runCode("await page.goto('/')");
     expect(page.isError).toBe(true);
-    expect(page.text).toMatch(/^Failed: ReferenceError: page is not defined \(line 1:\d+\); the code has screen, app, expect, credentials, secrets, browser, console, /);
+    expect(page.text).toMatch(/^Failed: ReferenceError: page is not defined \(line 1:\d+\); the code has screen, app, expect, credentials, secrets, services, browser, console, /);
     const member = await runCode("const title = 1;\nawait screen.evaluate('document.title')");
     expect(member.isError).toBe(true);
     expect(member.text).toMatch(/^Failed: TypeError: screen\.evaluate is not a function \(line 2:\d+\)\n/);
@@ -236,6 +236,13 @@ return (await browser.reload()) === undefined;`);
     const either = await runCode("await expect(screen.getByRole('button', 'Increment').or(screen.getByRole('button', 'Nowhere'))).toBeVisible();");
     expect(either.isError, either.text).toBe(false);
     expect(either.text).toContain('Test lines: 1.\n');
+  });
+
+  it('measures a node against the viewport with toBeInViewport', async () => {
+    const inside = await runCode("await expect(screen.getByRole('button', 'Increment')).toBeInViewport({ ratio: 1 });");
+    expect(inside.isError, inside.text).toBe(false);
+    const absent = await runCode("await expect(screen.getByRole('button', 'Nowhere')).not.toBeInViewport();");
+    expect(absent.isError, absent.text).toBe(false);
   });
 
   it('computes on what it reads: variables, loops, value assertions, a caught failure, a return value, and the console', async () => {

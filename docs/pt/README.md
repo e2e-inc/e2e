@@ -61,7 +61,7 @@ translation moves or goes with it in the same change.
   UI labels keep their own formatting.
 - Keep product, package, and API names in English: e2e, Playwright,
   `@e2e-dev/web`, MCP, CI, GitHub Actions. Keep literal CLI option labels
-  such as **None** unchanged so readers can find them in the terminal.
+  such as **Skip for now** unchanged so readers can find them in the terminal.
 - Keep a term in English where Brazilian developers use the English word
   (*runner*, *fixture*, *worker*, *engine*, *pull request*, *prompt*).
   Don't italicize these loanwords. The glossary says which terms stay in
@@ -122,7 +122,7 @@ translation moves or goes with it in the same change.
 | artifact | artefato |
 | matcher | matcher (keep in English, o matcher) |
 | timeout | tempo limite (`timeout` in code) |
-| headless, headed | headless, headed (keep in English) |
+| headless, headed | headless, headed (keep in English; in a screen-reader `aria-label`, write "com interface visível" for headed) |
 | sign in, sign out | entrar (fazer login), sair (fazer logout) |
 | subscription | assinatura |
 | prompt | prompt (keep in English, o prompt) |
@@ -162,3 +162,121 @@ translation moves or goes with it in the same change.
 | CLI | CLI (keep in English) |
 | API | API (keep in English) |
 | UI | UI (keep in English, a UI) |
+| finding (from `explore` or a bug bash) | achado |
+| explore session, explorer, planner | sessão de explore, explorador, planejador |
+| repro test | teste de reprodução |
+| persona | persona (a persona) |
+| pin (an agent) | fixar (agentes fixados) |
+| custom executor | executor personalizado |
+| budget (steps, model calls, time) | orçamento |
+| seeded data | dados pré-carregados (pré-carregar) |
+| signed in, start signed in | autenticado, com o login feito |
+| handle (a `Secret`) | referência |
+| one-time code | código de uso único |
+| fill (noun) | preenchimento |
+| override (a value per run) | substituição |
+| vault | cofre de segredos |
+| collection error | erro de coleta |
+| exit code, exits N | código de saída, sai com código N |
+| stdout, stderr | stdout, stderr (keep in English, o stdout) |
+| usage error | erro de uso |
+| scaffold (a project) | criar a estrutura (de um projeto) |
+| wizard (`e2e init`), its prompts | assistente, perguntas |
+| stored login | login salvo |
+| positional argument | argumento posicional |
+| bare (flag, name, pattern; a value on its own) | sem valor (flag), simples (nome, padrão); sozinho (um `StepExecutor` sozinho) |
+| dry run (`e2e list`) | execução simulada |
+| watch mode | modo watch |
+| serial group | grupo serial |
+| deadline | prazo |
+| teardown (a fixture) | desmontagem |
+| digest | digest (keep in English, o digest) |
+| safe integer, code point | inteiro seguro, ponto de código |
+| symlink | link simbólico |
+| version range, prerelease | intervalo, versão de pré-lançamento |
+| registry, dist-tag | registry, dist-tag (keep in English, o registry, a dist-tag) |
+| opt in, opt out | ativação, desativação |
+| wins (over another value) | prevalece |
+| stored screenshot | captura de tela armazenada |
+| the agent takes over | o agente assume |
+| cache miss | cache miss (keep in English, o cache miss) |
+| evict (a cache entry) | remover |
+| store (`cache.store`) | armazenamento |
+| stale | desatualizado |
+| gap (an action the cache can't replay) | lacuna (`gap` in code) |
+| label (text on a control) | rótulo |
+| edge case | caso de borda |
+| checkout (a git working copy) | checkout (keep in English, o checkout) |
+| working tree | árvore de trabalho |
+| serve (a model a plan or key offers) | disponibilizar |
+| built-in agent | agente embutido |
+| judgment (`assert`, `waitFor`, `extract`) | julgamento |
+| gate (`minProbability`, `minConfidence`) | limiar |
+| gate (a merge or a release in CI) | bloquear; liberar ou bloquear (a release, feminine) |
+| decide call, text call | chamada de decisão, chamada de texto |
+| completion check | verificação de conclusão |
+| tool call, forced tool choice | chamada de ferramenta, escolha de ferramenta forçada |
+| system prompt | prompt de sistema |
+| thinking (a model's reasoning) | raciocínio |
+| fallback (model) | fallback (keep in English, o fallback) |
+| self-hosted | auto-hospedado |
+| zero data retention | retenção zero de dados |
+| device code | código de dispositivo |
+| token refresh, refresh token | renovação do token, refresh token (keep in English) |
+| vendor | fornecedor |
+| on-screen keyboard | teclado virtual |
+| drawn (content the tree doesn't show) | desenhado |
+| port (a config or a test), migration guide | portar (porte, portado), guia de migração |
+| spec (a test file) | spec (keep in English, a spec) |
+| flow (a Maestro or Selenium test) | fluxo |
+| page object | page object (keep in English, o page object) |
+| capabilities (Appium) | capabilities (keep in English, as capabilities) |
+| command chain (Cypress) | cadeia de comandos |
+| workaround | alternativa |
+| roadmap | roadmap (keep in English, o roadmap) |
+| What e2e doesn't have yet: Planned, Not yet, Not planned | O que o e2e ainda não tem: Planejado, Ainda não, Não planejado |
+| Use today, Use instead (migration table columns) | Use hoje, Use em vez disso |
+| match (noun), to match | correspondência, corresponder |
+| query (a `screen` query) | consulta |
+| scripted (selectors, taps) | roteirizado |
+| launch (an app), launch arguments | iniciar, inicialização; argumentos de inicialização |
+| runtime permission | permissão de tempo de execução |
+| wizard, checkout (a purchase flow) | assistente passo a passo, finalização de compra |
+| retire (an old test) | aposentar |
+| request, response, header (HTTP) | requisição, resposta, cabeçalho |
+| handler, stub | handler, stub (keep in English, o handler, o stub) |
+| case-sensitive, case-insensitive | diferencia maiúsculas de minúsculas, sem diferenciar maiúsculas de minúsculas |
+| step (a CI YAML step) | step (keep in English, o step); an e2e test step stays passo |
+| pipeline, merge request | pipeline, merge request (keep in English, o pipeline, o merge request) |
+| runner (a CI machine), self-managed runner, runner image | runner (o runner), runner autogerenciado, imagem do runner |
+| matrix (a CI matrix) | matriz (jobs em matriz) |
+| job summary | resumo do job |
+| rerun | reexecução |
+| first pass (the run a rerun completes) | primeira rodada |
+| preview deployment, production deployment | deploy de preview, deploy de produção |
+| trigger (a build or workflow), fire (an event) | acionar, disparar |
+| action (a GitHub Actions action) | action (keep in English, a action) |
+| lockfile | lockfile (keep in English, o lockfile) |
+| package manager | gerenciador de pacotes |
+| bare React Native | React Native puro |
+| build profile | perfil de build |
+| environment variable, masked | variável de ambiente, mascarada |
+| rate limit | limite de taxa |
+| template | template (keep in English, o template) |
+| warm browser | navegador aquecido |
+| device provider, browser provider | provedor de dispositivos, provedor de navegadores |
+| worker slot | slot de worker |
+| scope (`'attempt'`, `'worker'`) | escopo por tentativa, escopo por worker (where English names the value in code, keep it: escopo `'attempt'`) |
+| release (a lease or device) | liberar, liberação |
+| live view | visualização ao vivo |
+| cloud browser | navegador em nuvem |
+| sandbox | sandbox (keep in English, o sandbox) |
+| tunnel | túnel |
+| daemon | daemon (keep in English, o daemon) |
+| crashed, died (a worker or run) | que caiu, cair |
+| killed (the runner) | encerrado à força |
+| idle timeout | tempo limite de inatividade |
+| layout engine | motor de layout (not engine, which names an e2e engine) |
+| below the fold | abaixo da dobra |
+| port reverse | redirecionamento reverso de portas |
+| dashboard | dashboard (keep in English, o dashboard) |

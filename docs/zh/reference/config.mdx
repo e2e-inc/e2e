@@ -239,7 +239,7 @@ targets: [
 | [`video`](#video) | `RecordingMode` | 配置中的 `video` |
 
 - `{ engine: web(), app: { url } }` 就是一个完整的测试目标。
-- 如果测试的 `requires` 指定了测试目标缺少的能力，该测试会在此测试目标上跳过。被选中测试所依赖的 `test.setup` 必须能够在该测试目标上运行，否则选择过程会以 `COLLECTION_ERROR` 失败。
+- 如果测试的 `platforms` 不包含测试目标的平台，该测试会在此测试目标上跳过。被选中测试所依赖的 `test.setup` 必须能够在该测试目标上运行，否则选择过程会以 `COLLECTION_ERROR` 失败。
 
 完整声明见 [`Target`](#target)。
 
@@ -311,8 +311,8 @@ targets: [
 | [`linkBase`](#linkbase) | `string` | - |
 | [`identity`](#identity) | `string` | 根据应用推导 |
 | [`environment`](#environment) | `'test' \| 'staging' \| 'production'` | `'test'` 或 `'production'` |
-| [`launchArguments`](#launcharguments) | `string[]` | - |
-| [`permissions`](#permissions) | `Record<string, AppPermissionState>` | - |
+| [`launchArguments`](#launcharguments) | `string[] \| Record<string, LaunchArgumentValue>` | - |
+| [`permissions`](#permissions) | `Record<string, AppPermissionState> \| 'all'` | - |
 | [`command`](#command) | `CommandConfig` | - |
 | [`readyUrl`](#readyurl) | `string` | `url` |
 
@@ -417,6 +417,15 @@ environment: 'staging', // default: 'test' for a local host or no URL, else 'pro
 launchArguments: ['-e2e', 'YES'],
 ```
 
+```ts
+launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true },
+```
+
+```ts
+type LaunchArgumentValue = string | number | boolean | readonly string[];
+type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue | undefined>>;
+```
+
 选择构建模式的参数会改变应用本身：为每种模式设置独立的 `identity`。
 
 #### `permissions`
@@ -427,10 +436,10 @@ launchArguments: ['-e2e', 'YES'],
 permissions: { camera: 'grant' },
 ```
 
-每项为 `'grant'`、`'deny'` 或 `'reset'`。
+每项为 `'grant'`、`'deny'` 或 `'reset'`。`permissions: 'all'` 授予测试目标的引擎能授予的所有权限。
 
 - `mobile()` 测试目标会在每次全新启动前设置各项权限。参阅[权限](/reference/mobile#engine)。
-- `web()` 测试目标只接受 `'grant'`，并向本次尝试中任意源上的所有页面授予该权限。无头模式的 Chromium 会拒绝未列出的权限。参阅[授予浏览器权限](/web#granting-browser-permissions)。
+- `web()` 测试目标只接受 `'grant'`，并向本次尝试中任意源上的所有页面授予该权限。无头模式的 Chromium 会拒绝未列出的权限。参阅[授予浏览器权限](/web#granting-browser-permissions)。`'all'` 授予下表中该浏览器的所有名称。
 
 | 浏览器 | 名称 |
 | --- | --- |
@@ -1186,7 +1195,7 @@ cache: { strict: true }, // default: false
 | `retries` | `0` | `1` |
 | `workers` | `max(1, floor(availableParallelism() / 2))` | `1` |
 | `cache` | `read-write` | 未设置时为 `read-only` |
-| `test.only` | 允许 | `ONLY_IN_CI`，退出码 2 |
+| `test.only`、`describe.only` | 允许 | `ONLY_IN_CI`，退出码 2 |
 | `command.reuseExisting` | 生效 | 忽略，并提示 |
 
 ## 加载

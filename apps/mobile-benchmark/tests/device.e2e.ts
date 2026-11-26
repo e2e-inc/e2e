@@ -37,6 +37,17 @@ test.describe('permission prompt', () => {
   });
 });
 
+// `permissions: 'all'` grants the microphone before the launch, so the
+// request resolves without a system dialog: a dialog left up would keep the
+// scenario on its prompt and fail the check.
+test('permissions all grants the microphone without a system dialog', async ({ app, device, screen }) => {
+  await device.setPermission('microphone', 'reset');
+  await device.openApp('dev.e2e.benchmark', { relaunch: true, permissions: 'all' });
+  await openScenario({ app, device, screen }, 'Permission Prompt');
+  await screen.getByTestId('request-permission').tap();
+  await expect(screen.getByTestId('success-message')).toHaveText('Microphone enabled');
+});
+
 // Every step auto-focuses its field and keeps the keyboard up on Return
 // (`submitBehavior="submit"`), so the keyboard covers Continue from the start
 // and `device.dismissKeyboard()` is the way past it: Android hides the
@@ -83,6 +94,26 @@ test('isKeyboardShown follows the keyboard up and through a dismissal', { platfo
 test('a shake is sent without an error and leaves the screen readable', async ({ app, device, screen }) => {
   await openScenario({ app, device, screen }, 'Sequential Onboarding');
   await device.shake();
+  await expect(screen.getByTestId('email-input')).toBeVisible();
+});
+
+// lock and unlock each return only once the device reports the new state, so
+// passing both is the round trip, and the screen read afterwards shows the app
+// reads again. A lock that fails after it took effect still gets an unlock, so
+// the tests after this one do not start locked; the test then fails with the
+// lock's error, and the unlock's own error stays on its step. Android only:
+// CI's iPhone 17 Pro simulator has an always-on display, where the unlock can
+// leave the display off, and on its iOS 26.5 runtime every later fill on that
+// simulator then fails its read-back.
+test('a lock and an unlock both complete and leave the app readable', { platforms: ['android'] }, async ({ app, device, screen }) => {
+  await openScenario({ app, device, screen }, 'Sequential Onboarding');
+  try {
+    await device.lock();
+  } catch (error) {
+    await device.unlock().catch(() => undefined);
+    throw error;
+  }
+  await device.unlock();
   await expect(screen.getByTestId('email-input')).toBeVisible();
 });
 

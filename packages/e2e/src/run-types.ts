@@ -5,10 +5,10 @@
 
 import type { RunEvent, RunExitCode, RunStatus } from './run/events.ts';
 import type { Report1Document } from './report/build.ts';
-import type { ProjectConfig } from '@e2e-dev/core/lib/types';
+import type { ProjectConfig, ServiceMap } from '@e2e-dev/core/lib/types';
 
 /** The reporters the runner ships, named by id; each is a `Reporter` on the same contract. */
-export type BuiltinReporter = 'list' | 'dot' | 'line' | 'json' | 'junit' | 'markdown';
+export type BuiltinReporter = 'list' | 'dot' | 'line' | 'json' | 'junit' | 'markdown' | 'ctrf';
 
 /**
  * The run's report document, the one `.e2e/report.json` holds. Its
@@ -42,9 +42,12 @@ export interface FinishedRun {
    */
   readonly traces: ReadonlyMap<string, string>;
   /**
-   * The report `--last-failed` selected from, when the run was given that
+   * The runs `--last-failed` selected from, when the run was given that
    * flag: the run before this one, whose tests that did not fail were left
-   * out here. A reporter that keeps one place current folds this run into it.
+   * out here, with every rerun before it already folded in, so it holds the
+   * passes of the first run however many reruns came between. A reporter
+   * that keeps one place current folds this run into it with `foldLastRun`;
+   * the runner writes that fold to `report-with-reruns.json` beside the report.
    */
   readonly lastRun?: Report;
   /**
@@ -76,9 +79,9 @@ export interface ReportFile {
 
 /**
  * A reporter in `reporters`, the contract the built-in `list`, `dot`, `line`,
- * `json`, `junit`, and `markdown` reporters are built on, with nothing the runner
- * gives them alone. Every hook is optional, but a reporter has at least one,
- * and every reporter that has a hook gets it.
+ * `json`, `junit`, `markdown`, and `ctrf` reporters are built on, with
+ * nothing the runner gives them alone. Every hook is optional, but a
+ * reporter has at least one, and every reporter that has a hook gets it.
  *
  * - `onEvent` is the one live hook. It sees every run event as it happens
  *   and must not block: a throw quarantines it for the rest of the run.
@@ -227,16 +230,31 @@ export interface TestFilterResult {
   readonly note?: string;
 }
 
-/** The config an `e2e.config.ts` default-exports, through `defineConfig`. */
-export interface E2EConfig extends ProjectConfig {
+/**
+ * The config an `e2e.config.ts` default-exports, through `defineConfig` or
+ * ending in `satisfies E2EConfig`. `Services` is the type of `services`
+ * passed to a target's `app.command.env` function, inferred by `defineConfig`
+ * from `services`.
+ */
+export interface E2EConfig<Services = Readonly<Record<string, unknown>>> extends ProjectConfig<Services> {
   /**
    * The run's reporters: built-in ids, each its factory from
    * `e2e/reporters` with no options, and reporter objects. `list`, `dot`, and
    * `line` show the run on stdout, or on stderr beside `json`, which prints the
-   * report there; `junit` writes `<output>/junit.xml` and `markdown`
-   * `<output>/summary.md`. `--reporter` replaces the built-ins only.
+   * report there; `junit` writes `<output>/junit.xml`, `markdown`
+   * `<output>/summary.md`, and `ctrf` `<output>/ctrf.json`. `--reporter` replaces the built-ins only.
    */
   reporters?: readonly (BuiltinReporter | Reporter)[];
   /** Test filters, in order, run with `--changed-since`: each judges the tests the one before it kept. */
   filters?: readonly TestFilter[];
+  /**
+   * Dependencies of the app under test, keyed by name and defined with
+   * `defineService`. Services start in key order before the app commands and
+   * stop in reverse order after the app commands. `e2e run` and `e2e explore`
+   * share one instance of each across all workers, `e2e mcp` shares one
+   * across sessions open on one config file, and each `openHost` host starts
+   * its own. Tests read their values through the `services` fixture, and an
+   * `app.command.env` function receives them through its argument.
+   */
+  services?: ServiceMap;
 }

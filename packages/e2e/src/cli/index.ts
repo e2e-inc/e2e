@@ -29,11 +29,12 @@ import { runsFromCheckout } from '../telemetry/checkout.ts';
 import { initCompletedEvent, runCompletedEvent, upgradeCompletedEvent, USAGE_ERROR_CODE } from '../telemetry/events.ts';
 import { Telemetry } from '../telemetry/telemetry.ts';
 import { CACHE_DIR_DESCRIPTION, registerCacheCommand } from './cache.ts';
+import { registerMergeReportsCommand } from './merge-reports-command.ts';
 import { docsLine, examples, helpSection, pc } from './help.ts';
 import { EXIT_CODES } from './exit-codes.ts';
 import type { DoctorReport } from './doctor.ts';
 import { ERROR_CODE_LIMIT, feedback, FEEDBACK_LIMITS, FEEDBACK_TYPES, type FeedbackReport } from './feedback.ts';
-import { guide } from './guide.ts';
+import { guide, guideTopics } from './guide.ts';
 import { addInitOptions, checkInitFlags, type InitFlagValues } from './init/flags.ts';
 import { parseList, parseNames } from './parse-names.ts';
 import { SESSION_BOUNDS } from '../session-tools/bounds.ts';
@@ -42,7 +43,6 @@ import type { LoginFlags } from '../oauth/cli.ts';
 import { SignalLadder } from './signals.ts';
 import { isStepAction } from './step.ts';
 import { stepAddress } from '../run/step-socket.ts';
-import { skillTopics } from './skill.ts';
 import { UpdateCheck } from './update-check.ts';
 import { telemetry as telemetryCommand, TELEMETRY_ACTIONS, type TelemetryAction } from './telemetry.ts';
 import { parseUpgradeTarget, type UpgradeTarget } from './upgrade-target.ts';
@@ -528,7 +528,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .command('init')
     .summary('scaffold an ESM package, e2e.config.ts, an example test, .gitignore entries, and the agent skill')
     .description(
-      'Scaffold a project: an ESM package.json, e2e.config.ts, an example test per engine, .gitignore entries, and the e2e skill for coding agents. An existing config and test files stay as they are; an existing package.json gets only the missing dependencies and scripts, and .gitignore only the missing entries. Prompts for the engines, for AI support, and for the skill directories, then offers to install the dependencies; --yes takes the defaults, with the skill in .agents/skills and .claude/skills linked to it.',
+      'Scaffold a project: an ESM package.json, e2e.config.ts, an example test per engine, .gitignore entries, the e2e skill for coding agents, and a line in AGENTS.md and CLAUDE.md that points agents at the skill. An existing config and test files stay as they are, and no example test is written beside an existing config; an existing package.json gets only the missing dependencies, those of the packages the config imports included, and scripts, .gitignore only the missing entries, and AGENTS.md and CLAUDE.md only the missing line. Prompts for the engines, for AI support, and for the skill directories, then offers to install the dependencies; --yes takes the defaults, with the skill in .agents/skills and .claude/skills linked to it.',
     )
     .argument('[directory]', 'project directory, created when missing (default: the current directory)')
     .option('-y, --yes', 'skip the prompts; each answer not given as a flag takes its default: web, vercel, every skill and MCP location, no installation');
@@ -613,10 +613,13 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .description(
       'Print the skill that init installs: how to set up e2e, write tests, use agent steps, run the CLI, and read a failing run. Without a topic, prints the overview and the topic list.',
     )
-    .argument('[topic]', `one of ${skillTopics().join(', ')}`)
-    .addHelpText('after', ['', examples(['e2e guide', 'e2e guide writing-tests']), '', docsLine('/reference/cli#e2e-guide')].join('\n'))
+    .argument('[topic]', 'one topic of the guide; the overview when omitted')
+    // Read when help prints: the topics are those of the guide this project gets, which may be an installed copy's.
+    .addHelpText('after', () =>
+      ['', `Topics: ${guideTopics({ version }).join(', ')}`, '', examples(['e2e guide', 'e2e guide writing-tests']), '', docsLine('/reference/cli#e2e-guide')].join('\n'),
+    )
     .action((topic: string | undefined) => {
-      process.exitCode = guide(topic);
+      process.exitCode = guide(topic, { version });
     });
 
   program
@@ -670,6 +673,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
       parseNames('agent'),
     )
     .option('--workers <n>', 'parallel workers (default: from the config)', parseNonNegativeInt)
+    .option('--fully-parallel', 'run the tests of one file in parallel too, on every target (default: fullyParallel in the config)')
     .option('--retries <n>', 'retries per failing test (default: from the config)', parseNonNegativeInt)
     .option('--action-timeout <ms>', 'budget of every engine operation, such as a locator waiting for its element; a call\'s own timeout still wins (default: actionTimeout in the config, else 30000)', parseBoundedInt({ min: 1, max: MAX_TIMER_MS }))
     .option('--assertion-timeout <ms>', 'default expect deadline; a matcher\'s own timeout still wins (default: assertionTimeout in the config, else 5000)', parseBoundedInt({ min: 1, max: MAX_TIMER_MS }))
@@ -743,6 +747,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           agent?: string[];
           retries?: number;
           workers?: number;
+          fullyParallel?: boolean;
           actionTimeout?: number;
           assertionTimeout?: number;
           maxFailures?: number;
@@ -792,6 +797,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           retries: options.retries,
           // A stepped run is one test at a time, so there is one prompt at a time.
           workers: options.step === true ? 1 : options.workers,
+          fullyParallel: options.fullyParallel,
           actionTimeout: options.actionTimeout,
           assertionTimeout: options.assertionTimeout,
           maxFailures: options.maxFailures,
@@ -1054,7 +1060,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     .command('doctor')
     .summary('check that e2e run can start here, without starting anything')
     .description(
-      'Check the runtime, load and resolve the config, ask each target\'s engine what it needs on this machine, and name the model each agent resolved to. Starts no app and no worker, only the server of an engine that runs in its own process, and calls no model unless --check-model is given. Ctrl-C stops the checks and reports what ran. A model on an e2e login passes when the login is stored; any other model reads its own credential, which doctor reports as unknown. Exits 0 when no check failed, 2 otherwise, and 130 when interrupted.',
+      'Check the runtime, load and resolve the config, ask each target\'s engine what it needs on this machine, and name the model each agent resolved to. Starts no app and no worker, only the server of an engine that runs in its own process, and calls no model unless --check-model is given. Ctrl-C stops the checks and reports what ran. A model on an e2e login passes when the login is stored; a Vercel AI Gateway or OpenRouter model with no key variable set is a warning; any other model reads its own credential, which doctor reports as unknown. Exits 0 when no check failed, 2 otherwise, and 130 when interrupted.',
     )
     .option('--config <path>', 'config file (default: the nearest e2e.config.ts, .mts, .js, or .mjs)')
     .option('--target <ids>', 'target names, comma-separated or repeated (default: all targets)', parseNames('target'))
@@ -1097,6 +1103,8 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
     });
 
   registerCacheCommand(program);
+
+  registerMergeReportsCommand(program);
 
   program
     .command('report')

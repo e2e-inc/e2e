@@ -30,9 +30,10 @@ export interface TestIdentity {
 
 /**
  * The skip causes a test gives itself: `explicit` from `test.skip` or the
- * `skip` option, `fixme` from `test.fixme`. Every other cause is the runner's.
+ * `skip` option, `fixme` from `test.fixme`, and `todo` from `test.todo`.
+ * Every other cause is the runner's.
  */
-const SELF_SKIP_CAUSES = ['explicit', 'fixme'] as const;
+const SELF_SKIP_CAUSES = ['explicit', 'fixme', 'todo'] as const;
 
 /** One of `SELF_SKIP_CAUSES`. */
 export type SelfSkipCause = (typeof SELF_SKIP_CAUSES)[number];
@@ -48,7 +49,6 @@ export type SkipInfo =
       readonly cause:
         | SelfSkipCause
         | 'platform-unavailable'
-        | 'capability-unavailable'
         | 'setup-failed'
         | 'serial-predecessor-failed'
         | 'hook-failed'
@@ -62,6 +62,12 @@ export type SkipInfo =
 interface SkipDetail {
   readonly reason: string;
   readonly relatedId?: string;
+  /**
+   * Set on an unselected test of a sharded run (`--shard`) that this run's
+   * cut gave another shard, whatever the reason says. This marks the cut of
+   * this invocation. Shards rerunning their own failures may cut different sets.
+   */
+  readonly otherShard?: true;
 }
 
 export type ArtifactProducer = { kind: 'step'; stepId: string } | { kind: 'attempt' };
@@ -99,8 +105,8 @@ export interface ArtifactRecord {
    * unless the file is text the session's ledger was run over, which makes
    * it `complete`. report-1 also admits an
    * `incomplete` artifact without a `path`: a video a hosted service keeps,
-   * recorded by `url`, or one its producer withheld, which this runner never
-   * writes.
+   * recorded by `url`, or an artifact whose file never appeared or could not
+   * be read, which stays `incomplete` without `path`, `size`, or `sha256`.
    */
   redaction: 'complete' | 'incomplete';
   producer: ArtifactProducer;

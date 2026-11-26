@@ -1,14 +1,15 @@
 /**
  * Worker process glue. Owns nothing but the process: it loads the config
  * itself (config modules may hold live engine handles that cannot cross
- * IPC), resolves each unit's pairs by re-importing the file, and hands all
+ * IPC), resolves each unit's pairs against its own import of the file, and hands all
  * actual execution to `TargetWorker`.
  */
 
-import { collectFromRegistration } from '../../collect/collect.ts';
-import { collectModule } from '../../collect/registry.ts';
+import { collectFromRegistration, type CollectedTest } from '../../collect/collect.ts';
+import { collectFile } from '../../collect/collect-file.ts';
+import type { ModuleRegistration } from '../../collect/registry.ts';
 import type { TestTargetPair } from '../../collect/select.ts';
-import { importModule, loadConfigModule } from '../../config/load.ts';
+import { loadConfigModule } from '../../config/load.ts';
 import { assignPorts } from '@e2e-dev/core/lib/config/resolve';
 import { resolveConfig } from '../../config/resolve-run.ts';
 import { setSecretRegistry } from '@e2e-dev/core/lib/secrets';
@@ -20,8 +21,10 @@ import { StreamRedactor } from '@e2e-dev/core/lib/internal/redact';
 import { ConfigLoadHold, writtenChunk } from '../process-output.ts';
 import { processSecrets, registerStaticSecrets, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { SessionStore } from '@e2e-dev/core/lib/run/sessions';
+import { copyServiceValues, type ServiceReply } from '../services.ts';
 import type {
   ChildProcessInbound,
+  ChildProcessOutbound,
   OutputMessage,
   RunUnitMessage,
   WirePair,
@@ -29,7 +32,7 @@ import type {
   WorkerToMain,
 } from './protocol.ts';
 import { inHeldTestToolCall } from './held-test-tool-scope.ts';
-import { TargetWorker, type ResolvedUnitPairs, type TargetWorkerDeps } from './session.ts';
+import { TargetWorker, type ResolveUnitPairs, type TargetWorkerDeps } from './session.ts';
 import { isAbandonedRejection } from '@e2e-dev/core/lib/internal/abandoned';
 import { claimRunCodeStray } from '../../session-tools/code-strays.ts';
 
@@ -54,7 +57,7 @@ const FLUSH_GRACE_MS = 2_000;
  * `attempt-deadline` sent right before one that blocks the loop, would never
  * leave.
  */
-function send(message: WorkerToMain): Promise<void> {
+function send(message: ChildProcessOutbound): Promise<void> {
   const taken = new Promise<void>((resolve) => {
     try {
       if (process.send === undefined || !process.connected) resolve();
@@ -145,6 +148,10 @@ function captureOutput(pairInFlight: () => OutputMessage['pair']): () => void {
   };
 }
 
+/** Pending service calls waiting for a `service-reply`, keyed by request id. */
+const serviceCalls = new Map<string, (reply: ServiceReply) => void>();
+let serviceCallCount = 0;
+
 function fatal(cause: unknown): void {
   send({ type: 'fatal', error: serializeError(classifyError(cause)) });
   exitAfterFlush(1);
@@ -191,15 +198,19 @@ async function bootstrap(
   );
 
   let collectCounter = 0;
-  const resolvePairs = async (unit: RunUnitMessage): Promise<ResolvedUnitPairs> => {
+  const importUnit = (unit: RunUnitMessage): Promise<ModuleRegistration> => {
     collectCounter += 1;
-    const registration = await collectModule(
-      () => importModule(unit.absolutePath, `worker-collect-${collectCounter}`),
-      unit.absolutePath,
-      staticSecretLedger(config.allSecrets).redact,
-    );
-    const collected = collectFromRegistration(config.projectRoot, unit.absolutePath, registration);
-    const byId = new Map(collected.tests.map((test) => [test.id, test]));
+    return collectFile(unit.absolutePath, `worker-collect-${collectCounter}`, staticSecretLedger(config.allSecrets).redact);
+  };
+  // A registration serves every unit of its file this worker runs, so its tests are collected one time.
+  const testsById = new WeakMap<ModuleRegistration, ReadonlyMap<string, CollectedTest>>();
+  const resolvePairs: ResolveUnitPairs = async (unit, reusable) => {
+    const registration = reusable ?? (await importUnit(unit));
+    let byId = testsById.get(registration);
+    if (byId === undefined) {
+      const collected = collectFromRegistration(config.projectRoot, unit.absolutePath, registration);
+      testsById.set(registration, (byId = new Map(collected.tests.map((test) => [test.id, test]))));
+    }
     const pairs: TestTargetPair[] = [];
     const missing: WirePair[] = [];
     for (const wire of unit.pairs) {
@@ -231,6 +242,16 @@ async function bootstrap(
     resolvePairs,
     debug,
     holdSteps: message.holdSteps,
+    services: copyServiceValues(message.services, (call, args) => {
+      serviceCallCount += 1;
+
+      const requestId = String(serviceCallCount);
+      const reply = new Promise<ServiceReply>((resolve) => serviceCalls.set(requestId, resolve));
+
+      void send({ type: 'service-call', requestId, call, args });
+
+      return reply;
+    }),
   };
 }
 
@@ -309,6 +330,14 @@ function main(): void {
       worker.start();
       return;
     }
+
+    if (message.type === 'service-reply') {
+      serviceCalls.get(message.requestId)?.(message.reply);
+      serviceCalls.delete(message.requestId);
+
+      return;
+    }
+
     worker?.handle(message);
   });
 }

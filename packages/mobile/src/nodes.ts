@@ -117,6 +117,33 @@ export function mayTakeText(node: SemanticNode): boolean {
   return children.length > 0 && children.every((child) => child.role === 'text' && child.children === undefined);
 }
 
+/** Roles `toBeEmpty` reads by value, as Playwright reads an input or textarea. */
+const FIELD_ROLES: ReadonlySet<string> = new Set(['textbox', 'searchbox']);
+
+/**
+ * The node a locate hands the harness, with the `empty` state `toBeEmpty`
+ * reads: empty when it holds no content (`holdsContent`). A secure field gets
+ * no state, as it withholds its value. Observations leave the state out: it
+ * is no use to the model.
+ */
+export function withEmptyState(node: SemanticNode): SemanticNode {
+  if (node.states?.secure === true) return node;
+  return { ...node, states: { ...node.states, empty: !holdsContent(node) } };
+}
+
+/**
+ * Whether the node holds content: a text field its value, as it is, so its
+ * label or hint never counts; a secure field nothing, so a container does not
+ * tell whether one is filled; any other node its own text or value, or any
+ * node below it that holds content. Fields go by role, not `mayTakeText`: an
+ * iOS `other` holding only text is as often a container as a drawn field.
+ */
+function holdsContent(node: SemanticNode): boolean {
+  if (node.states?.secure === true) return false;
+  if (node.role !== undefined && FIELD_ROLES.has(node.role)) return (node.value ?? '') !== '';
+  return (node.text ?? '').trim() !== '' || (node.value ?? '').trim() !== '' || (node.children ?? []).some(holdsContent);
+}
+
 const CHECKABLE_ROLES = new Set(['switch', 'checkbox']);
 const CHECKED_VALUES = new Set(['1', 'on', 'true', 'checked', 'selected']);
 const UNCHECKED_VALUES = new Set(['0', 'off', 'false', 'unchecked']);
@@ -343,9 +370,14 @@ function isAndroidClass(type: string | undefined): boolean {
   return type !== undefined && type.includes('.');
 }
 
+/** An element type without the `XCUIElementType` prefix a WebDriver-backed iOS snapshot may carry. */
+function elementType(type: string): string {
+  return type.replace(/^XCUIElementType(?=[A-Z])/, '');
+}
+
 /** One element-type spelling for `NavigationBar`, `XCUIElementTypeNavigationBar`, `navigation-bar`, and `android.widget.NavigationBar` alike. */
 function normalizeKind(type: string): string {
-  const simple = type.slice(type.lastIndexOf('.') + 1).replace(/^XCUIElementType(?=[A-Z])/, '');
+  const simple = elementType(type.slice(type.lastIndexOf('.') + 1));
   return simple
     .replaceAll(/([a-z0-9])([A-Z])/g, '$1-$2')
     .replaceAll(/[\s_]+/g, '-')
@@ -423,6 +455,41 @@ function foldedPlaceholder(
 /** The string itself, or undefined for an absent or empty one. */
 function nonEmpty(value: string | undefined): string | undefined {
   return value === undefined || value === '' ? undefined : value;
+}
+
+/**
+ * What `getAttribute` reads on a device node, under the names an Appium
+ * suite asks for:
+ * - `label`: the accessibility label, as Detox defines it. On iOS the label;
+ *   on Android the content description, else the node's text. An Android
+ *   field showing only its hint has no `text` key and gets no `label`. An
+ *   empty described field has `text: ""` and keeps `label` and `content-desc`.
+ * - `resource-id`: the test id (Android resource id, iOS accessibility identifier).
+ * - `class`: the Android class, or the iOS element type without its
+ *   `XCUIElementType` prefix. Also the tag name.
+ * - `content-desc`: Android only.
+ * - `placeholder`.
+ *
+ * Undefined when the node carries none of them.
+ */
+function nodeAttributes(
+  source: RawNode,
+  android: boolean,
+  projected: { readonly identifier: string | undefined; readonly placeholder: string | undefined },
+): Record<string, string> | undefined {
+  const description = nonEmpty(source.contentDescription);
+  const descriptionOnly = source.text === '' ? nonEmpty(source.label) : undefined;
+  const contentDescription = android ? (description ?? descriptionOnly) : undefined;
+  const ownText = source.hintShowing === true ? undefined : nonEmpty(source.label);
+  const entries: [string, string | undefined][] = [
+    ['label', android ? (contentDescription ?? ownText) : nonEmpty(source.label)],
+    ['resource-id', projected.identifier],
+    ['class', nonEmpty(source.type === undefined ? undefined : elementType(source.type))],
+    ['content-desc', contentDescription],
+    ['placeholder', projected.placeholder],
+  ];
+  const present = entries.filter((entry): entry is [string, string] => entry[1] !== undefined);
+  return present.length === 0 ? undefined : Object.fromEntries(present);
 }
 
 /**
@@ -611,6 +678,7 @@ export function projectSnapshot(
     const label = folded === undefined ? nonEmpty(source.label) : folded.label;
     const name = nonEmpty(source.contentDescription) ?? label;
     const placeholder = folded?.placeholder ?? nonEmpty(source.placeholder);
+    const attributes = nodeAttributes(source, android, { identifier, placeholder });
     const projected: { node: SemanticNode | undefined } = { node: undefined };
     const entry: ProjectedNode = {
       id,
@@ -656,7 +724,7 @@ export function projectSnapshot(
         : { value }),
       ...(secure ? { inputPurpose: 'password' as const } : {}),
       ...(Object.keys(states).length === 0 ? {} : { states }),
-      ...(placeholder === undefined ? {} : { attributes: { placeholder } }),
+      ...(attributes === undefined ? {} : { attributes }),
       // The accessibility identifier (iOS) or resource id (Android) is the node's test id.
       ...(identifier === undefined ? {} : { testId: identifier }),
       ...(source.rect === undefined ? {} : { rect: { ...source.rect } }),

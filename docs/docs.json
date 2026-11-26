@@ -141,6 +141,7 @@
               "community-packages",
               "tools",
               "fixtures",
+              "services",
               "executors",
               "filters"
             ]
@@ -191,6 +192,7 @@
               "reference/expect",
               "reference/screen",
               "reference/app",
+              "reference/request",
               "reference/agent",
               "reference/core"
             ]

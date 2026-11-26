@@ -5,7 +5,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Ajv2020 } from 'ajv/dist/2020.js';
@@ -30,6 +30,7 @@ afterEach(() => {
 function config(agents = ''): string {
   return `import { appendFileSync } from 'node:fs';
 import { APICallError } from 'ai';
+import { openrouter } from '@openrouter/ai-sdk-provider';
 import type { E2EConfig } from 'e2e';
 import { defineEngine } from 'e2e/engine';
 import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
@@ -59,6 +60,8 @@ const counted = createScriptedInstance('scripted', 'counted', async () => {
   appendFileSync('calls', 'call\\n');
   return scriptedResult([{ type: 'text', text: 'OK' }], 'stop');
 });
+const gated = createScriptedInstance('gateway', 'openai/answers', async () => scriptedResult([{ type: 'text', text: 'OK' }], 'stop'));
+const routed = openrouter('openai/answers');
 const refusing = createScriptedInstance('scripted', 'refuses', async () => scriptedResult([], 'content-filter'));
 const erroring = createScriptedInstance('scripted', 'errors', async () => scriptedResult([], 'error'));
 const failing = createScriptedInstance('scripted', 'fails', async () => {
@@ -82,7 +85,7 @@ export default {
 }
 
 /** Runs `e2e doctor` with `args` in a project of `files`. */
-function doctor(files: Record<string, string>, args: readonly string[], env: Record<string, string> = {}) {
+function doctor(files: Record<string, string>, args: readonly string[], env: Record<string, string | undefined> = {}) {
   const project = createProject(files);
   projects.push(project);
   const result = spawnSync(process.execPath, [CLI, 'doctor', ...args], {
@@ -96,7 +99,7 @@ function doctor(files: Record<string, string>, args: readonly string[], env: Rec
 }
 
 /** Runs `e2e doctor --json` and parses the report, which must match doctor-1. */
-function doctorJson(files: Record<string, string>, args: readonly string[] = [], env: Record<string, string> = {}) {
+function doctorJson(files: Record<string, string>, args: readonly string[] = [], env: Record<string, string | undefined> = {}) {
   const { exitCode, stdout, stderr } = doctor(files, ['--json', ...args], env);
   const report = JSON.parse(stdout) as DoctorReport;
   expect(validate(report), JSON.stringify(validate.errors)).toBe(true);
@@ -142,6 +145,46 @@ describe('e2e doctor', () => {
     const leaked = doctorJson({ 'e2e.config.ts': config() }, ['--target', 'checked'], { TOOLCHAIN: 'leak' });
     expect(leaked.report.checks.find((check) => check.id === 'toolchain')?.message).toBe('token <secret:stripe-key> rejected');
     expect(doctor({ 'e2e.config.ts': config() }, [], { TOOLCHAIN: 'leak' }).stdout).not.toContain('sk_live_generic_4242');
+  });
+
+  it('starts no service and calls no env function', () => {
+    const { exitCode } = doctorJson({
+      'e2e.config.ts': `import { appendFileSync } from 'node:fs';
+import { defineConfig, defineService } from 'e2e';
+import { createFakeEngine } from '../../helpers/fake-engine.ts';
+
+const inbox = defineService({
+  async *start() {
+    appendFileSync('events.log', 'start inbox\\n');
+    yield {};
+  },
+});
+
+export default defineConfig({
+  services: { inbox },
+  targets: [
+    {
+      name: 'plain',
+      platform: 'fake',
+      engine: createFakeEngine({}).engine,
+      app: {
+        url: 'http://127.0.0.1:4000',
+        command: {
+          executable: 'node',
+          env: () => {
+            appendFileSync('events.log', 'env\\n');
+            return {};
+          },
+        },
+      },
+    },
+  ],
+});
+`,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(existsSync(path.join(projects.at(-1)?.dir ?? '', 'events.log'))).toBe(false);
   });
 
   it('stops at a config that does not load, with its error code', () => {
@@ -195,6 +238,54 @@ describe('e2e doctor', () => {
       { agent: 'both', status: 'fail', code: 'MODEL_PROVIDER_FAILED', message: expect.stringMatching(/^model: .*provider is down.*; judge: .*error finish/) },
       { agent: 'brought', status: 'fail', code: 'MODEL_PROVIDER_FAILED', message: expect.stringContaining('provider is down') },
     ]);
+  });
+
+  it('warns when a gateway model has none of the variables it reads, without calling it, and still exits 0', () => {
+    const files = { 'e2e.config.ts': config('agents: { default: { model: gated }, split: { model: answering, judge: gated } },') };
+    const keyless = doctorJson(files, [], { AI_GATEWAY_API_KEY: '', VERCEL_OIDC_TOKEN: '' });
+    expect(keyless.exitCode).toBe(0);
+    expect(keyless.report.ok).toBe(true);
+    const warning = 'AI_GATEWAY_API_KEY is not set: agent steps that call the model fail with MODEL_PROVIDER_FAILED, unless the model signs in another way; --check-model calls it';
+    expect(keyless.report.checks.filter((check) => check.id === 'model').map(({ agent, status, message }) => ({ agent, status, message }))).toEqual([
+      { agent: 'default', status: 'warn', message: warning },
+      { agent: 'split', status: 'warn', message: warning },
+    ]);
+    const list = doctor(files, [], { AI_GATEWAY_API_KEY: '', VERCEL_OIDC_TOKEN: '' });
+    expect(list.stdout).toContain(`! model      [default] gateway/openai/answers · ${warning}`);
+    expect(list.stdout.trimEnd().split('\n').at(-1)).toBe('e2e run can start here, with 2 warnings');
+    // The gateway sends any non-empty key, a blank one included, and falls back to the token only for an empty one.
+    for (const env of [{ AI_GATEWAY_API_KEY: 'vck_some_key', VERCEL_OIDC_TOKEN: '' }, { AI_GATEWAY_API_KEY: ' ', VERCEL_OIDC_TOKEN: '' }, { AI_GATEWAY_API_KEY: '', VERCEL_OIDC_TOKEN: 'a.linked.project' }]) {
+      const keyed = doctorJson(files, [], env);
+      expect(keyed.report.checks.filter((check) => check.id === 'model').map(({ status, message }) => ({ status, message }))).toEqual([
+        { status: 'unknown', message: 'the model reads its own credential; --check-model calls it' },
+        { status: 'unknown', message: 'the model reads its own credential; --check-model calls it' },
+      ]);
+      expect(JSON.stringify(keyed.report)).not.toMatch(/vck_some_key|a\.linked\.project/);
+      expect(doctor(files, [], env).stdout.trimEnd().split('\n').at(-1)).toBe('e2e run can start here');
+    }
+  });
+
+  it('warns for an OpenRouter model only when its variable is undefined, which is when the call has no key to send', () => {
+    const files = { 'e2e.config.ts': config('agents: { default: { model: routed } },') };
+    const model = (env: Record<string, string | undefined>, args: readonly string[] = []) => {
+      const { exitCode, report } = doctorJson(files, args, env);
+      const { status, code, message } = report.checks.find((check) => check.id === 'model')!;
+      return { exitCode, status, code, message };
+    };
+    expect(model({ OPENROUTER_API_KEY: undefined })).toEqual({
+      exitCode: 0,
+      status: 'warn',
+      code: undefined,
+      message: 'OPENROUTER_API_KEY is not set: agent steps that call the model fail with MODEL_PROVIDER_FAILED, unless the model signs in another way; --check-model calls it',
+    });
+    expect(model({ OPENROUTER_API_KEY: undefined }, ['--check-model'])).toEqual({
+      exitCode: 2,
+      status: 'fail',
+      code: 'MODEL_PROVIDER_FAILED',
+      message: 'the model has no credential: OPENROUTER_API_KEY is not set, so no request was sent. Set OPENROUTER_API_KEY, or pass the key where the model is constructed',
+    });
+    // OpenRouter sends an empty variable as the key, so the provider answers and doctor cannot tell how.
+    expect(model({ OPENROUTER_API_KEY: '' })).toMatchObject({ exitCode: 0, status: 'unknown', message: 'the model reads its own credential; --check-model calls it' });
   });
 
   it('makes one call for agents with equal provider options, and counts a refusal as an answer', () => {

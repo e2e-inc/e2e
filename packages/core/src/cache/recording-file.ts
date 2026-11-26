@@ -335,6 +335,8 @@ function renderTarget(target: TraceTargetDescriptor, flow: (value: object) => Ya
   }
   if (target.states !== undefined) fields['states'] = [...target.states];
   if (target.position !== undefined) fields['position'] = { index: target.position.index, of: target.position.of };
+  if (target.twinsWithoutTestId === true) fields['twinsWithoutTestId'] = true;
+  if (target.countedOnEarlierLook === true) fields['countedOnEarlierLook'] = true;
   return flow(fields);
 }
 
@@ -478,7 +480,7 @@ function only(raw: Record<string, unknown>, allowed: readonly string[], where: s
   }
 }
 
-const TARGET_KEYS: readonly string[] = [...DESCRIPTOR_FIELDS, 'states', 'position'];
+const TARGET_KEYS: readonly string[] = [...DESCRIPTOR_FIELDS, 'states', 'position', 'twinsWithoutTestId', 'countedOnEarlierLook'];
 
 /** A target as the YAML spells it, as `readTraceEntry` expects it; its fields are validated there. */
 function readTarget(value: unknown, where: string): unknown {
