@@ -480,7 +480,17 @@ impl Walk {
         if role == "scrollbar" {
             // A scroll bar's arrows and page areas are its parts, not controls of their own.
         } else if level >= self.max_depth {
-            let count = element.count("AXChildren").unwrap_or(0);
+            let count = match element.count("AXChildren") {
+                Ok(count) => count,
+                Err(error) => {
+                    // A stalled count could hide children past the depth limit: the read has a hole.
+                    if missed(error) {
+                        self.lose();
+                        node.subtree_truncated = true;
+                    }
+                    0
+                }
+            };
             if count > 0 {
                 node.children_count = Some(count);
             }
