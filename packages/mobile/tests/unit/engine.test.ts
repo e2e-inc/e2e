@@ -220,7 +220,7 @@ describe('manifest', () => {
     expect(() => leased({ bundleId: 'com.example.app', locale: 'fr-FR' }, info)).toThrowError(
       expect.objectContaining({
         code: 'INVALID_CONFIG',
-        message: 'target "phone" app.locale is set, and device provider "cloud" leases this target\'s Android devices, which this machine\'s adb does not reach: set the language and locale with the provider\'s own options instead',
+        message: 'target "phone" app.locale is set, and device provider "cloud" leases this target\'s Android devices, which this machine\'s adb does not reach: set the device\'s language with the provider\'s own options where it has them (as testmu() and browserstack() do), or leave app.locale out on this target',
       }),
     );
     expect(() => android({ bundleId: 'Settings', locale: 'fr-FR' }, info)).toThrowError(
@@ -236,7 +236,7 @@ describe('manifest', () => {
     expect(() => dropping.engine.validateApp!({ bundleId: 'com.example.app', locale: 'fr-FR' }, info)).toThrowError(
       expect.objectContaining({
         code: 'INVALID_CONFIG',
-        message: 'target "phone" app.locale is set, and device provider "cloud" drops the launch arguments that carry the locale on iOS: set the language and locale with the provider\'s own options instead',
+        message: 'target "phone" app.locale is set, and device provider "cloud" drops the launch arguments that carry the locale on iOS: set the device\'s language with the provider\'s own options where it has them (as testmu() and browserstack() do), or leave app.locale out on this target',
       }),
     );
     expect(() => dropping.engine.validateApp!({ bundleId: 'com.example.app', launchArguments: ['-e2e'] }, info)).not.toThrow();

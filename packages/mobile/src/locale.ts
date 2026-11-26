@@ -101,7 +101,7 @@ export function assertLocaleReachable(label: string, options: Pick<MobileOptions
         ? `drops the launch arguments that carry the locale on iOS`
         : undefined;
   if (why === undefined) return;
-  const text = `${label} is set, and device provider "${provider.name}" ${why}: set the language and locale with the provider's own options instead`;
+  const text = `${label} is set, and device provider "${provider.name}" ${why}: set the device's language with the provider's own options where it has them (as testmu() and browserstack() do), or leave app.locale out on this target`;
   if (code === 'INVALID_CONFIG') throw new ConfigurationError(code, text);
   throw unsupported(text);
 }
