@@ -226,6 +226,25 @@ export interface Device {
    * shake is sent, so assert on what the app shows next.
    */
   shake(): Promise<void>;
+  /**
+   * Locks the screen and resolves once the device reports it locked: the
+   * sleep key on an Android phone or tablet, the lock button on an iPhone or
+   * iPad simulator. A screen that is already locked stays locked.
+   * `UNSUPPORTED_CAPABILITY` on a device agent-device cannot lock (a physical
+   * iPhone or iPad, a TV, a device a provider drives through a backend that
+   * has no lock command), and on an Android device whose screen lock is set
+   * to None, which has no lock screen to show.
+   */
+  lock(): Promise<void>;
+  /**
+   * Unlocks the screen and resolves once the device reports it unlocked; the
+   * app that was in front comes back. Android wakes the screen and dismisses
+   * the keyguard, an iOS simulator swipes up from the bottom edge. A screen
+   * that is not locked stays as it is. It never enters a PIN, pattern,
+   * password, or passcode: a lock that asks for one is
+   * `UNSUPPORTED_CAPABILITY`, and so is a device agent-device cannot lock.
+   */
+  unlock(): Promise<void>;
   /** Accepts or dismisses the visible system alert. */
   alert(action: 'accept' | 'dismiss'): Promise<void>;
   /**
@@ -442,6 +461,12 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async shake() {
       await surface.screenCommand('device.shake', (client) => client.command.shake(surface.selection()), context.signal);
     },
+    async lock() {
+      await surface.screenCommand('device.lock', (client) => client.command.lockScreen({ ...surface.selection(), action: 'lock' }), context.signal);
+    },
+    async unlock() {
+      await surface.screenCommand('device.unlock', (client) => client.command.lockScreen({ ...surface.selection(), action: 'unlock' }), context.signal);
+    },
     async alert(action) {
       await surface.screenCommand('device.alert', (client) => client.command.alert({ ...surface.selection(), action }), context.signal);
     },
@@ -490,6 +515,8 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     // A JavaScript caller can pass a key code; the label must still be text, so the step records the refusal.
     pressButton: { ...action, label: (button) => String(button) },
     shake: action,
+    lock: action,
+    unlock: action,
     alert: { ...action, label: (value) => value },
     dismissKeyboard: action,
     isKeyboardShown: action,
