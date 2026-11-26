@@ -1076,15 +1076,10 @@ is on again: a read or an action times out. Two quick `power` presses can
 trigger the phone's double-press shortcut, which opens the camera on a stock
 emulator, instead of waking the app.
 
-| Button | Android emulator or phone | Android TV | iOS simulator | Physical iPhone or iPad |
-| --- | --- | --- | --- | --- |
-| `volume-up`, `volume-down` | Yes | No | No | Yes |
-| `power` | Yes | No | No | No |
-
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | `button` is not one of the three names. Nothing is sent to the device. |
-| `UNSUPPORTED_CAPABILITY` | The device has no way to press that button, as the table shows. |
+| `UNSUPPORTED_CAPABILITY` | The device cannot press that button: an iOS simulator, an Android TV, `power` on an iPhone or iPad, or a hosted device whose WebDriver backend does not expose the button. |
 
 #### `shake`
 

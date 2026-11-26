@@ -197,7 +197,7 @@ declares `platforms: ['ios', 'android']` on those tests.
 | `driver.background(seconds)` | `device.home()`, then `device.openApp(id)` |
 | `driver.url('myapp://x')`, `mobile: deepLink` | `device.openLink('myapp://x')` |
 | `driver.back()`, `driver.hideKeyboard()`, `pressKeyCode` for Home | `app.back()`, `device.dismissKeyboard()`, `device.home()` |
-| `mobile: pressButton` with `volumeUp` or `volumeDown`, `pressKeyCode` for power or volume | [`device.pressButton('volume-up')`](/reference/mobile#pressbutton), `'volume-down'`, `'power'`: all three on an Android phone or emulator, volume on a physical iPhone or iPad. An iOS simulator and an Android TV are `UNSUPPORTED_CAPABILITY` |
+| `mobile: pressButton` with `volumeUp` or `volumeDown`, `pressKeyCode` for power or volume | [`device.pressButton('volume-up')`](/reference/mobile#pressbutton), `'volume-down'`, `'power'`; not on an iOS simulator |
 | `driver.isKeyboardShown()` | `device.isKeyboardShown()`. It reads the screen as it is now: after an action that opens or closes the keyboard, poll it with `expect.poll` |
 | `driver.getPageSource()` | `screen.tree()`, or `screen.debug()` to print it |
 | `driver.getWindowSize()` | [`device.viewport()`](/reference/mobile#viewport), `{ width, height }` in CSS pixels |
