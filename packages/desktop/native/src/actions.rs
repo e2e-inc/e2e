@@ -144,34 +144,66 @@ fn until(deadline: Instant, mut check: impl FnMut() -> bool) -> bool {
     }
 }
 
+/// How long an action that answered with an error is watched for its element going away, the sign that it landed.
+const GONE_WAIT: Duration = Duration::from_millis(300);
+
 /// Performs an AX action. Once the action is sent, an error answer cannot show that nothing happened, so the element is
-/// read again to tell:
-/// - gone now: the action closed what held it (an alert's button, a panel's), so it landed;
-/// - a timeout while the app still answers: the action opened a menu or a modal and runs inside the app's handler;
-/// - a timeout the app does not answer after: it may never have taken the action, delivered but unverified;
-/// - the action refused outright (no such action, no permission, a bad argument), or the element already gone when
-///   the action was sent: nothing reached the app;
-/// - any other error: it may have landed, delivered but unverified.
+/// read again to tell (`answered`).
 fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
     go(what)?;
     element.set_timeout(BLOCKING_ACTION_SECONDS);
     let result = element.perform(action);
     let outcome = match result {
         Ok(()) => Ok(()),
-        Err(error @ (ax::AX_INVALID_ELEMENT | ax::AX_ACTION_UNSUPPORTED | ax::AX_NOT_IMPLEMENTED | ax::AX_API_DISABLED | ax::AX_ILLEGAL_ARGUMENT)) => {
-            Err(refused(error, what))
+        Err(error) => {
+            let then = match error {
+                _ if refuses(error) || error == ax::AX_INVALID_ELEMENT => None,
+                // The app answers again or not: one read tells, and another would wait out the same stall.
+                ax::AX_CANNOT_COMPLETE => element.attribute("AXRole").err(),
+                // A press that closes what holds its element (a dismissed alert) can leave it readable a moment more.
+                _ => {
+                    let end = Instant::now() + GONE_WAIT;
+                    loop {
+                        let then = element.attribute("AXRole").err();
+                        if then == Some(ax::AX_INVALID_ELEMENT) || Instant::now() >= end {
+                            break then;
+                        }
+                        sleep(POLL);
+                    }
+                }
+            };
+            answered(error, then, what)
         }
-        Err(error) => match (error, element.attribute("AXRole")) {
-            (_, Err(ax::AX_INVALID_ELEMENT)) => Ok(()),
-            (ax::AX_CANNOT_COMPLETE, Ok(_)) => Ok(()),
-            (ax::AX_CANNOT_COMPLETE, Err(_)) => {
-                Err(Failure::unconfirmed(codes::APP_UNRESPONSIVE, format!("{what}: the app did not answer the action, or anything after it")))
-            }
-            (error, _) => Err(refused(error, what).delivered()),
-        },
     };
     element.set_timeout(0.0);
     outcome
+}
+
+/// Errors with which the app refuses an action before taking it: no such action or attribute, no permission, a bad
+/// argument.
+fn refuses(error: AXError) -> bool {
+    matches!(error, ax::AX_ACTION_UNSUPPORTED | ax::AX_ATTRIBUTE_UNSUPPORTED | ax::AX_NOT_IMPLEMENTED | ax::AX_API_DISABLED | ax::AX_ILLEGAL_ARGUMENT)
+}
+
+/// What an action's error answer means, from the error and a read of the element after it (`then`, its error, `None`
+/// when the element still answers):
+/// - refused outright: nothing reached the app;
+/// - the element gone as the action was sent: the action may have closed what held it, so it may have landed;
+/// - gone after: the action closed what held it (an alert's button, a panel's), so it landed;
+/// - a timeout while the app still answers: the action opened a menu or a modal and runs inside the app's handler;
+/// - a timeout the app does not answer after: it may never have taken the action, delivered but unverified;
+/// - any other error: it may have landed, delivered but unverified. The caller reads the effect where it can.
+fn answered(error: AXError, then: Option<AXError>, what: &str) -> Outcome<()> {
+    match (error, then) {
+        _ if refuses(error) => Err(refused(error, what)),
+        (ax::AX_INVALID_ELEMENT, _) => Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("{what}: the element went away as the action was sent"))),
+        (_, Some(ax::AX_INVALID_ELEMENT)) => Ok(()),
+        (ax::AX_CANNOT_COMPLETE, None) => Ok(()),
+        (ax::AX_CANNOT_COMPLETE, Some(_)) => {
+            Err(Failure::unconfirmed(codes::APP_UNRESPONSIVE, format!("{what}: the app did not answer the action, or anything after it")))
+        }
+        (error, _) => Err(refused(error, what).delivered()),
+    }
 }
 
 fn raw_role(element: &Element) -> (String, &'static str) {
@@ -867,6 +899,24 @@ mod tests {
         assert_eq!(open.details.and_then(|details| details.get("menu").cloned()), Some(serde_json::json!("open")));
         let missing = super::unclosed(Failure::refused(codes::ELEMENT_NOT_FOUND, "no option"), false);
         assert_eq!((missing.code, missing.delivery), (codes::ELEMENT_NOT_FOUND, Delivery::Unknown));
+    }
+
+    #[test]
+    fn reads_an_action_answer_by_whether_the_element_stayed() {
+        use crate::ax::{AX_ACTION_UNSUPPORTED, AX_ATTRIBUTE_UNSUPPORTED, AX_CANNOT_COMPLETE, AX_FAILURE, AX_INVALID_ELEMENT};
+        use crate::failure::{Delivery, codes};
+        let answer = |error, then| super::answered(error, then, "press");
+        for refused in [AX_ACTION_UNSUPPORTED, AX_ATTRIBUTE_UNSUPPORTED] {
+            assert_eq!(answer(refused, None).expect_err("refused").delivery, Delivery::NotDelivered);
+        }
+        assert!(answer(AX_FAILURE, Some(AX_INVALID_ELEMENT)).is_ok(), "gone after the press: it closed its alert");
+        assert!(answer(AX_CANNOT_COMPLETE, None).is_ok(), "a modal runs in the press's handler");
+        let stalled = answer(AX_CANNOT_COMPLETE, Some(AX_CANNOT_COMPLETE)).expect_err("no answer after");
+        assert_eq!((stalled.code, stalled.delivery), (codes::APP_UNRESPONSIVE, Delivery::Unknown));
+        let failed = answer(AX_FAILURE, None).expect_err("still there");
+        assert_eq!((failed.code, failed.delivery), (codes::ACTION_FAILED, Delivery::Unknown));
+        let gone = answer(AX_INVALID_ELEMENT, None).expect_err("went away as it was sent");
+        assert_eq!(gone.delivery, Delivery::Unknown);
     }
 
     #[test]
