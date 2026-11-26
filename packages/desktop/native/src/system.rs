@@ -85,7 +85,11 @@ pub fn screenshot(window: u32, path: &str, deadline: Instant) -> Outcome<f64> {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break,
             Ok(Some(_)) => {
-                return Err(Failure::refused(codes::PERM_DENIED, "screencapture could not capture the window; it needs Screen Recording permission"));
+                let mut stderr = String::new();
+                if let Some(mut pipe) = child.stderr.take() {
+                    let _ = std::io::Read::read_to_string(&mut pipe, &mut stderr);
+                }
+                return Err(capture_failed(window, stderr.trim()));
             }
             Ok(None) if Instant::now() >= deadline => {
                 let _ = child.kill();
@@ -97,7 +101,19 @@ pub fn screenshot(window: u32, path: &str, deadline: Instant) -> Outcome<f64> {
         }
     }
     if !Path::new(path).exists() {
-        return Err(Failure::refused(codes::PERM_DENIED, "screencapture wrote no image; it needs Screen Recording permission"));
+        return Err(capture_failed(window, "it wrote no image"));
     }
     Ok(scale_of(bounds))
+}
+
+/// Why a capture failed: no Screen Recording permission, a window that closed meanwhile, or what `screencapture` said.
+fn capture_failed(window: u32, said: &str) -> Failure {
+    if !screen_recording() {
+        return Failure::refused(codes::PERM_DENIED, "screencapture could not capture the window; it needs Screen Recording permission");
+    }
+    if windows::server_bounds(window).is_none() {
+        return Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {window} closed before it could be captured"));
+    }
+    let detail = if said.is_empty() { "it gave no reason".to_owned() } else { said.to_owned() };
+    Failure::refused(codes::INTERNAL, format!("screencapture could not capture window {window}: {detail}"))
 }
