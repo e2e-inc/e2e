@@ -92,14 +92,13 @@ export function mediaRefusal(
   platform: MobilePlatform,
   kind: DeviceKind | undefined,
   binding: SlotBinding | undefined,
-  envs: readonly Readonly<Record<string, string | undefined>>[],
+  env: Readonly<Record<string, string | undefined>>,
 ): string | undefined {
   const tool = platform === 'ios' ? 'xcrun simctl addmedia' : 'adb push';
   if (binding?.daemon !== undefined || binding?.leaseId !== undefined || binding?.client !== undefined) {
     return `device.addMedia runs ${tool} on this machine, and this device is driven through a device provider or another agent-device daemon; add the media through the provider instead`;
   }
-  // The worker's environment and the process's own: agent-device's client can read either.
-  if (envs.some((env) => (env['AGENT_DEVICE_DAEMON_BASE_URL'] ?? '') !== '')) {
+  if ((env['AGENT_DEVICE_DAEMON_BASE_URL'] ?? '') !== '') {
     return `device.addMedia runs ${tool} on this machine, and AGENT_DEVICE_DAEMON_BASE_URL points agent-device at a remote daemon, whose devices this machine cannot reach`;
   }
   if (platform === 'ios' && kind === 'device') {
@@ -108,16 +107,29 @@ export function mediaRefusal(
   return undefined;
 }
 
+/** The variable agent-device's daemon reads for the CoreSimulator device set it keeps its simulators in. */
+const SIMULATOR_SET_VARIABLE = 'AGENT_DEVICE_IOS_SIMULATOR_DEVICE_SET';
+
 /**
  * The commands that add `files` to the library of the device with id
  * `deviceId`. iOS takes them in one `simctl addmedia`, which adds a copy on
- * every call. Android pushes each file to `ANDROID_MEDIA_DIR` under its own
+ * every call, in the device set `AGENT_DEVICE_IOS_SIMULATOR_DEVICE_SET` names,
+ * as agent-device's own simctl calls do. Android pushes each file to `ANDROID_MEDIA_DIR` under its own
  * name, replacing a file of that name, then asks the media scanner for it:
  * Android 11 and later index a pushed file on their own, and earlier versions
  * index only what is scanned.
  */
-export function mediaCommands(platform: MobilePlatform, deviceId: string, files: readonly string[], adb: string): readonly HostCommand[] {
-  if (platform === 'ios') return [{ file: 'xcrun', args: ['simctl', 'addmedia', deviceId, ...files] }];
+export function mediaCommands(
+  platform: MobilePlatform,
+  deviceId: string,
+  files: readonly string[],
+  adb: string,
+  env: Readonly<Record<string, string | undefined>>,
+): readonly HostCommand[] {
+  if (platform === 'ios') {
+    const set = env[SIMULATOR_SET_VARIABLE]?.trim();
+    return [{ file: 'xcrun', args: ['simctl', ...(set ? ['--set', set] : []), 'addmedia', deviceId, ...files] }];
+  }
   return files.flatMap((file) => {
     const name = path.basename(file);
     const remote = `${ANDROID_MEDIA_DIR}/${name}`;

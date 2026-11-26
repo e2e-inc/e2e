@@ -7,7 +7,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { obj, type EngineFixtureContext, type FixtureOperations } from '@e2e-dev/core/engine';
 import type { Device } from '../../src/device.ts';
 import { buildEngine } from '../../src/engine.ts';
@@ -23,9 +23,12 @@ const ADB_NAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
 
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), 'e2e-add-media-'));
+  // addMedia reads this process's environment, as agent-device does; a developer's shell must not leak into it.
+  for (const name of ['AGENT_DEVICE_DAEMON_BASE_URL', 'AGENT_DEVICE_IOS_SIMULATOR_DEVICE_SET', 'ANDROID_SDK_ROOT', 'ANDROID_HOME']) vi.stubEnv(name, '');
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -40,7 +43,6 @@ interface Setup {
 async function setup(
   options: Partial<MobileOptions> & { kind: 'simulator' | 'emulator' | 'device'; id: string },
   runner: HostRunner = async () => undefined,
-  env: Readonly<Record<string, string | undefined>> = {},
   signal = new AbortController().signal,
   actionTimeout = 5_000,
 ): Promise<Setup> {
@@ -62,7 +64,7 @@ async function setup(
     targetName: 'target',
     projectRoot: dir,
     app: {},
-    env,
+    env: {},
     headed: false,
     workerSlot: 0,
     log: () => undefined,
@@ -92,16 +94,25 @@ function photo(name: string): string {
 }
 
 describe('device.addMedia', () => {
-  it('adds every file to an iOS simulator in one simctl addmedia, paths resolved against the project root, with the worker environment', async () => {
+  it("adds every file to an iOS simulator in one simctl addmedia, paths resolved against the project root, with this process's environment", async () => {
     photo('receipt.jpg');
     mkdirSync(path.join(dir, 'media'));
     photo('media/clip.mov');
-    const { device, ran, env } = await setup({ platform: 'ios', kind: 'simulator', id: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' }, undefined, { PATH: '/usr/bin' });
+    const { device, ran, env } = await setup({ platform: 'ios', kind: 'simulator', id: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' });
     await device.addMedia(['receipt.jpg', 'media/clip.mov']);
     expect(ran).toEqual([
       { file: 'xcrun', args: ['simctl', 'addmedia', 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0', path.join(dir, 'receipt.jpg'), path.join(dir, 'media', 'clip.mov')] },
     ]);
-    expect(env).toEqual([{ PATH: '/usr/bin' }]);
+    // The environment the agent-device client and its daemon read, so the program reaches the same adb server and simulator set.
+    expect(env).toEqual([process.env]);
+  });
+
+  it('adds to the simulator set agent-device keeps its simulators in', async () => {
+    const file = photo('receipt.jpg');
+    vi.stubEnv('AGENT_DEVICE_IOS_SIMULATOR_DEVICE_SET', '/tmp/e2e-simulators');
+    const { device, ran } = await setup({ platform: 'ios', kind: 'simulator', id: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' });
+    await device.addMedia(file);
+    expect(ran).toEqual([{ file: 'xcrun', args: ['simctl', '--set', '/tmp/e2e-simulators', 'addmedia', 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0', file] }]);
   });
 
   it('pushes each file to an Android device under its own name, then scans it, with the SDK adb', async () => {
@@ -111,7 +122,8 @@ describe('device.addMedia', () => {
     const adb = path.join(sdk, 'platform-tools', ADB_NAME);
     writeFileSync(adb, '');
     chmodSync(adb, 0o755);
-    const { device, ran } = await setup({ platform: 'android', kind: 'emulator', id: 'emulator-5554', device: 'emulator-5554' }, undefined, { ANDROID_HOME: sdk });
+    vi.stubEnv('ANDROID_HOME', sdk);
+    const { device, ran } = await setup({ platform: 'android', kind: 'emulator', id: 'emulator-5554', device: 'emulator-5554' });
     await device.addMedia(file);
     expect(ran).toEqual([
       { file: adb, args: ['-s', 'emulator-5554', 'push', file, "/sdcard/Pictures/it's 100% (1).png"] },
@@ -137,19 +149,18 @@ describe('device.addMedia', () => {
     await expect(iphone.device.addMedia('missing.jpg')).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', message: expect.stringContaining('physical iPhone') });
     expect(iphone.ran).toEqual([]);
 
-    const remote = await setup({ platform: 'android', kind: 'emulator', id: 'emulator-5554' }, undefined, { AGENT_DEVICE_DAEMON_BASE_URL: 'https://devices.example.com' });
+    vi.stubEnv('AGENT_DEVICE_DAEMON_BASE_URL', 'https://devices.example.com');
+    const remote = await setup({ platform: 'android', kind: 'emulator', id: 'emulator-5554' });
     await expect(remote.device.addMedia('missing.jpg')).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', message: expect.stringContaining('AGENT_DEVICE_DAEMON_BASE_URL') });
     expect(remote.ran).toEqual([]);
   });
 
   it('refuses a device a provider leased or another daemon drives', () => {
-    expect(mediaRefusal('android', 'emulator', { daemon: { baseUrl: 'http://127.0.0.1:4310' } }, [{}])).toContain('device provider');
-    expect(mediaRefusal('ios', 'simulator', { leaseId: 'lease-1' }, [{}])).toContain('device provider');
-    expect(mediaRefusal('ios', 'simulator', { client: obj({ stateDir: '/tmp/state' }) }, [{}])).toContain('device provider');
-    expect(mediaRefusal('ios', 'simulator', { deviceId: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' }, [{ AGENT_DEVICE_DAEMON_BASE_URL: '' }, {}])).toBeUndefined();
-    // A remote daemon named in either environment: the worker's or the process's own.
-    expect(mediaRefusal('android', 'emulator', undefined, [{}, { AGENT_DEVICE_DAEMON_BASE_URL: 'https://devices.example.com' }])).toContain('AGENT_DEVICE_DAEMON_BASE_URL');
-    expect(mediaRefusal('android', 'device', undefined, [{}])).toBeUndefined();
+    expect(mediaRefusal('android', 'emulator', { daemon: { baseUrl: 'http://127.0.0.1:4310' } }, {})).toContain('device provider');
+    expect(mediaRefusal('ios', 'simulator', { leaseId: 'lease-1' }, {})).toContain('device provider');
+    expect(mediaRefusal('ios', 'simulator', { client: obj({ stateDir: '/tmp/state' }) }, {})).toContain('device provider');
+    expect(mediaRefusal('ios', 'simulator', { deviceId: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' }, { AGENT_DEVICE_DAEMON_BASE_URL: '' })).toBeUndefined();
+    expect(mediaRefusal('android', 'device', undefined, {})).toBeUndefined();
   });
 
   it('is INVALID_ARGUMENT for a missing file, a directory, or no paths, before running anything', async () => {
@@ -203,7 +214,6 @@ describe('device.addMedia', () => {
         controller.abort();
         throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
       },
-      {},
       controller.signal,
     );
     await expect(device.addMedia('a.jpg')).rejects.toMatchObject({ code: 'CANCELLED' });
@@ -213,7 +223,7 @@ describe('device.addMedia', () => {
     photo('a.jpg');
     const controller = new AbortController();
     controller.abort();
-    const { device, ran } = await setup({ platform: 'ios', kind: 'simulator', id: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' }, undefined, {}, controller.signal);
+    const { device, ran } = await setup({ platform: 'ios', kind: 'simulator', id: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' }, undefined, controller.signal);
     await expect(device.addMedia('a.jpg')).rejects.toMatchObject({ code: 'CANCELLED' });
     expect(ran).toEqual([]);
   });
@@ -228,7 +238,6 @@ describe('device.addMedia', () => {
         new Promise((_resolve, reject) => {
           signal.addEventListener('abort', () => reject(Object.assign(new Error('killed'), { name: 'AbortError' })), { once: true });
         }),
-      {},
       new AbortController().signal,
       50,
     );
@@ -265,8 +274,8 @@ describe('runHostCommand', () => {
 
 describe('mediaCommands', () => {
   it('runs no program for an empty list on Android, and one simctl call on iOS', () => {
-    expect(mediaCommands('android', 'emulator-5554', [], 'adb')).toEqual([]);
-    expect(mediaCommands('ios', 'UDID', ['/a.jpg'], 'adb')).toEqual([{ file: 'xcrun', args: ['simctl', 'addmedia', 'UDID', '/a.jpg'] }]);
+    expect(mediaCommands('android', 'emulator-5554', [], 'adb', {})).toEqual([]);
+    expect(mediaCommands('ios', 'UDID', ['/a.jpg'], 'adb', { AGENT_DEVICE_IOS_SIMULATOR_DEVICE_SET: ' ' })).toEqual([{ file: 'xcrun', args: ['simctl', 'addmedia', 'UDID', '/a.jpg'] }]);
   });
 });
 

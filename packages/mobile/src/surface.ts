@@ -529,8 +529,6 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   private bound: BoundDevice | undefined;
   /** What agent-device booted that device as: a simulator, an emulator, or a physical device; set in init. */
   private boundKind: DeviceKind | undefined;
-  /** The worker's environment, as `init` received it: what a program the engine runs on this machine gets. */
-  private env: Readonly<Record<string, string | undefined>> = process.env;
   /** How this worker's device records through its provider: set in init when the pool's provider records and the slot rides one of its leases. */
   private leaseRecorder: LeaseRecorder | undefined;
   /**
@@ -683,7 +681,6 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   async init(info: EngineInitInfo): Promise<void> {
     this.projectRoot = info.projectRoot;
     this.app = info.app;
-    this.env = info.env;
     const binding = this.pool.binding(info, info.workerSlot, info.env);
     this.device = binding;
     const session = this.pool.slotSession(info, info.workerSlot, binding);
@@ -1960,22 +1957,26 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * and a path that is not a readable file, before anything runs. The
    * `timeoutMs` budget starts with the call: a program still running at it
    * is killed, and none starts after it, so nothing runs on into the next
-   * step. Nothing on screen changes, so the screen this surface read stays.
+   * step. The programs get this process's environment, the one the
+   * agent-device client and the daemon it starts read, so they reach the
+   * same adb server and simulator set. Nothing on screen changes, so the
+   * screen this surface read stays.
    */
   async addMedia(files: unknown, signal: AbortSignal, timeoutMs: number): Promise<void> {
     const timeout = AbortSignal.timeout(timeoutMs);
     const stop = AbortSignal.any([signal, timeout]);
     const resolved = mediaFiles(files).map((file) => path.resolve(this.projectRoot, file));
     const { platform } = this.options;
-    const refusal = mediaRefusal(platform, this.boundKind, this.device, [this.env, process.env]);
+    const env = process.env;
+    const refusal = mediaRefusal(platform, this.boundKind, this.device, env);
     if (refusal !== undefined) throw unsupported(refusal);
     const { deviceId } = this.boundDevice;
     await assertMediaFiles(platform, resolved);
-    const adb = platform === 'android' ? await findAdb(this.env) : 'adb';
-    for (const command of mediaCommands(platform, deviceId, resolved, adb)) {
+    const adb = platform === 'android' ? await findAdb(env) : 'adb';
+    for (const command of mediaCommands(platform, deviceId, resolved, adb, env)) {
       try {
         if (stop.aborted) throw stop.reason;
-        await this.track(this.runHost(command, { env: this.env, signal: stop }));
+        await this.track(this.runHost(command, { env, signal: stop }));
       } catch (error) {
         throw hostCommandError(error, command, { cancelled: signal.aborted, timedOutAfterMs: timeout.aborted ? timeoutMs : undefined });
       }
