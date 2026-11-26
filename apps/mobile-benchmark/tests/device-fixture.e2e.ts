@@ -268,8 +268,9 @@ test.describe('device fixture', () => {
   });
 
   // A volume press brings up Android's volume panel over the app, and the
-  // tree reads its sliders. The second press puts the level back; the panel
-  // hides itself a few seconds later, before the next test taps.
+  // tree reads its sliders. The second press lowers the level again (one step
+  // below where it started if it started at the top); no test reads it. The
+  // panel hides itself a few seconds later, before the next test taps.
   test('pressButton shows the volume panel on Android', { platforms: ['android'] }, async ({ device, screen }) => {
     const media = screen.getByRole('slider', { name: 'Media' });
     await device.pressButton('volume-up');
