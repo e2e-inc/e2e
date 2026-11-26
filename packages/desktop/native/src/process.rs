@@ -70,7 +70,11 @@ fn parse_procargs(buffer: &[u8]) -> Option<(Vec<String>, Option<Vec<String>>)> {
     // argv[0] names the program again.
     let arguments = argv.into_iter().skip(1).collect();
     // A restricted process shows its arguments alone: no variable a real environment always has.
-    let shown = environment.iter().any(|entry| entry.starts_with("HOME=") || entry.starts_with("PATH=") || entry.starts_with("USER="));
+    // The launch token is in it, or a variable a real environment always has: a helper the app started with a pared-down
+    // environment that kept the token still shows it.
+    let token = format!("{}=", crate::launch::TOKEN_VARIABLE);
+    let shown =
+        environment.iter().any(|entry| entry.starts_with("HOME=") || entry.starts_with("PATH=") || entry.starts_with("USER=") || entry.starts_with(&token));
     Some((arguments, shown.then_some(environment)))
 }
 
@@ -141,6 +145,12 @@ mod tests {
         let (arguments, environment) = parse_procargs(&buffer("/System/App", &["/System/App", "-E2EDesktopLaunch", "tok"], &[])).unwrap();
         assert_eq!(arguments, ["-E2EDesktopLaunch", "tok"]);
         assert!(environment.is_none());
+    }
+
+    #[test]
+    fn reads_an_environment_that_holds_only_the_launch_token() {
+        let (_, environment) = parse_procargs(&buffer("/bin/helper", &["/bin/helper"], &["E2E_DESKTOP_LAUNCH=tok"])).unwrap();
+        assert_eq!(environment.unwrap(), ["E2E_DESKTOP_LAUNCH=tok"]);
     }
 
     #[test]
