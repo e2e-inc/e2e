@@ -19,12 +19,12 @@ const STALE_IDS: u32 = 4096;
 /// The typing runs by the id their caller gave (one counter for the process), each marked once it is cancelled.
 static TYPING: Mutex<Option<HashMap<u32, bool>>> = Mutex::new(None);
 
-/// Marks the typing run `id` cancelled: it sends no more text. A cancel that comes before the run starts holds too.
-pub fn cancel_typing(id: u32) {
+/// Marks the input run `id` cancelled: it sends nothing more. A cancel that comes before the run starts holds too.
+pub fn cancel_input(id: u32) {
     TYPING.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert_with(HashMap::new).insert(id, true);
 }
 
-/// One typing run, registered while it lives so `cancel_typing` can reach it.
+/// One input run (an action, or the text it types), registered while it lives so `cancel_input` can reach it.
 pub struct TypingRun(Option<u32>);
 
 impl TypingRun {
@@ -40,7 +40,7 @@ impl TypingRun {
         TypingRun(id)
     }
 
-    fn cancelled(&self) -> bool {
+    pub fn cancelled(&self) -> bool {
         self.0.is_some_and(|id| TYPING.lock().unwrap_or_else(PoisonError::into_inner).as_ref().and_then(|runs| runs.get(&id).copied()).unwrap_or(false))
     }
 }
@@ -374,7 +374,7 @@ pub fn pointer(x: f64, y: f64, action: Pointer) -> Outcome<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CHUNK_UNITS, Piece, TypingRun, cancel_typing, parse_combo, pieces};
+    use super::{CHUNK_UNITS, Piece, TypingRun, cancel_input, parse_combo, pieces};
     use core_graphics::event::CGEventFlags;
 
     fn text(units: &Piece) -> String {
@@ -422,7 +422,7 @@ mod tests {
 
     #[test]
     fn keeps_a_cancel_that_came_before_its_run_while_an_older_run_starts() {
-        cancel_typing(1_000_021);
+        cancel_input(1_000_021);
         let older = TypingRun::start(Some(1_000_020));
         let cancelled = TypingRun::start(Some(1_000_021));
         assert!(!older.cancelled());

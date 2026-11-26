@@ -36,16 +36,8 @@ pub enum Action {
     Hover,
     SetValue(String),
     Select(String),
-    Scroll {
-        direction: String,
-        pages: f64,
-    },
-    /// `id` names the run for `input::cancel_typing`.
-    Type {
-        text: String,
-        physical: bool,
-        id: Option<u32>,
-    },
+    Scroll { direction: String, pages: f64 },
+    Type { text: String, physical: bool },
 }
 
 /// The failure for an AX error of a request that changed nothing.
@@ -59,6 +51,23 @@ fn refused(error: AXError, what: &str) -> Failure {
         ax::AX_ILLEGAL_ARGUMENT => Failure::refused(codes::ACTION_FAILED, format!("{what}: {}", ax::describe(error))),
         _ => Failure::unconfirmed(codes::ACTION_FAILED, format!("{what}: {}", ax::describe(error))),
     }
+}
+
+thread_local! {
+    /// The action this thread runs: its input run, which a cancel marks, and its deadline.
+    static CURRENT: std::cell::RefCell<Option<(input::TypingRun, Instant)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Refuses to send input once the caller gave up on the action: it was cancelled, or its deadline passed. The reads
+/// before an input can take long on a slow app, and input sent after the caller moved on would land unasked.
+fn go(what: &str) -> Outcome<()> {
+    CURRENT.with(|current| match current.borrow().as_ref() {
+        Some((run, _)) if run.cancelled() => Err(Failure::refused(codes::TIMEOUT, format!("{what}: the action was cancelled before its input was sent"))),
+        Some((_, deadline)) if Instant::now() >= *deadline => {
+            Err(Failure::refused(codes::TIMEOUT, format!("{what}: the action's time ran out before its input was sent")))
+        }
+        _ => Ok(()),
+    })
 }
 
 /// The failure for a read that failed before anything was sent: nothing reached the app. A read the app did not answer
@@ -144,6 +153,7 @@ fn until(deadline: Instant, mut check: impl FnMut() -> bool) -> bool {
 ///   the action was sent: nothing reached the app;
 /// - any other error: it may have landed, delivered but unverified.
 fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
+    go(what)?;
     element.set_timeout(BLOCKING_ACTION_SECONDS);
     let result = element.perform(action);
     let outcome = match result {
@@ -225,6 +235,7 @@ fn hits(pid: i32, element: &Element, x: f64, y: f64) -> bool {
 /// Physical pointer input at the element's center, once its window is forward and nothing covers it.
 fn physical(entry: &Entry, action: Pointer) -> Outcome<()> {
     let window = windows::find(entry.pid, entry.window)?;
+    go("pointer")?;
     raise(entry.pid, &window)?;
     let (x, y) = center(&entry.element)?;
     if !hits(entry.pid, &entry.element, x, y) {
@@ -253,6 +264,7 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     }
     let (_, role) = raw_role(element);
     if matches!(role, "row" | "cell" | "treeitem" | "option" | "tab") && settable(element, "AXSelected", "click")? {
+        go("select")?;
         element.set_bool("AXSelected", true).map_err(|error| refused(error, "select"))?;
         if until(deadline, || element.boolean("AXSelected") == Some(true)) {
             return Ok(());
@@ -269,6 +281,7 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
     if element.boolean("AXFocused") == Some(true) {
         return Ok(());
     }
+    go("focus")?;
     element.set_bool("AXFocused", true).map_err(|error| refused(error, "focus"))?;
     if until(deadline, || element.boolean("AXFocused") == Some(true)) {
         Ok(())
@@ -394,6 +407,7 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     }
     // A field that holds focus commits its text the way typing does; one that cannot take focus still takes the value.
     // Focus moved by this call has reached the app (its handlers may have run), so a later failure is no longer "nothing sent".
+    go("set value")?;
     let moved_focus = roles::takes_text(role)
         && settable(element, "AXFocused", "set value")?
         && element.boolean("AXFocused") != Some(true)
@@ -508,6 +522,7 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         if matches!(row_role, "radiobutton" | "tab") {
             return perform(&row, "AXPress", "choose the option");
         }
+        go("select")?;
         let written = if settable(element, "AXSelectedRows", "select")? {
             element.set_elements("AXSelectedRows", std::slice::from_ref(&row))
         } else {
@@ -543,6 +558,7 @@ fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
         let step = if content > visible && visible > 0.0 { pages * visible / (content - visible) } else { pages * 0.25 };
         let next = (current + if forward { step } else { -step }).clamp(0.0, 1.0);
         if settable(&bar, "AXValue", "scroll")? {
+            go("scroll")?;
             return bar.set_number("AXValue", next).map_err(|error| refused(error, "scroll"));
         }
         return perform(&bar, if forward { "AXIncrement" } else { "AXDecrement" }, "scroll");
@@ -560,8 +576,7 @@ fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
     Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("nothing here scrolls {direction}")))
 }
 
-fn type_text(entry: &Entry, text: &str, physical: bool, id: Option<u32>, deadline: Instant) -> Outcome<()> {
-    let run = input::TypingRun::start(id);
+fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Outcome<()> {
     let window = windows::find(entry.pid, entry.window)?;
     // Text sent to the app goes to its key window, which must be the one the field is in, as for `press`.
     if !physical {
@@ -574,11 +589,24 @@ fn type_text(entry: &Entry, text: &str, physical: bool, id: Option<u32>, deadlin
     } else {
         Route::Process(entry.pid)
     };
-    input::type_text(text, route, &run, deadline).map_err(Failure::delivered)
+    CURRENT
+        .with(|current| match current.borrow().as_ref() {
+            Some((run, _)) => input::type_text(text, route, run, deadline),
+            None => Err(Failure::refused(codes::INTERNAL, "type ran outside an action")),
+        })
+        .map_err(Failure::delivered)
 }
 
 /// Runs one action on the element `reference` names.
-pub fn act(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
+pub fn act(reference: &str, action: Action, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
+    // Until it returns, every input this action sends first checks it was not cancelled and is still in time (`go`).
+    CURRENT.with(|current| *current.borrow_mut() = Some((input::TypingRun::start(input_id), deadline)));
+    let outcome = run(reference, action, deadline);
+    CURRENT.with(|current| current.borrow_mut().take());
+    outcome
+}
+
+fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
     let entry = resolve(reference)?;
     let element = &entry.element;
     match action {
@@ -603,7 +631,7 @@ pub fn act(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         Action::SetValue(text) => set_value(element, &text, deadline),
         Action::Select(label) => select(&entry, &label, deadline),
         Action::Scroll { direction, pages } => scroll(element, &direction, pages),
-        Action::Type { text, physical, id } => type_text(&entry, &text, physical, id, deadline),
+        Action::Type { text, physical } => type_text(&entry, &text, physical, deadline),
     }
 }
 
@@ -777,6 +805,20 @@ mod tests {
         assert!(steps.get() < 10, "{} steps", steps.get());
         let none = step_to(3.0, Some(0.0), Instant::now(), |_| panic!("no step past the deadline"), || Some(0.0));
         assert_eq!(none.expect_err("out of time").delivery, crate::failure::Delivery::NotDelivered);
+    }
+
+    #[test]
+    fn sends_no_input_once_the_action_was_cancelled_or_ran_out_of_time() {
+        let set =
+            |id: u32, deadline: Instant| super::CURRENT.with(|current| *current.borrow_mut() = Some((crate::input::TypingRun::start(Some(id)), deadline)));
+        crate::input::cancel_input(2_000_001);
+        set(2_000_001, later());
+        assert!(super::go("press").is_err());
+        set(2_000_002, Instant::now());
+        assert!(super::go("press").is_err());
+        set(2_000_003, later());
+        assert!(super::go("press").is_ok());
+        super::CURRENT.with(|current| current.borrow_mut().take());
     }
 
     #[test]
