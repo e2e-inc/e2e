@@ -1534,6 +1534,9 @@ mod tests {
         assert_eq!(super::takes_click("AXStaticText", || panic!("no action read for a role that tells")), Ok(false));
         // A custom control drawn in a group, which offers a press, is a control of its own too.
         assert_eq!(super::takes_click("AXGroup", || Ok(vec!["AXPress".into()])), Ok(true));
+        // An open or a confirm takes a click as a press does.
+        assert_eq!(super::takes_click("AXGroup", || Ok(vec!["AXOpen".into()])), Ok(true));
+        assert_eq!(super::takes_click("AXGroup", || Ok(vec!["AXConfirm".into()])), Ok(true));
         assert_eq!(super::takes_click("AXGroup", || Ok(vec!["AXScrollToVisible".into()])), Ok(false));
         // An inline editor of a row takes a double-click of its own.
         for editor in ["AXTextField", "AXComboBox", "AXTextArea"] {
