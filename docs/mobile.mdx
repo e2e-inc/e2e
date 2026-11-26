@@ -581,7 +581,9 @@ with agent-device's message.
   `device.setPermission`, `app.clearState()`, `device.setLocation`,
   `device.clearLocation`, `device.setAppearance`, the biometric methods, and
   `device.clearKeychain`. So are `device.clipboard`, `device.setClipboard`,
-  `device.fold`, and `device.addMedia`.
+  and `device.fold`.
+- `device.addMedia` refuses an iPhone before it runs anything, with
+  `UNSUPPORTED_CAPABILITY`: no tool adds photos to a phone's library.
 - For a fresh start on an iPhone, reinstall with
   `device.installApp(path, { reinstall: true })`. Set `app.bundleId` or the
   `app` option so agent-device knows which app to remove.
