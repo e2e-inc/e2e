@@ -56,12 +56,19 @@ export interface Harness {
   prepare(info: Omit<EnginePrepareInfo, 'app'>): Promise<EnginePrepareResult | void>;
   /** Every `adb` argument list the engine ran, in order. */
   readonly adbCalls: (readonly string[])[];
-  /** Replaces what `adb` answers; by default API 36 for `getprop` and no output for anything else. */
+  /** Replaces what `adb` answers; by default `defaultAdbOutput`. */
   respondAdb(responder: (args: readonly string[]) => AdbResult): void;
 }
 
 /** The engine's options and its target's app, in one literal: what a test varies. */
 export type HarnessOptions = Partial<MobileOptions> & Pick<EngineAppInfo, 'bundleId' | 'appPath' | 'launchArguments' | 'launchArgumentValues' | 'permissions' | 'allPermissions' | 'locale'>;
+
+/** What `adb` prints by default: API 36 for `getprop`, no app locale for `get-app-locales`, and nothing for anything else. */
+export function defaultAdbOutput(args: readonly string[]): string {
+  if (args.includes('getprop')) return '36\n';
+  if (args.includes('get-app-locales')) return `Locales for ${args.at(-1)} for user 0 are []\n`;
+  return '';
+}
 
 /** An engine over the scripted client; `pinned` false leaves the target's `bundleId` out. */
 export function harness(options: HarnessOptions = {}, pinned = true): Harness {
@@ -75,7 +82,7 @@ export function harness(options: HarnessOptions = {}, pinned = true): Harness {
   const connections: (DeviceConnection | undefined)[] = [];
   const { bundleId, appPath, launchArguments, launchArgumentValues, permissions, allPermissions, locale, ...engineOptions } = options;
   const adbCalls: (readonly string[])[] = [];
-  let adb = (args: readonly string[]): AdbResult => ({ stdout: args.includes('getprop') ? '36\n' : '', stderr: '', exitCode: 0 });
+  let adb = (args: readonly string[]): AdbResult => ({ stdout: defaultAdbOutput(args), stderr: '', exitCode: 0 });
   const surface = new AgentDeviceSurface(
     { platform: 'ios', ...engineOptions },
     (session, connection) => {

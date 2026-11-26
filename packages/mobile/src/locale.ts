@@ -109,12 +109,13 @@ function appleLocaleArguments(locale: string): readonly string[] {
 
 /**
  * The per-app locales of one Android device this machine's `adb` reaches,
- * set before a launch and cleared again when a later fresh launch asks for
- * none, and when the worker disposes, so the device is left as it was found.
+ * set before a launch and put back to what the app had before when a later
+ * fresh launch asks for none, and when the worker disposes, so the device is
+ * left as it was found.
  */
 export class AndroidAppLocales {
-  /** Apps this worker gave a locale, which it clears again. */
-  private readonly localized = new Set<string>();
+  /** The locales each app this worker changed had before, as `set-app-locales` takes them (`''` for none). */
+  private readonly original = new Map<string, string>();
   /** The device's API level, read once per device. */
   private sdk: Promise<number> | undefined;
 
@@ -125,27 +126,31 @@ export class AndroidAppLocales {
   ) {}
 
   /**
-   * Sets `app`'s locale, or clears the one this worker set when `locale` is
-   * `undefined` and the launch is fresh: a foreground-only open of a running
-   * app keeps what it has, since a change would recreate its screen.
+   * Sets `app`'s locale, reading what it had first, or puts that back when
+   * `locale` is `undefined` and the launch is fresh: a foreground-only open
+   * of a running app keeps what it has, since a change would recreate its
+   * screen.
    */
   async beforeOpen(app: string, locale: string | undefined, relaunch: boolean, signal: AbortSignal): Promise<void> {
     if (locale !== undefined) {
       await this.requireSdk(signal);
+      if (!this.original.has(app)) this.original.set(app, await this.get(app, signal));
       await this.set(app, locale, signal);
-      this.localized.add(app);
-    } else if (relaunch && this.localized.has(app)) {
-      await this.set(app, undefined, signal);
-      this.localized.delete(app);
+      return;
+    }
+    const original = this.original.get(app);
+    if (relaunch && original !== undefined) {
+      await this.set(app, original, signal);
+      this.original.delete(app);
     }
   }
 
-  /** Clears every locale this worker set; failures are left, as the worker is going away. */
+  /** Puts back the locales of every app this worker changed; failures are left, as the worker is going away. */
   async restore(signal: AbortSignal): Promise<void> {
-    for (const app of this.localized) {
-      await this.set(app, undefined, signal).catch(() => undefined);
+    for (const [app, original] of this.original) {
+      await this.set(app, original, signal).catch(() => undefined);
     }
-    this.localized.clear();
+    this.original.clear();
   }
 
   /** Refuses a device older than Android 13, which has no per-app language to set. */
@@ -163,13 +168,27 @@ export class AndroidAppLocales {
   }
 
   /**
-   * One `cmd locale set-app-locales`; no `--locales` clears the app's own
-   * locale. It prints nothing when it worked, and exits 0 even for a
+   * The app's own locales, as `cmd locale get-app-locales` prints them
+   * (`Locales for <app> for user 0 are [de-DE,fr-FR]`): the tags between the
+   * brackets, `''` for none. Anything else, such as `Unknown package`, is the
+   * failure.
+   */
+  private async get(app: string, signal: AbortSignal): Promise<string> {
+    const action = `reading the locale of ${app}`;
+    const output = await this.adb(['shell', 'cmd', 'locale', 'get-app-locales', app], action, signal);
+    const tags = /^Locales for .+ are \[(.*)\]$/.exec(output)?.[1];
+    if (tags === undefined) throw new EngineError('ENGINE_FAILURE', `${action} on ${this.serial} failed: ${output}`, { retryable: false });
+    return tags.replaceAll(' ', '');
+  }
+
+  /**
+   * One `cmd locale set-app-locales`; `''` (no `--locales`) clears the app's
+   * own locale. It prints nothing when it worked, and exits 0 even for a
    * package that is not installed, so any output is the failure.
    */
-  private async set(app: string, locale: string | undefined, signal: AbortSignal): Promise<void> {
-    const args = ['shell', 'cmd', 'locale', 'set-app-locales', app, ...(locale === undefined ? [] : ['--locales', locale])];
-    const action = locale === undefined ? `clearing the locale of ${app}` : `setting the locale of ${app} to ${locale}`;
+  private async set(app: string, locales: string, signal: AbortSignal): Promise<void> {
+    const args = ['shell', 'cmd', 'locale', 'set-app-locales', app, ...(locales === '' ? [] : ['--locales', locales])];
+    const action = locales === '' ? `clearing the locale of ${app}` : `setting the locale of ${app} to ${locales}`;
     const output = await this.adb(args, action, signal);
     if (output !== '') throw new EngineError('ENGINE_FAILURE', `${action} on ${this.serial} failed: ${output}`, { retryable: false });
   }

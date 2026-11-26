@@ -135,7 +135,8 @@ await device.openApp('com.example.app', { relaunch: true, locale: 'ar-EG' });
   own language. Don't set those two arguments in `launchArguments` as well.
 - On Android the engine sets the app's own language with this machine's
   `adb` before the launch. It needs Android 13 or newer. A later fresh launch
-  without a locale, and the end of the run, clear it again.
+  without a locale, and the end of the run, put back the app's earlier
+  language. A run that is killed leaves the locale set.
 - A provider's Android devices are not reachable over this machine's `adb`,
   so `app.locale` fails at config load there. Set `language` and `locale` on
   `browserstack()` or `testmu()` instead.

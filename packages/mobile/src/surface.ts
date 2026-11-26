@@ -888,10 +888,12 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     this.appIdentity = undefined;
     this.installedApp = undefined;
     this.knownViewport = undefined;
+    // Before the session closes: a closed session frees the device for another one.
+    const restoring = locales?.restore(context.signal);
     let closing: Promise<void> | undefined;
     const close = (): void => {
       if (client === undefined) return;
-      closing ??= client.sessions.close().then(() => {
+      closing ??= Promise.resolve(restoring).then(() => client.sessions.close()).then(() => {
         if (recording?.kind === 'screen' && this.recording === recording) this.recording = undefined;
       }).catch(() => undefined);
     };
@@ -903,9 +905,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       const stopping = recording?.kind === 'lease' ? this.stopLeaseRecording(recording, context.signal).catch(() => undefined) : undefined;
       await withinCleanupBudget((async () => {
         await stopping;
+        await restoring;
         await closing;
-        // Over adb, not the session: the device is left in the language it was found in.
-        await locales?.restore(context.signal);
       })(), context);
     } finally {
       reuse?.removeEventListener('abort', close);

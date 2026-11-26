@@ -397,8 +397,8 @@ export default {
   language, or `device.openApp(app, { relaunch: true, locale })` for one
   launch; the app must ship it. iOS gets `AppleLanguages`/`AppleLocale`
   launch arguments (don't set those in `launchArguments` too). Android gets
-  the app's own language over this machine's `adb` (Android 13+), cleared
-  again at the end of the run; on a provider's Android device it fails at
+  the app's own language over this machine's `adb` (Android 13+), and the
+  app's earlier language comes back at the end of the run; on a provider's Android device it fails at
   config load, so set `language` and `locale` on `browserstack()` or
   `testmu()`.
 - One worker per device. No `device`: every booted simulator or emulator of

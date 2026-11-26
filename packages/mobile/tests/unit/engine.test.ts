@@ -22,7 +22,7 @@ import { AgentDeviceSurface } from '../../src/surface.ts';
 import { swipeWithin } from '../../src/support.ts';
 import { tvTools } from '../../src/tools.ts';
 import { ANDROID_APP_PACKAGE, ANDROID_ID_SNAPSHOT, createFakeClient, SETTINGS_NODES, SETTINGS_SNAPSHOT, type FakeClient } from '../helpers/fake-client.ts';
-import { boot, harness, poolVariableIn, PROJECT_ROOT, type Harness } from '../helpers/harness.ts';
+import { boot, defaultAdbOutput, harness, poolVariableIn, PROJECT_ROOT, type Harness } from '../helpers/harness.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 /** An agent's operation: the agent reads the screen right after acting, so its actions settle. */
@@ -3704,9 +3704,15 @@ describe('device fixture', () => {
     expect(h.fake.calls.length).toBe(before);
   });
 
-  it('sets an Android app\'s own locale through adb on the booted serial before each fresh launch, clears it when a fresh launch asks for none, and at dispose', async () => {
+  it('sets an Android app\'s own locale through adb on the booted serial before each fresh launch, and puts back what it had when a fresh launch asks for none, and at dispose', async () => {
     const h = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE, locale: 'fr-FR' });
     h.fake.respond('devices.boot', () => ({ id: 'emulator-5554', device: 'Pixel 9' }));
+    // The other app already has a language of its own, set in the device's settings.
+    h.respondAdb((args) => ({
+      stdout: args.includes('get-app-locales') && args.includes('com.other') ? 'Locales for com.other for user 0 are [de-DE,it-IT]\n' : defaultAdbOutput(args),
+      stderr: '',
+      exitCode: 0,
+    }));
     await openAttempt(h);
     const device = fixture(h);
     await h.engine.session!.restart!(operation());
@@ -3714,20 +3720,32 @@ describe('device fixture', () => {
     await device.openApp('com.other', { relaunch: true });
     // A foreground-only open keeps what the app has: a change would recreate its screen.
     await device.openApp(ANDROID_APP_PACKAGE);
-    const set = (app: string, locale?: string) => ['-s', 'emulator-5554', 'shell', 'cmd', 'locale', 'set-app-locales', app, ...(locale === undefined ? [] : ['--locales', locale])];
+    const adb = (...args: string[]) => ['-s', 'emulator-5554', 'shell', ...args];
+    const set = (app: string, locale?: string) => adb('cmd', 'locale', 'set-app-locales', app, ...(locale === undefined ? [] : ['--locales', locale]));
     expect(h.adbCalls).toEqual([
-      // The API level is read once, before the first locale is set.
-      ['-s', 'emulator-5554', 'shell', 'getprop', 'ro.build.version.sdk'],
+      // The API level is read once, and each app's own locales before its first change.
+      adb('getprop', 'ro.build.version.sdk'),
+      adb('cmd', 'locale', 'get-app-locales', ANDROID_APP_PACKAGE),
       set(ANDROID_APP_PACKAGE, 'fr-FR'),
       set(ANDROID_APP_PACKAGE, 'fr-FR'),
+      adb('cmd', 'locale', 'get-app-locales', 'com.other'),
       set('com.other', 'ja-JP'),
-      set('com.other'),
+      set('com.other', 'de-DE,it-IT'),
     ]);
     // Android reads no Apple arguments: the launch carries none.
     expect(h.fake.calls.filter((call) => call.method === 'apps.open').every((call) => !('launchArgs' in (call.args as object)))).toBe(true);
-    h.adbCalls.length = 0;
+    // The locale goes back before the session closes, which frees the device for another session.
+    const order: string[] = [];
+    h.respondAdb((args) => {
+      order.push(args.join(' '));
+      return { stdout: '', stderr: '', exitCode: 0 };
+    });
+    h.fake.respond('sessions.close', () => {
+      order.push('sessions.close');
+      return {};
+    });
     await h.engine.dispose!(cleanup());
-    expect(h.adbCalls).toEqual([set(ANDROID_APP_PACKAGE)]);
+    expect(order).toEqual([set(ANDROID_APP_PACKAGE).join(' '), 'sessions.close']);
   });
 
   it('refuses an Android app locale on a device older than Android 13, and reports what adb printed when the locale did not take', async () => {
@@ -3749,12 +3767,17 @@ describe('device fixture', () => {
     newer.respondAdb((args) => ({ stdout: args.includes('getprop') ? '36' : 'Unknown package com.missing for userId 0\n', stderr: '', exitCode: 0 }));
     await expect(fixture(newer).openApp('com.missing', { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({
       code: 'ENGINE_FAILURE',
-      message: 'setting the locale of com.missing to fr-FR on emulator-5554 failed: Unknown package com.missing for userId 0',
+      message: 'reading the locale of com.missing on emulator-5554 failed: Unknown package com.missing for userId 0',
+    });
+    newer.respondAdb((args) => ({ stdout: args.includes('set-app-locales') ? 'Unknown package com.gone for userId 0\n' : defaultAdbOutput(args), stderr: '', exitCode: 0 }));
+    await expect(fixture(newer).openApp('com.gone', { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: 'setting the locale of com.gone to fr-FR on emulator-5554 failed: Unknown package com.gone for userId 0',
     });
     newer.respondAdb(() => ({ stdout: '', stderr: "adb: device 'emulator-5554' not found", exitCode: 1 }));
     await expect(fixture(newer).openApp('com.other', { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({
       code: 'ENGINE_FAILURE',
-      message: "setting the locale of com.other to fr-FR on emulator-5554 failed: adb: device 'emulator-5554' not found",
+      message: "reading the locale of com.other on emulator-5554 failed: adb: device 'emulator-5554' not found",
     });
   });
 
