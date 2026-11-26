@@ -185,8 +185,14 @@ describe('device.addMedia', () => {
     mkdirSync(path.join(dir, 'b'));
     photo('a/photo.jpg');
     photo('b/photo.jpg');
+    photo('b/PHOTO.jpg');
+    photo('.hidden.jpg');
     const android = await setup({ platform: 'android', kind: 'emulator', id: 'emulator-5554' });
     await expect(android.device.addMedia(['a/photo.jpg', 'b/photo.jpg'])).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('two files are named photo.jpg') });
+    // Android's shared storage ignores case, so these land on one file too.
+    await expect(android.device.addMedia(['a/photo.jpg', 'b/PHOTO.jpg'])).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('ignoring case') });
+    // The media scanner treats a dot file as hidden and leaves it out of the library.
+    await expect(android.device.addMedia('.hidden.jpg')).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('starting with a dot') });
     expect(android.ran).toEqual([]);
     const ios = await setup({ platform: 'ios', kind: 'simulator', id: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' });
     await ios.device.addMedia(['a/photo.jpg', 'b/photo.jpg']);

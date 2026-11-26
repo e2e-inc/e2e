@@ -80,16 +80,20 @@ export function mediaFiles(files: unknown): readonly string[] {
 
 /**
  * Throws `INVALID_ARGUMENT` for the first path that is not a readable file,
- * and on Android for two paths with one file name: both would go to the same
- * place on the device, and the second would replace the first.
+ * and on Android for a name the device would not keep: two names that differ
+ * at most in case (shared storage ignores case, so the second would replace
+ * the first), or a name starting with a dot, which the media scanner treats
+ * as hidden and leaves out of the library.
  */
 export async function assertMediaFiles(platform: MobilePlatform, files: readonly string[]): Promise<void> {
   if (platform === 'android') {
     const names = new Set<string>();
     for (const file of files) {
       const name = path.basename(file);
-      if (names.has(name)) throw new TestError('INVALID_ARGUMENT', `device.addMedia: two files are named ${name}; Android keeps them under their names in ${ANDROID_MEDIA_DIR}, so rename one`);
-      names.add(name);
+      if (name.startsWith('.')) throw new TestError('INVALID_ARGUMENT', `device.addMedia: Android leaves ${name} out of the library, since a name starting with a dot is hidden; rename it`);
+      const key = name.toLowerCase();
+      if (names.has(key)) throw new TestError('INVALID_ARGUMENT', `device.addMedia: two files are named ${name}, ignoring case; Android keeps them under their names in ${ANDROID_MEDIA_DIR}, which ignores case, so rename one`);
+      names.add(key);
     }
   }
   for (const file of files) {
