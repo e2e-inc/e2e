@@ -230,8 +230,8 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
     carriedErrors.length > 0 ||
     [...carriedById.values()].some((result) => result.status !== 'interrupted') ||
     results.some((result) => result.selected !== false && FAILED_STATUSES.has(result.status));
-  // The run that chose the tests decides the shard, so the rerun's own is dropped.
-  const { shard: _rerunShard, ...currentRun } = current.run;
+  // The run that chose the tests decides the shard and merge provenance, so the rerun's own are dropped.
+  const { shard: _rerunShard, merge: _rerunMerge, ...currentRun } = current.run;
   return {
     ...current,
     run: {
@@ -247,9 +247,7 @@ export function foldLastRun(current: Report, lastRun: Report): Report {
       usage: combineReportUsage(lastRun.run.usage, current.run.usage, results.length),
       filters: lastRun.run.filters,
       changes: lastRun.run.changes,
-      ...(lastRun.run.extensions === undefined ? {} : {
-        extensions: { ...lastRun.run.extensions, ...current.run.extensions },
-      }),
+      ...(lastRun.run.merge === undefined ? {} : { merge: lastRun.run.merge }),
       ...(lastRun.run.shard === undefined ? {} : { shard: lastRun.run.shard }),
     },
   };

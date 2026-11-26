@@ -86,8 +86,14 @@ it('merges real shard runs and uses the merged report for a whole-run rerun', ()
   expect(rerun.status, rerun.stderr).toBe(0);
   expect(report(fixture, 'merged').results.filter((row) => row.selected).map((row) => row.titlePath.at(-1)).toSorted()).toEqual(['checkout', 'sign in']);
   const history = report(fixture, 'merged', 'report-with-reruns.json');
-  expect(run.extensions?.['e2e.merge']).toBeDefined();
-  expect(history.extensions?.['e2e.merge']).toEqual(run.extensions?.['e2e.merge']);
+  expect(run.merge).toMatchObject({
+    shards: [
+      { index: 1, status: 'passed', exitCode: 0 },
+      { index: 2, status: 'failed', exitCode: 1 },
+    ],
+  });
+  expect(run.merge!.shardDurationMs).toBeGreaterThanOrEqual(0);
+  expect(history.merge).toEqual(run.merge);
 }, 60_000);
 
 it('keeps both shared setup executions and links each shard’s local evidence', () => {

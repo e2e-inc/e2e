@@ -1,7 +1,7 @@
 import { combineExitCodes } from '@e2e-dev/core/lib/internal/errors';
 import { isLoopbackAddress } from '@e2e-dev/core/lib/internal/urls';
 import { uuidv7 } from '@e2e-dev/core/lib/internal/ids';
-import { compareTests, statusOf, type Report1Document, type ReportResult, type ReportSerialGroup } from './build.ts';
+import { compareTests, statusOf, type Report1Document, type ReportMerge, type ReportMergeShard, type ReportResult, type ReportSerialGroup } from './build.ts';
 import { combineReportUsage, runDuration, testKey } from './fold.ts';
 import { mergedAttempt } from './merge-artifacts.ts';
 import type { ShardInput } from './merge-input.ts';
@@ -234,6 +234,18 @@ export function mergeShardReports(shards: readonly ShardInput[]): Merge {
   const times = runs.map((run) => [run.startedAt, run.finishedAt] as const);
   const startedAt = times.map(([start]) => start).toSorted()[0]!;
   const finishedAt = times.map(([, finish]) => finish).toSorted().at(-1)!;
+  const merge: ReportMerge = {
+    shardDurationMs: runs.reduce((sum, run) => sum + Math.max(0, runDuration(run)), 0),
+    shards: inputs.map(({ shard: { index }, document: { run } }): ReportMergeShard => ({
+      index,
+      id: run.id,
+      status: run.status,
+      exitCode: run.exitCode,
+      configDigest: run.project.configDigest,
+      ...(run.changes === undefined ? {} : { changes: run.changes }),
+      ...(run.filters === undefined ? {} : { filters: run.filters }),
+    })),
+  };
   return {
     warnings,
     report: {
@@ -245,9 +257,10 @@ export function mergeShardReports(shards: readonly ShardInput[]): Merge {
         project: first.project,
         environment: first.environment,
         ...(vcs === undefined ? {} : { vcs }),
+        merge,
         startedAt,
         finishedAt,
-        durationMs: Date.parse(finishedAt) - Date.parse(startedAt),
+        durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt)),
         status,
         exitCode,
         targets: first.targets,
@@ -257,16 +270,6 @@ export function mergeShardReports(shards: readonly ShardInput[]): Merge {
         errors,
         summary,
         usage,
-        extensions: {
-          'e2e.merge': {
-            shardDurationMs: runs.reduce((sum, run) => sum + runDuration(run), 0),
-            shards: inputs.map(({ shard: { index }, document: { run } }) => ({
-              index, id: run.id, status: run.status, exitCode: run.exitCode,
-              configDigest: run.project.configDigest,
-              changes: run.changes, filters: run.filters,
-            })),
-          },
-        },
       },
     },
   };

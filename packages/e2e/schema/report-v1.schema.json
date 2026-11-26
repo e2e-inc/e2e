@@ -787,6 +787,7 @@
             "total": { "type": "integer", "minimum": 1 }
           }
         },
+        "merge": { "$ref": "#/$defs/merge" },
         "targets": { "type": "array", "items": { "$ref": "#/$defs/target" } },
         "serialGroups": { "type": "array", "items": { "$ref": "#/$defs/serialGroup" } },
         "results": { "type": "array", "items": { "$ref": "#/$defs/result" } },
@@ -799,6 +800,35 @@
         "filters": { "type": "array", "items": { "$ref": "#/$defs/filter" } },
         "explore": { "$ref": "#/$defs/explore" },
         "extensions": { "$ref": "#/$defs/extensions" }
+      }
+    },
+    "mergeShard": {
+      "description": "One source shard combined into a merged report, in ascending shard index order.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "id", "status", "exitCode", "configDigest"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 1 },
+        "id": { "$ref": "#/$defs/uuidV7" },
+        "status": { "enum": ["passed", "failed", "blocked", "error", "interrupted"] },
+        "exitCode": { "enum": [0, 1, 2, 3, 4, 130] },
+        "configDigest": { "$ref": "#/$defs/sha256" },
+        "changes": { "$ref": "#/$defs/changes" },
+        "filters": { "type": "array", "items": { "$ref": "#/$defs/filter" } }
+      }
+    },
+    "merge": {
+      "description": "Source-shard provenance on a report produced by e2e merge-reports. Absent on an unmerged run.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shardDurationMs", "shards"],
+      "properties": {
+        "shardDurationMs": { "type": "integer", "minimum": 0 },
+        "shards": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/mergeShard" }
+        }
       }
     },
     "filter": {
