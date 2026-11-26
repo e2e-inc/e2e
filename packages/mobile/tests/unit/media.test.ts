@@ -39,10 +39,22 @@ interface Setup {
   readonly labels: () => FixtureOperations<Device> | undefined;
 }
 
+/** A host runner that also sees what ran before, so it can answer an index query from the pushes. */
+type ScriptedRunner = (command: HostCommand, call: Parameters<HostRunner>[1], ran: readonly HostCommand[]) => Promise<string>;
+
+/** The `content query` rows an Android index lists for the files pushed so far, as the device prints them. */
+function indexRows(ran: readonly HostCommand[]): string {
+  const pushed = ran.filter((command) => command.args[2] === 'push').map((command) => command.args[4]!.replace('/sdcard/', '/storage/emulated/0/'));
+  return pushed.length === 0 ? 'No result found.\n' : pushed.map((remote, row) => `Row: ${row} _data=${remote}\n`).join('');
+}
+
+/** A device that indexes every pushed file as soon as it lands, as Android 11 and later do. */
+const indexesAtOnce: ScriptedRunner = async (command, _call, ran) => (command.args.includes('content') ? indexRows(ran) : '');
+
 /** Boots an engine on a device agent-device reports as `kind`, and returns its `device` fixture with every host command recorded. */
 async function setup(
   options: Partial<MobileOptions> & { kind: 'simulator' | 'emulator' | 'device'; id: string },
-  runner: HostRunner = async () => undefined,
+  runner: ScriptedRunner = indexesAtOnce,
   signal = new AbortController().signal,
   actionTimeout = 5_000,
 ): Promise<Setup> {
@@ -56,7 +68,7 @@ async function setup(
   const surface = new AgentDeviceSurface({ platform: 'ios', ...engineOptions }, () => fake.client, async (command, call) => {
     ran.push(command);
     envs.push(call.env);
-    await runner(command, call);
+    return runner(command, call, ran);
   });
   const engine = buildEngine(surface);
   await engine.init!({
@@ -131,16 +143,47 @@ describe('device.addMedia', () => {
         file: adb,
         args: ['-s', 'emulator-5554', 'shell', 'am', 'broadcast', '-a', 'android.intent.action.MEDIA_SCANNER_SCAN_FILE', '-d', "'file:///sdcard/Pictures/it%27s%20100%25%20%281%29.png'"],
       },
+      {
+        file: adb,
+        args: ['-s', 'emulator-5554', 'shell', 'content', 'query', '--uri', 'content://media/external/file', '--projection', '_data', '--where', `"_data LIKE '%/Pictures/%'"`],
+      },
     ]);
+  });
+
+  it('waits until the media index lists every pushed file, as on Android 10, where the scan finishes after the broadcast', async () => {
+    photo('a.jpg');
+    photo('b.jpg');
+    let queries = 0;
+    const { device, ran } = await setup({ platform: 'android', kind: 'emulator', id: 'emulator-5554' }, async (command, _call, done) => {
+      if (!command.args.includes('content')) return '';
+      queries += 1;
+      // The first answer lists only a.jpg; b.jpg is still being scanned.
+      return queries === 1 ? 'Row: 0 _data=/storage/emulated/0/Pictures/a.jpg\n' : indexRows(done);
+    });
+    await device.addMedia(['a.jpg', 'b.jpg']);
+    expect(queries).toBe(2);
+    expect(ran.filter((command) => command.args.includes('content'))).toHaveLength(2);
+  });
+
+  it('stops waiting for the media index at the action timeout', async () => {
+    photo('a.jpg');
+    const { device } = await setup(
+      { platform: 'android', kind: 'emulator', id: 'emulator-5554' },
+      async (command) => (command.args.includes('content') ? 'No result found.\n' : ''),
+      new AbortController().signal,
+      300,
+    );
+    await expect(device.addMedia('a.jpg')).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
   });
 
   it('adds to a physical Android phone too, which adb reaches like an emulator', async () => {
     const file = photo('a.jpg');
     const { device, ran } = await setup({ platform: 'android', kind: 'device', id: 'R58M123ABC' });
     await device.addMedia(file);
-    expect(ran.map((command) => command.args.slice(0, 3))).toEqual([
-      ['-s', 'R58M123ABC', 'push'],
-      ['-s', 'R58M123ABC', 'shell'],
+    expect(ran.map((command) => command.args.slice(0, 4))).toEqual([
+      ['-s', 'R58M123ABC', 'push', file],
+      ['-s', 'R58M123ABC', 'shell', 'am'],
+      ['-s', 'R58M123ABC', 'shell', 'content'],
     ]);
   });
 

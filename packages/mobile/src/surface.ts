@@ -73,7 +73,7 @@ import { mobileDoctor } from './doctor.ts';
 import { deviceLabel, deviceSelection, pinnedApp, type DeviceSelection, type SlotBinding } from './bindings.ts';
 import { assertAppId } from './links.ts';
 import { bootRequest, DevicePool } from './pool.ts';
-import { assertMediaFiles, findAdb, hostCommandError, mediaCommands, mediaFiles, mediaRefusal, runHostCommand, type DeviceKind, type HostRunner } from './media.ts';
+import { androidIndexQuery, assertMediaFiles, findAdb, hostCommandError, mediaCommands, mediaFiles, mediaRefusal, runHostCommand, unindexedFiles, type DeviceKind, type HostCommand, type HostRunner } from './media.ts';
 import { recordLease, travelledLease, type DeviceLease, type RecordingDeviceProvider } from './provider.ts';
 import {
   installedIdentity,
@@ -344,6 +344,9 @@ function depthBelow(entry: ProjectedNode, ancestor: ProjectedNode): number {
   }
   return hops;
 }
+
+/** How often `addMedia` asks an Android device's media index for the files it pushed. */
+const MEDIA_INDEX_POLL_MS = 250;
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -1972,15 +1975,20 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     if (refusal !== undefined) throw unsupported(refusal);
     const { deviceId } = this.boundDevice;
     await assertMediaFiles(platform, resolved);
-    const adb = platform === 'android' ? await findAdb(env) : 'adb';
-    for (const command of mediaCommands(platform, deviceId, resolved, adb, env)) {
+    const run = async (command: HostCommand): Promise<string> => {
       try {
         if (stop.aborted) throw stop.reason;
-        await this.track(this.runHost(command, { env, signal: stop }));
+        return await this.track(this.runHost(command, { env, signal: stop }));
       } catch (error) {
         throw hostCommandError(error, command, { cancelled: signal.aborted, timedOutAfterMs: timeout.aborted ? timeoutMs : undefined });
       }
-    }
+    };
+    const adb = platform === 'android' ? await findAdb(env) : 'adb';
+    for (const command of mediaCommands(platform, deviceId, resolved, adb, env)) await run(command);
+    if (platform !== 'android') return;
+    // The scan runs after the broadcast returns: wait, within the same budget, until the index lists every file.
+    const query = androidIndexQuery(deviceId, adb);
+    while (unindexedFiles(await run(query), resolved).length > 0) await sleep(MEDIA_INDEX_POLL_MS, stop);
   }
 
   /**

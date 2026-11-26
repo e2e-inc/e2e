@@ -23,8 +23,8 @@ export interface HostCommand {
   readonly args: readonly string[];
 }
 
-/** How a host command runs: what unit tests script. Rejects with the program's stderr in the message. */
-export type HostRunner = (command: HostCommand, options: { readonly env: Readonly<Record<string, string | undefined>>; readonly signal: AbortSignal }) => Promise<void>;
+/** How a host command runs: what unit tests script. Resolves to the program's stdout; rejects with its stderr on the error. */
+export type HostRunner = (command: HostCommand, options: { readonly env: Readonly<Record<string, string | undefined>>; readonly signal: AbortSignal }) => Promise<string>;
 
 /** The kinds agent-device boots a device as. */
 export type DeviceKind = 'simulator' | 'emulator' | 'device';
@@ -48,14 +48,14 @@ const MAX_STDERR = 2_000;
  */
 export const runHostCommand: HostRunner = (command, { env, signal }) =>
   new Promise((resolve, reject) => {
-    const child = execFile(command.file, [...command.args], { env, maxBuffer: 16 * 1024 * 1024 }, (error, _stdout, stderr) => {
+    const child = execFile(command.file, [...command.args], { env, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
       signal.removeEventListener('abort', kill);
       if (signal.aborted) {
         reject(Object.assign(new Error(`${path.basename(command.file)} was stopped`), { name: 'AbortError' }));
         return;
       }
       if (error === null) {
-        resolve();
+        resolve(String(stdout));
         return;
       }
       const output = String(stderr).trim();
@@ -160,6 +160,28 @@ export function mediaCommands(
       { file: adb, args: ['-s', deviceId, 'shell', 'am', 'broadcast', '-a', 'android.intent.action.MEDIA_SCANNER_SCAN_FILE', '-d', `'file://${ANDROID_MEDIA_DIR}/${encodeName(name)}'`] },
     ];
   });
+}
+
+/**
+ * Lists the media index's paths under `ANDROID_MEDIA_DIR`, for
+ * `unindexedFiles`. The `where` clause names no file, so the device's shell
+ * reads only fixed text.
+ */
+export function androidIndexQuery(deviceId: string, adb: string): HostCommand {
+  return { file: adb, args: ['-s', deviceId, 'shell', 'content', 'query', '--uri', 'content://media/external/file', '--projection', '_data', '--where', `"_data LIKE '%/Pictures/%'"`] };
+}
+
+/**
+ * The files whose pushed copy `androidIndexQuery`'s output does not list
+ * yet. The index keeps the storage path (`/storage/emulated/0/Pictures/...`),
+ * not `/sdcard`, so a row is matched by its ending. The media scan a
+ * broadcast asks for runs after `am broadcast` returns, so on a device that
+ * indexes only what is scanned (Android 10 and earlier) a file can be
+ * missing for a moment.
+ */
+export function unindexedFiles(stdout: string, files: readonly string[]): readonly string[] {
+  const indexed = stdout.split('\n').map((line) => line.trim());
+  return files.filter((file) => !indexed.some((line) => line.endsWith(`/Pictures/${path.basename(file)}`)));
 }
 
 /** A file name as one percent-encoded URI path segment, with none of the characters `encodeURIComponent` leaves bare that a shell reads. */
