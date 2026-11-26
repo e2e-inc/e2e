@@ -75,11 +75,15 @@ export class DialogRouter {
 
   /**
    * Answers with the configured policy, as a person would: an accepted
-   * `prompt` returns its default text, not an empty string.
+   * `prompt` returns its default text, not an empty string. The app-log line
+   * is written before the answer, while the step that opened the dialog is
+   * still running, so it says the answer is under way: when the answer then
+   * fails, the next step fails with `ENGINE_FAILURE`.
    */
   private async answer(dialog: PwDialog, policy: DialogPolicy): Promise<void> {
+    const answering = policy === 'accept' ? 'accepting' : 'dismissing';
     try {
-      this.appLog?.({ source: 'system', level: 'info', text: `${dialog.type()} dialog "${dialog.message()}" answered with web({ dialogs: '${policy}' })` });
+      this.appLog?.({ source: 'system', level: 'info', text: `${dialog.type()} dialog "${dialog.message()}" opened; ${answering} it per web({ dialogs: '${policy}' })` });
     } catch {
       // The harness's sink never fails a page event.
     }

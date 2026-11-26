@@ -78,8 +78,8 @@ describe('web({ dialogs })', () => {
     // The report keeps what each dialog the policy answered said; a handler's answer is the test's own.
     const logged = (title: string) => (resultByTitle(outcome, title).attempts[0]?.appLog ?? []).filter((entry) => entry.source === 'system').map((entry) => entry.text);
     expect(logged('answers dialogs no handler takes')).toEqual([
-      `confirm dialog "Delete?" answered with web({ dialogs: '${policy}' })`,
-      `prompt dialog "Name?" answered with web({ dialogs: '${policy}' })`,
+      `confirm dialog "Delete?" opened; ${policy === 'accept' ? 'accepting' : 'dismissing'} it per web({ dialogs: '${policy}' })`,
+      `prompt dialog "Name?" opened; ${policy === 'accept' ? 'accepting' : 'dismissing'} it per web({ dialogs: '${policy}' })`,
     ]);
     expect(logged('a handler the test registers comes first')).toEqual([]);
   }, 120_000);

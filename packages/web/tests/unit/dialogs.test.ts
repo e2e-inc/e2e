@@ -131,7 +131,7 @@ describe('DialogRouter', () => {
     expect(appLog).toHaveBeenCalledExactlyOnceWith({
       source: 'system',
       level: 'info',
-      text: `alert dialog "Could not save" answered with web({ dialogs: 'dismiss' })`,
+      text: `alert dialog "Could not save" opened; dismissing it per web({ dialogs: 'dismiss' })`,
     });
 
     router.add('accept');
