@@ -14,6 +14,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { ConfigurationError } from '@e2e-dev/core/engine';
 import type {
   EngineAppInfo,
   EngineAttemptContext,
@@ -38,7 +39,7 @@ import { screenshotFile, screenshotName, withPixels } from './capture.ts';
 import { DevTools } from './devtools.ts';
 import type { ElectronMainModule } from './electron.ts';
 import { invalidState, notActionable } from './errors.ts';
-import { describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
+import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
 import { bounded } from './input-gate.ts';
 import { locateIn, projectRead, readWindow, type ProjectionContext } from './locate.ts';
 import type { ResolvedElectronOptions } from './options.ts';
@@ -70,7 +71,10 @@ export class ElectronSurface {
 
   doctor(info: EngineDoctorInfo): Promise<readonly EngineDoctorCheck[]> {
     const executable = describeExecutable(info.projectRoot, this.options.executablePath);
-    return Promise.resolve([{ id: 'electron', status: executable.status, message: executable.message }]);
+    const checks: EngineDoctorCheck[] = [{ id: 'electron', status: executable.status, message: executable.message }];
+    const problem = info.app.appPath === undefined ? undefined : appPathProblem(info.projectRoot, info.app.appPath);
+    if (problem !== undefined) checks.push({ id: 'electron-app', status: 'fail', message: problem });
+    return Promise.resolve(checks);
   }
 
   async init(info: EngineInitInfo): Promise<void> {
@@ -78,6 +82,9 @@ export class ElectronSurface {
     this.appInfo = info.app;
     this.runEnv = info.env;
     this.executable = await resolveExecutable(info.projectRoot, this.options.executablePath);
+    // Checked once here, so a wrong path is one error rather than every test's launch failing.
+    const problem = info.app.appPath === undefined ? undefined : appPathProblem(info.projectRoot, info.app.appPath);
+    if (problem !== undefined) throw new ConfigurationError('INVALID_CONFIG', problem);
   }
 
   startAttempt(context: EngineAttemptContext): Promise<void> {

@@ -18,6 +18,8 @@ interface ElectronPackage {
   /** The binary's path, read from the package's `path.txt`; undefined before the binary is downloaded. */
   readonly binary: string | undefined;
   readonly version: string;
+  /** Where `ELECTRON_OVERRIDE_DIST_PATH` says the binary is, when it is set: no download can fill that directory. */
+  readonly override?: string;
 }
 
 /** The project's `electron` package, or undefined when the project has none. */
@@ -35,8 +37,20 @@ function electronPackage(projectRoot: string): ElectronPackage | undefined {
   const relative = existsSync(pathFile) ? readFileSync(pathFile, 'utf8').trim() : '';
   // Electron's own index.js takes the binary from ELECTRON_OVERRIDE_DIST_PATH when it is set (a build of your own, Nix).
   const override = process.env['ELECTRON_OVERRIDE_DIST_PATH'];
-  const binary = override !== undefined && override !== '' ? path.join(override, relative === '' ? 'electron' : relative) : relative === '' ? undefined : path.join(directory, 'dist', relative);
-  return { directory, binary: binary !== undefined && existsSync(binary) ? binary : undefined, version };
+  const overridden = override !== undefined && override !== '';
+  const binary = overridden ? path.join(override, relative === '' ? 'electron' : relative) : relative === '' ? undefined : path.join(directory, 'dist', relative);
+  return { directory, binary: binary !== undefined && existsSync(binary) ? binary : undefined, version, ...(overridden && binary !== undefined ? { override: binary } : {}) };
+}
+
+/** A missing binary where `ELECTRON_OVERRIDE_DIST_PATH` points: the variable is wrong, and downloading would not help. */
+function overrideMissing(binary: string): ConfigurationError {
+  return new ConfigurationError('INVALID_CONFIG', `ELECTRON_OVERRIDE_DIST_PATH names the directory of the Electron binary, and none is at ${binary}; fix the variable or unset it`);
+}
+
+/** An `executablePath` that names no executable file, with the fix for the common case: a macOS `.app` bundle. */
+function notExecutable(resolved: string): ConfigurationError {
+  const bundle = /\.app\/?$/.test(resolved) ? `; a macOS app runs as the binary inside its bundle, ${path.join(resolved, 'Contents', 'MacOS', path.basename(resolved, '.app'))}` : '';
+  return new ConfigurationError('INVALID_CONFIG', `electron({ executablePath }) names ${resolved}, which is not an executable file${bundle}`);
 }
 
 /**
@@ -66,11 +80,12 @@ function notInstalled(projectRoot: string): ConfigurationError {
 export async function resolveExecutable(projectRoot: string, executablePath: string | undefined): Promise<string> {
   if (executablePath !== undefined) {
     const resolved = path.resolve(projectRoot, executablePath);
-    if (!isExecutableFile(resolved)) throw new ConfigurationError('INVALID_CONFIG', `electron({ executablePath }) names ${resolved}, which is not an executable file`);
+    if (!isExecutableFile(resolved)) throw notExecutable(resolved);
     return resolved;
   }
   const installed = electronPackage(projectRoot);
   if (installed === undefined) throw notInstalled(projectRoot);
+  if (installed.binary === undefined && installed.override !== undefined) throw overrideMissing(installed.override);
   if (installed.binary === undefined) {
     throw new InfrastructureError(
       'ELECTRON_INSTALL_FAILED',
@@ -87,10 +102,16 @@ export async function resolveExecutable(projectRoot: string, executablePath: str
  * binary in place.
  */
 export async function ensureElectronBinary(projectRoot: string, executablePath: string | undefined, log: (line: string) => void, signal: AbortSignal): Promise<void> {
-  if (executablePath !== undefined) return;
+  if (executablePath !== undefined) {
+    // Checked once for the run, so a wrong path is one error rather than one per test.
+    const resolved = path.resolve(projectRoot, executablePath);
+    if (!isExecutableFile(resolved)) throw notExecutable(resolved);
+    return;
+  }
   const installed = electronPackage(projectRoot);
   if (installed === undefined) throw notInstalled(projectRoot);
   if (installed.binary !== undefined) return;
+  if (installed.override !== undefined) throw overrideMissing(installed.override);
   const script = path.join(installed.directory, 'install.js');
   if (!existsSync(script)) {
     throw new InfrastructureError('ELECTRON_INSTALL_FAILED', `electron ${installed.version} at ${installed.directory} has no binary and no install.js to download it with; reinstall the electron package`);
@@ -121,10 +142,35 @@ export function describeExecutable(projectRoot: string, executablePath: string |
     const resolved = path.resolve(projectRoot, executablePath);
     return isExecutableFile(resolved)
       ? { status: 'pass', message: `starts ${resolved}` }
-      : { status: 'fail', message: `electron({ executablePath }) names ${resolved}, which is not an executable file` };
+      : { status: 'fail', message: notExecutable(resolved).message };
   }
   const installed = electronPackage(projectRoot);
   if (installed === undefined) return { status: 'fail', message: notInstalled(projectRoot).message };
+  if (installed.binary === undefined && installed.override !== undefined) return { status: 'fail', message: overrideMissing(installed.override).message };
   if (installed.binary === undefined) return { status: 'warn', message: `electron ${installed.version} is installed without its binary; the first run downloads it` };
   return { status: 'pass', message: `electron ${installed.version} at ${installed.binary}` };
+}
+
+/**
+ * Why `app.appPath` names no app Electron can start, or undefined when it
+ * does: a main script, or a directory whose `package.json` names an existing
+ * `main` (else Electron runs its `index.js`).
+ */
+export function appPathProblem(projectRoot: string, appPath: string): string | undefined {
+  const resolved = path.resolve(projectRoot, appPath);
+  if (!existsSync(resolved)) return `app.appPath names ${resolved}, which does not exist`;
+  if (statSync(resolved).isFile()) return undefined;
+  const manifest = path.join(resolved, 'package.json');
+  let main = 'index.js';
+  if (existsSync(manifest)) {
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(manifest, 'utf8'));
+      if (typeof parsed === 'object' && parsed !== null && 'main' in parsed && typeof parsed.main === 'string' && parsed.main !== '') main = parsed.main;
+    } catch {
+      return `app.appPath names ${resolved}, whose package.json is not valid JSON`;
+    }
+  }
+  const script = path.resolve(resolved, main);
+  if (!existsSync(script) && !existsSync(`${script}.js`)) return `app.appPath names ${resolved}, and its main script ${script} does not exist; set "main" in its package.json`;
+  return undefined;
 }

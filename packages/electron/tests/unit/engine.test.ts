@@ -40,6 +40,10 @@ describe('resolveOptions', () => {
     expect(() => resolveOptions({ headless: true } as never)).toThrow(/headless/);
     expect(() => resolveOptions({ args: '--disable-gpu' } as never)).toThrow(/array of strings/);
     expect(() => resolveOptions({ args: ['--user-data-dir=/tmp/x'] })).toThrow(/--user-data-dir/);
+    // Playwright drives the app through ports of its own; a fixed one also collides between workers.
+    expect(() => resolveOptions({ args: ['--inspect=9229'] })).toThrow(/--inspect/);
+    expect(() => resolveOptions({ args: ['--remote-debugging-port=9222'] })).toThrow(/--remote-debugging-port/);
+    expect(() => resolveOptions({ env: { ELECTRON_RUN_AS_NODE: '1' } })).toThrow(/ELECTRON_RUN_AS_NODE/);
     expect(() => resolveOptions({ env: { A: 1 } } as never)).toThrow(/string value/);
     expect(() => resolveOptions({ launchTimeout: 0 })).toThrow(/launchTimeout/);
     expect(() => resolveOptions({ testIdAttribute: 'data test' })).toThrow(/testIdAttribute/);

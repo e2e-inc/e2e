@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { describeExecutable, resolveExecutable } from '../../src/executable.ts';
+import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from '../../src/executable.ts';
 
 const root = mkdtempSync(path.join(tmpdir(), 'e2e-electron-executable-'));
 mkdirSync(path.join(root, 'MyApp.app'));
@@ -32,6 +32,32 @@ describe('the project\'s electron package', () => {
       delete process.env['ELECTRON_OVERRIDE_DIST_PATH'];
     }
   });
+
+  it('names the variable, and downloads nothing, when ELECTRON_OVERRIDE_DIST_PATH points where no binary is', async () => {
+    const project = path.join(root, 'project');
+    process.env['ELECTRON_OVERRIDE_DIST_PATH'] = path.join(root, 'nowhere');
+    try {
+      await expect(resolveExecutable(project, undefined)).rejects.toThrow(/ELECTRON_OVERRIDE_DIST_PATH/);
+      await expect(ensureElectronBinary(project, undefined, () => undefined, new AbortController().signal)).rejects.toThrow(/ELECTRON_OVERRIDE_DIST_PATH/);
+      expect(describeExecutable(project, undefined)).toMatchObject({ status: 'fail', message: expect.stringContaining('ELECTRON_OVERRIDE_DIST_PATH') });
+    } finally {
+      delete process.env['ELECTRON_OVERRIDE_DIST_PATH'];
+    }
+  });
+});
+
+describe('app.appPath', () => {
+  it('takes a main script, or a directory whose main script exists, and says what is wrong otherwise', () => {
+    const app = path.join(root, 'app');
+    mkdirSync(path.join(app, 'no-main'), { recursive: true });
+    writeFileSync(path.join(app, 'main.cjs'), '');
+    writeFileSync(path.join(app, 'package.json'), JSON.stringify({ main: 'main.cjs' }));
+    writeFileSync(path.join(app, 'no-main', 'package.json'), '{}');
+    expect(appPathProblem(root, 'app')).toBeUndefined();
+    expect(appPathProblem(root, 'app/main.cjs')).toBeUndefined();
+    expect(appPathProblem(root, 'missing')).toMatch(/does not exist/);
+    expect(appPathProblem(root, 'app/no-main')).toMatch(/index\.js does not exist/);
+  });
 });
 
 describe('executablePath', () => {
@@ -45,5 +71,8 @@ describe('executablePath', () => {
       await expect(resolveExecutable(root, name)).rejects.toThrow(/not an executable file/);
       expect(describeExecutable(root, name)).toMatchObject({ status: 'fail', message: expect.stringContaining('not an executable file') });
     }
+    await expect(resolveExecutable(root, 'MyApp.app')).rejects.toThrow(path.join(root, 'MyApp.app', 'Contents', 'MacOS', 'MyApp'));
+    // Checked once in prepare, so a wrong path is one error for the run.
+    await expect(ensureElectronBinary(root, 'missing', () => undefined, new AbortController().signal)).rejects.toThrow(/not an executable file/);
   });
 });

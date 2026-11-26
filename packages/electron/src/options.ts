@@ -59,9 +59,17 @@ export interface ResolvedElectronOptions {
 
 const DEFAULT_LAUNCH_TIMEOUT_MS = 30_000;
 
-/** Whether a launch argument sets Chromium's profile directory, which the engine owns: every attempt gets an empty one. */
-export function setsUserDataDir(argument: string): boolean {
-  return /^--user-data-dir(=|$)/.test(argument);
+/**
+ * Why the engine refuses a launch argument it owns, or undefined: Chromium's
+ * profile directory (every attempt gets an empty one), and the inspector and
+ * DevTools ports Playwright drives the app through (a fixed port would also
+ * collide between workers).
+ */
+export function ownedArgument(argument: string): string | undefined {
+  if (/^--user-data-dir(=|$)/.test(argument)) return 'must not set --user-data-dir: the engine gives every attempt an empty one of its own';
+  const port = /^(--inspect(-brk)?|--remote-debugging-port|--remote-debugging-pipe)(=|$)/.exec(argument);
+  if (port !== null) return `must not set ${port[1]}: the engine drives the app through the inspector and DevTools ports it opens itself`;
+  return undefined;
 }
 const DEFAULT_SETTLE_MS = 100;
 
@@ -85,11 +93,13 @@ export function resolveOptions(options: ElectronOptions | undefined): ResolvedEl
   if (args !== undefined && (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string'))) {
     throw new ConfigurationError('INVALID_CONFIG', 'electron({ args }) must be an array of strings');
   }
-  if (args?.some(setsUserDataDir) === true) {
-    throw new ConfigurationError('INVALID_CONFIG', 'electron({ args }) must not set --user-data-dir: the engine gives every attempt an empty one of its own');
-  }
+  const owned = args?.map(ownedArgument).find((reason) => reason !== undefined);
+  if (owned !== undefined) throw new ConfigurationError('INVALID_CONFIG', `electron({ args }) ${owned}`);
   if (env !== undefined && (typeof env !== 'object' || env === null || Array.isArray(env) || Object.values(env).some((value) => typeof value !== 'string'))) {
     throw new ConfigurationError('INVALID_CONFIG', 'electron({ env }) must be an object of variable name to string value');
+  }
+  if (env !== undefined && 'ELECTRON_RUN_AS_NODE' in env) {
+    throw new ConfigurationError('INVALID_CONFIG', 'electron({ env }) must not set ELECTRON_RUN_AS_NODE: it starts the binary as plain Node.js, which opens no window');
   }
   if (launchTimeout !== undefined && (!Number.isInteger(launchTimeout) || launchTimeout < 1)) {
     throw new ConfigurationError('INVALID_CONFIG', 'electron({ launchTimeout }) must be a whole number of milliseconds, at least 1');
