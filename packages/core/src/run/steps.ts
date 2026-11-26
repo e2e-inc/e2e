@@ -703,12 +703,14 @@ export class StepRecorder {
     const { record } = step;
     const startedMs = Date.now();
     const reading = pollReadSignal();
-    const signal = this.cutSignal(reading, options.signal);
+    const cut = this.cutAfterCallsInside(step, this.cutSignal(reading, options.signal));
     try {
       const work = this.groups.run(step, async () => body());
       // A body waiting on something that is no step would never end it.
-      return await (signal === undefined ? work : withAbort(work, signal, () => new TestError('CANCELLED', `${record.api} cancelled`)));
+      return await (cut === undefined ? work : withAbort(work, cut.signal, () => new TestError('CANCELLED', `${record.api} cancelled`)));
     } catch (thrown) {
+      // The body may have set a provider key since the step started, and quote it in what it threw.
+      registerProviderKeys(process.env);
       if (step.abandoned || reading?.aborted === true) markAbandonedRejection(thrown);
       if (step.abandoned) throw thrown;
       if (options.passesThrough?.(thrown) !== true) {
@@ -719,12 +721,34 @@ export class StepRecorder {
       step.group?.rethrown?.add(thrown);
       throw thrown;
     } finally {
+      cut?.release();
       this.active.delete(record.id);
       if (!step.abandoned) {
         record.durationMs = Date.now() - startedMs;
         this.publishEnd(record);
       }
     }
+  }
+
+  /**
+   * A signal that follows `signal` once the steps running inside `group` have
+   * ended. Their engine calls are cut by the same abort, and each keeps its
+   * own outcome: a `test.step` that ended first would leave them running
+   * past the body, to be recorded as not awaited.
+   */
+  private cutAfterCallsInside(group: ActiveStep, signal: AbortSignal | undefined): { readonly signal: AbortSignal; release(): void } | undefined {
+    if (signal === undefined) return undefined;
+    const after = new AbortController();
+    const cut = (): void => {
+      const inside = [...this.active.values()].filter((running) => {
+        for (let around = running.group; around !== undefined; around = around.group) if (around === group) return true;
+        return false;
+      });
+      void Promise.allSettled(inside.map((running) => running.pending)).then(() => after.abort(signal.reason));
+    };
+    if (signal.aborted) cut();
+    else signal.addEventListener('abort', cut, { once: true });
+    return { signal: after.signal, release: () => signal.removeEventListener('abort', cut) };
   }
 
   /**

@@ -107,3 +107,58 @@ describe('test.step in a run', () => {
     expect(tap).toMatchObject({ parent: group.index, status: 'failed', error: { code: 'LOCATOR_NOT_FOUND' } });
   });
 });
+
+const TIMEOUTS = `import { test } from '@e2e-dev/web';
+
+test('times out in a call', { timeout: 1000 }, async ({ app, screen }) => {
+  await app.open();
+  await test.step('Wait for a missing button', async () => {
+    await screen.getByRole('button', 'No such button').waitFor({ timeout: 60000 });
+  });
+});
+
+test('times out, then steps late', { timeout: 1000 }, async ({ app }) => {
+  await app.open();
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  await test.step('Late', () => new Promise((resolve) => setTimeout(resolve, 200)));
+});
+
+test('runs next', async ({ app, screen }) => {
+  await app.open();
+  await screen.getByRole('heading').first().waitFor();
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+});
+`;
+
+describe('test.step around a test timeout', () => {
+  let app: FixtureApp;
+  let outcome: RunOutcome;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    ({ outcome, project } = await runProject({ 'tests/timeouts.e2e.ts': TIMEOUTS }, { appUrl: app.url }));
+  });
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  const steps = (title: string) => resultByTitle(outcome, title).attempts[0]!.steps.map((step) => [step.api, step.status, step.error?.code]);
+
+  it('cuts the call running in a step as the timeout cuts any call, not as one the test did not await', () => {
+    expect(resultByTitle(outcome, 'times out in a call').status).toBe('timed-out');
+    expect(steps('times out in a call').slice(1)).toEqual([
+      ['test.step', 'cancelled', 'CANCELLED'],
+      ['locator.waitFor', 'cancelled', 'CANCELLED'],
+    ]);
+  });
+
+  it('keeps a step a timed-out body calls later out of the test that runs then', () => {
+    expect(resultByTitle(outcome, 'times out, then steps late').status).toBe('timed-out');
+    const next = resultByTitle(outcome, 'runs next');
+    expect(next.status, JSON.stringify(next.attempts.at(-1)?.error)).toBe('passed');
+    expect(steps('runs next').map(([api]) => api)).toEqual(['app.open', 'locator.waitFor']);
+  });
+});

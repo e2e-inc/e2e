@@ -6,6 +6,7 @@ import { TestError } from '@e2e-dev/core/lib/internal/errors';
 import { runTestStep } from '@e2e-dev/core/lib/internal/test-step';
 import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import { Deadline } from '@e2e-dev/core/lib/internal/time';
+import { processSecrets } from '@e2e-dev/core/lib/run/secrecy';
 import { StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
 
 const tap = (steps: StepRecorder, label: string, body: () => Promise<void> = async () => {}): Promise<void> => steps.run('locator', 'locator.tap', label, body);
@@ -98,6 +99,26 @@ describe('StepRecorder.group', () => {
     const steps = new StepRecorder('a', { redact: (text) => text.replaceAll('hunter2', '[redacted]') });
     await steps.group('Log in with hunter2', async () => {});
     expect(steps.all()[0]!.label).toBe('Log in with [redacted]');
+  });
+
+  it('redacts a provider key its body set and then quoted in the error it threw', async () => {
+    const key = 'sk-step-body-4c1e9a7f2b6d8035e1';
+    const steps = new StepRecorder('a', { redact: processSecrets.redact });
+    const before = process.env.OPENAI_API_KEY;
+    try {
+      await steps
+        .group('Call the provider', () => {
+          process.env.OPENAI_API_KEY = key;
+          throw new Error(`request failed with key ${key}`);
+        })
+        .catch(() => undefined);
+    } finally {
+      if (before === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = before;
+    }
+    const error = steps.all()[0]!.error!;
+    expect(JSON.stringify(error)).not.toContain(key);
+    expect(error.message).toContain('request failed with key');
   });
 
   it('tells reporters which test.step a step runs inside', async () => {
@@ -222,6 +243,22 @@ describe('StepRecorder.group', () => {
     phase.abort();
     expect(await pending).toMatchObject({ code: 'CANCELLED' });
     expect(steps.all()[0]).toMatchObject({ status: 'cancelled' });
+  });
+
+  it('ends after the call the attempt cut inside it, so the call is cancelled and not left running', async () => {
+    const cut = new AbortController();
+    const steps = new StepRecorder('a');
+    let endCall = (): void => {};
+    const pending = steps
+      .group('Log in', () => tap(steps, 'button', () => new Promise<void>((_, reject) => { endCall = () => reject(new TestError('CANCELLED', 'the engine cut the call')); })), { signal: cut.signal })
+      .catch((error: unknown) => error);
+    cut.abort();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(steps.busy).toBe(true);
+    endCall();
+    expect(await pending).toMatchObject({ code: 'CANCELLED' });
+    expect(steps.all().map((step) => [step.label, step.status])).toEqual([['Log in', 'cancelled'], ['button', 'cancelled']]);
+    expect(steps.abandonRunning()).toBeUndefined();
   });
 
   it('stays the parent of a held call the test returned before releasing', async () => {
