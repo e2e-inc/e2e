@@ -779,6 +779,10 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
     focus(&entry.element, deadline)?;
     let route = if physical {
         raise(entry.pid, &window).map_err(Failure::delivered)?;
+        // Coming forward can open a sheet that takes focus from the field: the real keyboard would then type into it.
+        if Element::application(entry.pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element) {
+            return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the field lost keyboard focus as its window came forward, so nothing was typed"));
+        }
         Route::Physical
     } else {
         Route::Process(entry.pid)
