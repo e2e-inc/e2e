@@ -34,14 +34,15 @@ export async function withPixels(devtools: DevTools, raw: RawRead, snapshot: Eng
   const masked = await masks.count();
   if (unmaskableCount(raw.document, raw.strings) > 0) return { ...snapshot, maskedRegionCount: masked };
   const pixels = await capturePixels(devtools, window, masks);
-  // The app may have rendered such an element while the capture ran: read the document again before the pixels go out.
-  if ((await unmaskable(devtools, window)) > 0) return { ...snapshot, maskedRegionCount: masked };
+  // The app may have rendered such an element while the capture ran, inside a closed shadow root or beside the masks
+  // already placed: read the document again before the pixels go out.
+  if ((await unmaskable(devtools, window)) > 0 || (await masks.count()) > masked) return { ...snapshot, maskedRegionCount: masked };
   return { ...snapshot, pixels, maskedRegionCount: masked };
 }
 
 /** A CSS-scale screenshot of the window with the masks painted over. */
 async function capturePixels(devtools: DevTools, window: AppWindow, masks: Locator): Promise<ObservationPixels> {
-  const data = new Uint8Array(await window.page.screenshot({ scale: 'css', mask: [masks], maskColor: '#000000', caret: 'hide' }));
+  const data = new Uint8Array(await window.page.screenshot({ scale: 'css', mask: [masks], maskColor: '#000000', caret: 'hide', animations: 'disabled' }));
   const { width: css } = await devtools.evaluate(window.page, viewportSize);
   const size = readPngSize(data);
   if (size === undefined) throw new Error('the window capture is not a PNG');
@@ -64,10 +65,16 @@ export async function screenshotFile(devtools: DevTools, window: AppWindow, arti
     );
   const before = await unmaskable(devtools, window);
   if (before > 0) throw withheld(before);
-  const image = await window.page.screenshot({ mask: [window.page.locator(MASKED_SELECTOR)], maskColor: '#000000', caret: 'hide' });
+  const masks = window.page.locator(MASKED_SELECTOR);
+  const masked = await masks.count();
+  // Animations stopped, so a moving field stays under the mask measured for it.
+  const image = await window.page.screenshot({ mask: [masks], maskColor: '#000000', caret: 'hide', animations: 'disabled' });
   // The app may have rendered such an element while the capture ran: the file is written only once the document still has none.
   const after = await unmaskable(devtools, window);
   if (after > 0) throw withheld(after);
+  if ((await masks.count()) > masked) {
+    throw new ConfigurationError('POLICY_DENIED', 'a password field or nested document appeared while the screenshot was taken, after its masks were placed, so the screenshot is withheld');
+  }
   mkdirSync(path.dirname(absolute), { recursive: true });
   writeFileSync(absolute, image);
   return relative;
