@@ -1242,8 +1242,9 @@ pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: I
     };
     guarded(input_id, deadline, || {
         // A point another window or app already covers is refused before the move, which would reach that window: nothing
-        // is sent. The check after the move is for one that opens meanwhile.
-        if let Some(target) = target {
+        // is sent. The check after the move is for one that opens meanwhile. A hover clicks nothing, and is checked by
+        // neither, as the checks are about where a click lands.
+        if let Some(target) = target.filter(|_| matches!(action, Pointer::Click { .. })) {
             go("pointer")?;
             window_takes_point(target, x, y)?;
         }
