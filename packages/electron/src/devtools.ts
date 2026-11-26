@@ -48,6 +48,12 @@ export class DevTools {
     this.worlds.delete(page);
   }
 
+  /** Drops the window's session and world: its renderer crashed, and a call pending on them would never settle. */
+  forget(page: Page): void {
+    this.sessions.delete(page);
+    this.worlds.delete(page);
+  }
+
   /** The execution context of the engine's isolated world in the window's main frame, made once per document. */
   private world(page: Page): Promise<number> {
     let world = this.worlds.get(page);

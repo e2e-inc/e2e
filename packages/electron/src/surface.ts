@@ -14,7 +14,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ConfigurationError } from '@e2e-dev/core/engine';
+import { ConfigurationError, Deadline, withTimeout } from '@e2e-dev/core/engine';
 import type {
   EngineAppInfo,
   EngineAttemptContext,
@@ -40,12 +40,16 @@ import { DevTools } from './devtools.ts';
 import type { ElectronMainModule } from './electron.ts';
 import { closedWindow, invalidState, notActionable } from './errors.ts';
 import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
-import { bounded } from './input-gate.ts';
+import { bounded, waitDeadline } from './input-gate.ts';
 import { locateIn, projectRead, readWindow, type ProjectionContext, type RawRead } from './locate.ts';
 import type { ResolvedElectronOptions } from './options.ts';
 import { ROOT_ID, Windows, type AppWindow, type ElectronWindow, type WindowMatcher } from './windows.ts';
 
 export type { ElectronWindow, WindowMatcher } from './windows.ts';
+
+function crashed(): Error {
+  return invalidState('the window\'s renderer crashed: reload it from the main process with electron.evaluate, or restart the app');
+}
 
 export class ElectronSurface {
   private projectRoot = process.cwd();
@@ -145,24 +149,39 @@ export class ElectronSurface {
   /**
    * Reads the shown window. A window can close between being picked and being
    * read, before its close event arrives: it is discarded and the window shown
-   * in its place is read. Undefined when no window is open.
+   * in its place is read. A window whose renderer crashed answers nothing: the
+   * read waits, until `deadline`, for the app to load it again, then says it
+   * crashed. Undefined when no window is open.
    */
-  private async readShown(): Promise<RawRead | undefined> {
+  private async readShown(deadline: Deadline): Promise<RawRead | undefined> {
     for (;;) {
       const window = this.windowList.current();
       if (window === undefined) return undefined;
+      if (this.windowList.isCrashed(window)) {
+        await withTimeout(new Promise<void>((resolve) => window.page.once('load', () => resolve())), Math.max(1, deadline.remaining()), () => crashed()).catch(() => undefined);
+        if (this.windowList.isCrashed(window)) throw crashed();
+      }
+      // A read the renderer's crash leaves pending would never settle: the crash ends it, and the next pass waits.
+      let onCrash: (() => void) | undefined;
+      const crash = new Promise<'crashed'>((resolve) => {
+        onCrash = () => resolve('crashed');
+        window.page.once('crash', onCrash);
+      });
       try {
-        return await readWindow(this.devtools, window);
+        const raw = await Promise.race([readWindow(this.devtools, window), crash]);
+        if (raw !== 'crashed') return raw;
       } catch (cause) {
         if (!window.page.isClosed() && !closedWindow(cause)) throw cause;
         this.windowList.discard(window.page);
+      } finally {
+        if (onCrash !== undefined) window.page.off('crash', onCrash);
       }
     }
   }
 
   async observe(operation: OperationContext, options?: EngineObserveOptions): Promise<EngineSnapshot> {
     return await bounded(operation, 'observe', false, async () => {
-      const raw = await this.readShown();
+      const raw = await this.readShown(waitDeadline(operation));
       if (raw === undefined) return { root: { ref: { id: ROOT_ID, revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } };
       const snapshot = projectRead(raw, 'tree', this.projection());
       return options?.pixels === true ? await withPixels(this.devtools, raw, snapshot) : snapshot;
@@ -173,7 +192,7 @@ export class ElectronSurface {
     // An app that is not running has nothing to find, ever: say so rather than let the locator wait out its timeout.
     if (this.app.running === undefined) throw invalidState('the app is not running: open it with app.open()');
     return await bounded(operation, 'locate', false, async () => {
-      const raw = await this.readShown();
+      const raw = await this.readShown(waitDeadline(operation));
       if (raw === undefined) return [];
       const sink = this.attempt?.screen;
       if (sink !== undefined) {
@@ -185,6 +204,21 @@ export class ElectronSurface {
       }
       return await locateIn(this.devtools, raw, expression, this.projection());
     });
+  }
+
+  /**
+   * Hands the trace the screen an action left, as `locate` hands it the one
+   * it matched against: bounded to a second, and never failing the action.
+   */
+  private async traceScreen(): Promise<void> {
+    const sink = this.attempt?.screen;
+    if (sink === undefined) return;
+    try {
+      const raw = await withTimeout(this.readShown(new Deadline(0)), 1_000, () => new Error('the read took too long'));
+      if (raw !== undefined) sink(projectRead(raw, 'tree', this.projection()));
+    } catch {
+      // The trace is evidence; a read that fails or a sink that throws never fails the step.
+    }
   }
 
   // --- acting ---
@@ -203,22 +237,27 @@ export class ElectronSurface {
       if (action.kind === 'scrollIntoView') return;
       if (action.kind !== 'swipe') throw notActionable(`the window takes swipe and scrollIntoView only, not ${action.kind}; act on a node`);
       await swipeWindow(this.actions(), window, action, operation);
+      await this.traceScreen();
       return;
     }
     const { window, backendNodeId } = this.windowList.bind(ref);
     await performOnNode(this.actions(), window, backendNodeId, action, operation);
+    await this.traceScreen();
   }
 
   async performAt(point: ViewportPoint, action: PointerAction, operation: OperationContext): Promise<void> {
     await performAtPoint(this.actions(), this.requireWindow(), point, action, operation);
+    await this.traceScreen();
   }
 
   async typeText(text: string, options: { readonly replace: boolean }, operation: OperationContext): Promise<void> {
     await typeText(this.actions(), this.requireWindow(), text, options.replace, operation);
+    await this.traceScreen();
   }
 
   async pressKey(key: string, operation: OperationContext): Promise<void> {
     await pressKey(this.actions(), this.requireWindow(), key, operation);
+    await this.traceScreen();
   }
 
   // --- windows as tabs ---

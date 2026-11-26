@@ -10,7 +10,7 @@ import { Deadline, EngineError, raceAbort, TestError, withTimeout, type EngineAp
 import type { DevTools } from './devtools.ts';
 import { waitDeadline } from './input-gate.ts';
 import type { ElectronMainModule } from './electron.ts';
-import { invalidState } from './errors.ts';
+import { closedWindow, invalidState } from './errors.ts';
 import type { ResolvedElectronOptions } from './options.ts';
 import type { Windows } from './windows.ts';
 
@@ -104,14 +104,13 @@ export class AppProcess {
       // A launch the caller stopped waiting for still finishes: the app it starts is closed, or it would outlive the test.
       void launching.then((late) => late.close().catch(() => late.process().kill('SIGKILL')), () => undefined);
       if (cause instanceof EngineError) throw cause;
+      // The app exiting while Playwright attached is the app's doing, as one that quits before its first window is.
+      if (closedWindow(cause)) throw new EngineError('INVALID_STATE', `the app quit while it was launching: ${launchFailure(cause)}`, { retryable: false, cause });
       throw new EngineError('ENGINE_FAILURE', `could not launch ${setup.executable}${appPath === undefined ? '' : ` with ${appPath}`}: ${launchFailure(cause)}`, { retryable: false, cause });
     }
     this.app = app;
     this.attempt = setup.attempt;
     let quit = false;
-    app.process().stderr?.on('data', (chunk: Buffer) => {
-      for (const line of chunk.toString('utf8').split(/\r?\n/)) if (line.trim() !== '') this.attempt?.appLog({ source: 'console', level: 'warning', text: `[main stderr] ${line}` });
-    });
     app.on('window', (page) => this.track(app, page));
     app.on('console', (message) => this.attempt?.appLog({ source: 'console', level: levelOf(message.type()), text: `[main] ${message.text()}` }));
     app.on('close', () => {
@@ -123,15 +122,38 @@ export class AppProcess {
       }
     });
     for (const page of app.windows()) this.track(app, page);
+    // Downloads go to the attempt's own directory, never the user's: Electron saves one without asking in a hidden window.
+    await withTimeout(
+      app.evaluate(({ app: main, session }, directory) => {
+        main.setPath('downloads', directory);
+        // The session's path is read when it starts, which may be before this runs: each download is placed explicitly.
+        const place = (target: Electron.Session): void => {
+          target.on('will-download', (_event, item) => item.setSavePath(`${directory}/${item.getFilename()}`));
+        };
+        place(session.defaultSession);
+        main.on('session-created', place);
+      }, path.join(setup.userDataDir, 'Downloads')),
+      Math.min(left(), 2_000),
+      () => new Error('no time left to set the downloads directory'),
+    ).catch(() => undefined);
     try {
       const first = await raceAbort(() => app.firstWindow({ timeout: left() }), operation.signal, 'waiting for the first window');
       this.track(app, first);
       await raceAbort(() => first.waitForLoadState('domcontentloaded', { timeout: left() }), operation.signal, 'waiting for the first window to load');
     } catch (cause) {
+      // Read before the engine's own quit, whose close event would say the app quit.
+      const exited = quit;
+      // Electron can stall before its ready event on a loaded machine; say so rather than blame the app's window.
+      const ready = exited ? undefined : await withTimeout(app.evaluate(({ app: main }) => main.isReady()), 500, () => new Error('no answer')).catch(() => undefined);
       await this.quit({ timeoutMs: 5_000 }, DISCARD_CLOSE_MS);
       if (cause instanceof EngineError) throw cause;
       // Not OPERATION_TIMEOUT, whose message the harness replaces: this one says what the app did.
-      throw new EngineError('INVALID_STATE', quit ? 'the app quit before it opened a window' : `the app opened no window within ${timeout}ms`, { retryable: false, cause });
+      const message = exited
+        ? 'the app quit before it opened a window'
+        : ready === false
+          ? `Electron did not become ready within ${timeout}ms (its ready event never fired), so the app opened no window`
+          : `the app opened no window within ${timeout}ms`;
+      throw new EngineError('INVALID_STATE', message, { retryable: false, cause });
     }
     try {
       const versions = await withTimeout(
@@ -179,6 +201,13 @@ export class AppProcess {
       this.attempt?.appLog({ source: 'error', level: 'error', text: `unhandled ${dialog.type()} dialog dismissed: ${dialog.message()}` });
       void dialog.dismiss().catch(() => undefined);
     });
+    // A crashed renderer answers nothing: the window's session and world are dropped, and reads say so until it reloads.
+    page.on('crash', () => {
+      this.windows.markCrashed(page);
+      this.devtools.forget(page);
+      this.attempt?.appLog({ source: 'error', level: 'error', text: 'a window\'s renderer crashed' });
+    });
+    page.on('load', () => this.windows.markLoaded(page));
     page.on('framenavigated', (frame) => {
       if (frame !== page.mainFrame()) return;
       this.devtools.forgetWorld(page);
@@ -195,10 +224,11 @@ export class AppProcess {
 function launchFailure(cause: unknown): string {
   if (!(cause instanceof Error)) return String(cause);
   const [first = '', ...rest] = cause.message.split('\n');
-  const output = rest.flatMap((line) => {
+  // Playwright logs a line once per listener; each is kept once, in order.
+  const output = [...new Set(rest.flatMap((line) => {
     const match = /\[err\]\s?(.*)$/.exec(line);
     return match?.[1] !== undefined && match[1].trim() !== '' ? [match[1].trim()] : [];
-  });
+  }))];
   return output.length === 0 ? first : `${first} The app wrote to stderr:\n${output.slice(-10).join('\n')}`;
 }
 

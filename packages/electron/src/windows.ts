@@ -41,6 +41,7 @@ export class Windows {
   /** The windows shown before the current one, oldest first: closing the shown window goes back to the latest still open. */
   private history: AppWindow[] = [];
   private nextSerial = 1;
+  private readonly crashed = new Set<Page>();
 
   /** Registers a page the app opened, once; undefined when it is already known or closed. Its node ids get a serial of their own. */
   add(page: Page): AppWindow | undefined {
@@ -62,8 +63,22 @@ export class Windows {
     if (window !== undefined && this.shown === window) this.shown = this.fallback();
   }
 
+  /** Marks a window whose renderer crashed, until it loads a page again. */
+  markCrashed(page: Page): void {
+    this.crashed.add(page);
+  }
+
+  markLoaded(page: Page): void {
+    this.crashed.delete(page);
+  }
+
+  isCrashed(window: AppWindow): boolean {
+    return this.crashed.has(window.page);
+  }
+
   /** Forgets every window: the app quit. */
   clear(): void {
+    this.crashed.clear();
     this.byPage.clear();
     this.shown = undefined;
     this.history = [];
