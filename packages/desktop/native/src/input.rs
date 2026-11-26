@@ -32,8 +32,9 @@ impl TypingRun {
         if let Some(id) = id {
             let mut guard = TYPING.lock().unwrap_or_else(PoisonError::into_inner);
             let runs = guard.get_or_insert_with(HashMap::new);
-            // A cancel that came after its run ended left a mark; ids only grow, so marks far behind this one go.
-            runs.retain(|other, _| id.wrapping_sub(*other) < STALE_IDS);
+            // A cancel that came after its run ended left a mark; ids only grow, so marks far behind this one go. A newer id
+            // stays whatever order the runs start in: its cancel may have come before it started.
+            runs.retain(|other, _| *other >= id || id - *other < STALE_IDS);
             runs.entry(id).or_insert(false);
         }
         TypingRun(id)
@@ -373,7 +374,7 @@ pub fn pointer(x: f64, y: f64, action: Pointer) -> Outcome<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CHUNK_UNITS, Piece, parse_combo, pieces};
+    use super::{CHUNK_UNITS, Piece, TypingRun, cancel_typing, parse_combo, pieces};
     use core_graphics::event::CGEventFlags;
 
     fn text(units: &Piece) -> String {
@@ -417,6 +418,15 @@ mod tests {
             assert_eq!(parsed.key.character, typed, "{combo}");
         }
         assert!(parse_combo("shift+a").unwrap().flags.contains(CGEventFlags::CGEventFlagShift));
+    }
+
+    #[test]
+    fn keeps_a_cancel_that_came_before_its_run_while_an_older_run_starts() {
+        cancel_typing(1_000_021);
+        let older = TypingRun::start(Some(1_000_020));
+        let cancelled = TypingRun::start(Some(1_000_021));
+        assert!(!older.cancelled());
+        assert!(cancelled.cancelled());
     }
 
     #[test]
