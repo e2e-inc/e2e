@@ -254,8 +254,10 @@ fn expanded(role: &str, expanded: Option<bool>, toggle: Option<u8>) -> bool {
 
 /// Whether a node shows as selected. A menu reports its highlighted item as selected: that is where the pointer is, not
 /// a choice.
-fn selected(role: &str, selected: Option<bool>) -> bool {
-    selected == Some(true) && role != "menuitem"
+fn selected(role: &str, selected: Option<bool>, toggle: Option<u8>) -> bool {
+    // An AppKit tab (an AXRadioButton with the AXTabButton subrole) says it is the active one by its value, as a radio
+    // button says it is checked.
+    (selected == Some(true) && role != "menuitem") || (role == "tab" && toggle == Some(1))
 }
 
 /// The state a box's value shows: off, on, or mixed, from a number, a boolean, or the words toolkits use.
@@ -534,7 +536,7 @@ impl Walk {
                 _ => {}
             }
         }
-        if selected(role, read.selected) {
+        if selected(role, read.selected, toggle) {
             states.push("selected");
         }
         if role == "button" && toggle == Some(1) && read.subrole.as_deref() == Some("AXToggleButton") {
@@ -722,8 +724,12 @@ mod tests {
         assert!(!expanded("disclosure", None, Some(0)));
         assert!(!expanded("checkbox", None, Some(1)));
         assert!(expanded("treeitem", Some(true), None));
-        assert!(!selected("menuitem", Some(true)));
-        assert!(selected("row", Some(true)));
+        assert!(!selected("menuitem", Some(true), None));
+        assert!(selected("row", Some(true), None));
+        // An AppKit tab is the active one by its value, and no other role is selected by it.
+        assert!(selected("tab", None, Some(1)));
+        assert!(!selected("tab", None, Some(0)));
+        assert!(!selected("radiobutton", None, Some(1)));
     }
 
     #[test]
