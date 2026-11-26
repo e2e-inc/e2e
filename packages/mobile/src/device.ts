@@ -413,7 +413,7 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async pressButton(button) {
       requireHardwareButton(button);
       const input = surface.inputBudget('device.pressButton', { timeoutMs: context.timeouts.action, signal: context.signal });
-      await surface.screenCommand('device.pressButton', (client) => input.send(() => pressButton(client, button, surface.selection())), context.signal);
+      await surface.screenCommand('device.pressButton', (client) => input.send((signal) => pressButton(client, button, surface.selection(), signal)), context.signal);
     },
     async shake() {
       await surface.screenCommand('device.shake', (client) => client.command.shake(surface.selection()), context.signal);

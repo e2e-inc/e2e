@@ -27,9 +27,14 @@ export type HardwareButton = keyof typeof HARDWARE_BUTTONS;
 /** Every hardware button, in the order the docs list them. */
 const HARDWARE_BUTTON_NAMES = Object.keys(HARDWARE_BUTTONS) as [HardwareButton, ...HardwareButton[]];
 
-/** Presses one hardware button on the selected device. */
-export function pressButton(client: AgentDeviceClient, button: HardwareButton, selection: DeviceSelection): Promise<unknown> {
-  return client.command.hardwareButton({ ...selection, button: HARDWARE_BUTTONS[button] });
+/**
+ * Presses one hardware button on the selected device. The press takes the
+ * input budget's signal, so a press still pending at the action timeout is
+ * cancelled rather than landing after the test moved on (a late `power`
+ * turns the screen off).
+ */
+export function pressButton(client: AgentDeviceClient, button: HardwareButton, selection: DeviceSelection, signal: AbortSignal): Promise<unknown> {
+  return client.command.hardwareButton({ ...selection, button: HARDWARE_BUTTONS[button], signal });
 }
 
 /** Throws `INVALID_ARGUMENT` unless `button` is one of the hardware buttons. */
