@@ -33,7 +33,7 @@ export async function readWindow(devtools: DevTools, window: AppWindow): Promise
   const session = await devtools.session(window.page);
   const [{ nodes }, snapshot, metrics] = await Promise.all([
     session.send('Accessibility.getFullAXTree'),
-    session.send('DOMSnapshot.captureSnapshot', { computedStyles: [] }),
+    session.send('DOMSnapshot.captureSnapshot', { computedStyles: ['visibility'] }),
     session.send('Page.getLayoutMetrics'),
   ]);
   const css = metrics.cssLayoutViewport;

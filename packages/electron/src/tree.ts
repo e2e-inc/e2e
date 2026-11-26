@@ -57,6 +57,8 @@ export interface SnapshotDocument {
   readonly layout: {
     readonly nodeIndex: readonly number[];
     readonly bounds: readonly (readonly number[])[];
+    /** Per layout node, the computed styles the read asked for, as string indexes: `visibility` alone. */
+    readonly styles?: readonly (readonly number[])[];
   };
 }
 
@@ -118,6 +120,11 @@ const CHROMIUM_ROLES: Readonly<Record<string, string>> = {
   Iframe: 'iframe',
   IframePresentational: 'iframe',
   DisclosureTriangle: 'button',
+  // Date, time, and color inputs, which the web reads as text fields.
+  Date: 'textbox',
+  DateTime: 'textbox',
+  InputTime: 'textbox',
+  ColorWell: 'textbox',
   Canvas: 'image',
   Video: 'generic',
   Audio: 'generic',
@@ -150,6 +157,8 @@ interface DomFacts {
   readonly selectValue?: string;
   /** Device-pixel document bounds. */
   readonly bounds?: readonly number[];
+  /** Its computed `visibility` is `hidden` or `collapse`. */
+  readonly invisible: boolean;
 }
 
 /**
@@ -207,8 +216,11 @@ function indexSnapshot(document: SnapshotDocument, strings: readonly string[]): 
   const textValues = rareStrings(document.nodes.textValue);
   const withText = nodesWithText(document, strings);
   const bounds = new Map<number, readonly number[]>();
+  const invisible = new Set<number>();
   document.layout.nodeIndex.forEach((node, at) => {
     if (!bounds.has(node)) bounds.set(node, document.layout.bounds[at]!);
+    const visibility = strings[document.layout.styles?.[at]?.[0] ?? -1];
+    if (visibility === 'hidden' || visibility === 'collapse') invisible.add(node);
   });
   const attributesOf = (index: number): Record<string, string> => {
     const pairs = attributes[index] ?? [];
@@ -226,6 +238,7 @@ function indexSnapshot(document: SnapshotDocument, strings: readonly string[]): 
       nodeName: strings[names[index]!] ?? '',
       attributes: attributesOf(index),
       hasText: withText.has(index),
+      invisible: invisible.has(index),
       ...(input === undefined ? {} : { inputValue: input }),
       ...(text === undefined ? {} : { textValue: text }),
       ...(selected === undefined ? {} : { selectValue: selected }),
@@ -311,9 +324,10 @@ function startsNewLine(previous: Draft, next: Draft): boolean {
  * The text a node reads as: its text runs, and in node mode its descendants'
  * too. Runs join as the source has them: with white space where the source had
  * some or where a block boundary falls, and with none between inline markup
- * (`<span>$</span><span>10</span>` reads `$10`).
+ * (`<span>$</span><span>10</span>` reads `$10`). Two table cells side by side
+ * read with a space between them; `cellOf` names the cell a node is in.
  */
-function textOf(draft: Draft, deep: boolean, gap: (from: number, to: number) => boolean): string {
+function textOf(draft: Draft, deep: boolean, gap: (from: number, to: number) => boolean, cellOf: (order: number) => number): string {
   const parts: Draft[] = [];
   const walk = (node: Draft): void => {
     for (const child of node.children) {
@@ -328,7 +342,7 @@ function textOf(draft: Draft, deep: boolean, gap: (from: number, to: number) => 
   let joined = '';
   parts.forEach((part, at) => {
     const previous = parts[at - 1];
-    if (previous !== undefined && (previous.spaceAfter === true || part.spaceBefore === true || gap(previous.order, part.order) || startsNewLine(previous, part))) joined += ' ';
+    if (previous !== undefined && (previous.spaceAfter === true || part.spaceBefore === true || cellOf(previous.order) !== cellOf(part.order) || gap(previous.order, part.order) || startsNewLine(previous, part))) joined += ' ';
     joined += part.text ?? '';
   });
   return collapse(joined);
@@ -356,6 +370,15 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
   const blanks: number[] = [];
   nodeTypes.forEach((type, index) => blanks.push((blanks[index - 1] ?? 0) + (type === 3 && /^\s+$/.test(strings[nodeValues[index]!] ?? '') ? 1 : 0)));
   const gap = (from: number, to: number): boolean => from >= 0 && to > from && (blanks[to - 1] ?? 0) - (blanks[from] ?? 0) > 0;
+  // Each node's nearest table cell, from the DOM: Chromium gives a layout table's cells no cell role. A parent precedes its children.
+  const nodeNames = document.nodes.nodeName ?? [];
+  const parentIndexes = document.nodes.parentIndex ?? [];
+  const cells: number[] = [];
+  nodeNames.forEach((nameIndex, index) => {
+    const name = strings[nameIndex];
+    cells.push(name === 'TD' || name === 'TH' ? index : (cells[parentIndexes[index] ?? -1] ?? -1));
+  });
+  const cellOf = (order: number): number => cells[order] ?? -1;
 
   const rectOf = (facts: DomFacts | undefined): Draft['rect'] => {
     const box = facts?.bounds;
@@ -364,18 +387,25 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
     return { x: x / geometry.scale - geometry.scrollX, y: y / geometry.scale - geometry.scrollY, width: width / geometry.scale, height: height / geometry.scale };
   };
 
-  const build = (node: AXNode): Draft[] => {
+  /**
+   * Builds a node's drafts. `selectHidden` is set inside a select: its options
+   * have no box of their own while it is closed, and are hidden only when the
+   * select is.
+   */
+  const build = (node: AXNode, selectHidden?: boolean): Draft[] => {
     if (node.ignored && node.ignoredReasons?.some((reason) => HIDING_REASONS.has(reason.name)) === true) return [];
     const chromium = stringOf(node.role) ?? '';
     if (DROPPED_ROLES.has(chromium)) return [];
-    const children = (): Draft[] => (node.childIds ?? []).flatMap((id) => {
+    const children = (inside: boolean | undefined = selectHidden): Draft[] => (node.childIds ?? []).flatMap((id) => {
       const child = byId.get(id);
-      return child === undefined ? [] : build(child);
+      return child === undefined ? [] : build(child, inside);
     });
     const backend = node.backendDOMNodeId;
     const facts = backend === undefined ? undefined : dom.get(backend);
     if (chromium === 'StaticText') {
-      const text = collapse(stringOf(node.name) ?? '');
+      // The source text, as the web reads it: Chromium's name for a run is the rendered one, `text-transform` applied.
+      const source = backend === undefined ? undefined : domValue(domIndex.get(backend));
+      const text = collapse(source ?? stringOf(node.name) ?? '');
       if (text === '' || backend === undefined) return [];
       if (kept >= maxNodes) {
         truncated = true;
@@ -384,17 +414,20 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
       kept += 1;
       const rect = rectOf(facts);
       // The white space comes from the text node's own source: Chromium's name for a run trims what the next element's run follows.
-      const source = domValue(domIndex.get(backend)) ?? stringOf(node.name) ?? '';
-      const run: Draft = { id: options.idOf(backend), text: bound(text, OBSERVED_TEXT_LIMIT, mode), states: rect === undefined || rect.width === 0 || rect.height === 0 ? { hidden: true } : {}, ...(rect === undefined ? {} : { rect }), children: [], isText: true, spaceBefore: /^\s/.test(source), spaceAfter: /\s$/.test(source), order: domIndex.get(backend) ?? -1 };
+      const spacing = source ?? stringOf(node.name) ?? '';
+      const run: Draft = { id: options.idOf(backend), text: bound(text, OBSERVED_TEXT_LIMIT, mode), states: rect === undefined || rect.width === 0 || rect.height === 0 ? { hidden: true } : {}, ...(rect === undefined ? {} : { rect }), children: [], isText: true, spaceBefore: /^\s/.test(spacing), spaceAfter: /\s$/.test(spacing), order: domIndex.get(backend) ?? -1 };
       drafted.set(backend, run);
       return [run];
     }
     const testId = facts?.attributes[testIdAttribute.toLowerCase()];
     const name = collapse(stringOf(node.name) ?? '');
-    const role = CHROMIUM_ROLES[chromium] ?? (/^[A-Z]/.test(chromium) ? 'generic' : chromium);
+    const editingHost = facts !== undefined && facts.attributes['contenteditable'] !== undefined && facts.attributes['contenteditable'].toLowerCase() !== 'false';
+    // An editing host with no role of its own is a text field, as the web reads it; Chromium gives it none.
+    const mapped = CHROMIUM_ROLES[chromium] ?? (/^[A-Z]/.test(chromium) ? 'generic' : chromium);
+    const role = editingHost && (mapped === 'generic' || GENERIC_ROLES.has(chromium)) ? 'textbox' : mapped;
     // A container Chromium leaves out, or one that says nothing, gives its place to its children: unless a test id,
     // a name, or a locator's selector makes it addressable.
-    const silent = node.ignored || GENERIC_ROLES.has(chromium) || role === 'generic';
+    const silent = node.ignored || (role !== 'textbox' && (GENERIC_ROLES.has(chromium) || role === 'generic'));
     const selected = backend !== undefined && options.keep?.has(backend) === true;
     if (silent && testId === undefined && !selected && (node.ignored || name === '')) return children();
     if (backend === undefined) return children();
@@ -463,17 +496,22 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
     if (Object.keys(shown).length > 0) draft.attributes = shown;
     const rect = rectOf(facts);
     if (rect !== undefined) draft.rect = rect;
-    if (rect === undefined || rect.width === 0 || rect.height === 0) draft.states['hidden'] = true;
+    const option = facts?.nodeName === 'OPTION' || facts?.nodeName === 'OPTGROUP' || chromium === 'MenuListPopup';
+    if (option && selectHidden !== undefined) {
+      if (selectHidden) draft.states['hidden'] = true;
+    } else if (rect === undefined || rect.width === 0 || rect.height === 0) draft.states['hidden'] = true;
     // A native field's inner editor repeats its value as text: a secure one would leak its length, any other says
     // nothing new. An editing host (contenteditable) keeps its content, which is its text.
-    draft.children = secure || facts?.nodeName === 'INPUT' || facts?.nodeName === 'TEXTAREA' ? [] : children();
+    draft.children = secure || facts?.nodeName === 'INPUT' || facts?.nodeName === 'TEXTAREA' ? [] : children(facts?.nodeName === 'SELECT' ? draft.states['hidden'] === true : selectHidden);
     // Text runs that are the node's only content are the node's text, not nodes of their own. Beside other
     // children they stay nodes, and an observation does not repeat them on the node; a locator reads all of it.
     const onlyText = draft.children.length > 0 && draft.children.every((child) => child.isText);
     if (!secure && (mode === 'node' || onlyText)) {
-      const text = textOf(draft, mode === 'node', gap);
+      const text = textOf(draft, mode === 'node', gap, cellOf);
       if (text !== '') draft.text = bound(text, OBSERVED_TEXT_LIMIT, mode);
     }
+    // A closed select's option has no text run: its text is its label, which Chromium names it by.
+    if (draft.text === undefined && facts?.nodeName === 'OPTION' && name !== '') draft.text = bound(name, OBSERVED_TEXT_LIMIT, mode);
     // A locator keeps several runs as nodes, so an exact text query finds each one (`<span>Price</span> <span>$10</span>`).
     if (onlyText && (mode === 'tree' || draft.children.length === 1)) draft.children = [];
     // What toBeEmpty reads, on a locator's read only and never on a secure field: a field by its value, anything else
@@ -510,7 +548,7 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
     // Hidden as the main path reads it, from the layout box: an inline element Chromium leaves out of the tree has one,
     // and so does what a `display: contents` wrapper holds, though the wrapper has none of its own.
     const box = facts.bounds;
-    const hidden = (box === undefined || box.length < 4 || box[2] === 0 || box[3] === 0) && ![...inside].some((at) => at !== order && rendered.has(at));
+    const hidden = facts.invisible || ((box === undefined || box.length < 4 || box[2] === 0 || box[3] === 0) && ![...inside].some((at) => at !== order && rendered.has(at)));
     const siblings = ancestorOf(order, drafted, document)?.children ?? children;
     const node: Draft = {
       id: options.idOf(backend),
@@ -533,7 +571,7 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
       if (runs.length > 0) {
         for (const run of runs) siblings.splice(siblings.indexOf(run), 1);
         node.children = runs;
-        const text = textOf(node, false, gap);
+        const text = textOf(node, false, gap, cellOf);
         if (text !== '') node.text = bound(text, OBSERVED_TEXT_LIMIT, mode);
         if (mode === 'tree' || runs.length === 1) node.children = [];
       } else {

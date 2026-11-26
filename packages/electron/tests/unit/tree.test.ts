@@ -149,10 +149,11 @@ describe('projectTree', () => {
     expect(find(root, (node) => node.role === 'checkbox').states).toMatchObject({ checked: false });
   });
 
-  it('marks nodes with no box hidden, such as the options of a closed select', () => {
-    const { root } = project('tree');
+  it('reads the options of a closed select as shown as the select, with their labels as text, as the web does', () => {
+    const { root } = project('node');
     const option = find(root, (node) => node.role === 'option' && node.name === 'Team');
-    expect(option.states?.hidden).toBe(true);
+    expect(option.states?.hidden).toBeUndefined();
+    expect(option.text).toBe('Team');
   });
 
   it('answers the contract locator semantics through resolveExpression', () => {
