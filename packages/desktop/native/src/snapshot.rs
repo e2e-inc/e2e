@@ -208,6 +208,22 @@ fn label_of(element: &Element) -> Option<String> {
     values.into_iter().flatten().find_map(|value| label(value.text().map(str::to_owned)))
 }
 
+/// The part of the screen a node's children can show in, from the node's own `clip`. What a scroll area shows is its
+/// own frame: its children outside it are scrolled out of view. An open menu and a popover float above the window, so
+/// their items are not cut by the window's frame.
+fn inner_clip(role: &str, bounds: Option<Rect>, clip: Option<Rect>) -> Option<Rect> {
+    match (role, bounds) {
+        ("scrollarea", Some(bounds)) => clip.map(|clip| intersect(clip, bounds)).or(Some(bounds)),
+        _ if floats(role) => None,
+        _ => clip,
+    }
+}
+
+/// Roles that float above their window: an open menu and a popover.
+fn floats(role: &str) -> bool {
+    matches!(role, "menu" | "popover")
+}
+
 /// Whether a node shows as expanded. A disclosure triangle shows its state as its value, and has no `AXExpanded`.
 fn expanded(role: &str, expanded: Option<bool>, toggle: Option<u8>) -> bool {
     expanded == Some(true) || (role == "disclosure" && toggle == Some(1))
@@ -474,7 +490,8 @@ impl Walk {
         if matches!(role, "textfield" | "combobox") && !actions.contains(&"SetValue") {
             states.push("readonly");
         }
-        if let (false, Some(bounds), Some(clip)) = (root, read.bounds, clip)
+        // A menu or a popover floats above the window, so the window's frame does not hide it.
+        if let (false, Some(bounds), Some(clip)) = (root || floats(role), read.bounds, clip)
             && outside(bounds, clip)
         {
             states.push("offscreen");
@@ -508,13 +525,7 @@ impl Walk {
             children: Vec::new(),
         };
 
-        // What a scroll area shows is its own frame: its children outside it are scrolled out of view.
-        let inner = match (role, read.bounds) {
-            ("scrollarea", Some(bounds)) => clip.map(|clip| intersect(clip, bounds)).or(Some(bounds)),
-            // An open menu floats above the window, so its items are not cut by the window's frame.
-            ("menu", _) => None,
-            _ => clip,
-        };
+        let inner = inner_clip(role, read.bounds, clip);
         if role == "scrollbar" {
             // A scroll bar's arrows and page areas are its parts, not controls of their own.
         } else if level >= self.max_depth {
@@ -622,7 +633,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::{expanded, missed, outside, selected};
+    use super::{expanded, inner_clip, missed, outside, selected};
     use crate::ax;
     use crate::windows::Rect;
 
@@ -650,6 +661,15 @@ mod tests {
         assert!(expanded("treeitem", Some(true), None));
         assert!(!selected("menuitem", Some(true)));
         assert!(selected("row", Some(true)));
+    }
+
+    #[test]
+    fn leaves_a_popover_or_menu_past_the_window_unclipped() {
+        // A SwiftUI popover hangs off its window: its text sits above the window's top edge.
+        let above = Rect { x: 10.0, y: -37.0, width: 100.0, height: 20.0 };
+        assert!(outside(above, inner_clip("group", None, Some(WINDOW)).expect("the window's clip")));
+        assert_eq!(inner_clip("popover", None, Some(WINDOW)), None);
+        assert_eq!(inner_clip("menu", None, Some(WINDOW)), None);
     }
 
     #[test]
