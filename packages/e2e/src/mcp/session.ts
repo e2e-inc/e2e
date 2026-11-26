@@ -278,6 +278,11 @@ export class SessionHost {
 
     const cleanupErrors = attempt === undefined ? [] : [...await attempt.close()];
 
+    // An open that was cancelled while its app command was starting leaves
+    // that start to stop in the background, so wait for it before the last
+    // hold on the services can stop them under the app.
+    await this.apps.drained();
+
     await services.stop((cause) => {
       cleanupErrors.push(serializeError(classifyError(cause), { phase: 'cleanup', redact: processSecrets.redact }));
     });
@@ -577,9 +582,13 @@ export class SessionHost {
     } catch (cause) {
       opening.removeEventListener('abort', cancel);
 
-      await this.closeAttempt(attemptToClose, services, abort, async () => {
+      const closed = await this.closeAttempt(attemptToClose, services, abort, async () => {
         await step?.end({ status: 'failed', summary: 'opening the session failed' });
       }).catch(() => undefined);
+
+      for (const error of closed?.cleanupErrors ?? []) {
+        this.log('warning', `cleanup after a failed open: ${error.code}: ${error.message}`);
+      }
 
       throw cause;
     }

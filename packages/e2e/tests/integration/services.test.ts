@@ -23,7 +23,7 @@ import { defineService } from '../../src/index.ts';
 import type { CommandConfig, E2EConfig, RunEvent, Service } from '../../src/index.ts';
 import { createFakeEngine, FAKE_APP } from '../helpers/fake-engine.ts';
 import { freePort } from '../helpers/free-port.ts';
-import { hostHarness } from '../helpers/open-host.ts';
+import { credentials, hostHarness, secrets } from '../helpers/open-host.ts';
 import { createProject, listProject, runExisting, runExistingWithConfigFile, runProject, type FixtureProject, type RunOutcome } from '../helpers/run-project.ts';
 
 const resolveModule = new URL('../../dist/config/resolve-run.js', import.meta.url).href;
@@ -1614,6 +1614,30 @@ test('reads each type', async ({ services }) => {
         'stop beta',
         'stop alpha',
       ]);
+    });
+
+    it('lets a service read credentials and secrets while it starts and while it stops', async () => {
+      const engine = createFakeEngine().engine;
+      const reads: string[] = [];
+
+      const host = await harness.host(engine, {
+        config: harness.config(engine, {
+          credentials: { admin: { username: 'ada', password: 'admin-password-1' } },
+          secrets: { apiKey: 'api-key-value-1' },
+          services: {
+            inbox: defineService({
+              async *start() {
+                reads.push(`start ${credentials.user('admin').username} ${secrets.get('apiKey').name}`);
+                yield {};
+                reads.push(`stop ${credentials.user('admin').username} ${secrets.get('apiKey').name}`);
+              },
+            }),
+          },
+        }),
+      });
+
+      expect(await host.close()).toEqual([]);
+      expect(reads).toEqual(['start ada apiKey', 'stop ada apiKey']);
     });
 
     it('returns the same result when close is called twice, and stops each service once', async () => {
