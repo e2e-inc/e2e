@@ -59,7 +59,7 @@ import { DialogRouter } from './dialogs.ts';
 import { missingLibrariesMessage } from './host-libraries.ts';
 import { browserCheck, ensureBrowsersInstalled, missingBrowserLibraries } from './install.ts';
 import { applyPostSteps, frameSelectors, projectExpression } from './locators.ts';
-import { clipRect, contentBox, frameContentInset, placeBoxInFrame, ROOT_NODE_ID, toSemanticNode } from './observation.ts';
+import { clipRect, contentBox, frameBorderSize, frameContentInset, placeBoxInFrame, ROOT_NODE_ID, toSemanticNode, type Scale } from './observation.ts';
 import { captureObservation } from './observation-capture.ts';
 import { maskOptions, secureFieldMasks } from './observe.ts';
 import { SHOWN_SELECTOR } from './shown-selector.ts';
@@ -1353,9 +1353,11 @@ export class PlaywrightSurface {
    * has loaded, which is what makes `FRAME_NOT_FOUND` worth retrying. Returns
    * the innermost frame's content box in the top-level viewport, where its
    * document's viewport starts, with the part of it every frame along the
-   * chain shows, the way the observation tree clips a nested document
-   * (undefined for an expression in the main document, null for a frame
-   * with no box or one the frames around it do not show), and
+   * chain shows and the scale its document is drawn at. Each frame's content
+   * box is read as drawn, a transform on it or a frame around it included,
+   * before it is cut to the frames around it (undefined for an expression in
+   * the main document, null for a frame with no box or one the frames
+   * around it do not show), and
    * whether a frame along the chain is hidden: a frame element's own `hidden`
    * state, read in the document around it, so a cross-origin frame reads too.
    * Every node in a hidden frame is hidden, and so are the frames under it.
@@ -1389,12 +1391,20 @@ export class PlaywrightSurface {
     let box: FrameBox | undefined;
     try {
       for (const element of elements) {
-        const border = await element.boundingBox();
+        const [border, inset, size] = await Promise.all([
+          element.boundingBox(),
+          element.evaluate(frameContentInset),
+          element.evaluate(frameBorderSize),
+        ]);
         if (border === null) return { box: null, hidden };
-        const content = contentBox(border, await element.evaluate(frameContentInset));
+        const scale = {
+          x: size.width > 0 ? border.width / size.width : 1,
+          y: size.height > 0 ? border.height / size.height : 1,
+        };
+        const content = contentBox(border, inset, scale);
         const shown = box === undefined ? content : clipRect(content, box.shown);
         if (shown === undefined) return { box: null, hidden };
-        box = { content, shown };
+        box = { content, shown, scale };
       }
     } catch (cause) {
       throw translatePwError(cause, 'frame resolution');
@@ -1627,22 +1637,32 @@ function frameOf(request: Request): Frame | undefined {
 
 type Rect = NonNullable<SemanticNode['rect']>;
 
-/** A frame's content box in the top-level viewport, and the part of it the frames around it show. */
+/**
+ * A frame's content box in the top-level viewport, the part of it the frames
+ * around it show, and how much they and the frame scale its document.
+ */
 type FrameBox = {
   readonly content: Rect;
   readonly shown: Rect;
+  readonly scale: Scale;
 };
 
 /**
- * A located node in the top-level viewport's space, as the observation tree
- * reports it: its box shifted by the frame's and clipped to the part every
- * frame shows, and dropped when the frame has no box or the node lies
- * outside that part.
+ * A located node in the top-level viewport's space: its box scaled as the
+ * frames draw it, shifted by the frame's, and clipped to the part every frame
+ * shows, and dropped when the frame has no box or the node lies outside that
+ * part. The observation tree places the same node without the scale.
  */
 function inFrame(node: SemanticNode, frame: FrameBox | null | undefined): SemanticNode {
   if (frame === undefined || node.rect === undefined) return node;
   const { rect, origin, ...rest } = node;
-  return frame === null ? rest : { ...rest, ...placeBoxInFrame(rect, origin, frame.content, frame.shown) };
+  if (frame === null) return rest;
+  const { x, y } = frame.scale;
+  const scaled = { x: rect.x * x, y: rect.y * y, width: rect.width * x, height: rect.height * y };
+  return {
+    ...rest,
+    ...placeBoxInFrame(scaled, origin === undefined ? undefined : { x: origin.x * x, y: origin.y * y }, frame.content, frame.shown),
+  };
 }
 
 /**

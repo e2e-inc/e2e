@@ -12,6 +12,7 @@ import {
   type NodeRef,
   type SemanticNode,
   type ViewportPoint,
+  type ViewportSize,
 } from '@e2e-dev/core/engine';
 import {
   readDocumentSemanticsFunction,
@@ -298,6 +299,12 @@ function assembleTree(
 
 type Rect = NonNullable<SemanticNode['rect']>;
 
+/** How many top-level CSS pixels one CSS pixel of a document spans, along each axis. */
+export type Scale = {
+  readonly x: number;
+  readonly y: number;
+};
+
 /** A child document's tree, and where its viewport sits inside the frame element's border box. */
 interface FrameChild {
   readonly tree: SemanticNode;
@@ -323,9 +330,29 @@ export function frameContentInset(element: Element): Rect {
   };
 }
 
-/** A frame element's content box, from its border box and `frameContentInset`. */
-export function contentBox(border: Rect, inset: Rect): Rect {
-  return { x: border.x + inset.x, y: border.y + inset.y, width: inset.width, height: inset.height };
+/**
+ * A frame element's border box size in its own CSS pixels, before any
+ * transform: `boundingBox()` over it is how much the frame and the frames
+ * around it scale its document. Runs in the page.
+ */
+export function frameBorderSize(element: Element): ViewportSize {
+  const style = getComputedStyle(element);
+  const px = (value: string): number => Number.parseFloat(value) || 0;
+  if (style.boxSizing === 'border-box') return { width: px(style.width), height: px(style.height) };
+  return {
+    width: px(style.width) + px(style.paddingLeft) + px(style.paddingRight) + px(style.borderLeftWidth) + px(style.borderRightWidth),
+    height: px(style.height) + px(style.paddingTop) + px(style.paddingBottom) + px(style.borderTopWidth) + px(style.borderBottomWidth),
+  };
+}
+
+/** A frame element's content box, from its border box and `frameContentInset`, with the inset scaled as the frame is drawn. */
+export function contentBox(border: Rect, inset: Rect, scale: Scale = { x: 1, y: 1 }): Rect {
+  return {
+    x: border.x + inset.x * scale.x,
+    y: border.y + inset.y * scale.y,
+    width: inset.width * scale.x,
+    height: inset.height * scale.y,
+  };
 }
 
 /** The tree with every box translated into the frame's space and clipped to its box; a box left empty by the clip is dropped. */

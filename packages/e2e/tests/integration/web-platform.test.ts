@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { decodePng, type RgbaImage } from '@e2e-dev/core/lib/internal/image';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
 import {
@@ -406,12 +407,38 @@ test('a percentage position is of the part of the node the frames and the viewpo
     await target.tap({ position });
     return browser.evaluate(() => (window as unknown as { hits: string[] }).hits);
   };
+  expect(await wide.boundingBox()).toEqual({ x: 20, y: 20, width: 100, height: 60 });
   expect(await tapped(wide, { x: '100%', y: '50%' })).toEqual(['wide 99 30 shown']);
   expect(await tapped(wide, { x: 10, y: '0%' })).toEqual(['wide 10 0 shown']);
   expect(await tapped(shifted, { x: '0%', y: '50%' })).toEqual(['shifted 50 30 shown']);
   expect(await tapped(shifted, { x: '100%', y: 0 })).toEqual(['shifted 149 0 shown']);
   expect(await tapped(shifted, { x: 60, y: 5 })).toEqual(['shifted 60 5 shown']);
   expect(await tapped(tall, { x: '50%', y: '50%' })).toEqual([expect.stringMatching(/^tall 100 \\d+ shown$/)]);
+});
+
+test('a node in nested frames has the box the frames draw, a scaled frame included', async ({ app, screen, browser }) => {
+  await app.open();
+  await browser.evaluate(() => {
+    const nested = (margin: number, name: string) =>
+      '<body style="margin: 0; overflow: hidden; background: #fff">' +
+      '<iframe style="display: block; margin-left: ' + margin + 'px; width: 30px; height: 30px; border: 0" ' +
+      'srcdoc="<body style=&quot;margin: 0&quot;><button style=&quot;display: block; width: 30px; height: 30px; border: 0; padding: 0; background: #00f&quot;>' + name + '</button></body>">' +
+      '</iframe></body>';
+    document.body.innerHTML =
+      '<iframe id="scaled" style="position: absolute; left: 0; top: 0; width: 100px; height: 100px; border: 0; transform: scale(2); transform-origin: 0 0"></iframe>' +
+      '<iframe id="beside" style="position: absolute; left: 300px; top: 0; width: 100px; height: 100px; border: 0"></iframe>';
+    document.querySelector<HTMLIFrameElement>('#scaled')!.srcdoc = nested(65, 'Scaled');
+    document.querySelector<HTMLIFrameElement>('#beside')!.srcdoc = nested(150, 'Cut off');
+    return null;
+  });
+  const scaled = browser.frameLocator('#scaled').frameLocator('iframe').getByRole('button', { name: 'Scaled' });
+  const cutOff = browser.frameLocator('#beside').frameLocator('iframe').getByRole('button', { name: 'Cut off' });
+  await expect(scaled).toBeVisible();
+  await expect(cutOff).toBeAttached();
+  expect(await scaled.boundingBox()).toEqual({ x: 130, y: 0, width: 60, height: 60 });
+  expect(await cutOff.boundingBox()).toBeNull();
+  await scaled.screenshot('scaled-button');
+  await expect(screen).toHaveScreenshot('scaled-frame-mask', { mask: [scaled], maskColor: '#00ff00' });
 });
 
 test('a trigger that starts no download times out saying so', async ({ app, browser }) => {
@@ -707,6 +734,8 @@ describe('web platform integration', () => {
       {
         appUrl: app.url,
         configSource: workerConfigSource(1, "\n  cache: 'off',\n  actionTimeout: 5_000,\n  assertionTimeout: 4_000,\n  timeout: 30_000,"),
+        // The scaled frame test writes its screenshot, which the test below reads, on the first run.
+        runOptions: { updateSnapshots: true },
       },
     ));
   }, 240_000);
@@ -731,6 +760,7 @@ describe('web platform integration', () => {
     'taps use the requested mouse button, count, and position',
     'double taps, secondary taps, and hovers land at the position they name',
     'a percentage position is of the part of the node the frames and the viewport show',
+    'a node in nested frames has the box the frames draw, a scaled frame included',
     'a viewport set before the first navigation holds through app.open',
     'an empty class attribute is an empty class list',
     'reads wait for a node that arrives late',
@@ -743,6 +773,20 @@ describe('web platform integration', () => {
   ])('passes %s', (title) => {
     const result = resultByTitle(outcome, title);
     expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('passed');
+  });
+
+  it('cuts the screenshot and paints the mask of a node in a scaled nested frame where the frames draw it', () => {
+    const result = resultByTitle(outcome, 'a node in nested frames has the box the frames draw, a scaled frame included');
+    const cut = result.attempts[0]!.artifacts.find((artifact) => artifact.path?.includes('scaled-button'));
+    const button = decodePng(readFileSync(path.join(project.dir, '.e2e', 'results', cut!.path!)));
+    expect([button.width, button.height]).toEqual([60, 60]);
+    expect(pixelAt(button, 1, 1)).toEqual([0, 0, 255]);
+    expect(pixelAt(button, 58, 58)).toEqual([0, 0, 255]);
+    const masked = decodePng(readFileSync(path.join(project.dir, 'tests', 'kitchen.e2e.ts-snapshots', `scaled-frame-mask-web-${process.platform}.png`)));
+    expect(pixelAt(masked, 131, 1)).toEqual([0, 255, 0]);
+    expect(pixelAt(masked, 189, 59)).toEqual([0, 255, 0]);
+    expect(pixelAt(masked, 128, 30)).toEqual([255, 255, 255]);
+    expect(pixelAt(masked, 192, 30)).toEqual([255, 255, 255]);
   });
 
   it('decides absence under an absent frame without waiting out the deadline', () => {
@@ -1065,3 +1109,9 @@ describe('web platform integration', () => {
     expect(result.attempts[0]!.error).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining(message) });
   });
 });
+
+/** The red, green, and blue of one pixel. */
+function pixelAt(image: RgbaImage, x: number, y: number): number[] {
+  const at = (y * image.width + x) * 4;
+  return [...image.data.subarray(at, at + 3)];
+}
