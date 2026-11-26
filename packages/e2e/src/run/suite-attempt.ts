@@ -240,8 +240,7 @@ export class SuiteAttempt implements SuiteHookSession {
       steps,
       budget,
       runId: host.runId,
-      attemptId,
-      attempt: { testId: SUITE_HOOKS_DIR, attemptId, titlePath: [], index: 0, signal: attemptEnd.signal, memory: new Map<string, unknown>() },
+      attempt: { testId: SUITE_HOOKS_DIR, attemptId: launched.attemptId, titlePath: [], index: 0, signal: attemptEnd.signal, memory: new Map<string, unknown>() },
       artifacts: artifacts.sink,
       priorSteps: () => [],
       agentContext: undefined,
@@ -258,7 +257,7 @@ export class SuiteAttempt implements SuiteHookSession {
         budget.end();
         if (shared === undefined) {
           const errors: SerializedError[] = [];
-          await host.closeSession(launched, { attemptId, video: undefined }, { status: 'passed', cleanup: 'complete' }, artifacts.sink, errors);
+          await host.closeSession(launched, { video: undefined }, { status: 'passed', cleanup: 'complete' }, artifacts.sink, errors);
           for (const error of errors) runErrors.push({ error });
         }
         await removeDir();

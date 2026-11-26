@@ -10,11 +10,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { firefox, webkit } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { EngineFixtureContext } from '@e2e-dev/core/engine';
-import { PlaywrightSurface } from '../../src/surface.ts';
-import { createBrowserFixture, type Browser } from '../../src/browser.ts';
+import type { Browser } from '../../src/browser.ts';
 import type { BrowserName } from '../../src/index.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import { openSurface } from '../helpers/attempt.ts';
 
 const BASE = 'http://app.example/';
 
@@ -25,23 +23,20 @@ const browsers: readonly { name: BrowserName; installed: boolean }[] = [
 ];
 
 describe.each(browsers)('browser.cookies(urls) in $name', ({ name, installed }) => {
-  const surface = new PlaywrightSurface({ browser: name });
   const projectRoot = mkdtempSync(path.join(tmpdir(), 'e2e-cookies-url-'));
-  const signal = new AbortController().signal;
   let browser: Browser;
+  let close: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
     if (!installed) return;
-    await surface.init({ runId: 'cookies', targetName: 'web', projectRoot, app: { site: 'app.example' },
-      env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
-    await surface.startAttempt({ attemptId: 'cookies', artifactsDir: projectRoot, signal, resolveSecret: noSecrets, ...ignoreTrace });
-    await surface.ensurePage();
-    browser = createBrowserFixture(surface, {
-      app: { site: 'app.example', resolveUrl: (url: string) => new URL(url, BASE).href },
-      operation: (timeoutMs = 5_000) => ({ signal, timeoutMs, runId: 'cookies', attemptId: 'cookies', origin: 'test' }),
-      expectable: (target: object) => target,
-      fixture: (_name: string, target: object) => target,
-    } as unknown as EngineFixtureContext);
+    const opened = await openSurface({
+      options: { browser: name },
+      init: { projectRoot, app: { site: 'app.example' } },
+      attempt: { artifactsDir: projectRoot },
+      baseUrl: BASE,
+    });
+    ({ browser, close } = opened);
+    await opened.surface.ensurePage();
     await browser.setCookies([
       { name: 'host', value: '1', domain: 'app.example', path: '/' },
       { name: 'site', value: '1', domain: '.app.example', path: '/' },
@@ -54,10 +49,7 @@ describe.each(browsers)('browser.cookies(urls) in $name', ({ name, installed }) 
   });
 
   afterAll(async () => {
-    if (installed) {
-      await surface.endAttempt({ signal, timeoutMs: 5_000 });
-      await surface.dispose({ signal, timeoutMs: 5_000 });
-    }
+    await close?.();
     rmSync(projectRoot, { recursive: true, force: true });
   });
 

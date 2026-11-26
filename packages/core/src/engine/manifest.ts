@@ -36,6 +36,7 @@ const KNOWN_KEYS = [
   'keyboard',
   'fixtures',
   'isolation',
+  'actors',
   'state',
   'artifacts',
   'validateApp',
@@ -313,6 +314,12 @@ export function defineEngine<
   if (spec.isolation !== undefined && spec.isolation !== 'attempt' && spec.isolation !== 'worker') {
     throw invalid(name, `isolation must be 'attempt' or 'worker', got ${JSON.stringify(spec.isolation)}`);
   }
+  if (spec.actors !== undefined) {
+    if (typeof spec.actors !== 'boolean') throw invalid(name, 'actors must be a boolean');
+    if (spec.actors && (spec.startAttempt === undefined || spec.endAttempt === undefined)) {
+      throw invalid(name, 'declares actors without startAttempt and endAttempt: an actor is an attempt of its own beside the test\'s');
+    }
+  }
   if (spec.keyboard !== undefined && !capabilities.has('observation')) {
     throw invalid(name, 'declares keyboard without observe: the focused field is read off the observation');
   }
@@ -335,6 +342,10 @@ export function defineEngine<
   if (spec.launchArgumentValues === true) handle['launchArgumentValues'] = true;
   if (spec.fileApps === true) handle['fileApps'] = true;
   if (spec.isolation === 'worker') handle['isolation'] = 'worker';
+  if (spec.actors === true) {
+    handle['actors'] = true;
+    capabilities.add('actors');
+  }
   if (spec.pointerActions !== undefined) {
     handle['pointerActions'] = declaredKinds(name, 'pointerActions', spec.pointerActions, POINTER_ACTION_KINDS);
   }

@@ -327,6 +327,10 @@ browser example, a [setup test](/authentication) saves the sender's login
 as `sender`. The recipient signs in on a separate host pointed at the same
 app. Use test accounts and a conversation reserved for the test.
 
+For a second user the test can declare before it runs, use an
+[actor](/actors): it restores a saved login and takes its engine from the
+config.
+
 ```ts title="tests/chat.e2e.ts"
 import { randomUUID } from 'node:crypto';
 import { test } from '@e2e-dev/web';

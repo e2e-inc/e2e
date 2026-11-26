@@ -34,7 +34,7 @@ versions differ.
 | --- | --- | --- |
 | Adding e2e, writing `e2e.config.ts`, starting the app, configuring models or mobile targets | `setup` | [references/setup.md](references/setup.md) |
 | Driving the running app live, checking UI changes, taking screenshots or videos, trying locators, recording lines over `e2e mcp` | `mcp` | [references/mcp.md](references/mcp.md) |
-| Writing or fixing a test (structure, fixtures, locators, matchers, sessions, `browser`, API tests) | `writing-tests` | [references/writing-tests.md](references/writing-tests.md) |
+| Writing or fixing a test (structure, fixtures, locators, matchers, sessions, actors for more than one user, `browser`, API tests) | `writing-tests` | [references/writing-tests.md](references/writing-tests.md) |
 | Adding `agent.*` steps, picking models, tuning cost/budgets, replay cache | `agent` | [references/agent.md](references/agent.md) |
 | Running tests, CLI flags, CI, reporters, `report.json`, exit codes | `running` | [references/running.md](references/running.md) |
 | Fixing a failed run, error codes, rerunning fast, `--headed`, `--debug`, `--ai-trace`, reporting e2e bugs | `debugging` | [references/debugging.md](references/debugging.md) |

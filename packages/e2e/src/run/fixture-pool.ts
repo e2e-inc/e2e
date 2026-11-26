@@ -283,6 +283,12 @@ export interface BindOptions {
   readonly pool: WorkerFixturePool;
   /** The attempt's abort signal: setup stops once it fires. */
   readonly signal?: AbortSignal | undefined;
+  /**
+   * What the code receives for an `actor()` fixture: the actor the attempt
+   * opened for it (`run/actors.ts`). Absent where nothing opens actors, a
+   * suite hook or a session with no run around it, and naming one fails.
+   */
+  readonly actors?: ((definition: FixtureDefinition) => object) | undefined;
 }
 
 /**
@@ -292,7 +298,7 @@ export interface BindOptions {
  * built-in read off the attempt when the function destructures it.
  */
 export function bindFixtures(options: BindOptions): BoundFixtures {
-  const { plan, builtIns, pool, signal } = options;
+  const { plan, builtIns, pool, signal, actors } = options;
   /** The value each fixture handed over. */
   const provided = new Map<FixtureDefinition, unknown>();
   const receive = (inputs: FixtureInputs, builtIn: BuiltInReader): object => {
@@ -324,6 +330,14 @@ export function bindFixtures(options: BindOptions): BoundFixtures {
   };
 
   const setUpOne = async ({ definition, scope, usesEngine, inputs }: PlannedFixture): Promise<void> => {
+    if (definition.actor !== undefined) {
+      // The attempt opened it before the test's clock started, and closes it with everything else it opened.
+      if (actors === undefined) {
+        throw new ConfigurationError('UNSUPPORTED_CAPABILITY', `actor "${definition.name}" is opened for a test of a run: e2e run opens it, and a session with no run around it cannot`);
+      }
+      provided.set(definition, actors(definition));
+      return;
+    }
     if (scope === 'worker') {
       // A worker fixture outlives this attempt, so a built-in reaches it through the pool, never as this attempt's object.
       provided.set(definition, await pool.acquire(definition, receive(inputs, (name) => pool.builtIn(name)), usesEngine));
@@ -396,18 +410,27 @@ export interface TestAttemptFixtures {
  * Plans the fixtures of one attempt of `test` on `target`, resolved as one
  * unit over its body and `hooks`, before any session exists: a fixture rule
  * one of them breaks throws here. `open` binds the plan to the attempt once
- * its built-in fixtures exist.
+ * its built-in fixtures exist. An attempt that opened no session of its own
+ * has none (`builtIns` undefined), which the plan allows only when it names
+ * none that needs one (`usesEngine`).
  */
 export function planAttemptFixtures(
   target: BuiltInTarget,
   test: RegisteredTest,
   hooks: AttemptHooks,
-): { open(options: { readonly builtIns: object; readonly pool: WorkerFixturePool; readonly signal: AbortSignal }): TestAttemptFixtures } {
+): {
+  /** What the attempt sets up, for the actors among it (`plannedActors`). */
+  readonly plan: FixturePlan;
+  open(options: { readonly builtIns: object | undefined; readonly pool: WorkerFixturePool; readonly signal: AbortSignal; readonly actors?: BindOptions['actors'] }): TestAttemptFixtures;
+} {
   const plan = planAttempt(target, test, [...hooks.beforeEach, ...hooks.afterEach]);
   return {
-    open({ builtIns, pool, signal }) {
-      const read = attemptBuiltIns(builtIns);
-      const bound = bindFixtures({ plan, builtIns: read, pool, signal });
+    plan,
+    open({ builtIns, pool, signal, actors }) {
+      const read = builtIns === undefined
+        ? attemptlessBuiltIns(target, (name) => new Error(`"${name}" was read in an attempt that opened no session of its own`))
+        : attemptBuiltIns(builtIns);
+      const bound = bindFixtures({ plan, builtIns: read, pool, signal, actors });
       return {
         enter: () => pool.enter(read),
         async run(running, stop) {

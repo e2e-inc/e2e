@@ -54,7 +54,9 @@ export interface FixturePlan {
   /**
    * Whether the code, or a fixture it needs, names a built-in fixture that
    * needs an attempt on the engine. Code that names none never touches the
-   * engine, so a suite hook needs no attempt for it.
+   * engine through a session of its own: a suite hook needs no attempt for
+   * it, and a test that names only actors, each a session of its own, opens
+   * none beside theirs.
    */
   readonly usesEngine: boolean;
 }
@@ -140,6 +142,10 @@ class Planner {
       throw new FixtureUseError(`fixtures depend on each other in a cycle: ${cycle}. A fixture cannot name one that needs it`, definition.source);
     }
     this.state.set(definition, 'visiting');
+    // An actor holds an `app` and a `screen` of its own: one that took a built-in's name would hide the test's.
+    if (definition.actor !== undefined && this.builtIns.names.includes(definition.name)) {
+      throw new FixtureUseError(`actor "${definition.name}" has the name of a built-in fixture${this.onTarget()}: give the actor a name of its own, such as "reviewer"`, definition.source);
+    }
     this.autoOf(definition);
     const scope = this.scopeOf(definition);
     const what = describeFixture(definition.name, scope);

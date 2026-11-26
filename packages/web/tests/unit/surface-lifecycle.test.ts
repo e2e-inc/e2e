@@ -4,11 +4,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Browser, Dialog, Route } from 'playwright-core';
 import { secrets } from 'e2e';
-import type { EngineFixtureContext, OperationContext } from '@e2e-dev/core/engine';
+import type { OperationContext } from '@e2e-dev/core/engine';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { PlaywrightSurface } from '../../src/surface.ts';
-import { createBrowserFixture } from '../../src/browser.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import type { Browser as BrowserFixture } from '../../src/browser.ts';
+import type { PlaywrightSurface } from '../../src/surface.ts';
+import type { WorkerBrowser } from '../../src/worker-browser.ts';
+import { attemptContext, cleanupContext, openSurface, openWorker } from '../helpers/attempt.ts';
 
 const acquire = vi.hoisted(() => vi.fn());
 vi.mock('../../src/browser-connection.ts', async (importOriginal) => ({
@@ -18,9 +19,11 @@ vi.mock('../../src/browser-connection.ts', async (importOriginal) => ({
 }));
 
 const operation = (): OperationContext => ({ timeoutMs: 1_000, signal: new AbortController().signal, runId: 'run', attemptId: 'a1', origin: 'test' });
-const cleanup = () => ({ timeoutMs: 1_000, signal: new AbortController().signal });
 let artifactsDir: string;
+let worker: WorkerBrowser;
 let surface: PlaywrightSurface;
+let fixture: BrowserFixture;
+let close: () => Promise<void>;
 let registered: ((route: Route) => Promise<void>) | undefined;
 let browser: Browser;
 let focus: ReturnType<typeof vi.fn<() => Promise<boolean>>>;
@@ -61,19 +64,17 @@ beforeEach(async () => {
     })),
   } as unknown as Browser;
   acquire.mockResolvedValue(browser);
-  surface = new PlaywrightSurface({});
-  await surface.init({ runId: 'run', targetName: 'web', projectRoot: process.cwd(), app: {}, env: {}, headed: false, workerSlot: 0, signal: new AbortController().signal, log: () => undefined });
-  await surface.startAttempt({ attemptId: 'a1', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+  ({ worker, surface, browser: fixture, close } = await openSurface({ attempt: { attemptId: 'a1', artifactsDir }, timeoutMs: 1_000 }));
 });
 
 afterEach(async () => {
-  await surface.dispose(cleanup());
+  await close();
   rmSync(artifactsDir, { recursive: true, force: true });
 });
 
-it('names no handle mix-up when a started surface is read between attempts', async () => {
-  await surface.endAttempt(cleanup());
-  expect(() => surface.requireContext()).toThrow(/^no attempt is running$/);
+it('names no handle mix-up when a started worker is read between attempts', async () => {
+  await worker.endAttempt({ ...cleanupContext(), attemptId: 'a1' });
+  expect(() => worker.attempt({ attemptId: 'a1' }).requireContext()).toThrow(/^no attempt is running$/);
 });
 
 it.each(['dialog', 'route'] as const)('keeps a late %s failure on the attempt that registered it', async (kind) => {
@@ -85,24 +86,18 @@ it.each(['dialog', 'route'] as const)('keeps a late %s failure on the attempt th
     surface.dialogs.add(async () => { await waiting; throw new Error('old handler failed'); });
     pending = surface.dialogs.dispatch({ type: () => 'confirm', message: () => 'old', dismiss: async () => undefined } as unknown as Dialog);
   } else {
-    const fixture = createBrowserFixture(surface, {
-      operation,
-      fixture: (_name: string, value: unknown) => value,
-      expectable: (value: unknown) => value,
-      app: { resolveUrl: (url: string) => url },
-    } as unknown as EngineFixtureContext);
     await fixture.route('**/*', async () => { await waiting; throw new Error('old handler failed'); });
     pending = registered!({
       request: () => ({ postData: () => null, url: () => 'https://example.test/', method: () => 'GET', headers: () => ({}) }),
       abort: async () => undefined,
     } as unknown as Route);
   }
-  await surface.endAttempt(cleanup());
-  await surface.startAttempt({ attemptId: 'a2', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+  await worker.endAttempt({ ...cleanupContext(), attemptId: 'a1' });
+  const next = await openSurface({ worker, attempt: { attemptId: 'a2', artifactsDir } });
   release();
   await pending;
   expect(() => oldLatch.throwPending()).toThrow(/old handler failed/);
-  await expect(surface.guard(operation(), 'next attempt', async () => 'clean')).resolves.toBe('clean');
+  await expect(next.surface.guard(operation(), 'next attempt', async () => 'clean')).resolves.toBe('clean');
 });
 
 it('collects saved video segments after ordinary context replacement fails', async () => {
@@ -167,29 +162,30 @@ it('rejects a focus read from a context replaced before typing dispatches', asyn
 
 it('refuses headers or basicAuth from a runner that passes no app origin', async () => {
   for (const options of [{ headers: { 'x-gate': 'on' } }, { basicAuth: { username: 'ada', password: 'pw' } }]) {
-    const unscoped = new PlaywrightSurface(options);
-    await expect(
-      unscoped.init({ runId: 'run', targetName: 'web', projectRoot: process.cwd(), app: {}, env: {}, headed: false, workerSlot: 0, signal: new AbortController().signal, log: () => undefined }),
-    ).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
+    await expect(openWorker({ options })).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
   }
 });
 
 it('opens no session for an attempt the runner gave up on while its basic-auth password resolved', async () => {
-  const protectedSurface = new PlaywrightSurface({ basicAuth: { username: 'ada', password: secrets.get('stagingPassword') } });
-  await protectedSurface.init({ runId: 'run', targetName: 'web', projectRoot: process.cwd(), app: { origin: 'http://127.0.0.1:3000' }, env: {}, headed: false, workerSlot: 0, signal: new AbortController().signal, log: () => undefined });
+  const protectedWorker = await openWorker({
+    options: { basicAuth: { username: 'ada', password: secrets.get('stagingPassword') } },
+    init: { app: { origin: 'http://127.0.0.1:3000' } },
+  });
   try {
     let resolvePassword!: (value: string) => void;
     const slow = new Promise<string>((resolve) => { resolvePassword = resolve; });
     const controller = new AbortController();
-    const starting = protectedSurface.startAttempt({ attemptId: 'slow', artifactsDir, signal: controller.signal, resolveSecret: () => slow, ...ignoreTrace });
+    const starting = protectedWorker.startAttempt(attemptContext({ attemptId: 'slow', artifactsDir, signal: controller.signal, resolveSecret: () => slow }));
     controller.abort();
     await expect(starting).rejects.toMatchObject({ code: 'CANCELLED' });
-    await protectedSurface.endAttempt(cleanup());
+    await protectedWorker.endAttempt({ ...cleanupContext(), attemptId: 'slow' });
     resolvePassword('late-password');
     await new Promise<void>((resolve) => setImmediate(resolve));
-    await protectedSurface.startAttempt({ attemptId: 'next', artifactsDir, signal: new AbortController().signal, resolveSecret: async () => 'next-password', ...ignoreTrace });
+    // The attempt the runner gave up on opened no context: the one call is `beforeEach`'s.
+    expect(browser.newContext).toHaveBeenCalledTimes(1);
+    await protectedWorker.startAttempt(attemptContext({ attemptId: 'next', artifactsDir, resolveSecret: async () => 'next-password' }));
     expect(vi.mocked(browser.newContext).mock.lastCall?.[0]).toMatchObject({ httpCredentials: [{ username: 'ada', password: 'next-password', origin: 'http://127.0.0.1:3000' }] });
   } finally {
-    await protectedSurface.dispose(cleanup());
+    await protectedWorker.dispose(cleanupContext());
   }
 });

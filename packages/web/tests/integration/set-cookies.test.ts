@@ -11,10 +11,9 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { EngineFixtureContext } from '@e2e-dev/core/engine';
-import { PlaywrightSurface } from '../../src/surface.ts';
-import { createBrowserFixture, type Browser, type Cookie } from '../../src/browser.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import type { Browser, Cookie } from '../../src/browser.ts';
+import type { WebEngine } from '../../src/engine.ts';
+import { cleanupContext, openAttempt, openEngine } from '../helpers/attempt.ts';
 
 /** Answers every path with an empty page. */
 function startServer(): Promise<{ server: Server; port: number }> {
@@ -28,39 +27,30 @@ function startServer(): Promise<{ server: Server; port: number }> {
 }
 
 describe('browser.setCookies', () => {
-  const surface = new PlaywrightSurface({});
   const projectRoot = mkdtempSync(path.join(tmpdir(), 'e2e-set-cookies-'));
-  const signal = new AbortController().signal;
+  let engine: WebEngine;
   let server: Server;
   let origin: string;
   let browser: Browser;
+  let close: () => Promise<void>;
 
   beforeAll(async () => {
     const started = await startServer();
     server = started.server;
     origin = `http://127.0.0.1:${started.port}`;
-    await surface.init({ runId: 'cookies', targetName: 'web', projectRoot, app: { site: '127.0.0.1' },
-      env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
+    engine = await openEngine({ init: { projectRoot, app: { site: '127.0.0.1' } } });
   });
 
   beforeEach(async () => {
-    await surface.startAttempt({ attemptId: 'cookies', artifactsDir: projectRoot, signal, resolveSecret: noSecrets, ...ignoreTrace });
-    const page = await surface.ensurePage();
-    await page.goto(`${origin}/`);
-    browser = createBrowserFixture(surface, {
-      app: { site: '127.0.0.1', resolveUrl: (url: string) => new URL(url, `${origin}/`).href },
-      operation: (timeoutMs = 5_000) => ({ signal, timeoutMs, runId: 'cookies', attemptId: 'cookies', origin: 'test' }),
-      expectable: (target: object) => target,
-      fixture: (_name: string, target: object) => target,
-    } as unknown as EngineFixtureContext);
+    const attempt = await openAttempt({ engine, attempt: { artifactsDir: projectRoot }, baseUrl: `${origin}/` });
+    ({ browser, close } = attempt);
+    await attempt.page.goto(`${origin}/`);
   });
 
-  afterEach(async () => {
-    await surface.endAttempt({ signal, timeoutMs: 5_000 });
-  });
+  afterEach(() => close());
 
   afterAll(async () => {
-    await surface.dispose({ signal, timeoutMs: 5_000 });
+    await engine.dispose!(cleanupContext());
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(projectRoot, { recursive: true, force: true });
   });

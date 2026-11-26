@@ -95,7 +95,7 @@ export function storedRecordingsFor(cache: ResolvedCacheConfig): StoredRecording
  * `identityDigest`, so such a step never matches an entry without one.
  */
 function stepKey(step: TraceProvenance): string | undefined {
-  const { testId, targetId, instructionDigest, paramsDigest, callIndex, agent, identityDigest } = step;
+  const { testId, targetId, instructionDigest, paramsDigest, callIndex, agent, actor, identityDigest } = step;
   if (paramsDigest === undefined || callIndex === undefined || agent === undefined) return undefined;
-  return JSON.stringify([testId, targetId, instructionDigest, paramsDigest, callIndex, agent, identityDigest ?? null]);
+  return JSON.stringify([testId, targetId, instructionDigest, paramsDigest, callIndex, agent, identityDigest ?? null, actor ?? null]);
 }

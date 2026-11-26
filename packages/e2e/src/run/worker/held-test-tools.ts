@@ -369,7 +369,7 @@ export class HeldTestTools {
           signal: AbortSignal.timeout(timeoutMs),
           timeoutMs,
           runId: this.runId,
-          attemptId: this.attemptId,
+          attemptId: session.attemptId,
           origin: 'test',
         }),
         timeoutMs: config.cleanupTimeout,
@@ -487,7 +487,6 @@ export class HeldTestTools {
             budget: statementBudget,
             session,
             runId: this.runId,
-            attemptId: this.attemptId,
             fixtures: {
               app: createApp({
                 config,
@@ -514,7 +513,6 @@ export class HeldTestTools {
       budget,
       redact,
       runId: this.runId,
-      attemptId: this.attemptId,
       actionTimeout: config.actionTimeout,
       assertionTimeout: config.assertionTimeout,
     });

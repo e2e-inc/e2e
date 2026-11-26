@@ -439,6 +439,8 @@ function readProvenance(document: unknown): TraceProvenance | undefined {
   }
   const agent = raw['agent'] === undefined ? undefined : readBoundedText(raw['agent'], MAX_TRACE_DESCRIPTOR_CHARS);
   if (raw['agent'] !== undefined && agent === undefined) return undefined;
+  const actor = raw['actor'] === undefined ? undefined : readBoundedText(raw['actor'], MAX_TRACE_DESCRIPTOR_CHARS);
+  if (raw['actor'] !== undefined && actor === undefined) return undefined;
   const identityDigest = raw['identityDigest'];
   if (!isOptionalDigest(identityDigest)) return undefined;
   return {
@@ -448,6 +450,7 @@ function readProvenance(document: unknown): TraceProvenance | undefined {
     ...(paramsDigest === undefined ? {} : { paramsDigest }),
     ...(callIndex === undefined ? {} : { callIndex }),
     ...(agent === undefined ? {} : { agent }),
+    ...(actor === undefined ? {} : { actor }),
     ...(identityDigest === undefined ? {} : { identityDigest }),
   };
 }

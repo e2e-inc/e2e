@@ -10,6 +10,7 @@ import { ENGINE_SPI_VERSION } from '../contract.ts';
 import { isEngineHandle } from '../manifest.ts';
 import type {
   EngineAttemptContext,
+  EngineCleanupContext,
   EngineDoctorInfo,
   EngineFinishInfo,
   EngineHandle,
@@ -77,10 +78,9 @@ export function serveEngine(
   return new EngineServer(engine, streams).closed;
 }
 
-/** The attempt a worker connection runs, between `startAttempt` and `endAttempt`. */
+/** An attempt a worker connection runs, between `startAttempt` and `endAttempt`. */
 interface ServedAttempt {
-  readonly attemptId: string;
-  /** Ids of the signals first seen during the attempt, forgotten when it ends. */
+  /** Ids of the signals the attempt's calls carried, each forgotten when the last attempt that carried it ends. */
   readonly signals: Set<number>;
 }
 
@@ -92,7 +92,8 @@ class EngineServer {
   readonly #derivations = new Map<number, NonNullable<ResolveSecretOptions['derived']>>();
   #nextDerivation = 1;
   #engine: EngineHandle | undefined;
-  #attempt: ServedAttempt | undefined;
+  /** The open attempts by id: one, or more for an engine that declares `actors`. */
+  readonly #attempts = new Map<string, ServedAttempt>();
   #shutdown = false;
   /** Settles once the connection is closed. */
   readonly closed: Promise<void>;
@@ -197,19 +198,23 @@ class EngineServer {
       init: (hook, params) => hook(info<EngineInitInfo>(params)),
       startAttempt: (hook, params) => {
         const { attemptId, artifactsDir, signal, screens } = params as StartAttemptParams;
-        this.#attempt = { attemptId, signals: new Set() };
-        return hook(this.#attemptContext(attemptId, artifactsDir, this.#signal(signal), screens));
+        this.#attempts.set(attemptId, { signals: new Set() });
+        return hook(this.#attemptContext(attemptId, artifactsDir, this.#signal(signal, attemptId), screens));
       },
       settleAttempt: (hook, params) => hook(this.#cleanup(params as WireCleanup)),
       endAttempt: async (hook, params) => {
         // A hook that outlived its budget settles after the next attempt
         // started: it retires only the attempt it ended.
-        const ending = this.#attempt;
+        const { attemptId = this.#onlyAttempt() } = params as WireCleanup;
+        const ending = attemptId === undefined ? undefined : this.#attempts.get(attemptId);
         try {
           return await hook(this.#cleanup(params as WireCleanup));
         } finally {
-          for (const id of ending?.signals ?? []) this.#signals.delete(id);
-          if (this.#attempt === ending) this.#attempt = undefined;
+          if (attemptId !== undefined && this.#attempts.get(attemptId) === ending) this.#attempts.delete(attemptId);
+          // A test and its actors run on one budget, so they share its signal: it goes with the last of them.
+          for (const id of ending?.signals ?? []) {
+            if (![...this.#attempts.values()].some((open) => open.signals.has(id))) this.#signals.delete(id);
+          }
         }
       },
       dispose: (hook, params) => {
@@ -222,7 +227,7 @@ class EngineServer {
   /** The attempt context an engine's `startAttempt` receives, its callbacks routed to the client. */
   #attemptContext(attemptId: string, artifactsDir: string, signal: AbortSignal, screens: boolean): EngineAttemptContext {
     const send = (method: string, params: object): void => {
-      if (this.#attempt?.attemptId === attemptId) this.#connection.notify(method, { attemptId, ...params });
+      if (this.#attempts.has(attemptId)) this.#connection.notify(method, { attemptId, ...params });
     };
     return {
       attemptId,
@@ -269,7 +274,7 @@ class EngineServer {
 
   #operation(wire: WireOperation): OperationContext {
     return {
-      signal: this.#signal(wire.signal),
+      signal: this.#signal(wire.signal, wire.attemptId),
       timeoutMs: wire.timeoutMs,
       runId: wire.runId,
       attemptId: wire.attemptId,
@@ -277,23 +282,30 @@ class EngineServer {
     };
   }
 
-  #cleanup(wire: WireCleanup): { signal: AbortSignal; timeoutMs: number } {
-    return { signal: this.#signal(wire.signal), timeoutMs: wire.timeoutMs };
+  #cleanup(wire: WireCleanup): EngineCleanupContext {
+    return obj({ signal: this.#signal(wire.signal, wire.attemptId), timeoutMs: wire.timeoutMs, attemptId: wire.attemptId });
+  }
+
+  /** The one open attempt, which a cleanup hook that names none is for; undefined when none or several are open. */
+  #onlyAttempt(): string | undefined {
+    return this.#attempts.size === 1 ? this.#attempts.keys().next().value : undefined;
   }
 
   /**
    * The local signal for a wire signal: one per id, so an engine comparing
-   * signals sees the client's identity. One first seen during an attempt is
-   * forgotten when the attempt ends; the rest live as long as the connection.
+   * signals sees the client's identity. One a call of an attempt carried
+   * (`attemptId`, else the only one open) is forgotten when the last such
+   * attempt ends; the rest live as long as the connection.
    */
-  #signal(wire: WireSignal): AbortSignal {
+  #signal(wire: WireSignal, attemptId: string | undefined = this.#onlyAttempt()): AbortSignal {
     if (wire.aborted === true) return AbortSignal.abort(wire.reason === undefined ? undefined : decodeError(wire.reason));
     let controller = this.#signals.get(wire.id);
     if (controller === undefined) {
       controller = new AbortController();
       this.#signals.set(wire.id, controller);
-      this.#attempt?.signals.add(wire.id);
     }
+    // Every attempt that uses the signal keeps it, not only the first to send it.
+    if (attemptId !== undefined) this.#attempts.get(attemptId)?.signals.add(wire.id);
     return controller.signal;
   }
 }

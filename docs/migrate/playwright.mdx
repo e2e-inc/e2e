@@ -331,7 +331,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | Option fixtures, overriding `page` or `context` in `extend` | `process.env` in the fixture; a new fixture under its own name |
 | `const response = await page.goto()` | Start `browser.waitForResponse` before the navigation |
 | A Playwright `Reporter` class, third-party reporters | A [custom reporter](/reference/reporters#custom-reporters) with `onEvent` and `onRunFinished`; `junit.xml` for a dashboard |
-| `browser.newContext()` for a second user | Drive the second user through the API with `request` |
+| `browser.newContext()` for a second user | An [actor](/actors): `actor({ session: 'reviewer' })` in `test.extend()` |
 | `page.exposeFunction()`, `addStyleTag()`, `innerHTML()`, `page.viewportSize()` | `browser.evaluate` |
 | `routeFromHAR()`, `routeWebSocket()`, `page.setExtraHTTPHeaders()` | A `browser.route` for each endpoint or header; a `browser.addInitScript` that stubs `WebSocket` |
 | `emulateMedia({ media, forcedColors, contrast })` | - |

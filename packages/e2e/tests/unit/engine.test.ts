@@ -320,6 +320,7 @@ describe('parseKey', () => {
 describe('createEngineSession', () => {
   it('mints revisions and stamps them onto every ref', async () => {
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine(observingEngine()),
       targetName: 'toy-target',
     });
@@ -334,6 +335,7 @@ describe('createEngineSession', () => {
   it('routes every node action through perform and fails loud on undeclared members', async () => {
     const calls: string[] = [];
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine(
         observingEngine({
           actions: LOCATOR_ACTION_KINDS,
@@ -354,6 +356,7 @@ describe('createEngineSession', () => {
   it('refuses an undeclared action kind before it reaches the engine', async () => {
     const calls: string[] = [];
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine(
         observingEngine({
           actions: ['tap'],
@@ -374,6 +377,7 @@ describe('createEngineSession', () => {
   it('routes a point action through performAt only for a declared pointer kind', async () => {
     const performed: string[] = [];
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine(
         observingEngine({
           performAt: async (point, action) => void performed.push(`${action.kind}@${point.x},${point.y}`),
@@ -388,7 +392,7 @@ describe('createEngineSession', () => {
       /the "secondaryTap" action at a point/,
     );
     expect(performed).toEqual(['tap@3,4', 'longPress@5,6']);
-    const none = createEngineSession({ engine: defineEngine(observingEngine()), targetName: 'toy-target' });
+    const none = createEngineSession({ attemptId: 'attempt-1', engine: defineEngine(observingEngine()), targetName: 'toy-target' });
     await expect(none.performAt({ x: 1, y: 1 }, { kind: 'tap' }, OP)).rejects.toThrow(/point/);
   });
 
@@ -396,6 +400,7 @@ describe('createEngineSession', () => {
     const performed: { id: string; revision: string; kind: string; direction?: string; momentum?: string }[] = [];
     let observes = 0;
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine(
         observingEngine({
           observe: async () => {
@@ -421,6 +426,7 @@ describe('createEngineSession', () => {
 
   it('carries the engine location and viewport onto the observation', async () => {
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine(observingEngine({ observe: async () => snapshot([], { location: 'app://device/Home' }) })),
       targetName: 'toy-target',
     });
@@ -431,7 +437,7 @@ describe('createEngineSession', () => {
 
   it('derives the grammar verbs from the declared action kinds and hooks', () => {
     const verbs = (extra: Partial<Engine>) =>
-      [...createEngineSession({ engine: defineEngine(observingEngine(extra)), targetName: 't' }).verbs].toSorted();
+      [...createEngineSession({ attemptId: 'attempt-1', engine: defineEngine(observingEngine(extra)), targetName: 't' }).verbs].toSorted();
     const perform = async () => undefined;
     expect(verbs({})).toEqual([]);
     expect(verbs({ actions: LOCATOR_ACTION_KINDS, perform })).toEqual([
@@ -480,6 +486,7 @@ describe('createEngineSession', () => {
   it('rejects a superseded located ref but lets observation refs through to the engine', async () => {
     const performed: string[] = [];
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine(
         observingEngine({
           locate: async () => [node('n1', 'Save')],
@@ -502,6 +509,7 @@ describe('createEngineSession', () => {
     const many = (prefix: string, count: number) => Array.from({ length: count }, (_, i) => node(`${prefix}${i}`, `Row ${i}`));
     let nodes = many('a', 2100);
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine(observingEngine({ locate: async () => nodes })),
       targetName: 'toy-target',
     });
@@ -517,9 +525,10 @@ describe('createEngineSession', () => {
     await expect(session.read(refs.at(-1)!, OP)).resolves.toMatchObject({ name: 'Row 2099' });
   });
 
-  it('ends the attempt exactly once, handing endAttempt the cleanup budget', async () => {
+  it('ends the attempt exactly once, handing endAttempt the cleanup budget and the attempt it ends', async () => {
     const contexts: EngineCleanupContext[] = [];
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine(
         observingEngine({
           endAttempt: async (context) => void contexts.push(context),
@@ -530,11 +539,12 @@ describe('createEngineSession', () => {
     await session.close({ ...OP, timeoutMs: 7_000 });
     await session.close({ ...OP, timeoutMs: 7_000 });
     expect(contexts).toHaveLength(1);
-    expect(contexts[0]).toEqual({ signal: OP.signal, timeoutMs: 7_000 });
+    expect(contexts[0]).toEqual({ signal: OP.signal, timeoutMs: 7_000, attemptId: OP.attemptId });
   });
 
   it('reports missing observation as an unsupported capability', async () => {
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: undefined,
       targetName: 'bare',
     });
@@ -553,6 +563,7 @@ describe('createEngineSession pixels-only observation', () => {
     };
     const received: unknown[] = [];
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine(observingEngine({ observe: async (_operation, options) => { received.push(options); return raw; } })),
       targetName: 'toy',
     });
@@ -571,6 +582,7 @@ describe('createEngineSession pixels-only observation', () => {
   it('accepts a snapshot with no nodes and pixels: a vision-only body is observable', async () => {
     const pixels = { data: new Uint8Array(8), mediaType: 'image/png' as const, width: 4, height: 2, scale: 1 };
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine({
         name: 'vision',
         version: '1.0.0',
@@ -593,6 +605,7 @@ describe('createEngineSession pixels-only observation', () => {
     const label: SemanticNode = { ref: { id: 'label', revision: '' }, role: 'text', text: 'Sign in' };
     let raw = snapshot([pin, label]);
     const session = createEngineSession({
+      attemptId: 'attempt-1',
       engine: defineEngine(observingEngine({ observe: async () => raw })),
       targetName: 'toy',
     });

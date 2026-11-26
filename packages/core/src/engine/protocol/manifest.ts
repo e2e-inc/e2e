@@ -33,6 +33,7 @@ export function describeEngine(engine: EngineHandle): EngineManifest {
     launchArgumentValues: engine.launchArgumentValues === true ? true : undefined,
     fileApps: engine.fileApps === true ? true : undefined,
     isolation: engine.isolation === 'worker' ? ('worker' as const) : undefined,
+    actors: engine.actors === true ? (true as const) : undefined,
   });
 }
 
@@ -88,5 +89,6 @@ function comparable(manifest: EngineManifest) {
     launchArgumentValues: manifest.launchArgumentValues === true,
     fileApps: manifest.fileApps === true,
     isolation: manifest.isolation === 'worker' ? 'worker' : 'attempt',
+    actors: manifest.actors === true,
   };
 }

@@ -22,7 +22,8 @@ import {
 import { createRequire } from 'node:module';
 import type { WebFixtures } from './fixtures.ts';
 import { asBrowserProvider, type BrowserProvider } from './provider.ts';
-import { PlaywrightSurface, type WebOptions } from './surface.ts';
+import type { WebOptions } from './surface.ts';
+import { WorkerBrowser } from './worker-browser.ts';
 import { createBrowserFixture } from './browser.ts';
 import { validateInitScripts } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaProblem } from './media.ts';
@@ -33,27 +34,33 @@ import { BROWSER_NAMES, isBrowserName } from './browser-connection.ts';
 /** App fields only a device target reads. */
 const NATIVE_APP_KEYS = ['bundleId', 'appPath', 'launchArguments'] as const;
 
-/** Creates one Playwright engine: one browser per worker, one context per attempt. */
-const surfaces = new WeakMap<EngineHandle, PlaywrightSurface>();
+/** The worker's browser behind each `web()` handle, which finds the surface of the attempt a call names. */
+const workers = new WeakMap<EngineHandle, WorkerBrowser>();
 
 /**
  * The live browser objects behind a `web()` handle, for agent-side code
  * that replaces the toolset wholesale (spec chapter 16) and drives the page with
- * its own Playwright tooling. Both accessors read the current attempt: the
- * context exists from `startAttempt`, the page from the first `app.open()` or
- * `browser.goto()`, and either throws `INVALID_STATE` before that. The harness
- * remains the notary for what it witnesses; a caller here acts out of band.
+ * its own Playwright tooling. Both accessors read the attempt `surfaceOf` was
+ * given, or the one open attempt: the context exists from `startAttempt`,
+ * the page from the first `app.open()` or `browser.goto()`, and either
+ * throws `INVALID_STATE` before that. The harness remains the notary for
+ * what it witnesses; a caller here acts out of band.
  */
 export interface PlaywrightLiveSurface {
   readonly page: () => Page;
   readonly context: () => BrowserContext;
 }
 
-/** The live surface of a handle this module created, or undefined for any other engine. */
-export function surfaceOf(engine: EngineHandle): PlaywrightLiveSurface | undefined {
-  const surface = surfaces.get(engine);
-  if (surface === undefined) return undefined;
-  return { page: () => surface.requirePage(), context: () => surface.requireContext() };
+/**
+ * The live surface of a handle this module created, or undefined for any
+ * other engine. `attemptId` names the attempt it reads, which an executor
+ * has as `ExecutorAttempt.attemptId`; without it the accessors read the one
+ * open attempt, and throw `INVALID_STATE` while several are open.
+ */
+export function surfaceOf(engine: EngineHandle, attemptId?: string): PlaywrightLiveSurface | undefined {
+  const worker = workers.get(engine);
+  if (worker === undefined) return undefined;
+  return { page: () => worker.attempt({ attemptId }).requirePage(), context: () => worker.attempt({ attemptId }).requireContext() };
 }
 
 /**
@@ -64,6 +71,7 @@ export function surfaceOf(engine: EngineHandle): PlaywrightLiveSurface | undefin
 export interface WebEngine<Platform extends string = string, Isolation extends EngineIsolation = EngineIsolation>
   extends EngineHandle<WebFixtures, Platform, Isolation> {}
 
+/** Creates one Playwright engine: one browser per worker, one context per attempt. */
 export function web(options: WebOptions = {}): WebEngine<'web', 'attempt'> {
   if ('allowedOrigins' in options) {
     throw new ConfigurationError(
@@ -106,47 +114,45 @@ export function web(options: WebOptions = {}): WebEngine<'web', 'attempt'> {
   if (options.deviceScaleFactor !== undefined) validateDeviceScaleFactor(options);
   if (options.screencast !== undefined) validateScreencast(options.screencast);
   if (options.webmcp !== undefined) validateWebmcp(options, provider);
-  const reconnecting = options.connect?.reconnectEndpoint !== undefined;
-  // A per-attempt lease rides the same persistent context as `reconnectEndpoint`, with the same limits.
-  const recoverable = reconnecting || provider?.scope === 'attempt';
+  const worker = new WorkerBrowser(options);
   const mode = provider === undefined ? 'connect.reconnectEndpoint' : `browser provider "${provider.name}" with scope "attempt"`;
   const creationOptions = CREATION_OPTION_KEYS.filter((key) => options[key] !== undefined);
-  if (recoverable && creationOptions.length > 0) {
+  if (worker.persistent && creationOptions.length > 0) {
     throw new ConfigurationError(
       'INVALID_CONFIG',
       `${mode} uses a persistent context; ${creationOptions.join(', ')} ${creationOptions.length === 1 ? 'requires' : 'require'} a newly created context`,
     );
   }
-  const surface = new PlaywrightSurface(options);
   const handle = defineEngine<WebFixtures, 'web', 'attempt'>({
     name: 'web',
     version: ownVersion(),
     spiVersion: 1,
     platform: 'web',
     fileApps: true,
-    prepare: (info) => surface.prepare(info),
-    finish: (info) => surface.finish(info),
-    doctor: (info) => surface.doctor(info),
-    init: (info) => surface.init(info),
-    startAttempt: (context) => surface.startAttempt(context),
-    settleAttempt: (context) => surface.settleAttempt(context),
-    endAttempt: (context) => surface.endAttempt(context),
-    dispose: (context) => surface.dispose(context),
-    observe: (operation, observeOptions) => surface.observe(operation, observeOptions),
-    readStyle: (ref, properties, operation) => surface.readStyle(ref, properties, operation),
-    viewportIntersection: (ref, operation) => surface.viewportIntersection(ref, operation),
-    locate: (expression, operation) => surface.locate(expression, operation),
-    perform: (ref, action, operation) => surface.perform(ref, action, operation),
+    prepare: (info) => worker.prepare(info),
+    finish: (info) => worker.finish(info),
+    doctor: (info) => worker.doctor(info),
+    init: (info) => worker.init(info),
+    startAttempt: (context) => worker.startAttempt(context),
+    settleAttempt: (context) => worker.settleAttempt(context),
+    endAttempt: (context) => worker.endAttempt(context),
+    dispose: (context) => worker.dispose(context),
+    // Every hook on an attempt is `async`, so a call for one that is not open rejects, as a call that fails on its surface does.
+    observe: async (operation, observeOptions) => worker.attempt(operation).observe(operation, observeOptions),
+    readStyle: async (ref, properties, operation) => worker.attempt(operation).readStyle(ref, properties, operation),
+    viewportIntersection: async (ref, operation) => worker.attempt(operation).viewportIntersection(ref, operation),
+    locate: async (expression, operation) => worker.attempt(operation).locate(expression, operation),
+    perform: async (ref, action, operation) => worker.attempt(operation).perform(ref, action, operation),
     // A browser honors the SPI v1 actions plus blur, in-memory uploads, and multi-taps; `actions.ts` dispatches each.
     actions: [...LOCATOR_ACTION_KINDS, 'blur', 'setInputFilePayloads', 'multiTap'],
     // Playwright holds each modifier for the click.
     tapModifiers: true,
     // A page takes every pointer action of the contract at a bare point too.
-    performAt: (point, action, operation) => surface.performAt(point, action, operation),
+    performAt: async (point, action, operation) => worker.attempt(operation).performAt(point, action, operation),
     pointerActions: POINTER_ACTION_KINDS,
     keyboard: {
-      type: (text, keyboardOptions, operation) => surface.typeText(text, keyboardOptions, operation),
-      press: (key, operation) => surface.pressKey(key, operation),
+      type: async (text, keyboardOptions, operation) => worker.attempt(operation).typeText(text, keyboardOptions, operation),
+      press: async (key, operation) => worker.attempt(operation).pressKey(key, operation),
     },
     // `app.permissions: 'all'` grants every name the browser takes; see grantPermissions.
     grantsAllPermissions: true,
@@ -154,32 +160,34 @@ export function web(options: WebOptions = {}): WebEngine<'web', 'attempt'> {
     validateApp: (app, info) => validateApp(app, info, options),
     ...(isSecret(options.basicAuth?.password) ? { secrets: [options.basicAuth.password] } : {}),
     session: {
-      open: (url, operation) => surface.open(url, operation),
-      back: (operation) => surface.back(operation),
-      resize: (size, operation) => surface.resize(size, operation),
-      switchTab: (index, operation) => surface.switchTab(index, operation),
-      closeTab: (index, operation) => surface.closeTabAt(index, operation),
-      restart: (operation) => surface.restart(operation),
-      reset: recoverable ? () => Promise.reject(persistentContextLimit('app.clearState()', mode, provider !== undefined)) : (operation) => surface.reset(operation),
+      open: async (url, operation) => worker.attempt(operation).open(url, operation),
+      back: async (operation) => worker.attempt(operation).back(operation),
+      resize: async (size, operation) => worker.attempt(operation).resize(size, operation),
+      switchTab: async (index, operation) => worker.attempt(operation).switchTab(index, operation),
+      closeTab: async (index, operation) => worker.attempt(operation).closeTabAt(index, operation),
+      restart: async (operation) => worker.attempt(operation).restart(operation),
+      reset: worker.persistent ? () => Promise.reject(persistentContextLimit('app.clearState()', mode, provider !== undefined)) : async (operation) => worker.attempt(operation).reset(operation),
     },
     artifacts: {
-      screenshot: (label, operation) => surface.screenshot(label, operation),
-      startVideo: (operation) => surface.startVideo(operation),
-      stopVideo: (operation) => surface.stopVideo(operation),
+      screenshot: async (label, operation) => worker.attempt(operation).screenshot(label, operation),
+      startVideo: async (operation) => worker.attempt(operation).startVideo(operation),
+      stopVideo: async (operation) => worker.attempt(operation).stopVideo(operation),
     },
-    ...(recoverable
+    // A persistent context is the one a remote browser has: there is no second one to give an actor, and no state to save.
+    ...(worker.persistent
       ? {}
       : {
+          actors: true,
           state: {
-            capture: (operation) => surface.captureState(operation),
-            restore: (state, operation) => surface.restoreState(state, operation),
+            capture: async (operation) => worker.attempt(operation).captureState(operation),
+            restore: async (state, operation) => worker.attempt(operation).restoreState(state, operation),
           },
         }),
     fixtures: {
-      browser: (context) => createBrowserFixture(surface, context),
+      browser: (context) => createBrowserFixture(worker.attempt(context), context),
     },
   });
-  surfaces.set(handle, surface);
+  workers.set(handle, worker);
   return handle;
 }
 

@@ -1502,6 +1502,30 @@ prototypes, gets structured transfer. Cleanup does not wait for stalled
 protocol replies. An abandoned reader cannot reuse node IDs or publish
 references over a newer observation.
 
+## actor
+
+Declares one more browser session in a test, as a fixture for
+`test.extend()`. See [Actors](/actors).
+
+```ts
+import { test as base, actor } from '@e2e-dev/web';
+
+const test = base.extend({
+  reviewer: actor({ session: 'reviewer' }),
+});
+```
+
+| Option | Type | Default |
+| --- | --- | --- |
+| `session` | `string` | signed out |
+| `target` | `string` | the test's target |
+
+- `session` names a session a setup test saved.
+- `target` names another `web()` target of the config. Without it the actor
+  is a browser context of its own in the test's browser.
+- The value a test receives is an `Actor`: `agent`, `app`, `screen`, `request`,
+  `platform`, and `browser`.
+
 ## surfaceOf
 
 Returns the live Playwright surface of a `web()` handle, for a
@@ -1513,18 +1537,21 @@ import { web, surfaceOf } from '@e2e-dev/web';
 
 const engine = web();
 const live = surfaceOf(engine);   // PlaywrightLiveSurface | undefined
-live!.page();                     // the Page of the current attempt
+live!.page();                     // the Page of the one open attempt
 live!.context();                  // its BrowserContext
+surfaceOf(engine, ctx.attempt.attemptId);   // in an executor: the attempt the step runs in
 ```
 
 - It returns `undefined` for a handle from another package.
+- With [actors](#actor), several attempts are open at one time. Pass the
+  attempt id to read one of them.
 - Direct Playwright calls are not recorded as steps.
 - After [CDP recovery](#recovering-a-cdp-transport), read the accessors
   again.
 
 | Throws | When |
 | --- | --- |
-| `INVALID_STATE` | An accessor called outside an active attempt, or on a handle that has not started in this process, such as a second `web()`. |
+| `INVALID_STATE` | An accessor called outside an active attempt, for an attempt that is not open, without an id while several attempts are open, or on a handle that has not started in this process, such as a second `web()`. |
 
 ## Types
 

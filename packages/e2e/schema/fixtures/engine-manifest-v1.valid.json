@@ -32,5 +32,6 @@
   "grantsAllPermissions": true,
   "launchArgumentValues": true,
   "fileApps": true,
-  "isolation": "worker"
+  "isolation": "worker",
+  "actors": true
 }

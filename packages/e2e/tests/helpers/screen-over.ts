@@ -93,10 +93,9 @@ export function screenOver(options: ScreenOverOptions): { screen: Screen; steps:
   const signal = new AbortController().signal;
   const screen = createScreen({
     engine: new LocatorEngine({
-      session: createEngineSession({ engine, targetName: 'fake' }),
+      session: createEngineSession({ attemptId: 'attempt', engine, targetName: 'fake' }),
       budget: new AttemptBudget(signal, new Deadline(10_000)),
       runId: 'run',
-      attemptId: 'attempt',
       actionTimeout: options.timeoutMs,
       assertionTimeout: options.timeoutMs,
     }),

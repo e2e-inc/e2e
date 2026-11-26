@@ -27,8 +27,8 @@ function runtime(engine: EngineHandle, overrides: Partial<E2EConfig> = {}, app?:
   const steps = new StepRecorder('attempt');
   const registerArtifact = vi.fn(() => 'artifact');
   const { fixtures } = createFixtures({
-    config, target: config.targets[0]!, session: createEngineSession({ engine, targetName: 'fake' }),
-    steps, budget: new AttemptBudget(signal, new Deadline(10_000)), runId: 'run', attemptId: 'attempt',
+    config, target: config.targets[0]!, session: createEngineSession({ attemptId: 'attempt', engine, targetName: 'fake' }),
+    steps, budget: new AttemptBudget(signal, new Deadline(10_000)), runId: 'run', 
     attempt: { testId: 'test', attemptId: 'attempt', titlePath: [], index: 0, signal, memory: new Map() },
     artifacts: { dir: '/tmp', register: registerArtifact, link: () => 'artifact' }, priorSteps: () => steps.completed(),
     agentContext: undefined, saveSession: undefined,

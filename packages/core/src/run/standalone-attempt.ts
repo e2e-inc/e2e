@@ -50,10 +50,10 @@ export interface StandaloneSessionOptions {
   readonly retainSteps?: number;
   /** The test title of a hosted attempt; its policy decides whether the attempt reads it. */
   readonly name?: string;
-  /** A state an earlier session captured, restored at launch. */
-  readonly state?: RestoredState | undefined;
-  /** The video this session records, in place of what the target's mode says. */
-  readonly video?: VideoRecording | undefined;
+  /** What the session starts from: a state an earlier session captured, or the name of a session the run's store holds. */
+  readonly state?: RestoredState | string | undefined;
+  /** The video this session records, or `off` for none, in place of what the target's mode says. */
+  readonly video?: VideoRecording | 'off' | undefined;
 }
 
 export interface StandaloneAttempt<Extra = unknown> {
@@ -228,11 +228,11 @@ export async function launchAttempt<Sessions extends EngineSessions, Extra>(
     if (error === undefined) return { status: 'passed', error };
     return { status: classifyAttemptStatus(error, step?.status === 'timed-out', error.code === 'CANCELLED'), error };
   };
-  const video = options.video ?? attemptVideo(target.video, 0);
+  const video = options.video === 'off' ? undefined : (options.video ?? attemptVideo(target.video, 0));
   session = await executor.launchSession({ session: options.state, recordings: { trace: undefined, video } }, attemptId, artifacts.dir, attemptSignal);
   const opened = session;
   const closeOpened = (record: ClosingRecord): Promise<void> =>
-    executor.closeSession(opened, { attemptId, video }, record, artifacts.sink, attemptErrors);
+    executor.closeSession(opened, { video }, record, artifacts.sink, attemptErrors);
   if (attemptSignal.aborted) {
     await closeOpened({ status: 'interrupted', cleanup: 'complete' });
     throw new InfrastructureError('CANCELLED', 'opening the e2e session was cancelled');
@@ -242,7 +242,7 @@ export async function launchAttempt<Sessions extends EngineSessions, Extra>(
   budget.enter(attemptSignal, options.timeoutMs);
   const attempt: ExecutorAttempt = { testId: identity.testId, attemptId, titlePath: [], index: 0, signal: end.signal, memory: new Map<string, unknown>() };
   const base = {
-    config, target, session: opened, steps, runId, attemptId, attempt, artifacts: artifacts.sink,
+    config, target, session: opened, steps, runId, attempt, artifacts: artifacts.sink,
     priorSteps: () => steps.completed(), agent: options.agent, saveSession: undefined,
     models: new WorkerModels((error) => recordFailure(error, 'body')), debug: worker.debug,
   };
@@ -306,7 +306,7 @@ export async function launchAttempt<Sessions extends EngineSessions, Extra>(
       } catch (cause) { recordFailure(cause, 'cleanup'); }
       try {
         // Settling runs under the worker's signal; an interrupted host still ends its attempt below.
-        if (!worker.signal.aborted) await executor.settleAttempt(opened, attemptId);
+        if (!worker.signal.aborted) await executor.settleAttempt(opened);
       } catch (cause) { recordFailure(cause, 'body'); }
       const record: ClosingRecord = { status: verdict().status, cleanup: 'complete' };
       try {

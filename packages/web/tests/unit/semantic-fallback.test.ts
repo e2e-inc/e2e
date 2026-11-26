@@ -1,12 +1,10 @@
-import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Browser, JSHandle, Page } from 'playwright-core';
 import { EngineError, TestError, type OperationContext } from '@e2e-dev/core/engine';
 import { ElementList } from '../../src/element-list.ts';
 import { captureDocument, ROOT_NODE_ID } from '../../src/observation.ts';
-import { PlaywrightSurface } from '../../src/surface.ts';
 import { BrowserConnection } from '../../src/browser-connection.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import { openSurface, type OpenSurface } from '../helpers/attempt.ts';
 
 vi.mock('../../src/observation.ts', async (original) => ({
   ...await original<typeof import('../../src/observation.ts')>(),
@@ -14,7 +12,7 @@ vi.mock('../../src/observation.ts', async (original) => ({
 }));
 
 const TIMEOUT = new EngineError('OPERATION_TIMEOUT', 'semantic reader timed out', { retryable: false });
-const surfaces = new Set<PlaywrightSurface>();
+const opened = new Set<OpenSurface>();
 const operation = (signal = new AbortController().signal): OperationContext => ({
   signal, timeoutMs: 1_000, runId: 'run', attemptId: 'attempt', origin: 'agent',
 });
@@ -54,14 +52,9 @@ async function setup() {
     }),
   } as unknown as Browser;
   vi.spyOn(BrowserConnection.prototype, 'acquire').mockResolvedValue(browser);
-  const surface = new PlaywrightSurface({});
-  surfaces.add(surface);
-  const signal = new AbortController().signal;
-  await surface.init({
-    runId: 'run', targetName: 'fixture', projectRoot: process.cwd(), app: {}, env: {},
-    headed: false, workerSlot: 0, signal, log: () => undefined,
-  });
-  await surface.startAttempt({ attemptId: 'attempt', artifactsDir: tmpdir(), signal, resolveSecret: noSecrets, ...ignoreTrace });
+  const attempt = await openSurface();
+  opened.add(attempt);
+  const { surface } = attempt;
   await surface.ensurePage();
   vi.mocked(captureDocument).mockRejectedValue(TIMEOUT);
   return { surface, masks, screenshot };
@@ -69,8 +62,8 @@ async function setup() {
 
 afterEach(async () => {
   vi.useRealTimers();
-  await Promise.all([...surfaces].map((surface) => surface.dispose({ signal: new AbortController().signal, timeoutMs: 1_000 })));
-  surfaces.clear();
+  await Promise.all([...opened].map((attempt) => attempt.close()));
+  opened.clear();
   vi.restoreAllMocks();
 });
 

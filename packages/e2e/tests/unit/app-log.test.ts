@@ -81,7 +81,7 @@ describe('StepRecorder.recordAppEvent', () => {
 
 describe('the session app log route', () => {
   it('holds lines and navigations until a sink is routed, drops malformed ones, and sends later ones straight through', () => {
-    const session = createEngineSession({ engine: undefined, targetName: 'web' });
+    const session = createEngineSession({ attemptId: 'attempt-1', engine: undefined, targetName: 'web' });
     session.appLog.push(ERROR);
     session.appLog.navigated('navigated to /login');
     session.appLog.push({ source: 'stdout', level: 'error', text: 'not a source' } as unknown as AppLogEntry);
@@ -95,7 +95,7 @@ describe('the session app log route', () => {
   });
 
   it('holds each kind within its own quota before a sink is routed, so chatter never crowds out an error', () => {
-    const session = createEngineSession({ engine: undefined, targetName: 'web' });
+    const session = createEngineSession({ attemptId: 'attempt-1', engine: undefined, targetName: 'web' });
     for (let index = 0; index < 400; index += 1) session.appLog.push({ source: 'console', level: 'info', text: `tick ${index}` });
     for (let index = 0; index < 80; index += 1) session.appLog.navigated(`navigated to /${index}`);
     session.appLog.push(ERROR);

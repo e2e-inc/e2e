@@ -463,6 +463,16 @@ export function releaseSessionLedger(session: TargetSession): void {
 }
 
 /**
+ * Keeps sharing every value `session` knows now past its own end, until the
+ * returned function is called. What an attempt with more than one session
+ * does while it closes them one after another: the artifacts of each are
+ * still rewritten for what the others learned.
+ */
+export function holdSessionSecrets(session: TargetSession, secrets: ResolvedConfig['allSecrets']): () => void {
+  return share(sessionLedger(session, secrets).entries()).withdraw;
+}
+
+/**
  * Redacts `text` with every value `session` has seen, or with the process
  * ledger while no session is open yet, so text an attempt produces before
  * its session exists (a step label, a fixture error) is covered too.

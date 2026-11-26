@@ -19,8 +19,11 @@ function cleanup(): EngineCleanupContext {
   return { signal: new AbortController().signal, timeoutMs: 30_000 };
 }
 
+/** The id of the one attempt a test has open at a time, which its calls name. */
+const ATTEMPT = 'permissions';
+
 function operation(): OperationContext {
-  return { signal: new AbortController().signal, timeoutMs: 30_000, runId: 'run-permissions', attemptId: 'p1', origin: 'test' };
+  return { signal: new AbortController().signal, timeoutMs: 30_000, runId: 'run-permissions', attemptId: ATTEMPT, origin: 'test' };
 }
 
 describe('app permissions', () => {
@@ -45,7 +48,7 @@ describe('app permissions', () => {
       app: { site: new URL(app.url).hostname, ...(permissions === undefined ? {} : permissions === 'all' ? { allPermissions: true as const } : { permissions }) }, env: {}, headed: false,
       workerSlot: 0, log: () => undefined, signal: new AbortController().signal,
     });
-    await engine.startAttempt!({ attemptId: 'p1', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+    await engine.startAttempt!({ attemptId: ATTEMPT, artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
     return engine;
   }
 
@@ -100,7 +103,7 @@ describe('app permissions', () => {
     });
     try {
       await engine.endAttempt!(cleanup());
-      await engine.startAttempt!({ attemptId: 'p2', artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+      await engine.startAttempt!({ attemptId: ATTEMPT, artifactsDir, signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
       // Refused with the whole list, then granted without the unknown name.
       expect(spy.mock.calls.map(([names]) => names.includes('local-network-access'))).toEqual([true, false]);
       expect(await copy(engine, 'the rest')).toBe('the rest');

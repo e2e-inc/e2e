@@ -28,7 +28,8 @@ import type {
   SemanticNode,
   ViewportPoint,
 } from '@e2e-dev/core/lib/engine/index';
-import { defineEngine, ENGINE_SPI_VERSION, LOCATOR_ACTION_KINDS } from './engine-runtime.ts';
+import type { Actor } from '../../src/index.ts';
+import { defineActor, defineEngine, ENGINE_SPI_VERSION, LOCATOR_ACTION_KINDS } from './engine-runtime.ts';
 import { createScene, type Scene, type ScriptedNode, type Stage } from './scripted-scene.ts';
 
 /** The EBML magic every WebM file starts with, followed by nothing worth decoding. */
@@ -170,6 +171,10 @@ export interface FakeEngineBehavior {
   isolation?: 'attempt' | 'worker';
   /** The secrets the engine declares, which `onStartAttempt` may resolve through its context. */
   secrets?: readonly Secret[];
+  /** Declares `actors`: the engine runs an actor's attempt while the test's own is open. */
+  actors?: boolean;
+  /** The engine's name; `fake` by default. An `actor()` belongs to the engine of one name. */
+  name?: string;
 }
 
 /** The app URL the fake serves: every observation reports it as its location. */
@@ -209,6 +214,9 @@ const FAKE_NODE: SemanticNode = {
   states: { hidden: false },
 };
 
+/** The `actor()` of the fake engine, as an engine package exports its own. */
+export const fakeActor = defineActor<Actor>('fake');
+
 /** Creates a branded, instrumented fake engine. */
 export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineHandle {
   const events: string[] = [];
@@ -220,6 +228,8 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
   const restoredStates: EngineState[] = [];
   const fixtureCalls: string[] = [];
   const scenes = new Map<string, Scene>();
+  /** The ids of the attempts open now: a call of the harness carries one of them. */
+  const open = new Set<string>();
   let openAttempts = 0;
   let attemptsStarted = 0;
   let attemptsEnded = 0;
@@ -236,6 +246,9 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
       timeoutMs: operation.timeoutMs,
       abortedAtCall: operation.signal.aborted,
     });
+    // The harness names the attempt a call is for by the id its startAttempt got, a serial group's tests included.
+    // A call recorded and then refused is one a body made after its attempt ended.
+    if (open.size > 0 && !open.has(operation.attemptId)) throw new Error(`${method} was called for attempt ${operation.attemptId}, which is not open`);
   }
 
   function callsOf(attemptId: string): RecordedCall[];
@@ -254,11 +267,16 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
 
   const tree = behavior.tree ?? FAKE_NODE;
   const location = `${FAKE_APP_URL}/`;
-  let videoStartedAt: string | undefined;
+  /** When each attempt's video began, by attempt id: more than one records at a time with `actors`. */
+  const videoStartedAt = new Map<string, string>();
+  /** The artifact directory of the attempt an operation belongs to. */
+  const artifactsDirOf = (operation: OperationContext): string | undefined =>
+    attempts.find((attempt) => attempt.attemptId === operation.attemptId)?.artifactsDir;
 
   const { preparedWorkers } = behavior;
   const engine = defineEngine({
-    name: 'fake',
+    name: behavior.name ?? 'fake',
+    ...(behavior.actors === true ? { actors: true } : {}),
     version: '1.0.0',
     spiVersion: ENGINE_SPI_VERSION,
     ...(preparedWorkers === undefined ? {} : { prepare: async () => ({ workers: preparedWorkers }) }),
@@ -275,23 +293,28 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
       maxConcurrentAttempts = Math.max(maxConcurrentAttempts, openAttempts);
       events.push(`startAttempt:${index}`);
       attempts.push(context);
+      open.add(context.attemptId);
       if (behavior.scene !== undefined) scenes.set(context.attemptId, createScene(behavior.scene, location));
       await behavior.onStartAttempt?.(context, index);
     },
     ...(behavior.onSettleAttempt === undefined
       ? {}
       : {
-          async settleAttempt() {
-            await behavior.onSettleAttempt?.(current);
+          async settleAttempt(context) {
+            const named = context.attemptId === undefined ? -1 : attempts.findIndex((attempt) => attempt.attemptId === context.attemptId);
+            await behavior.onSettleAttempt?.(named === -1 ? current : named);
           },
         }),
-    async endAttempt() {
-      const index = current;
+    async endAttempt(context) {
+      // With `actors` more than one attempt is open, and the context names the one that ends.
+      const named = context.attemptId === undefined ? -1 : attempts.findIndex((attempt) => attempt.attemptId === context.attemptId);
+      const index = named === -1 ? current : named;
       openAttempts -= 1;
       attemptsEnded += 1;
       events.push(`endAttempt:${index}`);
       const attemptId = attempts[index]?.attemptId;
       if (attemptId !== undefined) {
+        open.delete(attemptId);
         scenes.get(attemptId)?.dispose();
         scenes.delete(attemptId);
       }
@@ -475,7 +498,7 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
               record(`artifacts.screenshot(${label ?? ''})`, operation);
               // A file the runner can measure, so the artifact record is
               // complete; its bytes differ per attempt, as a screen's would.
-              const dir = attempts[current]?.artifactsDir;
+              const dir = artifactsDirOf(operation);
               if (dir !== undefined) {
                 mkdirSync(path.join(dir, 'screenshots'), { recursive: true });
                 writeFileSync(
@@ -489,17 +512,17 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
               ? {
                   async startVideo(operation) {
                     record('artifacts.startVideo', operation);
-                    videoStartedAt = new Date().toISOString();
+                    videoStartedAt.set(operation.attemptId, new Date().toISOString());
                   },
                   async stopVideo(operation) {
                     record('artifacts.stopVideo', operation);
                     await behavior.onStopVideo?.(current);
-                    const dir = attempts[current]?.artifactsDir;
-                    if (dir === undefined || videoStartedAt === undefined) return [];
+                    const dir = artifactsDirOf(operation);
+                    const startedAt = videoStartedAt.get(operation.attemptId);
+                    if (dir === undefined || startedAt === undefined) return [];
                     mkdirSync(path.join(dir, 'video'), { recursive: true });
                     writeFileSync(path.join(dir, 'video', 'fake.webm'), FAKE_WEBM);
-                    const startedAt = videoStartedAt;
-                    videoStartedAt = undefined;
+                    videoStartedAt.delete(operation.attemptId);
                     const links = (behavior.videoLinks ?? []).map((url) => ({ url, mediaType: 'video/mp4', startedAt }));
                     return [...links, { path: 'video/fake.webm', startedAt }];
                   },

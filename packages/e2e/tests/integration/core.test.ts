@@ -330,7 +330,7 @@ describe('e2e/core', { timeout: 60_000 }, () => {
     const ended = new AbortController();
     let seats = 0;
     const gaveUp = { signal: new AbortController().signal, take: () => undefined };
-    const steps = { progress: () => undefined, video: () => Promise.resolve() };
+    const steps = { progress: () => undefined, wrote: () => undefined, verified: () => undefined, placed: () => undefined, video: () => Promise.resolve() };
     publishAttempt(
       {
         attemptId: 'a1', owner: 'suite', testKind: 'test', assertionTimeout: 1_000, budget: new AttemptBudget(ended.signal, new Deadline(1_000)), soft: new SoftFailures(),

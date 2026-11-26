@@ -114,7 +114,12 @@ function makePair(
   target: ResolvedTarget,
   overrides: Partial<TestTargetPair> = {},
 ): TestTargetPair {
-  return { test, target, agent: 'default', repeat: 0, options: defaultOptions, disposition: 'run', skip: undefined, ...overrides };
+  return { test, target, agent: 'default', repeat: 0, options: defaultOptions, disposition: 'run', skip: undefined, actors: [], ...overrides };
+}
+
+/** An actor a pair opens on `target`, another target than the pair's own, restoring `session` when it names one. */
+function makeActor(name: string, target: ResolvedTarget, session?: string): TestTargetPair['actors'][number] {
+  return { name, definition: { name, fn: async () => undefined, names: [], scope: 'test', auto: undefined, layer: 0 }, session, target, own: false };
 }
 
 function makeCollection(files: readonly string[], pairs: readonly TestTargetPair[]): Collection {
@@ -135,7 +140,7 @@ function makeCollection(files: readonly string[], pairs: readonly TestTargetPair
 }
 
 function makeSelection(perTarget: readonly { target: ResolvedTarget; pairs: TestTargetPair[] }[]): Selection {
-  return { pairs: perTarget.flatMap((entry) => entry.pairs), perTarget };
+  return { pairs: perTarget.flatMap((entry) => entry.pairs), perTarget, actorTargets: [] };
 }
 
 interface FakeBehaviour {
@@ -552,6 +557,42 @@ describe('app command failures', () => {
     expect(collected.runErrors).toEqual([{ error: failure.error }]);
     expect(fleet.spawned.map((worker) => worker.targetName)).toEqual(['healthy']);
     expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('skips the tests that name an actor on a target whose app exited, and runs the rest of their target', async () => {
+    const web = makeTarget('web', 0);
+    const phone = makeTarget('phone', 1);
+    const courier = makeActor('courier', phone);
+    const pairs = [
+      makePair(makeTest('tests/a.e2e.ts', 'names the phone'), web, { actors: [courier] }),
+      makePair(makeTest('tests/b.e2e.ts', 'names no actor'), web),
+    ];
+    const fleet = new FakeFleet();
+    // Nothing runs on the phone target itself: it is in the run for the actor alone.
+    const exited: TargetFailure = { targetNames: ['phone'], error: { ...failure.error, message: 'target "phone" command exited with code 1 after becoming ready' } };
+    const collected = await run(makeSelection([{ target: web, pairs }]), makeCollection(['tests/a.e2e.ts', 'tests/b.e2e.ts'], pairs), fleet, {
+      subscribeTargetFailures(receive) {
+        receive(exited);
+        return () => undefined;
+      },
+    });
+    expect(collected.results.map((result) => [result.test.title, result.status, result.skip?.reason]).toSorted()).toEqual([
+      ['names no actor', 'passed', undefined],
+      ['names the phone', 'skipped', exited.error.message],
+    ]);
+    expect(collected.runErrors).toEqual([{ error: exited.error }]);
+
+    // A setup test names actors too: one whose actor's app is gone is skipped, and so is the test that needs its session.
+    const setup = makePair(makeTest('tests/setup.e2e.ts', 'login', { kind: 'setup', sessions: ['user'], id: 'setup::user' }), web, { actors: [courier] });
+    const consumer = makePair(makeTest('tests/c.e2e.ts', 'starts signed in'), web, { options: { ...defaultOptions, session: 'user' } });
+    const withSetup = await run(makeSelection([{ target: web, pairs: [setup, consumer] }]), makeCollection(['tests/setup.e2e.ts', 'tests/c.e2e.ts'], [setup, consumer]), new FakeFleet(), {
+      subscribeTargetFailures(receive) {
+        receive(exited);
+        return () => undefined;
+      },
+    });
+    expect(withSetup.results.map((result) => [result.test.title, result.status])).toEqual([['login', 'skipped'], ['starts signed in', 'skipped']]);
+    expect(withSetup.runErrors).toEqual([{ error: exited.error }]);
   });
 
   it('does not dispatch a queued unit when a failed target worker reports ready late', async () => {
@@ -1240,6 +1281,27 @@ describe('scheduler gating and dispatch', () => {
     const firstWorkerUnits = fleet.unitsByWorker[0]!;
     expect(firstWorkerUnits[0]!.kind).toBe('setup');
     expect(collected.results[0]!.test.kind).toBe('setup');
+  });
+
+  it('holds a target\'s tests until the setup an actor needs on another target is done, and skips them when it fails', async () => {
+    const web = makeTarget('web', 0);
+    const phone = makeTarget('phone', 1);
+    const setup = makePair(makeTest('tests/setup.e2e.ts', 'login', { kind: 'setup', sessions: ['courier'], id: 'setup::courier' }), phone);
+    const courier = makeActor('courier', phone, 'courier');
+    const ordinary = makePair(makeTest('tests/a.e2e.ts', 'names the courier'), web, { actors: [courier] });
+    const selection = makeSelection([{ target: web, pairs: [ordinary] }, { target: phone, pairs: [setup] }]);
+    const collection = makeCollection(['tests/setup.e2e.ts', 'tests/a.e2e.ts'], [setup, ordinary]);
+
+    const passing = new FakeFleet();
+    const passed = await run(selection, collection, passing, { workers: 3 });
+    expect(passed.results.map((result) => [result.test.title, result.status])).toEqual([['login', 'passed'], ['names the courier', 'passed']]);
+    // The web target comes first in the run, and still its test waits for the phone's setup.
+    expect(passing.unitsByWorker.flat().map((unit) => unit.kind)).toEqual(['setup', 'file']);
+
+    const failing = new FakeFleet({ status: { 'setup::courier': 'failed' } });
+    const failed = await run(selection, collection, failing, { workers: 3 });
+    const skipped = failed.results.find((result) => result.test.title === 'names the courier')!;
+    expect(skipped).toMatchObject({ status: 'skipped', skip: { cause: 'setup-failed', relatedId: 'setup::courier' } });
   });
 
   it('runs units for several targets under a single worker cap', async () => {

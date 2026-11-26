@@ -1,0 +1,166 @@
+/**
+ * The actors a test names: more sessions beside its own, each an `actor()`
+ * fixture of the chain it was registered through. A fixture plan lists the
+ * ones a test needs, named directly or through a fixture or a hook; here
+ * each is resolved against the config, so a target it cannot run on is a
+ * collection error and never a failure inside a launch budget.
+ */
+
+import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import { didYouMean } from '@e2e-dev/core/lib/internal/suggest';
+import type { CollectedTest } from './collect.ts';
+import { FixtureUseError } from './fixture-errors.ts';
+import type { FixturePlan } from './fixture-plan.ts';
+import type { AttemptPlans } from './fixture-use.ts';
+import type { FixtureDefinition } from './registry.ts';
+
+/** One actor a test opens. */
+export interface PlannedActor {
+  /** The fixture's name: what its steps, its video, and its recordings carry. */
+  readonly name: string;
+  readonly definition: FixtureDefinition;
+  /** The saved session it starts from; undefined for a signed-out one. */
+  readonly session: string | undefined;
+  /** The target it runs on. */
+  readonly target: ResolvedTarget;
+  /** Whether that is the test's own target, where the actor is one more attempt on the worker's engine. */
+  readonly own: boolean;
+}
+
+/**
+ * The actors `plan` sets up for a test on `own`, each on the target it
+ * names among `targets`, or on `own`. Throws a `FixtureUseError` for a target
+ * the config does not have, an actor of another engine than its target
+ * runs, an engine that cannot open one beside the test or two beside each
+ * other, another target whose engine instance a second target shares, and
+ * a session an engine cannot restore.
+ */
+export function plannedActors(plan: FixturePlan, own: ResolvedTarget, targets: readonly ResolvedTarget[]): PlannedActor[] {
+  const actors = resolvedActors(plan, own, targets);
+  // Another target's engine is one instance for the worker: without `actors` it runs one attempt, so it serves one actor.
+  const served = new Map<string, PlannedActor>();
+  for (const actor of actors) {
+    if (actor.own || actor.target.engine?.capabilities.has('actors') === true) continue;
+    const earlier = served.get(actor.target.name);
+    if (earlier === undefined) {
+      served.set(actor.target.name, actor);
+      continue;
+    }
+    throw new FixtureUseError(
+      `actors "${earlier.name}" and "${actor.name}" both run on target "${actor.target.name}", and engine ${actor.target.engine?.name ?? 'none'}, as configured, drives one session at a time: give each a target of its own`,
+      actor.definition.source,
+    );
+  }
+  return actors;
+}
+
+function resolvedActors(plan: FixturePlan, own: ResolvedTarget, targets: readonly ResolvedTarget[]): PlannedActor[] {
+  return plan.order.flatMap(({ definition }) => {
+    const declared = definition.actor;
+    if (declared === undefined) return [];
+    const { name } = definition;
+    const refuse = (message: string): never => {
+      throw new FixtureUseError(`actor "${name}" ${message}`, definition.source);
+    };
+    const named = declared.target === undefined ? own : targets.find((target) => target.name === declared.target);
+    if (named === undefined) {
+      const known = targets.map((target) => target.name);
+      return refuse(`names target "${declared.target}", and the config has no target of that name; it has ${known.join(', ')}${didYouMean(declared.target ?? '', known)}`);
+    }
+    const isOwn = named.name === own.name;
+    const engine = named.engine;
+    if (engine?.name !== declared.engine) {
+      const runs = `runs engine ${engine?.name ?? 'none'}`;
+      return refuse(
+        declared.target === undefined
+          ? `is a ${declared.engine} actor, and the test's target "${own.name}" ${runs}: name the ${declared.engine} target it runs on, as in actor({ target: '...' })`
+          : `is a ${declared.engine} actor, and target "${named.name}", which it names, ${runs}: use the actor() of that engine's package`,
+      );
+    }
+    // One engine instance is one worker's: initialized again for the actor, it would serve the app of neither target.
+    const sharing = isOwn ? undefined : targets.find((target) => target !== named && target.engine === engine);
+    if (sharing !== undefined) {
+      return refuse(
+        `runs on target "${named.name}", which shares its engine instance with target "${sharing.name}": give the target an engine of its own, a second ${engine.name}() call in the config`,
+      );
+    }
+    if (isOwn && !engine.capabilities.has('actors')) {
+      return refuse(
+        `runs on the test's own target "${own.name}", and engine ${engine.name}, as configured, drives one session at a time there: name another target of the config for it, as in actor({ target: '...' })`,
+      );
+    }
+    if (declared.session !== undefined && !engine.capabilities.has('state')) {
+      return refuse(`restores session "${declared.session}", and target "${named.name}" cannot restore one: engine ${engine.name}, as configured, has no state capability`);
+    }
+    return [{ name, definition, session: declared.session, target: named, own: isOwn }];
+  });
+}
+
+/**
+ * The actors a collected `test` opens on `own` by its attempt `plan`:
+ * `plannedActors`, and what a test cannot have yet. A test in a serial group
+ * names none, since the group's tests share a single session, and a setup
+ * test names none that restores a session, which would need another setup
+ * first. Throws a `FixtureUseError` for either.
+ */
+export function collectedActors(plan: FixturePlan, test: CollectedTest, own: ResolvedTarget, targets: readonly ResolvedTarget[]): readonly PlannedActor[] {
+  const actors = plannedActors(plan, own, targets);
+  const [first] = actors;
+  if (first !== undefined && test.serialId !== undefined) {
+    throw new FixtureUseError(
+      `test ${JSON.stringify(test.titlePath.join(' > '))} is in a serial group and names actor "${first.name}": the group's tests share one session, and an actor is opened for one test`,
+      test.source,
+    );
+  }
+  const restoring = test.kind === 'setup' ? actors.find((actor) => actor.session !== undefined) : undefined;
+  if (restoring !== undefined) {
+    throw new FixtureUseError(
+      `setup test ${JSON.stringify(test.titlePath.join(' > '))} names actor "${restoring.name}", which restores session "${restoring.session}": a setup test cannot start from a session another one saves`,
+      test.source,
+    );
+  }
+  return actors;
+}
+
+/** Whether the chain `test` was registered through declares an actor at all: most do not, and need no plan to say they open none. */
+const declaresActors = (test: CollectedTest): boolean => test.fixtures.some((definition) => definition.actor !== undefined);
+
+/**
+ * The actors `test` opens on `target`. A fixture rule the test breaks
+ * there, an actor's among them, is thrown as the `COLLECTION_ERROR` it is.
+ */
+export function actorsOf(plans: AttemptPlans, test: CollectedTest, target: ResolvedTarget): readonly PlannedActor[] {
+  if (!declaresActors(test)) return [];
+  const planned = plans.plan(test, target);
+  if ('error' in planned) throw planned.error;
+  return planned.actors;
+}
+
+/**
+ * The saved sessions the actors of `test` restore on `target`, each with
+ * the target it is restored on. Empty for a test that cannot be planned
+ * there: it does not run there, or `actorsOf` reports why.
+ */
+export function actorSessionsOf(plans: AttemptPlans, test: CollectedTest, target: ResolvedTarget): readonly NeededSession[] {
+  if (!declaresActors(test)) return [];
+  const planned = plans.plan(test, target);
+  return 'error' in planned ? [] : actorSessions(planned.actors);
+}
+
+/** A saved session a pair starts from, its own or an actor's, and the target it is restored on. */
+export interface NeededSession {
+  readonly session: string;
+  readonly target: ResolvedTarget;
+}
+
+/** The saved sessions `actors` restore, each once per target. */
+export function actorSessions(actors: readonly PlannedActor[]): readonly NeededSession[] {
+  const seen = new Set<string>();
+  return actors.flatMap((actor) => {
+    if (actor.session === undefined) return [];
+    const key = `${actor.target.name}::${actor.session}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ session: actor.session, target: actor.target }];
+  });
+}

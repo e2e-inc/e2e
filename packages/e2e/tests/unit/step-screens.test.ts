@@ -168,7 +168,7 @@ describe('the session screen route and environment', () => {
   });
 
   it('hands every engine screen to the routed sink as a semantic observation, and drops malformed ones', () => {
-    const session = createEngineSession({ engine: undefined, targetName: 'phone', traced: true });
+    const session = createEngineSession({ attemptId: 'attempt-1', engine: undefined, targetName: 'phone', traced: true });
     const heard: Observation[] = [];
     session.screens.push(snapshot('before any sink'));
     session.screens.route((observation) => heard.push(observation));
@@ -183,7 +183,7 @@ describe('the session screen route and environment', () => {
   });
 
   it('takes no screen at all for an attempt that keeps no trace', () => {
-    const session = createEngineSession({ engine: undefined, targetName: 'phone' });
+    const session = createEngineSession({ attemptId: 'attempt-1', engine: undefined, targetName: 'phone' });
     const heard: Observation[] = [];
     session.screens.route((observation) => heard.push(observation));
     session.screens.push(snapshot('Add'));
@@ -192,7 +192,7 @@ describe('the session screen route and environment', () => {
   });
 
   it('merges environment facts, overwriting a name, dropping non-strings, and keeping a handful, redacted before they are clipped', () => {
-    const session = createEngineSession({ engine: undefined, targetName: 'web' });
+    const session = createEngineSession({ attemptId: 'attempt-1', engine: undefined, targetName: 'web' });
     expect(session.environment.read((text) => text)).toBeUndefined();
     session.environment.push({ browser: 'chromium 140' });
     // A secret that straddles the value's clip: redacted whole first, so no head of it is left.
@@ -207,7 +207,7 @@ describe('the session screen route and environment', () => {
   });
 
   it('redacts a secret longer than anything held before, whole', () => {
-    const session = createEngineSession({ engine: undefined, targetName: 'web' });
+    const session = createEngineSession({ attemptId: 'attempt-1', engine: undefined, targetName: 'web' });
     const secret = `sk-${'z'.repeat(6000)}`;
     session.environment.push({ token: secret });
     const facts = session.environment.read((text) => text.replaceAll(secret, '<secret:token>'))!;

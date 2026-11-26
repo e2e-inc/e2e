@@ -44,6 +44,8 @@ import {
 export interface EngineSessionOptions {
   readonly engine: EngineHandle | undefined;
   readonly targetName: string;
+  /** The attempt the session runs on the engine; see `TargetSession.attemptId`. */
+  readonly attemptId: string;
   /** Whether the attempt keeps a trace; without one, no screen is taken for it, from the engine or an observation. */
   readonly traced?: boolean;
 }
@@ -341,6 +343,7 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
   };
 
   const session: TargetSession = {
+    attemptId: options.attemptId,
     verbs: declaredVerbs(engine),
     actions,
     pointerActions,
@@ -501,14 +504,14 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       dismiss: guard('keyboard dismissal', engine?.keyboard?.dismiss),
     },
     settle: guard('attempt settle', async (operation) => {
-      await engine?.settleAttempt?.({ signal: operation.signal, timeoutMs: operation.timeoutMs });
+      await engine?.settleAttempt?.({ signal: operation.signal, timeoutMs: operation.timeoutMs, attemptId: operation.attemptId });
     }),
     // The engine outlives the attempt; only the per-attempt isolation ends
     // here, exactly once. dispose() belongs to the worker.
     close: guard('attempt end', async (operation) => {
       if (ended) return;
       ended = true;
-      await engine?.endAttempt?.({ signal: operation.signal, timeoutMs: operation.timeoutMs });
+      await engine?.endAttempt?.({ signal: operation.signal, timeoutMs: operation.timeoutMs, attemptId: operation.attemptId });
     }),
   };
   return session;

@@ -107,7 +107,7 @@ const defaultOptions: ResolvedTestOptions = {
 };
 
 function makePair(test: CollectedTest, overrides: Partial<TestTargetPair> = {}): TestTargetPair {
-  return { test, target, agent: 'default', repeat: 0, options: defaultOptions, disposition: 'run', skip: undefined, ...overrides };
+  return { test, target, agent: 'default', repeat: 0, options: defaultOptions, disposition: 'run', skip: undefined, actors: [], ...overrides };
 }
 
 function makeFile(file: string, tests: CollectedTest[]): CollectedFile {
@@ -141,7 +141,7 @@ describe('buildWorkPlans', () => {
         skip: { cause: 'explicit', reason: 'skipped' },
       }),
     ];
-    const selection: Selection = { pairs, perTarget: [{ target, pairs }] };
+    const selection: Selection = { pairs, perTarget: [{ target, pairs }], actorTargets: [] };
     const collection: Collection = {
       files: [
         makeFile('tests/a.e2e.ts', [a1, a2]),
@@ -171,7 +171,7 @@ describe('buildWorkPlans', () => {
     const pairs = [
       makePair(only, { disposition: 'filtered', skip: { cause: 'filtered', reason: 'tags' } }),
     ];
-    const selection: Selection = { pairs, perTarget: [{ target, pairs }] };
+    const selection: Selection = { pairs, perTarget: [{ target, pairs }], actorTargets: [] };
     const collection: Collection = {
       files: [makeFile('tests/a.e2e.ts', [only])],
       tests: [only],
@@ -194,7 +194,7 @@ describe('buildWorkPlans with parallel scopes', () => {
     const on = options.target ?? target;
     const pairs = options.pairs ?? tests.map((test) => makePair(test, { target: on }));
     const collection: Collection = { files: [makeFile(FILE, [...tests])], tests: [...tests], nearMisses: [], unmatchedPositionals: [], uncollected: [] };
-    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target: on, pairs }] }, collection, '/project', options.workers ?? 4);
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target: on, pairs }], actorTargets: [] }, collection, '/project', options.workers ?? 4);
     return plan!.fileUnits.map((unit) => unit.pairs.map((pair) => pair.test.title));
   }
 
@@ -202,7 +202,7 @@ describe('buildWorkPlans with parallel scopes', () => {
   function planOf(tests: CollectedTest[]): TargetWorkPlan {
     const pairs = tests.map((test) => makePair(test));
     const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
-    return buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4)[0]!;
+    return buildWorkPlans({ pairs, perTarget: [{ target, pairs }], actorTargets: [] }, collection, '/project', 4)[0]!;
   }
 
   it('gives each test of a parallel scope its own unit and keeps the rest of the file in one', () => {
@@ -219,7 +219,7 @@ describe('buildWorkPlans with parallel scopes', () => {
     const tests = [makeTest(FILE, 'plain', 0), makeTest(FILE, 'parallel 1', 1, { parallel: inParallel }), makeTest(FILE, 'parallel 2', 2, { parallel: inParallel })];
     const pairs = tests.map((test) => makePair(test));
     const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
-    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4);
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }], actorTargets: [] }, collection, '/project', 4);
     expect(plan!.fileUnits.map((unit) => unit.id)).toEqual([`file::web::${FILE}`, `file::web::${FILE}::1`, `file::web::${FILE}::2`]);
     expect(plan!.fileUnits.map((unit) => unit.share)).toEqual([1 / 3, 1 / 3, 1 / 3]);
   });
@@ -257,7 +257,7 @@ describe('buildWorkPlans with parallel scopes', () => {
     const tests = [makeTest(FILE, 'step 1', 0, { parallel: serial }), makeTest(FILE, 'step 2', 1, { parallel: serial })];
     const pairs = [0, 1].flatMap((repeat) => tests.map((test) => makePair(test, { repeat })));
     const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
-    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4);
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }], actorTargets: [] }, collection, '/project', 4);
     expect(plan!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.repeat}`))).toEqual([
       ['step 1@0', 'step 1@1', 'step 2@0', 'step 2@1'],
     ]);
@@ -267,7 +267,7 @@ describe('buildWorkPlans with parallel scopes', () => {
     const tests = [makeTest(FILE, 'one', 0, { parallel: inParallel }), makeTest(FILE, 'two', 1, { parallel: inParallel })];
     const pairs = tests.flatMap((test) => ['fast', 'smart'].flatMap((agent) => [0, 1].map((repeat) => makePair(test, { agent, repeat }))));
     const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
-    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4);
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }], actorTargets: [] }, collection, '/project', 4);
     expect(plan!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.agent}@${pair.repeat}`))).toEqual([
       ['one@fast@0', 'one@fast@1'],
       ['one@smart@0', 'one@smart@1'],
@@ -307,7 +307,7 @@ describe('buildWorkPlans with parallel scopes', () => {
     ];
     const pairs = tests.flatMap((test) => ['fast', 'smart'].map((agent) => makePair(test, { agent })));
     const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
-    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 2);
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }], actorTargets: [] }, collection, '/project', 2);
     expect(plan!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.agent}`))).toEqual([
       ['hooked 1@fast'],
       ['hooked 1@smart'],
@@ -323,9 +323,9 @@ describe('buildWorkPlans with parallel scopes', () => {
     const tests = [makeTest(FILE, 'a', 0, { parallel: hooked }), makeTest(FILE, 'b', 1, { parallel: hooked })];
     const pairs = tests.flatMap((test) => [0, 1].map((repeat) => makePair(test, { repeat })));
     const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
-    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 2);
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }], actorTargets: [] }, collection, '/project', 2);
     expect(plan!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.repeat}`))).toEqual([['a@0', 'a@1'], ['b@0', 'b@1']]);
-    const [single] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 1);
+    const [single] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }], actorTargets: [] }, collection, '/project', 1);
     expect(single!.fileUnits.map((unit) => unit.pairs.map((pair) => `${pair.test.title}@${pair.repeat}`))).toEqual([['a@0', 'a@1', 'b@0', 'b@1']]);
   });
 
@@ -345,7 +345,7 @@ describe('buildWorkPlans with parallel scopes', () => {
       unmatchedPositionals: [],
       uncollected: [],
     };
-    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4);
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }], actorTargets: [] }, collection, '/project', 4);
     expect(plan!.fileUnits).toHaveLength(6);
     const titles = (capped: TargetWorkPlan): string[][] => capped.fileUnits.map((unit) => unit.pairs.map((pair) => pair.test.title));
     expect(titles(withWorkerCap(plan!, 2))).toEqual([['hooked 0', 'hooked 1'], ['hooked 2', 'hooked 3'], ['one'], ['two']]);
@@ -369,7 +369,7 @@ describe('buildWorkPlans with parallel scopes', () => {
       unmatchedPositionals: [],
       uncollected: [],
     };
-    const plans = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4);
+    const plans = buildWorkPlans({ pairs, perTarget: [{ target, pairs }], actorTargets: [] }, collection, '/project', 4);
     const durations = new Map([[FILE, 9_000], [other, 5_000]]);
     const [ordered] = orderWorkPlans(plans, { relevanceOf: () => 0, durationOf: (_, file) => durations.get(file) });
     expect(ordered!.fileUnits.map((unit) => unit.pairs[0]!.test.title)).toEqual(['whole', 'part 0', 'part 1', 'part 2']);
@@ -379,7 +379,7 @@ describe('buildWorkPlans with parallel scopes', () => {
     const tests = [makeTest(FILE, 'one', 0, { parallel: inParallel }), makeTest(FILE, 'two', 1, { parallel: inParallel })];
     const pairs = tests.map((test) => makePair(test));
     const collection: Collection = { files: [makeFile(FILE, tests)], tests, nearMisses: [], unmatchedPositionals: [], uncollected: [] };
-    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }] }, collection, '/project', 4, FILE);
+    const [plan] = buildWorkPlans({ pairs, perTarget: [{ target, pairs }], actorTargets: [] }, collection, '/project', 4, FILE);
     expect(plan!.fileUnits.map((unit) => unit.pairs.map((pair) => pair.test.title))).toEqual([['one', 'two']]);
   });
 
@@ -421,7 +421,7 @@ describe('orderWorkPlans', () => {
       unmatchedPositionals: [],
       uncollected: [],
     };
-    return buildWorkPlans({ pairs: perTarget.flatMap((entry) => entry.pairs), perTarget }, collection, '/project', 4);
+    return buildWorkPlans({ pairs: perTarget.flatMap((entry) => entry.pairs), perTarget, actorTargets: [] }, collection, '/project', 4);
   }
 
   /** The files of each plan in dispatch order, keyed by target. */
@@ -596,6 +596,7 @@ describe('wire protocol', () => {
       options: defaultOptions,
       disposition: 'skip',
       skip: { cause: 'explicit', reason: 'skipped' },
+      actors: [],
     });
     expect('fn' in record.test).toBe(false);
     expect(JSON.parse(JSON.stringify(encodeResult(record))).test.id).toBe(record.test.id);

@@ -194,6 +194,37 @@ const pages = {
        <a href="/logout">Sign out</a>`,
   }),
 
+  // A room everyone who opens it shares: a note one visitor posts shows up
+  // for the others without a reload, under the name they signed in with.
+  '/room': (request) => ({
+    title: 'Room',
+    body: `<h1>Room</h1>
+       <p role="status" aria-label="Viewer">${request.user === undefined ? 'Viewing as a guest' : `Signed in as ${request.user}`}</p>
+       <label for="note">Note</label>
+       <input id="note" />
+       <button id="post">Post</button>
+       <ul aria-label="Notes"></ul>
+       <script>
+         const api = '/api/room?id=' + encodeURIComponent(${JSON.stringify(request.room ?? 'lobby')});
+         const list = document.querySelector('ul[aria-label="Notes"]');
+         const show = (notes) => {
+           while (list.children.length < notes.length) {
+             const note = notes[list.children.length];
+             const item = document.createElement('li');
+             item.textContent = note.author + ': ' + note.text;
+             list.append(item);
+           }
+         };
+         document.getElementById('post').addEventListener('click', async () => {
+           const input = document.getElementById('note');
+           const posted = await fetch(api, { method: 'POST', body: JSON.stringify({ text: input.value }) });
+           input.value = '';
+           show(await posted.json());
+         });
+         setInterval(async () => show(await (await fetch(api)).json()), 200);
+       </script>`,
+  }),
+
   // Planted bug: the pay button keeps the total from page load, so after a
   // quantity change the summary and the button show different totals.
   '/checkout': () => ({

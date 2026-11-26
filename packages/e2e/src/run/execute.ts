@@ -40,11 +40,14 @@ import { isFailedStatus, type SerialAttemptRecord } from '@e2e-dev/core/lib/run/
 import { traceScreen } from '@e2e-dev/core/lib/run/step-screens';
 import { runWithRetries } from './retry.ts';
 import { AttemptGuestSessions } from './guests.ts';
+import { plannedActors } from '../collect/actors.ts';
+import { ActorHosts, AttemptActors } from './actors.ts';
+import { holdSecrets, ownSession, type DrivenSession } from './driven-sessions.ts';
 import { runSerialUnit, type SerialAttemptStart, type SerialHost, type SharedSerialSession } from './serial.ts';
 import { interruptedInPhase, interruptedSkip, pairKey, unitResult, unstartedResult } from './units.ts';
 import { carriedSecrets, processSecrets, redactForSession, sessionLedger, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { SessionStaging } from '@e2e-dev/core/lib/run/sessions';
-import { isOwnStep, StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
+import { StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
 import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type HoldReads, type StepHold } from './step-hold.ts';
 import { HeldTestTools } from './worker/held-test-tools.ts';
 import { WorkerModels } from '@e2e-dev/core/lib/run/worker-models';
@@ -166,6 +169,8 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
   readonly realms: RealmManager;
   /** The worker-scoped `test.extend()` fixtures, torn down before the engine is disposed. */
   readonly workerFixtures: WorkerFixturePool;
+  /** The engines of the other targets this worker's tests name actors on. */
+  private readonly actorHosts: ActorHosts;
   /** What suite hooks and worker fixture teardowns run on; see `SuiteAttempt`. */
   private readonly suiteAttempts: SuiteAttemptContext;
 
@@ -188,6 +193,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       options.events?.onRunAbort?.({ error: serializeError(error) });
     });
     this.workerFixtures = new WorkerFixturePool(options.target);
+    this.actorHosts = new ActorHosts(options);
     this.suiteAttempts = { host: this, config: options.config, models: this.models, runErrors: this.runErrors };
     this.realms = new RealmManager({
       targetName: options.target.name,
@@ -204,6 +210,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
   /** Tears the worker fixtures down, then disposes the engine: a teardown may still drive it. */
   override async dispose(options: Pick<EngineDisposeContext, 'reuseSignal'> = {}): Promise<void> {
     await tearDownWorkerFixtures(this.suiteAttempts);
+    this.runErrors.push(...(await this.actorHosts.dispose()));
     await super.dispose(options);
   }
 
@@ -555,7 +562,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     const attemptEnd = new AbortController();
     const attempt: ExecutorAttempt = {
       testId: pair.test.id,
-      attemptId,
+      attemptId: shared?.attemptId ?? attemptId,
       titlePath: pair.test.titlePath,
       index: attemptIndex,
       signal: attemptEnd.signal,
@@ -643,20 +650,20 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     // Once per attempt: a screen that yielded nothing within the budget is
     // not asked again, so a hung app costs the budget once.
     let evidenceTried = false;
-    const captureEvidence = async (): Promise<void> => {
-      if (failure === undefined || evidenceTried || openSession === null || this.interruptSignal.aborted) return;
+    /** The sessions the attempt drives now: its own once it is open, then each actor's. */
+    const driven = (): readonly DrivenSession[] => [...(openSession === null ? [] : [ownSession(this, openSession, this.config)]), ...actors.sessions()];
+    /** Takes the evidence `from` the session a failure came from, or from the one its step ran on. */
+    const captureEvidence = async (from?: DrivenSession): Promise<void> => {
+      if (failure === undefined || evidenceTried || this.interruptSignal.aborted) return;
+      // What the failure is about: the step a timeout cut, else the last one that failed.
+      const failed = (timedOut ? steps.running().at(-1) : undefined) ?? steps.all().findLast((step) => step.status !== 'passed');
+      const sessions = driven();
+      // A step of a session the test opened itself (`launch()`) is none of these: the test's own screen is shown for it.
+      const shown = from ?? sessions.find((each) => each.actor === failed?.actor) ?? sessions.find((each) => each.actor === undefined);
+      if (shown === undefined) return;
       evidenceTried = true;
       const evidence = await captureFailureEvidence({
-        session: openSession,
-        error: failure,
-        ownStep: isOwnStep(steps.all().findLast((step) => step.status !== 'passed') ?? {}),
-        ledger: sessionLedger(openSession, this.config.allSecrets),
-        config: this.config,
-        appOrigin: this.target.app.base?.origin,
-        appBase: this.target.app.base,
-        artifacts: artifacts.sink,
-        operation: (signal, timeoutMs) => this.op(attemptId, timeoutMs, signal),
-        interrupt: this.interruptSignal,
+        ...shown.screen(), ownStep: shown.actor === failed?.actor, error: failure, config: this.config, artifacts: artifacts.sink, interrupt: this.interruptSignal,
       }).catch(() => undefined);
       if (evidence !== undefined) record.failure = evidence;
     };
@@ -673,6 +680,12 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             recordings: this.storedRecordings,
           })
         : undefined;
+    /** The actors the test names, open from before its clock starts until the attempt ends; none for a test that names none. */
+    const actors = new AttemptActors({
+      config: this.config, runId: this.options.runId, own: this, hosts: this.actorHosts, guests, cut: () => attemptAbort.abort(), dir: artifacts.dir,
+      test: pair.test, attemptIndex, agent: pair.agent, agentContext: pair.options.agentContext, video: video !== undefined,
+      caches: cache !== undefined, recordings: this.storedRecordings, models: this.models,
+    });
 
     // A rejection nobody caught, handed in by the process while this attempt
     // is in flight. Set while the body's race is pending, so the rejection
@@ -680,6 +693,8 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     // the phase it landed in, beside a failure already there.
     let cutBody: ((cause: unknown) => void) | undefined;
     let leaveWorkerFixtures: (() => void) | undefined;
+    /** Stops the sessions sharing what each learned of secrets (`holdSecrets`); nothing for a single session. */
+    let releaseSecrets = (): void => undefined;
     let endBudget: (() => void) | undefined;
     this.strayFailure = (cause) => {
       if (cutBody !== undefined) {
@@ -698,18 +713,21 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         beforeEach: this.realms.hooksFor(realm, registered, 'beforeEach'),
         afterEach: this.realms.hooksFor(realm, registered, 'afterEach'),
       });
+      const planned = plannedActors(fixturePlan.plan, this.target, this.config.targets);
+      // A test that drives its actors alone opens no session of its own: `{ author, reviewer }` is two sessions, not three.
+      const drivesOwn = planned.length === 0 || pair.options.session !== undefined || fixturePlan.plan.usesEngine;
       const session =
         shared?.session ??
-        (await this.launchSession({ session: pair.options.session, recordings }, attemptId, artifacts.dir, attemptAbort.signal));
-      openSession = session;
+        (drivesOwn ? await this.launchSession({ session: pair.options.session, recordings }, attemptId, artifacts.dir, attemptAbort.signal) : undefined);
+      openSession = session ?? null;
       // A serial group's session serves one member at a time; what the app
       // logs from here is this attempt's.
-      session.appLog.route((event, at) => {
+      session?.appLog.route((event, at) => {
         if (heldTools?.runningCall !== true) {
           steps.recordAppEvent(event, at);
         }
       });
-      session.screens.route((observation) => {
+      session?.screens.route((observation) => {
         if (heldTools?.runningCall === true) {
           return;
         }
@@ -724,6 +742,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         );
       });
 
+      await actors.open(planned);
       // The runner's watchdog keeps the test deadline too: it hears each move and what is left.
       const announce = (remainingMs?: number): void =>
         this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt, timeoutMs: timeout.timeoutMs, ...(remainingMs === undefined ? {} : { remainingMs }) });
@@ -732,7 +751,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       const timeout = new AttemptTimeout(budget, pair.options.timeout, announce);
       announce();
       const saveSession =
-        context.kind !== 'setup'
+        context.kind !== 'setup' || session === undefined
           ? undefined
           : async (name: string): Promise<void> => {
               if (session.captureState === undefined) {
@@ -742,7 +761,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
                 );
               }
               const signal = budget.signal;
-              const state = await session.captureState(this.op(attemptId, this.config.actionTimeout, signal));
+              const state = await session.captureState(this.op(session, this.config.actionTimeout, signal));
               if (signal.aborted) throw abortError(signal, cancelledError);
               context.staging.stage(
                 name,
@@ -750,14 +769,13 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
                 carriedSecrets(sessionLedger(session, this.config.allSecrets), this.config.allSecrets),
               );
             };
-      const { fixtures: builtIns, agentRuntime } = createFixtures({
+      const own = session === undefined ? undefined : createFixtures({
         config: inMemory?.agents === undefined ? this.config : { ...this.config, agents: inMemory.agents },
         target: this.target,
         session,
         steps,
         budget,
         runId: this.options.runId,
-        attemptId,
         attempt,
         artifacts: artifacts.sink,
         priorSteps,
@@ -769,9 +787,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         models: this.models,
         test: { file: pair.test.file, titlePath: pair.test.titlePath, writtenScreenshots: this.writtenScreenshots },
       });
-      if (hold !== undefined) {
+      // Held steps and pauses are the test's own session's: a test that drives only actors has none to hold.
+      if (hold !== undefined && session !== undefined && own !== undefined) {
         const tools = new HeldTestTools(
-          agentRuntime,
+          own.agentRuntime,
           this.options.runId,
           this.target,
           this.options.headed,
@@ -805,7 +824,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             },
             tools,
           ),
-          readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(attemptId, this.config.actionTimeout, signal), screens),
+          readScreen: (signal: AbortSignal) => readHeldScreen(session, this.op(session, this.config.actionTimeout, signal), screens),
         });
       }
       // `expect.poll` and `expect.soft` take no fixture, so the attempt they
@@ -840,7 +859,10 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         attemptEnd.signal,
       );
 
-      const fixtures = fixturePlan.open({ builtIns, pool: this.workerFixtures, signal: attemptAbort.signal });
+      const fixtures = fixturePlan.open({
+        builtIns: own?.fixtures, pool: this.workerFixtures, signal: attemptAbort.signal,
+        actors: (definition) => actors.fixtures(definition, budget),
+      });
       // Worker fixtures read their built-ins off this attempt until it ends.
       leaveWorkerFixtures = fixtures.enter();
 
@@ -859,7 +881,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       const abandonNotAwaited = async (): Promise<TestError[]> => {
         if (attemptEnd.signal.aborted) return [];
         const pollsNotAwaited = bodyPolls.close();
-        // Both fail their steps now; the sessions' close is waited for below, after the test's own steps are cut.
+        // Both fail their steps now; the other sessions' stop is waited for below, after the test's own steps are cut.
         const guestsAbandoned = guests.abandonRunning();
         const stepsNotAwaited = steps.abandonRunning();
         steps.holdable = false;
@@ -972,11 +994,13 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       // the last step is collected here, so it is the verdict instead of the
       // next attempt's surprise. Evidence is taken now, before a teardown
       // navigates away from the page the callback saw.
-      try {
-        await this.settleAttempt(session, attemptId);
-      } catch (cause) {
-        recordFailure(cause, 'body');
-        await captureEvidence();
+      for (const each of driven()) {
+        try {
+          await each.settle();
+        } catch (cause) {
+          recordFailure(cause, 'body');
+          await captureEvidence(each);
+        }
       }
 
       enter('afterEach');
@@ -995,7 +1019,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
           recordFailure(cause, 'afterEach');
         }
       }
-      await this.settleAttempt(session, attemptId).catch((cause: unknown) => recordFailure(cause, 'afterEach'));
+      for (const each of driven()) await each.settle().catch((cause: unknown) => recordFailure(cause, 'afterEach'));
     } catch (cause) {
       recordFailure(cause, phase);
     } finally {
@@ -1032,12 +1056,15 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         secondaryErrors.push(serializeError(classifyError(cause), { phase: 'cleanup', projectRoot: this.config.projectRoot, redact }));
       }
 
+      // Closing a session ends its part in the sharing; one session has nobody to share with.
+      const closing = driven();
+      if (closing.length > 1) releaseSecrets = holdSecrets(closing, this.config);
       // A serial member's recording ends with the member, not the group.
       if (openSession !== null && shared !== undefined) {
-        await this.stopRunningRecording(openSession, attemptId, record, artifacts.sink, secondaryErrors);
+        await this.stopRunningRecording(openSession, record, artifacts.sink, secondaryErrors);
       }
       if (openSession !== null && shared === undefined) {
-        await this.closeSession(openSession, { attemptId, video }, record, artifacts.sink, secondaryErrors);
+        await this.closeSession(openSession, { video }, record, artifacts.sink, secondaryErrors);
       }
       if (openSession !== null) {
         const environment = openSession.environment.read(redact);
@@ -1055,6 +1082,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     // Size and digest land asynchronously; the record is read right after.
     await artifacts.settle();
     guests.release();
+    releaseSecrets();
     record.durationMs = Date.now() - startedMs;
     record.steps = [...steps.all()];
     const appLog = steps.appLog();
@@ -1067,20 +1095,18 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     // nothing about the flow. An attempt whose every failure is that no model
     // answered implicates nothing unconfirmed, so a provider outage evicts no
     // entry.
-    if (cache !== undefined) {
-      const writes = await settleStagedTraces(
-        cache,
-        record.status === 'interrupted'
-          ? undefined
-          : {
-              lastVerifiedStepIndex: failure === undefined ? steps.lastVerifiedStepIndex : lastVerifiedAtFailure,
-              implicatesUnconfirmed: failure === undefined || implicatesUnconfirmed,
-            },
-      );
-      for (const step of record.steps) {
-        const write = writes.get(step.index);
-        if (step.cache !== undefined && write !== undefined) step.cache.write = write;
-      }
+    const settlement =
+      record.status === 'interrupted'
+        ? undefined
+        : {
+            lastVerifiedStepIndex: failure === undefined ? steps.lastVerifiedStepIndex : lastVerifiedAtFailure,
+            implicatesUnconfirmed: failure === undefined || implicatesUnconfirmed,
+          };
+    // What became of each recording, the test's own and its actors', by the step's index in this record.
+    const writes = new Map([...(cache === undefined ? [] : await settleStagedTraces(cache, settlement)), ...(await actors.settleRecordings(settlement))]);
+    for (const step of record.steps) {
+      const write = writes.get(step.index);
+      if (step.cache !== undefined && write !== undefined) step.cache.write = write;
     }
     return record;
   }

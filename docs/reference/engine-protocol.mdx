@@ -220,6 +220,8 @@ export interface EngineManifest {
   readonly fileApps?: boolean;
   /** See `Engine.isolation`; left out for `attempt`. */
   readonly isolation?: 'worker';
+  /** See `Engine.actors`; left out when the engine runs one attempt at a time. */
+  readonly actors?: true;
 }
 ```
 
@@ -256,7 +258,7 @@ params are the member's arguments by name, with every `OperationContext` as
 | `lifecycle/doctor` | `EngineDoctorInfo` without `log` | `EngineDoctorCheck[]` |
 | `lifecycle/init` | `EngineInitInfo` without `log` | `null` |
 | `lifecycle/startAttempt` | `{ attemptId, artifactsDir, signal, screens }` | `null` |
-| `lifecycle/settleAttempt`, `lifecycle/endAttempt` | `{ signal, timeoutMs }` | `null` |
+| `lifecycle/settleAttempt`, `lifecycle/endAttempt` | `{ signal, timeoutMs, attemptId? }` | `null` |
 | `lifecycle/dispose` | `{ signal, timeoutMs, reuseSignal? }` | `null` |
 
 `artifacts/screenshot` returns `{ data, mediaType: 'image/png' }`, the image

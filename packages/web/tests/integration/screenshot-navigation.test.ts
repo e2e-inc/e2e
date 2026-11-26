@@ -12,10 +12,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Page } from 'playwright-core';
-import type { OperationContext } from '@e2e-dev/core/engine';
-import { PlaywrightSurface } from '../../src/surface.ts';
+import type { PlaywrightSurface } from '../../src/surface.ts';
+import type { WorkerBrowser } from '../../src/worker-browser.ts';
+import { cleanupContext, openSurface, openWorker, type Operation } from '../helpers/attempt.ts';
 import { decodePng } from '../helpers/png.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 // Caret cleanup awaits a frame evaluate before a capture rejection reaches the
 // caller, which lets a short timer fire before the retry decides. This file
@@ -43,10 +43,11 @@ function startHoppingServer(): Promise<{ server: Server; origin: string }> {
 }
 
 describe('surface.screenshot while navigating', () => {
-  const surface = new PlaywrightSurface({ viewport: { width: 320, height: 200 } });
+  let worker: WorkerBrowser;
+  let surface: PlaywrightSurface;
+  let operation: Operation;
+  let close: () => Promise<void>;
   const projectRoot = mkdtempSync(path.join(tmpdir(), 'e2e-screenshot-navigation-'));
-  const signal = new AbortController().signal;
-  const operation = (timeoutMs = 10_000): OperationContext => ({ signal, timeoutMs, runId: 'shots', attemptId: 'shots', origin: 'test' });
   let server: Server;
   let origin: string;
   let page: Page;
@@ -61,22 +62,21 @@ describe('surface.screenshot while navigating', () => {
 
   beforeAll(async () => {
     ({ server, origin } = await startHoppingServer());
-    await surface.init({ runId: 'shots', targetName: 'web', projectRoot, app: { site: '127.0.0.1' },
-      env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
+    worker = await openWorker({ options: { viewport: { width: 320, height: 200 } }, init: { projectRoot, app: { site: '127.0.0.1' } } });
   });
 
   beforeEach(async () => {
-    await surface.startAttempt({ attemptId: 'shots', artifactsDir: projectRoot, signal, resolveSecret: noSecrets, ...ignoreTrace });
+    ({ surface, operation, close } = await openSurface({ worker, attempt: { artifactsDir: projectRoot }, timeoutMs: 10_000 }));
     page = await surface.ensurePage();
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    await close();
   });
 
   afterAll(async () => {
-    await surface.dispose({ signal, timeoutMs: 5_000 });
+    await worker.dispose(cleanupContext());
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(projectRoot, { recursive: true, force: true });
   });

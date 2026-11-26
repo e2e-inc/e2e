@@ -94,7 +94,7 @@ export interface ArtifactRecord {
    * is the step's offset into it.
    */
   startedAt?: string;
-  /** The session that produced the artifact when it is not the test's own: one the test opened with `launch()`. */
+  /** The session that produced the artifact when it is not the test's own: an `actor()` fixture's, or one the test opened with `launch()`; see `StepRecord.actor`. */
   actor?: string;
   /**
    * Mirrors report-1: how much of the file the runner masked. A screenshot is

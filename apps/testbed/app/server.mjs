@@ -13,6 +13,18 @@ import { playwrightRoutes } from './playwright/routes.mjs';
 const PORT = Number(process.env.PORT ?? 4271);
 const playwright = playwrightRoutes(PORT);
 
+/** Who can sign in. `reviewer` is there for tests that sign two users in at once. */
+const USERS = { admin: 'admin-pass', reviewer: 'reviewer-pass' };
+
+/** The notes of each room, by its id: what everyone with the room open sees. */
+const rooms = new Map();
+
+/** The signed-in user the request's cookie names, or undefined for a guest. */
+function signedIn(request) {
+  const { session } = parseCookies(request);
+  return Object.hasOwn(USERS, session ?? '') ? session : undefined;
+}
+
 function parseCookies(request) {
   const header = request.headers.cookie ?? '';
   return Object.fromEntries(
@@ -57,8 +69,9 @@ const server = createServer(async (request, response) => {
     let body = '';
     for await (const chunk of request) body += chunk;
     const params = new URLSearchParams(body);
-    if (params.get('username') === 'admin' && params.get('password') === 'admin-pass') {
-      send(303, { 'set-cookie': 'session=admin; Path=/; HttpOnly', location: '/dashboard' });
+    const username = params.get('username') ?? '';
+    if (Object.hasOwn(USERS, username) && params.get('password') === USERS[username]) {
+      send(303, { 'set-cookie': `session=${username}; Path=/; HttpOnly`, location: '/dashboard' });
     } else {
       html(render('/login', { failed: true }));
     }
@@ -69,12 +82,28 @@ const server = createServer(async (request, response) => {
     return;
   }
   if (url.pathname === '/dashboard') {
-    const cookies = parseCookies(request);
-    if (cookies.session !== 'admin') {
+    const user = signedIn(request);
+    if (user === undefined) {
       send(303, { location: '/login' });
       return;
     }
-    html(render('/dashboard', { user: 'admin' }));
+    html(render('/dashboard', { user }));
+    return;
+  }
+  if (url.pathname === '/room') {
+    html(render('/room', { user: signedIn(request), room: url.searchParams.get('id') ?? 'lobby' }));
+    return;
+  }
+  if (url.pathname === '/api/room') {
+    const id = url.searchParams.get('id') ?? 'lobby';
+    const notes = rooms.get(id) ?? [];
+    rooms.set(id, notes);
+    if (request.method === 'POST') {
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      notes.push({ author: signedIn(request) ?? 'guest', text: String(JSON.parse(body).text) });
+    }
+    send(200, { 'content-type': 'application/json' }, JSON.stringify(notes));
     return;
   }
 

@@ -9,7 +9,8 @@ import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/re
 import { attemptKeep, attemptVideo, pairRecording, type AttemptRecordings } from '@e2e-dev/core/lib/internal/recording-modes';
 import type { RecordingMode, TestOptions } from '@e2e-dev/core/lib/types';
 import { excludingEntry, type Collection, type CollectedTest, type UncollectedFile } from './collect.ts';
-import { assertFixtureUse } from './fixture-use.ts';
+import { actorSessions, actorSessionsOf, actorsOf, type NeededSession, type PlannedActor } from './actors.ts';
+import { assertFixtureUse, AttemptPlans } from './fixture-use.ts';
 import { groupChain } from './registry.ts';
 import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
 
@@ -55,6 +56,14 @@ export interface TestTargetPair {
   /** run: execute; skip: report skipped; filtered: report as unselected. */
   readonly disposition: 'run' | 'skip' | 'filtered';
   readonly skip: SkipInfo | undefined;
+  /** The actors the pair opens beside its own session when it runs (`collect/actors.ts`); none for a pair that does not run. */
+  readonly actors: readonly PlannedActor[];
+}
+
+/** Every saved session a pair starts from, with the target each is restored on: its own, then its actors'. */
+export function pairSessions(pair: Pick<TestTargetPair, 'target' | 'options' | 'actors'>): readonly NeededSession[] {
+  const own = pair.options.session === undefined ? [] : [{ session: pair.options.session, target: pair.target }];
+  return [...own, ...actorSessions(pair.actors).filter((needed) => !own.some((mine) => mine.session === needed.session && mine.target.name === needed.target.name))];
 }
 
 /** All pairs for one selected target, in report order. */
@@ -66,8 +75,14 @@ export interface TargetSelection {
 export interface Selection {
   /** Every pair across all selected targets, in report order. */
   readonly pairs: readonly TestTargetPair[];
-  /** Selected targets with their pairs, in config order. */
+  /**
+   * Selected targets with their pairs, in config order. A target nothing
+   * selected follows them when an actor restores a session on it: it then
+   * holds the setup tests that save one, and nothing else.
+   */
   readonly perTarget: readonly TargetSelection[];
+  /** The targets actors of the running pairs run on beside the pairs' own, selected or not: their apps have to be up too. */
+  readonly actorTargets: readonly ResolvedTarget[];
 }
 
 /** Why a test filter left a test out: the filter's name and its reason. */
@@ -341,10 +356,11 @@ export function select(
 
   assertSerialAgentsAgree(collection.tests, optionsByTest);
   const sessionProducers = collectSessionProducers(collection.tests);
+  const attemptPlans = new AttemptPlans(collection, config.targets, config.projectRoot);
   const pairFilters =
     filters.lastFailed === undefined
       ? filters
-      : { ...filters, lastFailed: withSetupConsumers(filters.lastFailed, collection.tests, targets, optionsByTest, sessionProducers) };
+      : { ...filters, lastFailed: withSetupConsumers(filters.lastFailed, collection.tests, targets, optionsByTest, sessionProducers, attemptPlans) };
 
   // One pair per target, test, and agent the test runs as, in that order,
   // so a persona sweep reports its variants side by side.
@@ -366,8 +382,27 @@ export function select(
   // shard machines agree on the cut whatever a filter answers.
   const withExclusions =
     filters.excluded === undefined ? withShard : applySerialClosure(applyExclusions(withShard, filters.excluded));
-  const withSessions = applySessionSelection(withExclusions, sessionProducers, collection.uncollected);
-  assertFixtureUse(withSessions, collection, config.projectRoot);
+  /** Each pair that runs, with the actors it opens. */
+  const planActors = (planned: readonly TestTargetPair[]): TestTargetPair[] =>
+    planned.map((pair) => (pair.disposition === 'run' ? { ...pair, actors: actorsOf(attemptPlans, pair.test, pair.target) } : pair));
+  const withActors = planActors(withExclusions);
+  /** The targets the actors of `planned` run on beside each pair's own, in config order. */
+  const actorTargetsOf = (planned: readonly TestTargetPair[]): ResolvedTarget[] =>
+    config.targets.filter((target) => planned.some((pair) => pair.actors.some((actor) => !actor.own && actor.target.name === target.name)));
+  // An actor may run on a target nothing selected: the setup tests that save its session run there.
+  const unselected = actorTargetsOf(withActors).filter((target) => !targets.includes(target));
+  const actorSetups = unselected.flatMap((target) =>
+    collection.tests.flatMap((test) => {
+      if (test.kind !== 'setup') return [];
+      const options = optionsByTest.get(test.id)!;
+      return options.agents.map((agent) => classifyPair(test, target, agent, options, focused, selectedFiles, pairFilters, tagMode));
+    }),
+  );
+  const promoted = applySessionSelection([...withActors, ...actorSetups], sessionProducers, collection.uncollected);
+  // A target nothing selected is in the run for the setups an actor needs there, and for nothing else of it.
+  // The setup tests that run now name actors too.
+  const withSessions = planActors(promoted.filter((pair) => targets.includes(pair.target) || pair.disposition === 'run'));
+  assertFixtureUse(withSessions, attemptPlans);
 
   const runnableOrdinary = withSessions.filter(
     (pair) => pair.disposition === 'run' && pair.test.kind === 'test',
@@ -379,12 +414,16 @@ export function select(
     );
   }
 
+  // Read off every pair that runs: a setup test names actors too, and their apps have to be up.
+  const actorTargets = actorTargetsOf(withSessions);
+  const perTarget = [...targets, ...unselected].map((target) => ({
+    target,
+    pairs: withSessions.filter((pair) => pair.target.name === target.name),
+  }));
   return {
     pairs: withSessions,
-    perTarget: targets.map((target) => ({
-      target,
-      pairs: withSessions.filter((pair) => pair.target.name === target.name),
-    })),
+    perTarget: perTarget.filter((entry) => entry.pairs.length > 0 || targets.includes(entry.target)),
+    actorTargets,
   };
 }
 
@@ -404,6 +443,7 @@ export function repeatEach(selection: Selection, times: number): Selection {
   return {
     pairs: expand(selection.pairs),
     perTarget: selection.perTarget.map(({ target, pairs }) => ({ target, pairs: expand(pairs) })),
+    actorTargets: selection.actorTargets,
   };
 }
 
@@ -601,14 +641,18 @@ function withSetupConsumers(
   targets: readonly ResolvedTarget[],
   optionsByTest: ReadonlyMap<string, ResolvedTestOptions>,
   sessionProducers: ReadonlyMap<string, CollectedTest>,
+  plans: AttemptPlans,
 ): ReadonlySet<string> {
   const widened = new Set(lastFailed);
   for (const target of targets) {
     for (const test of tests) {
       const options = optionsByTest.get(test.id)!;
-      const producer = options.session === undefined ? undefined : sessionProducers.get(options.session);
-      if (producer === undefined) continue;
-      const rerun = optionsByTest.get(producer.id)!.agents.some((agent) => lastFailed.has(resultId(producer.id, target.name, agent)));
+      // Its own session's setup, on this target, and each of its actors', on the actor's.
+      const needed = pairSessions({ target, options, actors: [] }).concat(test.kind === 'test' ? actorSessionsOf(plans, test, target) : []);
+      const rerun = needed.some(({ session, target: on }) => {
+        const producer = sessionProducers.get(session);
+        return producer !== undefined && optionsByTest.get(producer.id)!.agents.some((agent) => lastFailed.has(resultId(producer.id, on.name, agent)));
+      });
       if (rerun) for (const agent of options.agents) widened.add(resultId(test.id, target.name, agent));
     }
   }
@@ -625,7 +669,7 @@ function classifyPair(
   filters: SelectionFilters,
   tagMode: TagMode,
 ): TestTargetPair {
-  const base = { test, target, agent, repeat: 0, options };
+  const base = { test, target, agent, repeat: 0, options, actors: [] };
 
   if (test.kind === 'test') {
     // A file no positional named is collected for its setup tests only; its
@@ -811,27 +855,31 @@ function applySessionSelection(
   /** Each needed setup, by target and producer, with the sessions a selected test consumes from it. */
   const neededSetups = new Map<string, Set<string>>();
   for (const pair of pairs) {
-    if (pair.disposition !== 'run' || pair.options.session === undefined) continue;
-    const producer = sessionProducers.get(pair.options.session);
-    if (producer === undefined) {
-      // The setup may be in a file a narrowed run could not collect; its error is then the cause.
-      const cause =
-        uncollected.length === 0
-          ? ''
-          : `; it may be declared in a file that failed to collect: ${nameFiles(uncollected.map((entry) => `${entry.file} (${entry.reason})`))}`;
-      const declared = [...sessionProducers.keys()];
-      const known =
-        declared.length === 0
-          ? '; no collected setup test declares a session'
-          : `; setup tests declare ${declared.map((name) => `"${name}"`).join(', ')}${didYouMean(pair.options.session, declared)}`;
-      throw new CollectionError(
-        `test "${pair.test.titlePath.join(' > ')}" in ${pair.test.file} consumes session "${pair.options.session}" but no setup test produces it${known}${cause}`,
-      );
+    if (pair.disposition !== 'run') continue;
+    for (const { session, target } of pairSessions(pair)) {
+      const producer = sessionProducers.get(session);
+      if (producer === undefined) {
+        // The setup may be in a file a narrowed run could not collect; its error is then the cause.
+        const cause =
+          uncollected.length === 0
+            ? ''
+            : `; it may be declared in a file that failed to collect: ${nameFiles(uncollected.map((entry) => `${entry.file} (${entry.reason})`))}`;
+        const declared = [...sessionProducers.keys()];
+        const known =
+          declared.length === 0
+            ? '; no collected setup test declares a session'
+            : `; setup tests declare ${declared.map((name) => `"${name}"`).join(', ')}${didYouMean(session, declared)}`;
+        const actor = session === pair.options.session ? undefined : pair.actors.find((candidate) => candidate.session === session);
+        const consumer = actor === undefined ? 'consumes' : `names actor "${actor.name}", which restores`;
+        throw new CollectionError(
+          `test "${pair.test.titlePath.join(' > ')}" in ${pair.test.file} ${consumer} session "${session}" but no setup test produces it${known}${cause}`,
+        );
+      }
+      const key = `${target.name}::${producer.id}`;
+      const sessions = neededSetups.get(key) ?? new Set<string>();
+      sessions.add(session);
+      neededSetups.set(key, sessions);
     }
-    const key = `${pair.target.name}::${producer.id}`;
-    const sessions = neededSetups.get(key) ?? new Set<string>();
-    sessions.add(pair.options.session);
-    neededSetups.set(key, sessions);
   }
   return pairs.map((pair) => {
     if (pair.test.kind !== 'setup') return pair;

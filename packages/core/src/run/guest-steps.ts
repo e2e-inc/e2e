@@ -120,15 +120,33 @@ export type GuestResult = Pick<StepRecord, TakenField>;
 
 /** A step of the session as the test's recorder lets it be told, once filed there (`StepRecorder.guest`). */
 export interface GuestRecord {
+  /** The step's index in the test's record. */
+  readonly index: number;
+  /** Counts the step as a check that passed: it confirms the steps that began before it, of every session. */
+  verified(): void;
   /** Tells of the step's progress; an event is kept on the step's record. */
   tell(progress: Exclude<StepProgressFact, { readonly phase: 'start' | 'end' }>): void;
   /** Ends the step with how it went. */
   end(result: GuestResult): void;
 }
 
-/** The mirror of one session's steps in a test's record. */
+/**
+ * The mirror of one session's steps in a test's record. What it takes beside
+ * `progress` is for a session of the runner's own copy of this package, an
+ * actor's: a session of another copy tells its steps and nothing more.
+ */
 export interface GuestMirror {
   progress: GuestSteps['progress'];
+  /**
+   * Says a check passed on the session that confirms its steps before
+   * `index` of its own record: the check's own index, or its enclosing
+   * step's for a check nested in one. The test's record counts it as its own
+   * checks count, so it confirms what every session of the test did before
+   * that step.
+   */
+  verified(index: number): void;
+  /** Where the session's step at `index` of its own record stands in the test's record; undefined for one never told here. */
+  placed(index: number): number | undefined;
   /** Ends the mirror: a step still running is told as cancelled, and what the session reports next is dropped. */
   cut(): void;
 }
@@ -144,6 +162,8 @@ export interface GuestMirror {
 export function mirrorGuestSteps(steps: StepRecorder, actor: string, root: string): GuestMirror {
   /** The session's running steps, by the id its own recorder gave them, each with when it started here. */
   const running = new Map<string, { readonly filed: GuestRecord; readonly startedMs: number }>();
+  /** The session's steps told here, by their index in its own record. */
+  const filedAt = new Map<number, GuestRecord>();
   const redact = (text: string): string => steps.redactText(text);
   /** A line of the session's, read against the test's project root; nothing when it lies outside it. */
   const relocated = (source: SourceLocation | undefined): SourceLocation | undefined => {
@@ -175,6 +195,7 @@ export function mirrorGuestSteps(steps: StepRecorder, actor: string, root: strin
         if (cut) return;
         const filed = steps.guest({ kind: progress.kind, api: progress.api, label: progress.label, actor, source: relocated(record.source) });
         running.set(record.id, { filed, startedMs: Date.now() });
+        filedAt.set(record.index, filed);
         return;
       }
       const step = running.get(record.id);
@@ -193,6 +214,8 @@ export function mirrorGuestSteps(steps: StepRecorder, actor: string, root: strin
       running.delete(record.id);
       step.filed.end(resultOf(record));
     },
+    verified: (index) => filedAt.get(index)?.verified(),
+    placed: (index) => filedAt.get(index)?.index,
     cut: () => {
       cut = true;
       for (const { filed, startedMs } of running.values()) filed.end({ status: 'cancelled', durationMs: Date.now() - startedMs });

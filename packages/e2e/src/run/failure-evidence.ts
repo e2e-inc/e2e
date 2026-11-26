@@ -39,10 +39,17 @@ export interface FailureEvidenceOptions {
   readonly error: E2EError;
   /**
    * Whether the step that failed ran on `session`. False for a step of a
-   * session the test drives beside it (`launch()`): the screen is still the
-   * test's own to show, but the failed locator was never asked of it.
+   * session the test opened with `launch()`: the screen is still the test's
+   * own to show, but the failed locator was never asked of it. An actor's
+   * step has the actor's session here.
    */
   readonly ownStep: boolean;
+  /**
+   * The actor `session` is, when it is not the test's own: what the capture
+   * registers is told as that actor's, and `dir` is where the session keeps
+   * its artifacts under the attempt's directory.
+   */
+  readonly actor?: { readonly name: string; readonly dir: string } | undefined;
   readonly ledger: SecretLedger;
   readonly config: ResolvedConfig;
   /** The app base URL's origin, whose link targets the screen lists as paths. */
@@ -54,6 +61,9 @@ export interface FailureEvidenceOptions {
   /** Aborts the capture: a run interrupt has no time for evidence. */
   readonly interrupt: AbortSignal;
 }
+
+/** The session a failure's evidence is read off, and what reading it takes. */
+export type FailureScreen = Pick<FailureEvidenceOptions, 'session' | 'actor' | 'ledger' | 'appOrigin' | 'appBase' | 'operation'>;
 
 /**
  * Captures the evidence of one failed attempt, or as much of it as the
@@ -67,6 +77,7 @@ export async function captureFailureEvidence(options: FailureEvidenceOptions): P
   if (signal.aborted) return finish(evidence);
   const operation = options.operation(signal, EVIDENCE_TIMEOUT_MS);
   const { redact, redactCut } = options.ledger;
+  const told = options.actor === undefined ? undefined : { actor: options.actor.name };
 
   // The engine is handed the budget, and the wait is abandoned at its end
   // either way: an engine stuck on a hung app may never honor it.
@@ -101,7 +112,7 @@ export async function captureFailureEvidence(options: FailureEvidenceOptions): P
       // An earlier run's file at the same path is overwritten: attempt
       // directories are named by test and attempt index, not by run.
       writeFileSync(file, `${observation.text}\n`);
-      evidence.screen = options.artifacts.register('log', SCREEN_FILE);
+      evidence.screen = options.artifacts.register('log', SCREEN_FILE, told);
     } catch {
       // An unwritable directory: the tree stays unrecorded.
     }
@@ -114,7 +125,8 @@ export async function captureFailureEvidence(options: FailureEvidenceOptions): P
   if (!signal.aborted && !fileApp) {
     try {
       const relative = await bounded(() => options.session.artifacts.screenshot('failure', operation));
-      evidence.screenshot = options.artifacts.register('screenshot', relative);
+      // The engine wrote it under the session's own directory, an actor's below the attempt's.
+      evidence.screenshot = options.artifacts.register('screenshot', path.join(options.actor?.dir ?? '', relative), told);
     } catch {
       // A screenshot the engine could not take is not evidence the report claims.
     }

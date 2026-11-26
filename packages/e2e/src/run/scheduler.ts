@@ -8,7 +8,7 @@
  * execution.
  */
 
-import type { TestTargetPair } from '../collect/select.ts';
+import { pairSessions, type TestTargetPair } from '../collect/select.ts';
 import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
 import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import type { AiTraceSnapshot } from '@e2e-dev/core/lib/internal/ai-trace';
@@ -23,7 +23,7 @@ import {
 } from '@e2e-dev/core/lib/internal/errors';
 import { timestamp, uuidv7 } from '@e2e-dev/core/lib/internal/ids';
 import { MAX_TIMER_MS } from '@e2e-dev/core/lib/internal/time';
-import type { AttemptRecord, ResultRecord, RunError, SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
+import type { AttemptRecord, ResultRecord, RunError, SerialGroupRecord, TestIdentity } from '@e2e-dev/core/lib/run/records';
 import { retryVerdict } from './retry.ts';
 import { SerialGroupProgress, serialGroupId } from './serial.ts';
 import type { HeldStep, HoldReads, StepHold, StepHoldContext } from './step-hold.ts';
@@ -172,6 +172,10 @@ interface TargetState {
   readonly fileQueue: WorkUnit[];
   /** session name -> id of the setup test that failed to produce it */
   readonly failedSessions: Map<string, string>;
+  /** The other targets whose setup tests save a session an actor of this target's tests restores: its tests wait for them too. */
+  readonly awaits: ReadonlySet<string>;
+  /** The other targets an actor of this target's tests runs on: their apps have to be up for those tests. */
+  readonly actorTargets: ReadonlySet<string>;
   initFailures: number;
   unavailable: TargetUnavailable | undefined;
 }
@@ -411,6 +415,8 @@ type SchedulerHold = {
 
 class Scheduler {
   private readonly targets = new Map<string, TargetState>();
+  /** The targets whose app command exited while another target's tests named an actor on them, each with the skip those tests get. */
+  private readonly exitedActorApps = new Map<string, SkipInfo>();
   /** Every worker that has not exited yet, retired ones included. */
   private readonly workers: SchedulerWorker[] = [];
   private wake: (() => void) | undefined;
@@ -452,10 +458,15 @@ class Scheduler {
   /**
    * Every result leaves through here, so the failure count is one number
    * however the result came about: a worker's verdict, a synthesized crash,
-   * or a skip. Reaching the limit stops the run at once. Returns whether the
-   * result was a counted failure the run goes on after.
+   * or a skip. A setup that did not pass saved no session, however it came to
+   * that: whatever starts from one skips, on its target and on any whose
+   * actors restore it. Reaching the limit stops the run at once. Returns
+   * whether the result was a counted failure the run goes on after.
    */
   private report(result: ResultRecord): boolean {
+    if (result.selected && result.test.kind === 'setup' && result.status !== 'passed' && result.status !== 'flaky') {
+      this.markSessionsFailed(result.target, result.test);
+    }
     this.options.events.onResult(result);
     if (!countsTowardFailureLimit(result.status)) return false;
     this.failures += 1;
@@ -514,6 +525,12 @@ class Scheduler {
         setupQueue: [...plan.setupUnits],
         fileQueue: [...plan.fileUnits],
         failedSessions: new Map(),
+        awaits: new Set(
+          plan.fileUnits.flatMap((unit) => unit.pairs.flatMap((pair) => pairSessions(pair).flatMap(({ target }) => (target.name === plan.target.name ? [] : [target.name])))),
+        ),
+        actorTargets: new Set(
+          [...plan.setupUnits, ...plan.fileUnits].flatMap((unit) => unit.pairs.flatMap((pair) => pair.actors.flatMap((actor) => (actor.own ? [] : [actor.target.name])))),
+        ),
         initFailures: 0,
         unavailable: undefined,
       });
@@ -563,11 +580,19 @@ class Scheduler {
       const state = this.targets.get(name);
       if (state !== undefined && this.hasPendingWork(state)) affected.push(state);
     }
-    if (affected.length === 0) return;
-    this.options.events.onRunError({ error: failure.error });
     const reason = failure.error.message.split('\n')[0] ?? failure.error.message;
+    const skip: SkipInfo = { cause: 'infrastructure-unavailable', reason };
+    // Another target's tests may name an actor on a target whose app is gone: those tests skip, and the rest of that target runs on.
+    let named = false;
+    for (const name of failure.targetNames) {
+      const consumed = [...this.targets.values()].some((state) => state.actorTargets.has(name) && this.hasPendingWork(state));
+      if (consumed) this.exitedActorApps.set(name, skip);
+      named ||= consumed;
+    }
+    if (affected.length === 0 && !named) return;
+    this.options.events.onRunError({ error: failure.error });
     for (const state of affected) {
-      this.failTarget(state, { kind: 'app-exit', skip: { cause: 'infrastructure-unavailable', reason } });
+      this.failTarget(state, { kind: 'app-exit', skip });
     }
     this.wakeUp();
   }
@@ -828,8 +853,12 @@ class Scheduler {
   private peekUnit(state: TargetState): WorkUnit | undefined {
     if (state.unavailable !== undefined) return undefined;
     if (state.setupQueue.length > 0) return state.setupQueue[0];
-    // Ordinary units wait until every setup for this target has finished.
+    // Ordinary units wait until every setup for this target has finished, and every setup on a target their actors restore a session on.
     if (this.hasPendingSetup(state)) return undefined;
+    for (const name of state.awaits) {
+      const other = this.targets.get(name);
+      if (other !== undefined && other.unavailable === undefined && this.hasPendingSetup(other)) return undefined;
+    }
     return state.fileQueue[0];
   }
 
@@ -879,16 +908,21 @@ class Scheduler {
     else state.fileQueue.unshift(unit);
   }
 
-  /** Skip info when a pair's session was not produced by a passing setup. */
+  /** Skip info when a pair cannot run for what it depends on: a session no passing setup produced, or an actor's target whose app exited. */
   private dependencySkip(
     state: TargetState,
     pair: TestTargetPair,
-  ): ReturnType<typeof setupFailedSkip> | undefined {
-    const session = pair.options.session;
-    if (session === undefined) return undefined;
-    const failedSetup = state.failedSessions.get(session);
-    if (failedSetup === undefined) return undefined;
-    return setupFailedSkip(session, failedSetup);
+  ): SkipInfo | undefined {
+    for (const actor of pair.actors) {
+      const exited = actor.own ? undefined : this.exitedActorApps.get(actor.target.name);
+      if (exited !== undefined) return exited;
+    }
+    for (const { session, target } of pairSessions(pair)) {
+      // An actor's session is saved on the actor's target, which may not be this one.
+      const failedSetup = this.targets.get(target.name)?.failedSessions.get(session);
+      if (failedSetup !== undefined) return setupFailedSkip(session, failedSetup);
+    }
+    return undefined;
   }
 
   // --- workers ---
@@ -1083,7 +1117,6 @@ class Scheduler {
         if (result.status !== 'passed' && result.status !== 'flaky' && result.status !== 'skipped') {
           worker.sawFailure = true;
         }
-        if (result.test.kind === 'setup') this.recordSetupOutcome(state, result);
         if (this.report(result) && this.answersFailures) worker.runner.send({ type: 'continue' });
         break;
       }
@@ -1158,13 +1191,6 @@ class Scheduler {
         this.options.events.onRunAbort({ error: message.error });
         break;
       }
-    }
-  }
-
-  private recordSetupOutcome(state: TargetState, result: ResultRecord): void {
-    if (result.status === 'passed' || result.status === 'flaky') return;
-    for (const session of result.test.sessions) {
-      state.failedSessions.set(session, result.test.id);
     }
   }
 
@@ -1284,7 +1310,6 @@ class Scheduler {
       }
       const { finished, running } = worker.attempts.get(key) ?? { finished: [], running: undefined };
       if (hung !== undefined && key === hung.pair) {
-        this.markSessionsFailed(state, pair);
         this.report(finishedResult(pair, [...finished, hungAttempt(hung)]));
         continue;
       }
@@ -1304,7 +1329,8 @@ class Scheduler {
         rescheduled.push(pair);
         continue;
       }
-      this.markSessionsFailed(state, pair);
+      // A setup whose worker exited never persisted its sessions, even when its last attempt had finished as passed.
+      this.markSessionsFailed(state.target, pair.test);
       if (key !== worker.inFlightPair) {
         this.report(
           unstartedResult(pair, {
@@ -1349,12 +1375,11 @@ class Scheduler {
     if (rescheduled.length > 0) this.returnUnit(state, { ...unit, pairs: rescheduled });
   }
 
-  /** A crashed setup never persisted its sessions; dependents must skip. */
-  private markSessionsFailed(state: TargetState, pair: TestTargetPair): void {
-    if (pair.test.kind !== 'setup') return;
-    for (const session of pair.test.sessions) {
-      state.failedSessions.set(session, pair.test.id);
-    }
+  /** Records that the setup `test` saved none of its sessions on `target`; nothing for any other test. */
+  private markSessionsFailed(target: ResolvedTarget, test: Pick<TestIdentity, 'kind' | 'sessions' | 'id'>): void {
+    if (test.kind !== 'setup') return;
+    const failed = this.targets.get(target.name)?.failedSessions;
+    for (const session of test.sessions) failed?.set(session, test.id);
   }
 
   /**

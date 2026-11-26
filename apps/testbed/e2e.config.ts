@@ -21,5 +21,9 @@ export default {
       username: 'admin',
       password: 'admin-pass',
     },
+    reviewer: {
+      username: 'reviewer',
+      password: 'reviewer-pass',
+    },
   },
 } satisfies E2EConfig;

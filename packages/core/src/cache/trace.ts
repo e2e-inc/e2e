@@ -105,6 +105,8 @@ export interface TraceProvenance {
   readonly callIndex?: number;
   /** Name of the configured agent the step ran with. */
   readonly agent?: string;
+  /** The actor the step ran as, when it is not the test's own session. */
+  readonly actor?: string;
   /**
    * SHA-256 of the whole redacted test id, target id, and agent name, only
    * when one of them is longer than an entry keeps or ends like a cut (a

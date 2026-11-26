@@ -21,9 +21,6 @@ import {
   type Engine,
   type EngineAttemptContext,
   type EngineHandle,
-  type EngineInitInfo,
-  type OperationContext,
-  type SemanticNode,
 } from '@e2e-dev/core/lib/engine/index';
 import { resolveConfig } from '../../src/config/resolve-run.ts';
 import { engineAppInfo } from '@e2e-dev/core/lib/config/app';
@@ -34,46 +31,7 @@ import { Connection } from '@e2e-dev/core/lib/engine/protocol/connection';
 import type { EngineTransport } from '@e2e-dev/core/lib/engine/protocol/transport';
 import { secretHandle } from '@e2e-dev/core/lib/secrets';
 import type { CrashMode } from '../fixtures/protocol-server.ts';
-
-const node = (id: string, name: string, role = 'button'): SemanticNode => ({ ref: { id, revision: '' }, role, name });
-
-const ROOT: SemanticNode = { ref: { id: 'root', revision: '' }, role: 'root', children: [node('n1', 'Save'), node('n2', 'Cancel')] };
-
-const operation = (signal: AbortSignal = new AbortController().signal): OperationContext => ({
-  signal,
-  timeoutMs: 1000,
-  runId: 'run',
-  attemptId: 'attempt-1',
-  origin: 'test',
-});
-
-const initInfo = (log: (line: string) => void = () => {}): EngineInitInfo => ({
-  runId: 'run',
-  targetName: 'toy',
-  projectRoot: process.cwd(),
-  app: {},
-  env: process.env,
-  headed: false,
-  workerSlot: 0,
-  signal: new AbortController().signal,
-  log,
-});
-
-const cleanup = { signal: new AbortController().signal, timeoutMs: 1000 };
-
-/** Serves `engine` in this process and returns the client handle over it. */
-function overLoopback(engine: Engine, extra: Partial<Parameters<typeof connectEngine>[0]> = {}): { local: EngineHandle; remote: EngineHandle } {
-  const local = defineEngine(engine);
-  return { local, remote: connectEngine({ manifest: describeEngine(local), transport: loopbackTransport(local), ...extra }) };
-}
-
-const toy = (extra: Partial<Engine> = {}): Engine => ({
-  name: 'toy',
-  version: '1.0.0',
-  spiVersion: 1,
-  observe: async () => ({ root: ROOT, viewport: { width: 1280, height: 720 } }),
-  ...extra,
-});
+import { cleanup, initInfo, operation, overLoopback, ROOT, toy } from '../helpers/protocol-loopback.ts';
 
 describe('engine protocol', () => {
   it('carries a read request and computed values through JSON-RPC', async () => {
@@ -1000,6 +958,11 @@ describe('engine protocol against a server written from the messages alone', () 
     const relative = await remote.artifacts!.screenshot('after login', operation());
     expect(relative).toBe(path.join('screenshots', '001-after_login.png'));
     expect(readFileSync(path.join(artifactsDir, relative), 'utf8')).toBe('png bytes');
+    const later = await remote.artifacts!.screenshot('later', operation());
+    expect(later).toBe(path.join('screenshots', '002-later.png'));
+    expect(readFileSync(path.join(artifactsDir, later), 'utf8')).toBe('png bytes');
+    // One for an attempt that is not open has no directory to land in.
+    await expect(remote.artifacts!.screenshot('stray', { ...operation(), attemptId: 'not-open' })).rejects.toThrow(/screenshot outside an attempt/);
     expect(facts).toEqual([{ written: 'by hand' }]);
     await remote.dispose!(cleanup);
     expect(received).toEqual(['lifecycle/startAttempt', 'shutdown', 'transport closed']);
@@ -1079,6 +1042,47 @@ describe('engine protocol against a server written from the messages alone', () 
     await ending;
     await remote.dispose!(cleanup);
     rmSync(artifactsDir, { recursive: true, force: true });
+  });
+
+  it('keeps a screenshot answered while its attempt is ending out of its directory, and writes the one of an attempt open beside it', async () => {
+    const methods = ['engine/observe', 'artifacts/screenshot', 'lifecycle/startAttempt', 'lifecycle/endAttempt'] as const;
+    const answers = new Map<string, () => void>();
+    let ended: (() => void) | undefined;
+    const { transport } = handWritten(methods, {
+      'lifecycle/endAttempt': async () => {
+        await new Promise<void>((resolve) => (ended = resolve));
+        return null;
+      },
+      'artifacts/screenshot': async (params) => {
+        const { attemptId } = (params as { operation: { attemptId: string } }).operation;
+        await new Promise<void>((resolve) => answers.set(attemptId, resolve));
+        return { data: Buffer.from('png bytes').toString('base64'), mediaType: 'image/png' };
+      },
+    });
+    const remote = connectEngine({ manifest: { name: 'hand', version: '1', spiVersion: 1, methods: [...methods] }, transport });
+    const dirs = { test: mkdtempSync(path.join(tmpdir(), 'e2e-protocol-')), actor: mkdtempSync(path.join(tmpdir(), 'e2e-protocol-')) };
+    const attempt = (attemptId: keyof typeof dirs): EngineAttemptContext => ({
+      attemptId, artifactsDir: dirs[attemptId], signal: new AbortController().signal, resolveSecret: async () => '', appLog: () => {}, navigation: () => {}, environment: () => {},
+    });
+    await remote.init!(initInfo());
+    await remote.startAttempt!(attempt('test'));
+    await remote.startAttempt!(attempt('actor'));
+    const shots = (['test', 'actor'] as const).map((attemptId) =>
+      remote.artifacts!.screenshot('shot', { ...operation(), attemptId }).then((file) => file, (cause: unknown) => cause));
+    await vi.waitFor(() => expect(answers.size).toBe(2));
+    // The harness names the attempt it ends: the test's stays open beside it.
+    const ending = remote.endAttempt!({ ...cleanup, attemptId: 'actor' });
+    await vi.waitFor(() => expect(ended).toBeDefined());
+    for (const answer of answers.values()) answer();
+    const [kept, refused] = await Promise.all(shots);
+    expect(kept).toBe(path.join('screenshots', '001-shot.png'));
+    expect(readdirSync(path.join(dirs.test, 'screenshots'))).toEqual(['001-shot.png']);
+    expect(refused).toMatchObject({ code: 'INVALID_STATE' });
+    expect(readdirSync(dirs.actor)).toEqual([]);
+    ended?.();
+    await ending;
+    await remote.dispose!(cleanup);
+    for (const dir of Object.values(dirs)) rmSync(dir, { recursive: true, force: true });
   });
 
   it('refuses a screenshot path outside the attempt directory', async () => {

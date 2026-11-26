@@ -1703,10 +1703,11 @@ export interface DeviceSelection {
 `PermissionState`, `DeviceClientConfig`, `DeviceConnection`, `DeviceDaemon`,
 `DeviceProvider`, `DeviceLease`, `DeviceReleaseContext`, `DeviceRequest`,
 `Device`, `DeviceSession`, `DeviceSessionClient`, `DeviceSelection`, `DeviceOrientation`, `BiometricSensor`, `ForegroundApp`,
-`FoldPose`, `InstallAppOptions`, `InstalledApp`, and `OpenAppOptions` are exported from
-`@e2e-dev/mobile`. The runtime exports are `mobile`, and `test`, `describe`,
+`FoldPose`, `InstallAppOptions`, `InstalledApp`, `OpenAppOptions`, and `Actor` are exported from
+`@e2e-dev/mobile`. The runtime exports are `mobile`, `actor`, and `test`, `describe`,
 `beforeEach`, `afterEach`, `beforeAll`, and `afterAll`, typed with the `device`
-fixture. A device keeps its state between tests, so `device`, `app`, and
+fixture. `actor({ target })` declares a device [actor](/actors) on another
+`mobile()` target of the config; it takes no `session`. A device keeps its state between tests, so `device`, `app`, and
 `screen` are [worker fixtures](/reference/test#worker-fixtures), and
 `beforeAll` and `afterAll` get them. `mobileTools`, `tvTools`, and `foldTools`
 come from `@e2e-dev/mobile/tools`.

@@ -142,6 +142,7 @@ rules:
 | `launchArgumentValues` | Not a boolean. |
 | `fileApps` | Not a boolean. |
 | `isolation` | Anything but `'attempt'` or `'worker'`. |
+| `actors` | Not a boolean, or `true` without `startAttempt` and `endAttempt`. |
 | `keyboard`, `state`, `artifacts`, `session` | An unknown key or a non-function member. `keyboard` without `type` and `press`; `state` without both `capture` and `restore`; `artifacts` without `screenshot`; `startVideo` without `stopVideo`, or the reverse. |
 | `secrets` | Not an array of `secrets.get()` handles. |
 | `fixtures` | Not an object, a fixture that is not a factory function, or a fixture name that is not a lower-camel identifier or shadows `agent`, `app`, `screen`, `platform`, `request`, or `session`. |
@@ -179,6 +180,7 @@ The body of one target. Every member but `name`, `version`, and
 | [`keyboard`](#keyboard) | `EngineKeyboard` |
 | [`fixtures`](#contributed-fixtures) | factories |
 | [`isolation`](#fixture-isolation) | `'attempt' \| 'worker'` |
+| [`actors`](#actors) | `boolean` |
 | [`state`](#state) | `EngineStateCapability` |
 | [`artifacts`](#artifacts) | `EngineArtifacts` |
 | [`validateApp`](#app) | method |
@@ -319,6 +321,19 @@ export interface Engine {
    * lives; see `EngineIsolation`. Defaults to `attempt`.
    */
   readonly isolation?: EngineIsolation;
+  /**
+   * The engine can run the actors of a test: more than one attempt on a
+   * worker at a time, each isolated from the others the way two tests are
+   * (on a browser, a context of its own). `startAttempt` is then called
+   * again with another `attemptId` while an attempt is open. Every
+   * operation, attempt callback, and fixture context carries the id its
+   * attempt's `startAttempt` got, and `settleAttempt` and `endAttempt` name
+   * the attempt they are for (`EngineCleanupContext.attemptId`). A call for
+   * an attempt that is not open is refused, never run on another's. The
+   * attempts end in any order. Without it, a test that names an actor on
+   * its own target is refused before the run starts.
+   */
+  readonly actors?: boolean;
   /** capability: state - opaque snapshot capture/restore for session reuse. */
   readonly state?: EngineStateCapability;
   /** capability: artifacts - screenshots under the attempt directory, and videos there or at a provider. */
@@ -421,7 +436,7 @@ export interface OperationContext {
   readonly timeoutMs: number;
   /** The run id. */
   readonly runId: string;
-  /** The attempt id. */
+  /** The attempt the call is for: the id its `startAttempt` got. */
   readonly attemptId: string;
   /**
    * Who asked: a test's own deterministic step, or the agent acting on a
@@ -455,6 +470,7 @@ member. Two gaps end differently:
 | `viewportIntersection` | `viewport-intersection` | `locate` | `expect(locator).toBeInViewport()`. |
 | `tapModifiers: true` | - | `perform` | `modifiers` on `tap`, `doubleTap`, `multiTap`, and `secondaryTap`. |
 | `selectsDevice: true` | - | `prepare` | `e2e run --device`, the device `prepare` binds. |
+| `actors: true` | `actors` | `startAttempt`, `endAttempt` | An [actor](#actors) on the test's own target. |
 | `grantsAllPermissions: true` | - | - | `app.permissions: 'all'`, which the engine receives as `EngineAppInfo.allPermissions`. Without it, config load refuses `'all'`, so an engine released before it never receives the string. |
 | `launchArgumentValues: true` | - | - | The object form of `app.launchArguments`, in `EngineAppInfo.launchArgumentValues`. |
 | `fileApps: true` | - | - | A target whose `app.url` is a `file:` URL. `validateApp` is told with `fileApp: true`. |
@@ -1083,6 +1099,12 @@ export interface EngineCleanupContext {
   readonly signal: AbortSignal;
   /** Remaining cleanup budget when the call starts. */
   readonly timeoutMs: number;
+  /**
+   * The attempt `settleAttempt` or `endAttempt` is for. An engine that
+   * declares `actors` has more than one open at a time and reads it; absent
+   * for `dispose`, and from a harness that predates actors.
+   */
+  readonly attemptId?: string;
 }
 
 /** Cleanup of one worker, with optional permission to leave run-owned resources for a replacement. */
@@ -2445,6 +2467,11 @@ export type EngineFixtureFactory = (context: EngineFixtureContext) => object;
 export interface EngineFixtureContext {
   /** The target the fixture serves. */
   readonly targetName: string;
+  /**
+   * The attempt the fixture is built for, which an engine that declares
+   * `actors` routes by; absent from a harness that predates actors.
+   */
+  readonly attemptId?: string;
   /** Records the declared operations before invoking them; undeclared accessors retain their identity. */
   fixture<T extends object>(name: string, surface: T, operations: FixtureOperations<T>): T;
   readonly app: EngineAppInfo & {
@@ -2512,7 +2539,8 @@ defineEngine({ name: 'device', /* ... */ isolation: 'worker' });
   then `endAttempt`). So do the teardowns of worker fixtures when the worker
   ends. Make `startAttempt` launch nothing.
 - In a serial group, or a test an `e2e mcp` session runs, the hooks run on the
-  attempt already open. An engine runs one attempt at a time.
+  attempt already open. An engine without [`actors`](#actors) runs one attempt
+  at a time.
 - When the attempt cannot open, or the run was interrupted, the hooks run
   without those built-in fixtures. See [`beforeAll`](/reference/test#beforeall).
 
@@ -2528,6 +2556,54 @@ defineEngine({ name: 'device', /* ... */ isolation: 'worker' });
  */
 export type EngineIsolation = 'attempt' | 'worker';
 ```
+
+#### Actors
+
+`actors: true` declares that the engine can run the [actors](/actors) of a
+test on one worker: `startAttempt` is called again while an attempt is open.
+`@e2e-dev/web` declares it and gives each attempt a browser context.
+
+```ts
+defineEngine({ name: 'toy', /* ... */ actors: true, startAttempt, endAttempt });
+```
+
+Route by attempt id. It is on every `OperationContext`, on the context of
+`startAttempt`, `settleAttempt`, and `endAttempt`, and on the fixture
+context:
+
+```ts
+const open = new Map<string, Surface>();     // each attempt, by the id its startAttempt got
+
+observe: async (operation) => {
+  const surface = open.get(operation.attemptId);
+  if (surface === undefined) throw new EngineError('INVALID_STATE', 'the attempt this call belongs to is not running', { retryable: false });
+  return surface.observe(operation);
+},
+endAttempt: async ({ attemptId }) => { /* end that attempt, and leave the others open */ },
+```
+
+A serial group's tests, and its suite hooks, call under the group's id. The
+first attempt open is the test's own session, or an actor's when the test
+drives only its actors. [`Engine.actors`](#engine) has the rest of the
+contract.
+
+Without `actors`, an actor on the test's own target is a collection error.
+An actor that names another target needs nothing from the engine: the
+worker initializes that target's engine for it.
+
+`defineActor` builds the `actor()` an engine package exports. Pass the
+engine's `name`, and type what a test receives:
+
+```ts
+import { defineActor } from 'e2e/engine';
+import type { Actor } from 'e2e';
+
+export const actor = defineActor<Actor<{ readonly gadget: Gadget }>>('toy');
+```
+
+| Throws | When |
+| --- | --- |
+| `INVALID_CONFIG` | `actor()` gets an option it does not take, or a `session` or `target` that is not a non-empty string. |
 
 #### Declaring operations
 
@@ -2595,7 +2671,8 @@ return context.fixture('printer', printer, { print: { kind: 'resource' } });
 `KEY_NAMES`, `parseKey`, `ENGINE_ERROR_CODES`, `RETRYABLE_ENGINE_ERROR_CODES`,
 `Secret`, `isSecret`, `TextMatch`, `JsonValue`, `JsonValueRules`,
 `ResolveExpressionOptions`, `PollConditionOptions`, `WithoutUndefined`,
-`FixtureOperation`, `EngineIsolation`, `OBSERVED_NAME_LIMIT`, and `OBSERVED_TEXT_LIMIT` are
+`FixtureOperation`, `EngineIsolation`, `defineActor`, `ActorDeclaration`,
+`OBSERVED_NAME_LIMIT`, and `OBSERVED_TEXT_LIMIT` are
 exported from `e2e/engine`. So are the [engine protocol](/reference/engine-protocol)'s
 `connectEngine`, `serveEngine`, `describeEngine`, `spawnTransport`,
 `socketTransport`, `loopbackTransport`, `ENGINE_METHODS`,

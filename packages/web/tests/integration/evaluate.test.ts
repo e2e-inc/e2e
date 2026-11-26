@@ -3,41 +3,33 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Page } from 'playwright-core';
-import type { EngineFixtureContext } from '@e2e-dev/core/engine';
-import { PlaywrightSurface } from '../../src/surface.ts';
-import { createBrowserFixture, type Browser } from '../../src/browser.ts';
-import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
+import type { Browser } from '../../src/browser.ts';
+import type { WebEngine } from '../../src/engine.ts';
+import { cleanupContext, openAttempt, openEngine, type Operation } from '../helpers/attempt.ts';
 
 describe('browser.evaluate error boundaries', () => {
-  const surface = new PlaywrightSurface({});
   const artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-evaluate-'));
-  const signal = new AbortController().signal;
+  let engine: WebEngine;
   let page: Page;
   let browser: Browser;
+  let operation: Operation;
+  let close: () => Promise<void>;
 
   beforeAll(async () => {
-    await surface.init({ runId: 'evaluate', targetName: 'web', projectRoot: process.cwd(),
-      app: {}, env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
+    engine = await openEngine();
   });
 
   beforeEach(async () => {
-    await surface.startAttempt({ attemptId: 'evaluate', artifactsDir, signal, resolveSecret: noSecrets, ...ignoreTrace });
-    page = await surface.ensurePage();
-    browser = createBrowserFixture(surface, {
-      operation: () => ({ signal, timeoutMs: 1_000, runId: 'evaluate', attemptId: 'evaluate', origin: 'test' }),
-      expectable: (target: object) => target,
-      // The recorder is the harness's concern; these tests exercise evaluate's error boundaries only.
-      fixture: (_name: string, target: object) => target,
-    } as unknown as EngineFixtureContext);
+    ({ browser, page, operation, close } = await openAttempt({ engine, attempt: { artifactsDir }, timeoutMs: 1_000 }));
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    await close();
   });
 
   afterAll(async () => {
-    await surface.dispose({ signal, timeoutMs: 5_000 });
+    await engine.dispose!(cleanupContext());
     rmSync(artifactsDir, { recursive: true, force: true });
   });
 
@@ -129,8 +121,7 @@ describe('browser.evaluate error boundaries', () => {
   it('fails a later evaluate and a locate as EVALUATE_FAILED once the page replaced Map', async () => {
     await page.setContent('<div>cart</div><script>window.Map = 1;</script>');
     await expect(browser.evaluate('() => 1')).rejects.toMatchObject({ code: 'EVALUATE_FAILED' });
-    const operation = { signal, timeoutMs: 5_000, runId: 'evaluate', attemptId: 'evaluate', origin: 'test' as const };
-    await expect(surface.locate({ kind: 'selector', selector: 'div' }, operation))
+    await expect(engine.locate!({ kind: 'selector', selector: 'div' }, operation(5_000)))
       .rejects.toMatchObject({ code: 'EVALUATE_FAILED', category: 'test' });
   });
 

@@ -304,6 +304,21 @@ describe('planning', () => {
     // An auto worker fixture that drives the device makes every suite hook of its chain need the engine.
     expect(planSuiteHook(target, suiteHook([logged([], 'install', undefined, { scope: 'worker', auto: true, uses: ['gadget'] })], [])).usesEngine).toBe(true);
   });
+
+  it("says whether the code drives the test's own session, which an actor is not", () => {
+    const chain = [
+      { ...logged([], 'reviewer', 'R'), actor: { engine: 'toy', session: undefined, target: undefined } },
+      logged([], 'pair', 'P', { uses: ['reviewer', 'platform'] }),
+      logged([], 'opened', 'O', { uses: ['app', 'reviewer'] }),
+    ];
+    const plan = (names: readonly string[], hooks: Parameters<typeof planAttempt>[2] = []) => planAttempt(toyTarget(), testNaming(chain, names), hooks);
+    expect(plan(['reviewer']).usesEngine).toBe(false);
+    expect(plan(['pair', 'platform']).usesEngine).toBe(false);
+    expect(plan(['reviewer', 'screen']).usesEngine).toBe(true);
+    expect(plan(['reviewer', 'gadget']).usesEngine).toBe(true);
+    expect(plan(['opened']).usesEngine).toBe(true);
+    expect(plan(['reviewer'], [hookNaming('afterEach', chain, ['app'])]).usesEngine).toBe(true);
+  });
 });
 
 describe('fixtures that extend a built-in', () => {
