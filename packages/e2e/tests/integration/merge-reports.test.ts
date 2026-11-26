@@ -456,6 +456,22 @@ test('slow', async () => { await new Promise((resolve) => setTimeout(resolve, 80
   expect(report(fixture, 'merged')).toMatchObject({ status: 'failed', exitCode: 1 });
 }, 60_000);
 
+it('keeps exit 1 when a fresh shard stops at its failure limit while another test runs', () => {
+  const fixture = project();
+  writeFileSync(path.join(fixture.dir, 'tests/shop.e2e.ts'), `import { test } from 'e2e';
+test('slow', async () => { await new Promise((resolve) => setTimeout(resolve, 8000)); });
+`);
+  writeFileSync(path.join(fixture.dir, 'tests/zz-broken.e2e.ts'), `import { test } from 'e2e';
+test('broken', async () => { await new Promise((resolve) => setTimeout(resolve, 500)); throw new Error('broken'); });
+`);
+  const ran = cli(fixture, ['run', '--shard', '1/1', '--output', 'shard-1', '--workers', '2', '--max-failures', '1']);
+  expect(ran.status, ran.stderr).toBe(1);
+  expect(report(fixture, 'shard-1').summary.interrupted).toBe(1);
+  const merged = cli(fixture, ['merge-reports', 'shard-1', '--output', 'merged']);
+  expect(merged.status, merged.stderr).toBe(1);
+  expect(report(fixture, 'merged')).toMatchObject({ status: 'failed', exitCode: 1 });
+}, 60_000);
+
 it('merges shards when one report could not record the commit and retains the known commit', () => {
   const fixture = project();
   expect(shard(fixture, 1).status).toBe(0);
