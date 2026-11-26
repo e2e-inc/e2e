@@ -400,7 +400,7 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
       await surface.closeApp(context.signal);
     },
     async addMedia(files) {
-      await surface.addMedia(files, context.signal);
+      await surface.addMedia(files, context.signal, context.timeouts.action);
     },
     async clearKeychain() {
       await surface.clearKeychain(context.signal);

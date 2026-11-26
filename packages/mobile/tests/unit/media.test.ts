@@ -11,12 +11,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { obj, type EngineFixtureContext, type FixtureOperations } from '@e2e-dev/core/engine';
 import type { Device } from '../../src/device.ts';
 import { buildEngine } from '../../src/engine.ts';
-import { findAdb, mediaCommands, mediaRefusal, type HostCommand, type HostRunner } from '../../src/media.ts';
+import { findAdb, mediaCommands, mediaRefusal, runHostCommand, type HostCommand, type HostRunner } from '../../src/media.ts';
 import type { MobileOptions } from '../../src/options.ts';
 import { AgentDeviceSurface } from '../../src/surface.ts';
 import { createFakeClient, SETTINGS_SNAPSHOT } from '../helpers/fake-client.ts';
 
 let dir: string;
+
+/** The file name `findAdb` looks for on this machine. */
+const ADB_NAME = process.platform === 'win32' ? 'adb.exe' : 'adb';
 
 beforeEach(() => {
   dir = mkdtempSync(path.join(tmpdir(), 'e2e-add-media-'));
@@ -39,6 +42,7 @@ async function setup(
   runner: HostRunner = async () => undefined,
   env: Readonly<Record<string, string | undefined>> = {},
   signal = new AbortController().signal,
+  actionTimeout = 5_000,
 ): Promise<Setup> {
   const { kind, id, ...engineOptions } = options;
   const fake = createFakeClient({
@@ -73,7 +77,7 @@ async function setup(
     },
     signal,
     headed: false,
-    timeouts: { test: 30_000, action: 5_000, assertion: 5_000 },
+    timeouts: { test: 30_000, action: actionTimeout, assertion: 5_000 },
     operation: () => ({ signal, timeoutMs: 5_000, runId: 'run-1', attemptId: 'a1', origin: 'test' }),
     locator: () => ({}),
   } as unknown as EngineFixtureContext;
@@ -104,7 +108,7 @@ describe('device.addMedia', () => {
     const file = photo("it's 100% (1).png");
     const sdk = path.join(dir, 'sdk');
     mkdirSync(path.join(sdk, 'platform-tools'), { recursive: true });
-    const adb = path.join(sdk, 'platform-tools', 'adb');
+    const adb = path.join(sdk, 'platform-tools', ADB_NAME);
     writeFileSync(adb, '');
     chmodSync(adb, 0o755);
     const { device, ran } = await setup({ platform: 'android', kind: 'emulator', id: 'emulator-5554', device: 'emulator-5554' }, undefined, { ANDROID_HOME: sdk });
@@ -139,11 +143,13 @@ describe('device.addMedia', () => {
   });
 
   it('refuses a device a provider leased or another daemon drives', () => {
-    expect(mediaRefusal('android', 'emulator', { daemon: { baseUrl: 'http://127.0.0.1:4310' } }, {})).toContain('device provider');
-    expect(mediaRefusal('ios', 'simulator', { leaseId: 'lease-1' }, {})).toContain('device provider');
-    expect(mediaRefusal('ios', 'simulator', { client: obj({ stateDir: '/tmp/state' }) }, {})).toContain('device provider');
-    expect(mediaRefusal('ios', 'simulator', { deviceId: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' }, { AGENT_DEVICE_DAEMON_BASE_URL: '' })).toBeUndefined();
-    expect(mediaRefusal('android', 'device', undefined, {})).toBeUndefined();
+    expect(mediaRefusal('android', 'emulator', { daemon: { baseUrl: 'http://127.0.0.1:4310' } }, [{}])).toContain('device provider');
+    expect(mediaRefusal('ios', 'simulator', { leaseId: 'lease-1' }, [{}])).toContain('device provider');
+    expect(mediaRefusal('ios', 'simulator', { client: obj({ stateDir: '/tmp/state' }) }, [{}])).toContain('device provider');
+    expect(mediaRefusal('ios', 'simulator', { deviceId: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' }, [{ AGENT_DEVICE_DAEMON_BASE_URL: '' }, {}])).toBeUndefined();
+    // A remote daemon named in either environment: the worker's or the process's own.
+    expect(mediaRefusal('android', 'emulator', undefined, [{}, { AGENT_DEVICE_DAEMON_BASE_URL: 'https://devices.example.com' }])).toContain('AGENT_DEVICE_DAEMON_BASE_URL');
+    expect(mediaRefusal('android', 'device', undefined, [{}])).toBeUndefined();
   });
 
   it('is INVALID_ARGUMENT for a missing file, a directory, or no paths, before running anything', async () => {
@@ -190,12 +196,47 @@ describe('device.addMedia', () => {
     await expect(device.addMedia('a.jpg')).rejects.toMatchObject({ code: 'CANCELLED' });
   });
 
+  it('kills a program that outlives the action timeout as OPERATION_TIMEOUT, and runs nothing after it', async () => {
+    photo('a.jpg');
+    photo('b.jpg');
+    const { device, ran } = await setup(
+      { platform: 'android', kind: 'emulator', id: 'emulator-5554' },
+      (_command, { signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(Object.assign(new Error('killed'), { name: 'AbortError' })), { once: true });
+        }),
+      {},
+      new AbortController().signal,
+      50,
+    );
+    await expect(device.addMedia(['a.jpg', 'b.jpg'])).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT', message: expect.stringContaining('50ms') });
+    expect(ran).toHaveLength(1);
+  });
+
   it('labels the step with the file names, never their directories', async () => {
     const { labels } = await setup({ platform: 'ios', kind: 'simulator', id: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' });
     const label = labels()?.addMedia?.label;
     expect(label?.('/Users/someone/receipt.jpg')).toBe('receipt.jpg');
     expect(label?.(['a/1.jpg', 'b/2.jpg', 'c/3.jpg'])).toBe('1.jpg, 2.jpg, 3.jpg');
     expect(label?.(['1.jpg', '2.jpg', '3.jpg', '4.jpg', '5.jpg'])).toBe('1.jpg, 2.jpg and 3 more');
+  });
+});
+
+describe('runHostCommand', () => {
+  const failWith = (stderr: number): HostCommand => ({
+    file: process.execPath,
+    args: ['-e', `process.stderr.write('k'.repeat(${stderr})); process.exit(3)`],
+  });
+  const stderrOf = (command: HostCommand): Promise<unknown> =>
+    runHostCommand(command, { env: process.env, signal: new AbortController().signal }).then(
+      () => undefined,
+      (error: { stderr?: unknown }) => error.stderr,
+    );
+
+  it("rejects with the program's stderr, and leaves out stderr too long to show instead of cutting it", async () => {
+    expect(await stderrOf(failWith(12))).toBe('k'.repeat(12));
+    // Half a secret no longer matches the redactor, so long output is dropped whole.
+    expect(await stderrOf(failWith(5_000))).toBe('5000 characters of stderr, too long to show');
   });
 });
 
@@ -207,7 +248,8 @@ describe('mediaCommands', () => {
 });
 
 describe('findAdb', () => {
-  it('takes the first SDK root with an executable adb, else adb on PATH', async () => {
+  // Windows has no execute bit, so a plain file there counts as executable.
+  it.skipIf(process.platform === 'win32')('takes the first SDK root with an executable adb, else adb on PATH', async () => {
     const root = (name: string, executable: boolean): string => {
       const sdk = path.join(dir, name);
       mkdirSync(path.join(sdk, 'platform-tools'), { recursive: true });

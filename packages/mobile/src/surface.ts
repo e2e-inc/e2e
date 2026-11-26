@@ -1957,22 +1957,27 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * Adds photos or videos, resolved against the project root, to the
    * library of the session's device with the platform's own tool on this
    * machine (see `media.ts`). Refuses a device this machine cannot reach,
-   * and a path that is not a readable file, before anything runs. Nothing
-   * on screen changes, so the screen this surface read stays.
+   * and a path that is not a readable file, before anything runs. Each
+   * program is killed once `timeoutMs` has passed since the call, so none
+   * runs on into the next step. Nothing on screen changes, so the screen
+   * this surface read stays.
    */
-  async addMedia(files: unknown, signal: AbortSignal): Promise<void> {
+  async addMedia(files: unknown, signal: AbortSignal, timeoutMs: number): Promise<void> {
     const resolved = mediaFiles(files).map((file) => path.resolve(this.projectRoot, file));
     const { platform } = this.options;
-    const refusal = mediaRefusal(platform, this.boundKind, this.device, this.env);
+    const refusal = mediaRefusal(platform, this.boundKind, this.device, [this.env, process.env]);
     if (refusal !== undefined) throw unsupported(refusal);
     const { deviceId } = this.boundDevice;
     await assertMediaFiles(resolved);
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const stop = AbortSignal.any([signal, timeout]);
     const adb = platform === 'android' ? await findAdb(this.env) : 'adb';
     for (const command of mediaCommands(platform, deviceId, resolved, adb)) {
       try {
-        await this.track(this.runHost(command, { env: this.env, signal }));
+        if (stop.aborted) throw stop.reason;
+        await this.track(this.runHost(command, { env: this.env, signal: stop }));
       } catch (error) {
-        throw hostCommandError(error, command, signal);
+        throw hostCommandError(error, command, { cancelled: signal.aborted, timedOutAfterMs: timeout.aborted ? timeoutMs : undefined });
       }
     }
   }

@@ -32,7 +32,11 @@ export type DeviceKind = 'simulator' | 'emulator' | 'device';
 /** Where an Android device keeps what `addMedia` pushes: shared storage the media provider indexes. */
 const ANDROID_MEDIA_DIR = '/sdcard/Pictures';
 
-/** What the program wrote to stderr, at most this many characters, goes into the failure message. */
+/**
+ * The most stderr a failure message carries. Longer output is left out
+ * whole, never cut: the runner redacts whole secret values only, and half a
+ * value no longer matches.
+ */
 const MAX_STDERR = 2_000;
 
 /** Runs a host command with `execFile`: no shell, so a file name is one argument whatever it holds. */
@@ -43,8 +47,8 @@ export const runHostCommand: HostRunner = (command, { env, signal }) =>
         resolve();
         return;
       }
-      const detail = String(stderr).trim().slice(0, MAX_STDERR);
-      reject(Object.assign(error, { stderr: detail }));
+      const output = String(stderr).trim();
+      reject(Object.assign(error, { stderr: output.length > MAX_STDERR ? `${output.length} characters of stderr, too long to show` : output }));
     });
   });
 
@@ -76,13 +80,14 @@ export function mediaRefusal(
   platform: MobilePlatform,
   kind: DeviceKind | undefined,
   binding: SlotBinding | undefined,
-  env: Readonly<Record<string, string | undefined>>,
+  envs: readonly Readonly<Record<string, string | undefined>>[],
 ): string | undefined {
   const tool = platform === 'ios' ? 'xcrun simctl addmedia' : 'adb push';
   if (binding?.daemon !== undefined || binding?.leaseId !== undefined || binding?.client !== undefined) {
     return `device.addMedia runs ${tool} on this machine, and this device is driven through a device provider or another agent-device daemon; add the media through the provider instead`;
   }
-  if ((env['AGENT_DEVICE_DAEMON_BASE_URL'] ?? '') !== '') {
+  // The worker's environment and the process's own: agent-device's client can read either.
+  if (envs.some((env) => (env['AGENT_DEVICE_DAEMON_BASE_URL'] ?? '') !== '')) {
     return `device.addMedia runs ${tool} on this machine, and AGENT_DEVICE_DAEMON_BASE_URL points agent-device at a remote daemon, whose devices this machine cannot reach`;
   }
   if (platform === 'ios' && kind === 'device') {
@@ -140,10 +145,17 @@ export async function findAdb(env: Readonly<Record<string, string | undefined>>,
   return 'adb';
 }
 
-/** Translates a host command's failure: an abort is `CANCELLED`, a missing program or any other failure `ENGINE_FAILURE` with what it wrote. */
-export function hostCommandError(error: unknown, command: HostCommand, signal: AbortSignal): EngineError {
+/**
+ * Translates a host command's failure: the step's own abort is `CANCELLED`,
+ * the action timeout `OPERATION_TIMEOUT`, a missing program or any other
+ * failure `ENGINE_FAILURE` with what it wrote.
+ */
+export function hostCommandError(error: unknown, command: HostCommand, stop: { readonly cancelled: boolean; readonly timedOutAfterMs?: number | undefined }): EngineError {
   const shown = `${path.basename(command.file)} ${command.args.slice(0, 3).join(' ')}`;
-  if (signal.aborted) return cancelled(`device.addMedia was cancelled while ${shown} ran`);
+  if (stop.cancelled) return cancelled(`device.addMedia was cancelled while ${shown} ran`);
+  if (stop.timedOutAfterMs !== undefined) {
+    return new EngineError('OPERATION_TIMEOUT', `device.addMedia stopped ${shown} after ${stop.timedOutAfterMs}ms, the action timeout`, { retryable: false, cause: error });
+  }
   const { code, stderr } = (error ?? {}) as { code?: unknown; stderr?: unknown };
   if (code === 'ENOENT') {
     const hint = command.file === 'xcrun' ? 'install Xcode and its command-line tools' : 'install the Android SDK platform-tools, or set ANDROID_HOME';
