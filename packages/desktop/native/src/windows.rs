@@ -45,6 +45,8 @@ pub struct WindowInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     pub is_focused: bool,
+    /// The app's main window (`AXMain`), which an app in the background still names while none has focus.
+    pub is_main: bool,
     pub visible: bool,
     pub accessible: bool,
     pub minimized: bool,
@@ -183,7 +185,7 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
     for (element, id) in &accessible {
         let Some(id) = *id else { continue };
         let entry = server.iter().find(|window| window.id == id);
-        let values = element.attributes(&["AXTitle", "AXMinimized", "AXPosition", "AXSize", "AXSubrole"]).unwrap_or_else(|_| vec![None; 5]);
+        let values = element.attributes(&["AXTitle", "AXMinimized", "AXPosition", "AXSize", "AXSubrole", "AXMain"]).unwrap_or_else(|_| vec![None; 6]);
         let title = values[0].as_ref().and_then(|value| value.text().map(str::to_owned));
         let minimized = values[1].as_ref().and_then(|value| value.boolean()).unwrap_or(false);
         let subrole = values[4].as_ref().and_then(|value| value.text());
@@ -198,6 +200,7 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
             id: id.to_string(),
             title: title.or_else(|| entry.and_then(|window| window.title.clone())),
             is_focused: focused.as_ref().is_some_and(|focused| holds_focus(focused, element)),
+            is_main: values[5].as_ref().and_then(|value| value.boolean()).unwrap_or(false),
             visible: entry.is_some_and(|window| window.onscreen),
             accessible: true,
             minimized,
@@ -219,6 +222,7 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
             id: window.id.to_string(),
             title: window.title.clone(),
             is_focused: false,
+            is_main: false,
             visible: window.onscreen,
             accessible: false,
             minimized: false,
