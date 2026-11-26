@@ -13,8 +13,9 @@ use std::time::Instant;
 /// The most nodes one snapshot reads; a window with more is read in part (`truncated`).
 const MAX_NODES: usize = 8_000;
 
-/// The most children read under one node; the rest are left out, and the node says so.
-const MAX_CHILDREN: usize = 1_000;
+/// The most children read under one node; the rest are left out, and the node says so. As many as a snapshot reads in
+/// all, so a long list costs only what the node budget already bounds, and a window cut short is one too large to read.
+const MAX_CHILDREN: usize = MAX_NODES;
 
 /// The longest value read, in characters.
 const MAX_VALUE_CHARS: usize = 1_000_000;
