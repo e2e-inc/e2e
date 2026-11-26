@@ -37,3 +37,23 @@ document.querySelector('#scroll-under').addEventListener('click', () => {
 document.querySelector('#under-header').addEventListener('click', () => {
   document.querySelector('[data-testid="under-header-status"]').textContent = 'Tapped';
 });
+
+// Typeahead: a key moves the selection to the first option it starts.
+const planets = document.querySelector('#planets');
+planets.addEventListener('keydown', (event) => {
+  const next = [...planets.querySelectorAll('[role="option"]')].find((option) => option.textContent.toLowerCase().startsWith(event.key.toLowerCase()));
+  if (next === undefined) return;
+  for (const option of planets.querySelectorAll('[role="option"]')) option.setAttribute('aria-selected', String(option === next));
+});
+
+document.querySelector('#tip-anchor').addEventListener('mouseenter', () => {
+  document.querySelector('[data-testid="tip"]').textContent = 'Tip shown';
+});
+
+const hold = document.querySelector('#hold');
+hold.addEventListener('pointerdown', () => {
+  document.querySelector('[data-testid="hold-state"]').textContent = 'down';
+});
+hold.addEventListener('pointerup', () => {
+  document.querySelector('[data-testid="hold-state"]').textContent = 'up';
+});

@@ -1,7 +1,7 @@
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { test } from '@e2e-dev/electron';
-import { expect } from 'e2e';
+import { credentials, expect } from 'e2e';
 
 /** What a rejected step threw, for checking its code. */
 function failure(promise: Promise<unknown>): Promise<unknown> {
@@ -83,6 +83,48 @@ test.describe('controls page', () => {
     await screen.getByRole('button', 'Scroll the target under the header').tap();
     await screen.getByRole('button', 'Behind the header').tap({ timeout: 5000 });
     await expect(screen.getByTestId('under-header-status')).toHaveText('Tapped');
+  });
+
+  test('reads ARIA values, read-only states, and levels as written, as web() does', async ({ screen }) => {
+    await expect(screen.getByRole('slider', 'Volume')).toHaveValue('Low');
+    await expect(screen.getByRole('slider', 'Volume')).not.toBeEditable();
+    await expect(screen.getByRole('progressbar', 'Upload')).toHaveValue('40');
+    await expect(screen.getByRole('treeitem', { name: 'src', level: 1 })).toHaveCount(1);
+  });
+
+  test('types into a focused listbox as typeahead, refuses to check a toggle button, and hovers a focusable span', async ({ screen }) => {
+    await screen.getByRole('listbox', 'Planet').pressSequentially('v');
+    await expect(screen.getByRole('option', 'Venus')).toBeSelected();
+    expect(await failure(screen.getByRole('button', 'Italic').check({ timeout: 1000 }))).toMatchObject({ code: 'ACTION_FAILED' });
+    await screen.getByText('Hover for tip').hover();
+    await expect(screen.getByTestId('tip')).toHaveText('Tip shown');
+  });
+
+  test('saves a download in the attempt\'s own directory, never the user\'s', async ({ screen, electron }) => {
+    const downloads = await electron.evaluate(({ app: main }) => main.getPath('downloads'));
+    const userData = await electron.evaluate(({ app: main }) => main.getPath('userData'));
+    expect(realpathSync(path.dirname(downloads))).toBe(realpathSync(userData));
+    await screen.getByRole('link', 'Download note').tap();
+    await expect.poll(() => existsSync(path.join(downloads, 'note.txt'))).toBe(true);
+  });
+
+  test('releases a long press its timeout cuts short before the step fails', async ({ screen }) => {
+    const cut = await failure(screen.getByRole('button', 'Hold').longPress({ duration: 3000, timeout: 1000 }));
+    expect(cut).toBeDefined();
+    await expect(screen.getByTestId('hold-state')).toHaveText('up', { timeout: 100 });
+  });
+
+  test('refuses a secret as electron.evaluate\'s argument', async ({ electron }) => {
+    const refused = await failure(electron.evaluate((_main, arg: unknown) => JSON.stringify(arg), { password: credentials.user('ada').password }));
+    expect(refused).toMatchObject({ code: 'POLICY_DENIED' });
+  });
+
+  test('says a window\'s renderer crashed, and reads it again once the app reloads it', async ({ screen, electron }) => {
+    await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer());
+    const crashed = await failure(screen.getByRole('heading', 'Controls').waitFor({ timeout: 1000 }));
+    expect(crashed).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('renderer crashed') });
+    await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.reload());
+    await expect(screen.getByRole('heading', 'Controls')).toBeVisible({ timeout: 5000 });
   });
 
   test('restarts promptly through a beforeunload guard, and the app runs its quit handlers', async ({ app, screen, electron }) => {
