@@ -64,9 +64,8 @@ on the CI simulator only, and strict mode waits on them.
 - Login Form (CI only): the CI simulator reads the screen's route as its
   title, `Login Form`, where a Mac reads the back button's `Benchmark
   Examples`, so the recorded start route does not match.
-- Photo Picker (CI only): the recorded tap names the photo by the time it
-  was seeded, `Photo, October 03, 22:50`, which is another time on another
-  simulator.
+- Photo Picker (CI only, until a CI run shows otherwise): the recorded tap
+  names the photo by its capture time, `Photo, October 15, 10:27 AM`.
 - Permission Prompt (CI only): every recorded action replays, but the
   recorded end state, `Microphone enabled`, does not show.
 Each job posts its first pass to the pull request as one comment (`e2e ios:
@@ -111,6 +110,12 @@ node node_modules/e2e/dist/cli/bin.js run tests/login-form.e2e.ts --target ios-s
 
 Android note: the Android Gradle Plugin's prefab step fails on very new JDKs
 (observed on JDK 26). Build with JDK 17 through 21.
+
+The lock test in `tests/device.e2e.ts` needs the Android screen lock set to
+Swipe: `device.lock()` fails on None, and `device.unlock()` refuses a PIN,
+pattern, or password. A new emulator's lock is None; switch it to Swipe in
+Settings > Security > Screen lock, or with
+`adb shell locksettings set-disabled false`, as the CI job does.
 
 ## Scenario contract
 

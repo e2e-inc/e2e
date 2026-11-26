@@ -60,6 +60,13 @@ export interface GuestSeat<Opened, Taken> {
    * the seat up meanwhile, and what was opened is the caller's to close.
    */
   take(opened: Opened): Taken | undefined;
+  /**
+   * Gives the seat back after the opening failed and its rejection reached
+   * the caller: nothing was opened, so nothing of it is left running in the
+   * test. Optional, since the attempt offering the seat may come from
+   * another installed copy of the package.
+   */
+  release?(): void;
 }
 
 /** What an attempt offers the hosts and sessions a test opens beside its own with `launch()`. */
@@ -95,7 +102,7 @@ export interface AttemptGuests {
  * - `dropped`: counts in the session's own step indexes or artifact ids.
  */
 const FIELDS = {
-  id: 'own', index: 'own', actor: 'own', startedAt: 'own', phase: 'own',
+  id: 'own', index: 'own', actor: 'own', parent: 'own', startedAt: 'own', phase: 'own',
   kind: 'start', api: 'start', label: 'start', source: 'start',
   events: 'told',
   status: 'taken', durationMs: 'taken', observationRevision: 'taken', observationTruncated: 'taken', explanation: 'taken',

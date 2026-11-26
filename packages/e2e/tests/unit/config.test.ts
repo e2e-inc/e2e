@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { discoverConfig } from '../../src/config/load.ts';
+import { engineAppInfo } from '@e2e-dev/core/lib/config/app';
 import { isCiMode, type CliOverrides } from '@e2e-dev/core/lib/config/resolve';
 import { resolveConfig } from '../../src/config/resolve-run.ts';
 import { ConfigurationError, defineEngine } from '@e2e-dev/core/lib/engine/index';
@@ -75,6 +76,27 @@ describe('resolveConfig', () => {
     expect(resolve({ failOnSkippedFailure: true }).configDigest).toBe(resolve({}).configDigest);
     for (const value of ['true', 1, null, {}]) {
       expect(() => resolve(invalid({ failOnSkippedFailure: value }))).toThrow(/failOnSkippedFailure must be a boolean/);
+    }
+  });
+
+  it('resolves fullyParallel for each target, the flag over the target over the config, without invalidating recordings', () => {
+    const targets: Target[] = [
+      { name: 'plain', platform: 'web' },
+      { name: 'on', platform: 'web', fullyParallel: true },
+      { name: 'off', platform: 'web', fullyParallel: false },
+    ];
+    const resolved = (config: Partial<E2EConfig>, cli: CliOverrides = {}): boolean[] =>
+      resolveConfig({ targets, ...config }, { projectRoot: ROOT, env: BASE_ENV, cli }).targets.map((target) => target.fullyParallel);
+    expect(resolved({})).toEqual([false, true, false]);
+    expect(resolved({ fullyParallel: true })).toEqual([true, true, false]);
+    expect(resolved({}, { fullyParallel: true })).toEqual([true, true, true]);
+    const plain: Target[] = ['plain', 'on', 'off'].map((name) => ({ name, platform: 'web' }));
+    expect(resolve({ targets, fullyParallel: true }).configDigest).toBe(resolve({ targets: plain }).configDigest);
+    for (const value of ['true', 1, null]) {
+      expect(() => resolve(invalid({ fullyParallel: value }))).toThrow(/^fullyParallel must be a boolean/);
+      expect(() =>
+        resolveConfig(invalid({ targets: [{ ...WEB, fullyParallel: value }] }), { projectRoot: ROOT, env: BASE_ENV, cli: { fullyParallel: true } }),
+      ).toThrow('target "web" fullyParallel must be a boolean');
     }
   });
 
@@ -324,7 +346,7 @@ describe('resolveConfig', () => {
       PORT: '3000',
     });
     expect(() => resolveApp({ url, command: { executable: 'node', env: ['PORT=3000'] } } as never)).toThrow(
-      'target "web" app.command.env must be an object of variable name to string',
+      'target "web" app.command.env must be an object of variable names to strings, like { PORT: \'3000\' }, or a function that returns one',
     );
     expect(() => resolveApp({ url, command: { executable: 'node', env: { PORT: 3000 } } } as never)).toThrow(
       expect.objectContaining({ code: 'INVALID_CONFIG', message: 'target "web" app.command.env.PORT must be a string, got 3000' }),
@@ -558,6 +580,9 @@ describe('resolveConfig', () => {
     expect(() => resolveApp({ permissions: { camera: 'allow' } } as never)).toThrow(
       'app.permissions.camera must be grant, deny, or reset, got "allow"',
     );
+    expect(() => resolveApp({ permissions: 'every' } as never)).toThrow(
+      "app.permissions must be 'all' or an object of permission name to grant, deny, or reset",
+    );
     expect(() => resolve({ targets: [{ ...WEB, app: 'https://app.test' }] } as never)).toThrow('target "web" app must be an object');
     expect(() => resolve({ targets: [{ ...WEB, app: { url: 'https://app.test' } }] })).toThrow(
       'target "web" declares app without an engine',
@@ -569,6 +594,33 @@ describe('resolveConfig', () => {
       launchArguments: ['-e2e'],
       permissions: { camera: 'grant' },
     });
+  });
+
+  it("takes 'all' only on an engine that declares grantsAllPermissions, which receives it as allPermissions", () => {
+    // An engine that predates 'all' would read the string as a map of names.
+    expect(() => resolveApp({ bundleId: 'dev.shop.app', permissions: 'all' })).toThrow(
+      new ConfigurationError(
+        'INVALID_CONFIG',
+        `target "web" app.permissions is 'all', which engine "fake" does not take (it declares no grantsAllPermissions)`,
+      ),
+    );
+    const seen: unknown[] = [];
+    const granting = defineEngine({
+      name: 'granting',
+      version: '1.0.0',
+      spiVersion: 1,
+      grantsAllPermissions: true,
+      validateApp(app) {
+        seen.push(app);
+      },
+    });
+    const [target] = resolve({ targets: [{ ...WEB, engine: granting, app: { bundleId: 'dev.shop.app', permissions: 'all' } }] }).targets;
+    expect(target!.app.permissions).toBe('all');
+    expect(seen).toEqual([{ bundleId: 'dev.shop.app', allPermissions: true }]);
+    expect(engineAppInfo(target!.app)).toEqual({ bundleId: 'dev.shop.app', allPermissions: true });
+    expect(() => defineEngine({ name: 'bad', version: '1.0.0', spiVersion: 1, grantsAllPermissions: invalid<boolean>('yes') })).toThrow(
+      /grantsAllPermissions must be a boolean/,
+    );
   });
 
   it('takes launch arguments as an object of name to string, number, boolean, or list of strings, and leaves out an undefined value', () => {
@@ -1489,5 +1541,63 @@ describe('discoverConfig', () => {
         expect.objectContaining({ code: 'CONFIG_NOT_FOUND', message: `config file not found: ${path.join(root, 'missing.config.ts')}` }),
       );
     });
+  });
+});
+
+describe('services', () => {
+  it.each([
+    { services: [], message: 'services must be a plain object keyed by name, like services: { email: defineService({ ... }) }' },
+    { services: 'email', message: 'services must be a plain object keyed by name, like services: { email: defineService({ ... }) }' },
+    { services: { email: {} }, message: 'services.email must be a service from defineService({ async *start() { ... } })' },
+    { services: { email: { start: 'http://email.test' } }, message: 'services.email must be a service from defineService({ async *start() { ... } })' },
+    { services: { email: null }, message: 'services.email must be a service from defineService({ async *start() { ... } })' },
+    {
+      services: {
+        email: {
+          async *start() {
+            yield {};
+          },
+          stop: () => undefined,
+        },
+      },
+      message: 'services.email has unknown key "stop"',
+    },
+    {
+      services: {
+        email: {
+          startupTimeout: '2m',
+          async *start() {
+            yield {};
+          },
+        },
+      },
+      message: 'services.email.startupTimeout must be a positive safe integer of milliseconds, got "2m"',
+    },
+    {
+      services: {
+        email: {
+          shutdownTimeout: 0,
+          async *start() {
+            yield {};
+          },
+        },
+      },
+      message: 'services.email.shutdownTimeout must be a positive safe integer of milliseconds, got 0',
+    },
+  ])('refuses $message', ({ services, message }) => {
+    expect(() => resolve(invalid({ services }))).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG', message: expect.stringContaining(message) }));
+  });
+
+  it('keeps the services in key order', () => {
+    const service = {
+      async *start() {
+        yield {};
+      },
+    };
+
+    expect(resolve({ services: { beta: service, alpha: service } }).services).toEqual([
+      ['beta', service],
+      ['alpha', service],
+    ]);
   });
 });

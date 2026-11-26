@@ -34,7 +34,7 @@ import { DebugTrace } from '@e2e-dev/core/lib/internal/debug';
 import { printableUrl } from '@e2e-dev/core/lib/internal/urls';
 import { resultId, timestamp, uuidv7 } from '@e2e-dev/core/lib/internal/ids';
 import type { ExploreProgress } from '../explore/progress.ts';
-import { buildReport, projectSource, type Report1Document, type ReportChanges, type ReportExplore, type ReportFilter } from '../report/build.ts';
+import { statusOf, buildReport, projectSource, type Report1Document, type ReportChanges, type ReportExplore, type ReportFilter } from '../report/build.ts';
 import type { TargetProvenance } from '@e2e-dev/core/lib/run/provision';
 import { agentStepTable } from '../report/debug-steps.ts';
 import { writeTracePages, type TracePages } from '../report/traces.ts';
@@ -50,7 +50,7 @@ import { cleanupErrorsOf, someSkippedAfterFailure, tracedResultIds, type ResultR
 import { runUnits, type TargetFailure } from './scheduler.ts';
 import { pauseEvents, type BeforeStep } from './step-hold.ts';
 import { hostReporters } from './reporter-host.ts';
-import { buildWorkPlans, nonRunResult, orderWorkPlans, plannedSlots, type TargetWorkPlan, type TimeLimit } from './units.ts';
+import { buildWorkPlans, nonRunResult, orderWorkPlans, plannedSlots, withWorkerCap, type TargetWorkPlan, type TimeLimit, type WorkOrder } from './units.ts';
 import { SessionStore } from '@e2e-dev/core/lib/run/sessions';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
 import type { RunnerOutput } from './process-output.ts';
@@ -61,6 +61,7 @@ import { nextRerunDir, pruneArtifacts } from '@e2e-dev/core/lib/run/artifacts';
 import { carryForward, fileDurationKey, lastFailedIds, readLastRun, readWithReruns, reportArtifactPaths, retainCollectedHistory, type RerunCollection } from './last-run.ts';
 import { loadTimings, writeTimings } from './timings.ts';
 import { childProcessSpawner } from './worker/handle.ts';
+import { copyServiceValues, NO_SERVICES, startServices, type RunServices } from './services.ts';
 import { setSecretRegistry } from '@e2e-dev/core/lib/secrets';
 import type { RecordingMode } from '@e2e-dev/core/lib/types';
 import type { BuiltinReporter, E2EConfig, Reporter } from '../run-types.ts';
@@ -151,6 +152,8 @@ export interface RunOptions {
   device?: string | undefined;
   retries?: number | undefined;
   workers?: number | undefined;
+  /** Runs the tests of one file in parallel on every target (`--fully-parallel`), over the config's `fullyParallel`. */
+  fullyParallel?: boolean | undefined;
   /**
    * The budget of every engine operation (`--action-timeout`), over the
    * config's `actionTimeout`; a call's own `timeout` still wins.
@@ -492,8 +495,10 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
   const results: ResultRecord[] = [];
   const serialGroups: SerialGroupRecord[] = [];
   const targetProvenance = new Map<string, TargetProvenance>();
-  /** The services and app commands the targets' engines declared, once started. */
+  /** The app commands the targets declare, once started. */
   let processes: AppProcesses | undefined;
+  /** The config's services, once started. */
+  let services: RunServices = NO_SERVICES;
   let sessionStore: SessionStore | undefined;
   /** The engines' prepare/finish pairing: every prepared target is finished at teardown. */
   const engines = new PreparedEngines();
@@ -504,6 +509,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
   const cli: RunCliOverrides = {};
   if (options.retries !== undefined) cli.retries = options.retries;
   if (options.workers !== undefined) cli.workers = options.workers;
+  if (options.fullyParallel !== undefined) cli.fullyParallel = options.fullyParallel;
   if (options.actionTimeout !== undefined) cli.actionTimeout = options.actionTimeout;
   if (options.assertionTimeout !== undefined) cli.assertionTimeout = options.assertionTimeout;
   if (options.reporters !== undefined) cli.reporters = options.reporters;
@@ -1040,13 +1046,6 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     for (const message of options.tests?.notices ?? []) notice('run', message);
     for (const message of recordingNotices(selection.perTarget, grades, { explore: options.tests?.explore !== undefined })) notice('run', message);
 
-    // The work units, built once: the same plans tell each engine's `prepare`
-    // how many worker slots to provision and the scheduler what to dispatch.
-    let plans = buildWorkPlans(selection, collection, config.projectRoot);
-    // A run with nothing to run (the filters left nothing, or
-    // --pass-with-no-tests on an empty selection) still reports, but
-    // prepares no engine and starts no app.
-    const hasWork = plans.some((plan) => plan.setupUnits.length + plan.fileUnits.length > 0);
     // Workers re-load the config module themselves, so a file-backed config
     // runs across processes. A supplied `rawConfig` cannot cross a process
     // boundary (it may hold live engine handles), and neither can the bodies
@@ -1056,12 +1055,20 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     const workerConfigPath = options.tests === undefined ? config.configPath : undefined;
     const inProcess = workerConfigPath === undefined;
     const runWorkers = inProcess ? 1 : config.workers;
+    // The work units, built once: the same plans tell each engine's `prepare`
+    // how many worker slots to provision and the scheduler what to dispatch.
+    let plans = buildWorkPlans(selection, collection, config.projectRoot, runWorkers, options.tests?.file);
+    // A run with nothing to run (the filters left nothing, or
+    // --pass-with-no-tests on an empty selection) still reports, but
+    // prepares no engine and starts no app.
+    const hasWork = plans.some((plan) => plan.setupUnits.length + plan.fileUnits.length > 0);
     // Starting long files early only pays when other workers take the rest, so only such a run reads the timings history.
     const previous = runWorkers > 1 ? await loadTimings(timingsPath(config), outputLayout(config.output).report) : undefined;
-    plans = orderWorkPlans(plans, {
+    const order: WorkOrder = {
       relevanceOf: (testId) => relevance.get(testId) ?? 0,
       durationOf: (targetName, file) => previous?.get(fileDurationKey(targetName, file)),
-    });
+    };
+    plans = orderWorkPlans(plans, order);
     const timeLimit: TimeLimit | undefined =
       options.maxDuration !== undefined
         ? { ms: options.maxDuration, source: '--max-duration' }
@@ -1086,6 +1093,8 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
             emit,
           ),
         );
+        // A target `prepare` gave fewer workers had its files cut again; the order is theirs to take anew.
+        plans = orderWorkPlans(plans, order);
       } catch (cause) {
         if (!interrupted.aborted) recordFailure(cause, 'launch');
         return;
@@ -1135,7 +1144,34 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
           ...(reused ? { outcome: 'reused' as const } : {}),
         }),
     };
-    processes = hasWork ? await startDeclaredProcesses(targets, config.projectRoot, processHooks, interrupted, debug) : undefined;
+
+    // Start configured services before app commands, each as a setup step,
+    // because a command's `env` function can read their values.
+    const serviceStep = (name: string) => ({ kind: 'service' as const, label: `service "${name}"` });
+
+    if (hasWork) {
+      services = await debug.time('services.start', () =>
+        startServices(
+          config.services,
+          interrupted,
+          forceController.signal,
+          {
+            starting: (name) => emit({ type: 'setup', step: serviceStep(name), state: 'started' }),
+            ready: (name, durationMs) => emit({ type: 'setup', step: serviceStep(name), state: 'finished', durationMs }),
+            stopFailed: (cause) => recordFailure(cause, 'cleanup'),
+          },
+        ),
+      );
+    }
+
+    if (interrupted.aborted) {
+      return;
+    }
+
+    processes = hasWork
+      ? await startDeclaredProcesses(targets, config.projectRoot, processHooks, interrupted, debug, { services: copyServiceValues(services.wire, services.call) })
+      : undefined;
+
     // A run cancelled while the app was starting runs no test: the interrupt
     // alone decides the outcome.
     if (interrupted.aborted) return;
@@ -1195,6 +1231,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
             headed: options.headed ?? false,
             debug,
             holdSteps,
+            services,
             envFor: workerEnvFor(plans, env),
           })
         : childProcessSpawner({
@@ -1212,6 +1249,8 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
             debug: debug.enabled,
             aiTrace: aiTrace !== undefined,
             holdSteps,
+            services: services.wire,
+            callService: services.call,
             envFor: workerEnvFor(plans, env),
           });
 
@@ -1300,12 +1339,13 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     // Engines finish first: every worker is gone, and what `prepare` leased
     // (a cloud device billed by the minute) should not wait on the app's
     // shutdown. Services go down after the apps that depended on them; a
-    // failing service teardown command is a cleanup error of the run, not a
+    // service that fails to stop is a cleanup error of the run, not a
     // crash.
     for (const teardown of [
       () => engines.finish({ runId, env, timeoutMs: config.cleanupTimeout, notice, onFailure: (cause) => recordFailure(cause, 'cleanup') }),
       () => sessionStore?.cleanup(),
       () => processes?.stop((cause) => recordFailure(cause, 'cleanup')),
+      () => services.stop((cause) => recordFailure(cause, 'cleanup')),
     ]) {
       try {
         await teardown();
@@ -1372,8 +1412,8 @@ function withPreparedWorkers(
     );
   }
   return {
-    ...plan,
-    ...(workers === undefined ? {} : { workers }),
+    // Fewer workers than the files were cut for: cut them again, so no test pays for parallelism the target lacks.
+    ...(workers === undefined ? plan : workers < slots ? withWorkerCap(plan, workers) : { ...plan, workers }),
     ...(result?.env === undefined ? {} : { env: result.env }),
   };
 }
@@ -1596,11 +1636,6 @@ function plannedFiles(selection: Selection): { file: string; target: string; tes
     }
   }
   return [...files.values()];
-}
-
-/** The exit-code status the report builder starts from; `blocked` is derived from the results there. */
-function statusOf(exitCode: RunExitCode): Exclude<RunStatus, 'blocked'> {
-  return exitCode === 0 ? 'passed' : exitCode === 1 ? 'failed' : exitCode === 130 ? 'interrupted' : 'error';
 }
 
 /**

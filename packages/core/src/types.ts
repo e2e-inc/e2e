@@ -13,7 +13,7 @@ import type { StepCacheInfo } from './run/steps.ts';
 import type { EngineHandle } from './engine/index.ts';
 import type { KeyModifier, Momentum, ScrollDirection, SelectOption, ViewportPoint } from './engine/contract.ts';
 import type { CacheStore } from './cache/store.ts';
-import type { FixtureDefinitions, FixtureOverrides, WorkerFixtures } from './types/fixtures.ts';
+import type { ConfigBase, ConfigFixtures, FixtureDefinitions, FixtureOverrides, InferredConfig, OmitEach, PickEach, SelectedFixtures, TestOverrides, WorkerFixtures } from './types/fixtures.ts';
 
 export type { KeyModifier, Momentum, ScrollDirection, SelectOption } from './engine/contract.ts';
 export type { CacheReadResult, CacheStore } from './cache/store.ts';
@@ -30,6 +30,7 @@ export type {
   WorkerFixtureDefinition,
   WorkerFixtures,
 } from './types/fixtures.ts';
+export type { CopyableServiceValue, Service, ServiceMap, ServiceStartContext, ServiceValue, ServiceValues } from './types/services.ts';
 export type {
   Credential,
   CredentialConfig,
@@ -719,7 +720,7 @@ export interface App {
   startRecording(options?: RecordingOptions): Promise<void>;
   /**
    * Stops the recording and returns its videos in play order: one, or on the
-   * web one per page when the page was replaced while it recorded.
+   * web one per page it showed: a tab switch or a replaced page starts another.
    */
   stopRecording(): Promise<readonly [RecordedVideo, ...RecordedVideo[]]>;
 }
@@ -830,6 +831,13 @@ export interface TestFixtures {
   readonly platform: string;
   /** HTTP calls, each one a step; a path resolves against the app URL. */
   readonly request: APIRequest;
+  /**
+   * Values yielded by the config's `services`, keyed by name. Each worker, each
+   * `e2e mcp` session, and each `openHost` host receives a copy of the data
+   * (sessions on one host share the same copy). Each function becomes an async
+   * function called in the process that started the services.
+   */
+  readonly services: Readonly<Record<string, unknown>>;
 }
 
 export interface SetupFixtures extends TestFixtures {
@@ -853,7 +861,12 @@ export interface TestOptions {
    * around a serial group.
    */
   fail?: boolean | string;
-  /** Focuses the test locally. CI rejects it with `ONLY_IN_CI`. */
+  /**
+   * Focuses the test locally; on a group, focuses every test in it, skipped
+   * ones included, unless a test or group inside it is focused too, which
+   * narrows the focus to that one. CI rejects it with `ONLY_IN_CI`. Not
+   * allowed inside a serial group; a serial group itself can be focused.
+   */
   only?: boolean;
   /** Platforms the test runs on; other targets skip it. Innermost wins. */
   platforms?: readonly string[];
@@ -885,9 +898,23 @@ export interface TestOptions {
   video?: RecordingMode;
 }
 
-export interface DescribeOptions extends Omit<TestOptions, 'only'> {
+export interface DescribeOptions extends TestOptions {
   /** Runs the group as one ordered retry unit with shared app state. Nesting one serial group in another is a `COLLECTION_ERROR`. */
   serial?: boolean;
+  /**
+   * `true` lets the group's tests run at the same time on separate workers
+   * instead of in order on one. `false` keeps a group inside a parallel
+   * scope in order on one worker. Unset, the group runs as the scope around
+   * it does. A `COLLECTION_ERROR` on a serial group, and for `true` inside
+   * a serial group or inside a group or file with `parallel: false`.
+   */
+  parallel?: boolean;
+}
+
+/** What `test.describe.configure()` sets on the scope it is called in. */
+export interface DescribeConfigureOptions {
+  /** The scope's `parallel`, as the `describe` option of that name; at the top of a file it applies to the whole file. */
+  parallel?: boolean;
 }
 
 export interface SetupOptions extends Omit<TestOptions, 'session' | 'only' | 'skip' | 'fail' | 'agent'> {
@@ -939,14 +966,29 @@ export interface DescribeRegistrar<Options = DescribeOptions> {
 export interface DescribeAPI extends DescribeRegistrar {
   /** Declares a group whose tests are expected to fail, as if it had `fail: true`; a reason goes in the `fail` option of `describe`. */
   fail: DescribeRegistrar<Omit<DescribeOptions, 'fail'>>;
+  /**
+   * Configures the scope it is called in: the enclosing `describe`, or the
+   * whole file at the top level. `{ parallel: true }` lets the scope's tests
+   * run at the same time on separate workers.
+   */
+  configure(options: DescribeConfigureOptions): void;
+  /** Declares a focused group, as if it had `only: true`: its tests are focused the way `test.only` focuses one. CI rejects it with `ONLY_IN_CI`. */
+  only: DescribeRegistrar<Omit<DescribeOptions, 'only'>>;
 }
 
 /** The two call forms of `test`, shared with what `test.skipIf` and `test.runIf` return. */
 export interface TestRegistrar<Fixtures = TestFixtures & WorkerFixtures> {
   /** Registers one test synchronously during module evaluation. */
   (title: string, fn: TestFn<Fixtures>): TestCase;
-  /** Registers one configured test synchronously during module evaluation. */
-  (title: string, options: TestOptions, fn: TestFn<Fixtures>): TestCase;
+  /**
+   * Registers one configured test synchronously during module evaluation.
+   * Its fixtures are typed for the targets its `platforms` option keeps.
+   */
+  <const Platform extends string = string>(
+    title: string,
+    options: TestOptions & { readonly platforms?: readonly Platform[] },
+    fn: TestFn<SelectedFixtures<Fixtures, Platform>>,
+  ): TestCase;
 }
 
 /**
@@ -994,6 +1036,8 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
+  /** Registers an unfinished test, reported as skipped with cause and reason `todo`. */
+  todo(title: string): TestCase;
   /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
   fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
@@ -1082,6 +1126,19 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    * `COLLECTION_ERROR`, so use the `timeout` option there.
    */
   setTimeout(timeout: number): void;
+  /**
+   * Inside a running test, hook, or fixture: runs `body` as one step named
+   * `title` and returns what it returns. Reports show the title, with the
+   * calls `body` makes nested under it; steps nest. The step fails when
+   * `body` throws, and the error goes on to the test:
+   *
+   *   await test.step('Log in as test user', async () => {
+   *     await screen.getByTestId('login_button').tap();
+   *   });
+   *
+   * Outside a test the call is `COLLECTION_ERROR`.
+   */
+  step<T>(title: string, body: () => T | Promise<T>): Promise<T>;
   /** Registers one focused local test. CI rejects focused tests. */
   only(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /** Registers one setup test with statically declared session outputs. */
@@ -1094,13 +1151,16 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    *
    *   export const test = base.extend<{ device: Device }>();
    */
-  extend<Extra = {}, ExtraWorker = {}>(): TestAPI<Fixtures & Extra, Worker & ExtraWorker>;
+  extend<Extra = {}, ExtraWorker = {}, Config extends InferredConfig<Config> = {}>(): TestAPI<
+    ConfigBase<Fixtures, Config> & Extra & ConfigFixtures<Config, 'test'>,
+    ConfigBase<Worker, Config> & ExtraWorker & ConfigFixtures<Config, 'worker'>
+  >;
   /**
    * Returns a new `test` whose registrations extend fixtures it already
    * has, built-in ones included. Inside the function the fixture's own name
    * is the fixture it extends; the value it hands to `use` is what tests,
-   * hooks, and other fixtures receive under that name. It keeps the type and
-   * the scope of the fixture it extends:
+   * hooks, and other fixtures receive under that name. It keeps the type of
+   * the fixture it extends. Its scope is the one it declares, else `test`:
    *
    *   export const test = base.extend({
    *     app: async ({ app }, use) => {
@@ -1109,7 +1169,9 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    *     },
    *   });
    */
-  extend(overrides: FixtureOverrides<Fixtures & Worker, Worker>): TestAPI<Fixtures, Worker>;
+  extend<const Overrides extends FixtureOverrides<Fixtures & Worker, Worker>>(
+    overrides: Overrides,
+  ): TestAPI<Fixtures & PickEach<Worker, TestOverrides<Overrides>>, OmitEach<Worker, TestOverrides<Overrides>>>;
   /**
    * Returns a new `test` whose registrations carry these fixture
    * definitions on top of the ones it already had. Each attempt sets up the
@@ -1144,10 +1206,18 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    * (`[fn, { scope: 'worker', auto: true }]`). A suite hook sets up the auto
    * worker fixtures of its chain, never a test fixture.
    */
-  extend<Extra = {}, ExtraWorker = {}>(
-    fixtures: FixtureDefinitions<Fixtures & Worker, Extra, Worker, ExtraWorker>,
-  ): TestAPI<Fixtures & Extra, Worker & ExtraWorker>;
-  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail. */
+  extend<Extra = {}, ExtraWorker = {}, Config extends InferredConfig<Config> = {}>(
+    fixtures: FixtureDefinitions<
+      ConfigBase<Fixtures, Config> & ConfigBase<Worker, Config> & ConfigFixtures<Config, 'test'> & ConfigFixtures<Config, 'worker'>,
+      Extra,
+      ConfigBase<Worker, Config> & ConfigFixtures<Config, 'worker'>,
+      ExtraWorker
+    >,
+  ): TestAPI<
+    ConfigBase<Fixtures, Config> & Extra & ConfigFixtures<Config, 'test'>,
+    ConfigBase<Worker, Config> & ExtraWorker & ConfigFixtures<Config, 'worker'>
+  >;
+  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail, `describe.only` a focused one. */
   describe: DescribeAPI;
   /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
   beforeEach(fn: TestHookFn<Fixtures & Worker>): void;
@@ -1211,7 +1281,7 @@ export interface AsyncExpectation {
   /** Waits for contained normalized text; a list waits for each entry to be contained by a distinct match, in order, extra matches allowed. */
   toContainText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
   toContainText(expected: readonly TextMatch[], options?: TextMatcherOptions): Promise<void>;
-  /** Waits for a form control's value, compared as it is. */
+  /** Waits for a control's value, compared as it is. */
   toHaveValue(expected: TextMatch, options?: { timeout?: number }): Promise<void>;
   /** Waits for the attribute to be present; with `value`, for it to match. */
   toHaveAttribute(name: string, options?: { timeout?: number }): Promise<void>;
@@ -1341,6 +1411,12 @@ export interface ValueExpectation<T> {
    * A schema that validates asynchronously is `INVALID_ARGUMENT`.
    */
   toMatchSchema<Schema extends StandardSchemaV1>(schema: Schema): StandardSchemaV1.InferOutput<Schema>;
+  /**
+   * Requires a `WebResponse` whose status is 2xx (200 to 299), as `request`,
+   * `waitForResponse`, and `route.fetch()` return it. The failure names the
+   * status and the URL's origin and path; the body is never read.
+   */
+  toBeOK(...valueIsNotAResponse: [T] extends [WebResponse] ? [] : [never]): void;
 }
 
 /** The names of the value matchers, every key of `ValueExpectation` but `not`. */
@@ -1481,22 +1557,48 @@ export interface Expect extends ExpectCall {
   stringMatching(sample: string | RegExp): AsymmetricMatcher;
 }
 
-export interface CommandConfig {
+/**
+ * The function form of `CommandConfig.env`.
+ *
+ * TypeScript compares the parameters of a function type one way, so a
+ * config from `defineConfig`, whose `env` reads its own services, wouldn't be
+ * an `E2EConfig`. It compares a method's parameters both ways, so the
+ * function is declared as a method and read back by name.
+ */
+type CommandEnvFunction<Services> = {
+  env(context: { readonly services: Services }): Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>;
+}['env'];
+
+/**
+ * Configuration for an app command. `Services` is the type of `services`
+ * passed to an `env` function.
+ */
+export interface CommandConfig<Services = Readonly<Record<string, unknown>>> {
   /** Resolved with `PATH`; never shell-interpreted. */
   executable: string;
   /** Passed verbatim; `{port}` expands to the app's port. */
   args?: readonly string[];
   /** Working directory, resolved from the project root. */
   cwd?: string;
-  /** Added to the inherited set; `{port}` expands in values. */
-  env?: Readonly<Record<string, string>>;
+  /**
+   * Added to the inherited set, with `{port}` expanded in values. An `env`
+   * function is called after services start and before any app commands start.
+   * The call happens one time per run in `e2e run` and `e2e explore`, one time
+   * per session in `e2e mcp`, and one time per host in `openHost`. The function
+   * still runs when `reuseExisting` is set and a process is already running.
+   * The running process doesn't get the returned variables, and a notice is
+   * printed. The function receives the same `services` object tests get. The
+   * returned variables are validated the same way as an `env` object. Targets
+   * with the same command and the same variables share one process.
+   */
+  env?: Readonly<Record<string, string>> | CommandEnvFunction<Services>;
   /**
    * Variables copied from the runner's environment when set: exact names, or
    * prefixes ending in `*` (`'STRIPE_*'`). `env` wins over an inherited value.
    * A bare `'*'` is `INVALID_CONFIG`.
    */
   inheritEnv?: readonly string[];
-  /** Ready-probe budget in milliseconds; default 60000. Expiry is `APP_UNREACHABLE`. */
+  /** Milliseconds the `env` function gets to return, and then the ready probe gets; default 60000 each. Expiry is `APP_UNREACHABLE`. */
   startupTimeout?: number;
   /** Grace period before force-kill in milliseconds; default 10000. */
   shutdownTimeout?: number;
@@ -1547,9 +1649,10 @@ export type ResolvedLaunchArguments = readonly string[] | LaunchArgumentValues;
  * `url` it opens; a device target names the installed app (`bundleId`) or
  * the build (`appPath`) it launches. Each engine checks the fields its
  * platform needs at config load. `command` and `readyUrl` start the app for
- * this target alone.
+ * this target alone. `Services` is the type of `services` passed to a
+ * `command.env` function.
  */
-export interface TargetApp {
+export interface TargetApp<Services = Readonly<Record<string, unknown>>> {
   /**
    * Base URL of an addressable app: `app.open()` opens it and relative
    * navigation resolves against it. WHATWG-normalized; no userinfo, query, or
@@ -1610,9 +1713,10 @@ export interface TargetApp {
    * denied, or reset before every fresh launch. A browser target takes
    * `grant` only and holds it on every page of the attempt; what it leaves
    * out is the browser's default, which headless Chromium refuses. The
-   * engine checks the names its platform knows.
+   * engine checks the names its platform knows. `'all'` grants every
+   * permission the engine can grant on its platform.
    */
-  permissions?: Readonly<Record<string, AppPermissionState>> | undefined;
+  permissions?: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
   /**
    * Process the runner starts before the first test and stops at the end of
    * the run (a dev server, Metro for a debug build). Structured, never
@@ -1622,7 +1726,7 @@ export interface TargetApp {
    * same command share one process, probed at the first declaring target's
    * `readyUrl`. A release build has no command.
    */
-  command?: CommandConfig | undefined;
+  command?: CommandConfig<Services> | undefined;
   /**
    * URL polled until `command` is ready (a 200-499 status); defaults to
    * `url`, and is required without one. `{port}` in it is the port of `url`.
@@ -1636,8 +1740,10 @@ export interface TargetApp {
  * with no `engine` the target runs agent tools and `request` calls to
  * absolute URLs, and everything runs opaque.
  * The app under test is the target's `app`; the engine only drives it.
+ * `Services` is the type of `services` passed to an `app.command.env`
+ * function.
  */
-export interface Target {
+export interface Target<Services = Readonly<Record<string, unknown>>> {
   /** Label in reports and for `--target`; defaults to the platform. */
   name?: string;
   /**
@@ -1648,7 +1754,7 @@ export interface Target {
   /** The engine driving the surface: `web(...)`, `mobile(...)`, or any `defineEngine` handle. */
   engine?: EngineHandle;
   /** The app under test: what it is, where it is served, and the command that starts it. */
-  app?: TargetApp;
+  app?: TargetApp<Services>;
   /**
    * Which attempts on this target keep a trace, in place of the config's
    * `trace`; `--trace` and a test's own `trace` win over it.
@@ -1661,6 +1767,8 @@ export interface Target {
    * `UNSUPPORTED_ARTIFACT`.
    */
   video?: RecordingMode;
+  /** Whether this target runs the tests of one file in parallel, in place of the config's `fullyParallel`; `--fully-parallel` wins over it. */
+  fullyParallel?: boolean;
 }
 
 /**
@@ -1894,13 +2002,15 @@ export type AgentConfig = AgentOptions &
 /**
  * The project half of `E2EConfig`: targets, agents, the replay cache,
  * secrets, budgets, and output. The test runner and `@e2e-dev/core` both resolve
- * it; `E2EConfig` adds the runner's reporters and test filters.
+ * it; `E2EConfig` adds the runner's reporters, test filters, and services.
+ * `Services` is the type of `services` passed to a target's
+ * `app.command.env` function.
  */
-export interface ProjectConfig {
+export interface ProjectConfig<Services = Readonly<Record<string, unknown>>> {
   /** Stable project id, 1 through 256 characters; defaults to the root `package.json` name. */
   projectId?: string;
   /** The surfaces tests run on; required, at least one, each naming its engine. */
-  targets: readonly Target[];
+  targets: readonly Target<Services>[];
   /** Test file globs relative to the project root (`*`, `?`, and a whole `**` segment; a leading `!` excludes); default every `*.e2e.ts` under `tests/`. */
   tests?: string | readonly string[];
   /** Test attempt deadline in milliseconds; default 120000. */
@@ -1928,6 +2038,14 @@ export interface ProjectConfig {
   maxDuration?: number;
   /** Parallel workers, 1 through 1024; default 1 in CI, else half the cores. An engine may cap it lower. */
   workers?: number;
+  /**
+   * Runs the tests of one file at the same time on separate workers, as if
+   * every file had `parallel: true`; default false, where files run in
+   * parallel and a file's tests in order. A target's `fullyParallel` wins
+   * over it, and `--fully-parallel` over both. A serial group still runs as
+   * one unit, and `parallel: false` keeps a group or a file in order.
+   */
+  fullyParallel?: boolean;
   /** `{ store }` hands every artifact to a host store as it is produced. */
   artifacts?: ArtifactsConfig;
   /**
