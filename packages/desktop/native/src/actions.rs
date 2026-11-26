@@ -928,14 +928,15 @@ mod tests {
 
     #[test]
     fn sends_no_input_once_the_action_was_cancelled_or_ran_out_of_time() {
+        // Ids near the input tests' ids: tests share one registry, and a run 4096 ids past another drops that one's mark.
         let set =
             |id: u32, deadline: Instant| super::CURRENT.with(|current| *current.borrow_mut() = Some((crate::input::TypingRun::start(Some(id)), deadline)));
-        crate::input::cancel_input(2_000_001);
-        set(2_000_001, later());
+        crate::input::cancel_input(1_000_031);
+        set(1_000_031, later());
         assert!(super::go("press").is_err());
-        set(2_000_002, Instant::now());
+        set(1_000_032, Instant::now());
         assert!(super::go("press").is_err());
-        set(2_000_003, later());
+        set(1_000_033, later());
         assert!(super::go("press").is_ok());
         super::CURRENT.with(|current| current.borrow_mut().take());
     }
