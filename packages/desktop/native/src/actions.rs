@@ -804,14 +804,15 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
     let after_focus = |failure: Failure| if moved { failure.delivered() } else { failure };
     let route = if physical {
         raise(entry.pid, &window).map_err(after_focus)?;
-        // Coming forward can open a sheet that takes focus from the field: the real keyboard would then type into it.
-        if Element::application(entry.pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element) {
-            return Err(after_focus(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus as its window came forward, so nothing was typed")));
-        }
         Route::Physical
     } else {
         Route::Process(entry.pid)
     };
+    // Focusing the field can run a handler that opens a sheet or another window, and coming forward can too: the keys
+    // would then go there. The field itself must hold the app's focus before the first key.
+    if Element::application(entry.pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element) {
+        return Err(after_focus(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed")));
+    }
     // Each key goes only while the window that held the keyboard when typing began still does: a Return that opened another
     // window, a sheet on this one included, or another app must not take the rest of the text with it. A field in a sheet
     // that was there from the start keeps its sheet.
