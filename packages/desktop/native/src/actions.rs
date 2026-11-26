@@ -773,12 +773,15 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
     if !physical {
         key_window(entry.pid, &window)?;
     }
+    // Focus this call moved into the field reached the app (its handlers may have run); focus it already had did not.
+    let moved = entry.element.boolean("AXFocused") != Some(true);
     focus(&entry.element, deadline)?;
+    let after_focus = |failure: Failure| if moved { failure.delivered() } else { failure };
     let route = if physical {
-        raise(entry.pid, &window).map_err(Failure::delivered)?;
+        raise(entry.pid, &window).map_err(after_focus)?;
         // Coming forward can open a sheet that takes focus from the field: the real keyboard would then type into it.
         if Element::application(entry.pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element) {
-            return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the field lost keyboard focus as its window came forward, so nothing was typed"));
+            return Err(after_focus(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus as its window came forward, so nothing was typed")));
         }
         Route::Physical
     } else {
@@ -801,7 +804,7 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
             Some((run, _)) => input::type_text(text, route, run, deadline, &still),
             None => Err(Failure::refused(codes::INTERNAL, "type ran outside an action")),
         })
-        .map_err(Failure::delivered)
+        .map_err(after_focus)
 }
 
 /// Runs `work` as the action `input_id` names: until it returns, every input it sends first checks that the action was

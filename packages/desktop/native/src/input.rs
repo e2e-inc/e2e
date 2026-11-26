@@ -311,24 +311,31 @@ fn pieces(text: &str) -> Vec<Piece> {
 /// the keyboard there.
 pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time::Instant, still: &dyn Fn() -> Outcome<()>) -> Outcome<()> {
     let source = source()?;
+    // A stop before the first key sent nothing; after it, the keys sent stay sent.
+    let mut sent = false;
+    let stopped = |failure: Failure, sent: bool| {
+        if sent { Failure { message: format!("{}; the text sent before then stays sent", failure.message), ..failure }.delivered() } else { failure }
+    };
     for piece in pieces(text) {
         // The focus check reads the app and can take a while: the cancel and the deadline are checked after it, right
         // before the key goes.
-        still().map_err(|failure| Failure { message: format!("{}; the text sent before then stays sent", failure.message), ..failure }.delivered())?;
+        still().map_err(|failure| stopped(failure, sent))?;
         if run.cancelled() {
-            return Err(Failure::unconfirmed(codes::TIMEOUT, "typing was cancelled; the text sent before then stays sent"));
+            return Err(stopped(Failure::refused(codes::TIMEOUT, "typing was cancelled"), sent));
         }
         if std::time::Instant::now() >= deadline {
-            return Err(Failure::unconfirmed(codes::TIMEOUT, "typing ran out of time; the text sent before then stays sent"));
+            return Err(stopped(Failure::refused(codes::TIMEOUT, "typing ran out of time"), sent));
         }
         let units = match piece {
             Piece::Return | Piece::Tab => {
                 let code = if piece == Piece::Tab { 48 } else { 36 };
-                press(&Combo { key: Key { code, character: None }, flags: CGEventFlags::CGEventFlagNull }, route)?;
+                press(&Combo { key: Key { code, character: None }, flags: CGEventFlags::CGEventFlagNull }, route).map_err(|failure| stopped(failure, sent))?;
+                sent = true;
                 continue;
             }
             Piece::Text(units) => units,
         };
+        sent = true;
         for down in [true, false] {
             let event =
                 CGEvent::new_keyboard_event(source.clone(), 0, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
@@ -433,6 +440,19 @@ mod tests {
         let cancelled = TypingRun::start(Some(1_000_021));
         assert!(!older.cancelled());
         assert!(cancelled.cancelled());
+    }
+
+    #[test]
+    fn says_nothing_was_sent_when_typing_stops_before_its_first_key() {
+        use crate::failure::{Delivery, Failure, codes};
+        let later = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        // A pid no process has: nothing below may reach it.
+        let route = super::Route::Process(-1);
+        let lost = super::type_text("ab", route, &TypingRun::start(None), later, &|| Err(Failure::refused(codes::ACTION_FAILED, "lost the keyboard")));
+        assert_eq!(lost.expect_err("stopped").delivery, Delivery::NotDelivered);
+        cancel_input(1_000_041);
+        let cancelled = super::type_text("ab", route, &TypingRun::start(Some(1_000_041)), later, &|| Ok(()));
+        assert_eq!(cancelled.expect_err("cancelled").delivery, Delivery::NotDelivered);
     }
 
     #[test]
