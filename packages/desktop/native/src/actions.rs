@@ -620,12 +620,37 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
     Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("a {role} has no options to select")))
 }
 
+/// A scroll area's scroll bar for one axis. A SwiftUI `List` lists it only as a child, with no `AXVerticalScrollBar`.
+pub fn scroll_bar(element: &Element, vertical: bool) -> Option<Element> {
+    element.element(if vertical { "AXVerticalScrollBar" } else { "AXHorizontalScrollBar" }).or_else(|| {
+        let orientation = if vertical { "AXVerticalOrientation" } else { "AXHorizontalOrientation" };
+        element.elements("AXChildren", 16).ok()?.into_iter().find(|child| {
+            child.text("AXRole").as_deref() == Some("AXScrollBar")
+                && match child.text("AXOrientation") {
+                    Some(shown) => shown == orientation,
+                    // No orientation: a vertical bar is taller than it is wide.
+                    None => child.frame().is_some_and(|(_, _, width, height)| (height > width) == vertical),
+                }
+        })
+    })
+}
+
 /// Scrolls a scroll area by moving its scroll bar, `pages` of its visible size.
 fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
+    scroll_by(element, direction, pages).map_err(|failure| {
+        // An element that takes none of the ways to scroll: say so, not which attribute it lacks.
+        if failure.code == codes::ACTION_NOT_SUPPORTED && failure.delivery == Delivery::NotDelivered {
+            Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("nothing here scrolls {direction}"))
+        } else {
+            failure
+        }
+    })
+}
+
+fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
     let vertical = matches!(direction, "up" | "down");
     let forward = matches!(direction, "down" | "right");
-    let bar = element.element(if vertical { "AXVerticalScrollBar" } else { "AXHorizontalScrollBar" });
-    if let Some(bar) = bar {
+    if let Some(bar) = scroll_bar(element, vertical) {
         let current = match bar.attribute("AXValue") {
             Ok(Value::Number(number)) => number,
             _ => 0.0,
@@ -634,7 +659,7 @@ fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
         let visible = if vertical { height } else { width };
         let content = element
             .element("AXContents")
-            .or_else(|| element.elements("AXChildren", 1).ok().and_then(|children| children.into_iter().next()))
+            .or_else(|| element.elements("AXChildren", 16).ok()?.into_iter().find(|child| child.text("AXRole").as_deref() != Some("AXScrollBar")))
             .and_then(|contents| contents.frame())
             .map(|(_, _, width, height)| if vertical { height } else { width })
             .unwrap_or(0.0);

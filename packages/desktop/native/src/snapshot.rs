@@ -331,7 +331,7 @@ impl Walk {
         if has("AXScrollToVisible") {
             push(&mut out, "ScrollTo");
         }
-        if (role == "scrollarea" && read.scrollbar)
+        if (role == "scrollarea" && (read.scrollbar || [true, false].into_iter().any(|vertical| crate::actions::scroll_bar(element, vertical).is_some())))
             || ["AXScrollDownByPage", "AXScrollUpByPage", "AXScrollLeftByPage", "AXScrollRightByPage"].into_iter().any(&has)
         {
             push(&mut out, "Scroll");
