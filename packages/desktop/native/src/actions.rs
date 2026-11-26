@@ -4,7 +4,7 @@
 //! element shows it (a box's state, a field's value, a list's choice).
 
 use crate::ax::{self, AXError, Element, Value};
-use crate::failure::{Failure, Outcome, codes};
+use crate::failure::{Delivery, Failure, Outcome, codes};
 use crate::input::{self, Pointer, Route};
 use crate::refs::{self, Entry};
 use crate::roles;
@@ -462,13 +462,24 @@ fn open_menu(button: &Element, deadline: Instant) -> Option<Element> {
     menu
 }
 
+/// How long closing a menu nothing was chosen from may take past the action's deadline: an open menu covers the window.
+const MENU_CLOSE_WAIT: Duration = Duration::from_millis(500);
+
+/// Closes a menu nothing was chosen from, and answers whether it closed. It runs after the action's deadline too.
 fn close_menu(pid: i32, menu: &Element, deadline: Instant) -> bool {
+    let deadline = deadline.max(Instant::now() + MENU_CLOSE_WAIT);
     let _ = menu.perform("AXCancel");
     if until(deadline, || windows::open_menus(pid) == 0) {
         return true;
     }
     let _ = input::parse_combo("escape").and_then(|combo| input::press(&combo, Route::Process(pid)));
     until(deadline, || windows::open_menus(pid) == 0)
+}
+
+/// A select's failure before anything was chosen, once its menu was closed or failed to close. A menu that stayed open
+/// changed the screen, and covers the window for the next action, so the failure is no longer "nothing sent".
+fn unclosed(failure: Failure, closed: bool) -> Failure {
+    if closed { failure } else { failure.delivered().with_details(serde_json::json!({ "menu": "open" })) }
 }
 
 fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
@@ -488,26 +499,31 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         let Some(menu) = open_menu(element, deadline) else {
             return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the list's menu did not open"));
         };
-        let items = match all(&menu, "AXChildren", "read the list's options") {
-            Ok(items) => items,
-            Err(failure) => {
-                // Nothing was chosen: the menu goes again, and the stall is reported as one.
-                return Err(if close_menu(entry.pid, &menu, deadline) {
-                    failure
-                } else {
-                    failure.with_details(serde_json::json!({ "retryable": true, "menu": "open" }))
-                });
+        // Until the item is pressed nothing is chosen: a failure closes the menu again, and says when it stayed open,
+        // since an open menu covers the window for the next action.
+        let unchosen = |failure: Failure| unclosed(failure, close_menu(entry.pid, &menu, deadline));
+        let items = all(&menu, "AXChildren", "read the list's options").map_err(unchosen)?;
+        // A title the app did not answer in time may be the option asked for: that is no proof it is missing.
+        let mut stalled = false;
+        let item = items.into_iter().find(|item| match item.attribute("AXTitle") {
+            Ok(title) => title.text() == Some(label) && item.boolean("AXEnabled") != Some(false),
+            Err(error) => {
+                stalled |= error == ax::AX_CANNOT_COMPLETE;
+                false
             }
+        });
+        let Some(item) = item else {
+            return Err(unchosen(if stalled {
+                unread(ax::AX_CANNOT_COMPLETE, "read the list's options")
+            } else {
+                Failure::refused(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\""))
+            }));
         };
-        let Some(item) = items.into_iter().find(|item| item.text("AXTitle").as_deref() == Some(label) && item.boolean("AXEnabled") != Some(false)) else {
-            // Nothing was chosen: the menu opened and closed again, and the list's value is as it was.
-            if close_menu(entry.pid, &menu, deadline) {
-                return Err(Failure::refused(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\"")));
-            }
-            return Err(Failure::unconfirmed(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\", and its menu did not close"))
-                .with_details(serde_json::json!({ "menu": "open" })));
-        };
-        perform(&item, "AXPress", "choose the option").map_err(Failure::delivered)?;
+        perform(&item, "AXPress", "choose the option").map_err(|failure| match failure.delivery {
+            // Refused before the press (out of time, cancelled, the item gone): nothing was chosen.
+            Delivery::NotDelivered => unchosen(failure),
+            Delivery::Unknown => failure,
+        })?;
         if until(deadline, || value_text(element).as_deref() == Some(label)) {
             // The menu fades out after the choice; the next action must not land on it.
             until(deadline, || windows::open_menus(entry.pid) == 0);
@@ -838,6 +854,19 @@ mod tests {
         set(2_000_003, later());
         assert!(super::go("press").is_ok());
         super::CURRENT.with(|current| current.borrow_mut().take());
+    }
+
+    #[test]
+    fn says_a_select_menu_that_stayed_open_reached_the_app() {
+        use crate::failure::{Delivery, Failure, codes};
+        let stall = || super::unread(crate::ax::AX_CANNOT_COMPLETE, "read the list's options");
+        let closed = super::unclosed(stall(), true);
+        assert_eq!((closed.delivery, closed.details.as_ref().and_then(|details| details.get("menu"))), (Delivery::NotDelivered, None));
+        let open = super::unclosed(stall(), false);
+        assert_eq!(open.delivery, Delivery::Unknown);
+        assert_eq!(open.details.and_then(|details| details.get("menu").cloned()), Some(serde_json::json!("open")));
+        let missing = super::unclosed(Failure::refused(codes::ELEMENT_NOT_FOUND, "no option"), false);
+        assert_eq!((missing.code, missing.delivery), (codes::ELEMENT_NOT_FOUND, Delivery::Unknown));
     }
 
     #[test]
