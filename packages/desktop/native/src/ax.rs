@@ -173,6 +173,20 @@ pub fn format_number(number: f64) -> String {
 }
 
 /// Decodes one CoreFoundation value. `Err` carries an AX error a multiple-attribute read put in the value's place.
+/// The values of a batch read, from what each slot decoded to. A batch that succeeds can still carry an error in one
+/// slot: a gone element fails the whole read, and so does a stall, since a value the app did not answer in time is not
+/// a value it lacks. Any other error is an attribute with no value.
+fn slots(decoded: Vec<Result<Value, AXError>>) -> Result<Vec<Option<Value>>, AXError> {
+    decoded
+        .into_iter()
+        .map(|slot| match slot {
+            Ok(value) => Ok(Some(value)),
+            Err(error @ (AX_INVALID_ELEMENT | AX_CANNOT_COMPLETE)) => Err(error),
+            Err(_) => Ok(None),
+        })
+        .collect()
+}
+
 fn decode(value: CFTypeRef) -> Result<Value, AXError> {
     if value.is_null() {
         return Err(AX_NO_VALUE);
@@ -254,7 +268,8 @@ impl Element {
     }
 
     /// Several attributes in one request, each `None` when it has no value.
-    /// `Err` only when the whole request failed.
+    /// `Err` when the whole request failed, the element is gone, or the app
+    /// did not answer one of them in time.
     pub fn attributes(&self, names: &[&str]) -> Result<Vec<Option<Value>>, AXError> {
         let keys: Vec<CFString> = names.iter().map(|name| CFString::new(name)).collect();
         let array = CFArray::from_CFTypes(&keys);
@@ -266,24 +281,12 @@ impl Element {
         if values.is_null() {
             return Ok(vec![None; names.len()]);
         }
-        let mut out = Vec::with_capacity(names.len());
         let count = unsafe { CFArrayGetCount(values) };
-        for index in 0..names.len() as CFIndex {
-            if index >= count {
-                out.push(None);
-                continue;
-            }
-            match decode(unsafe { CFArrayGetValueAtIndex(values, index) }) {
-                Ok(value) => out.push(Some(value)),
-                Err(AX_INVALID_ELEMENT) => {
-                    unsafe { CFRelease(values as CFTypeRef) };
-                    return Err(AX_INVALID_ELEMENT);
-                }
-                Err(_) => out.push(None),
-            }
-        }
+        let decoded: Vec<Result<Value, AXError>> = (0..names.len() as CFIndex)
+            .map(|index| if index < count { decode(unsafe { CFArrayGetValueAtIndex(values, index) }) } else { Err(AX_NO_VALUE) })
+            .collect();
         unsafe { CFRelease(values as CFTypeRef) };
-        Ok(out)
+        slots(decoded)
     }
 
     /// How many values an array attribute holds.
@@ -424,5 +427,18 @@ pub fn describe(error: AXError) -> &'static str {
         AX_API_DISABLED => "accessibility is not allowed for this process",
         AX_NO_VALUE => "the attribute has no value",
         _ => "the accessibility request failed",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AX_ATTRIBUTE_UNSUPPORTED, AX_CANNOT_COMPLETE, AX_INVALID_ELEMENT, AX_NO_VALUE, Value, slots};
+
+    #[test]
+    fn fails_a_batch_read_on_a_stalled_or_gone_slot_and_reads_any_other_error_as_no_value() {
+        let read = slots(vec![Ok(Value::Text("Name".into())), Err(AX_NO_VALUE), Err(AX_ATTRIBUTE_UNSUPPORTED)]).expect("a read");
+        assert!(matches!(read.as_slice(), [Some(Value::Text(_)), None, None]));
+        assert_eq!(slots(vec![Ok(Value::Text("Name".into())), Err(AX_CANNOT_COMPLETE)]).err(), Some(AX_CANNOT_COMPLETE));
+        assert_eq!(slots(vec![Err(AX_INVALID_ELEMENT), Ok(Value::Bool(true))]).err(), Some(AX_INVALID_ELEMENT));
     }
 }
