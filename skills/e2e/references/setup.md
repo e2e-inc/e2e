@@ -327,6 +327,10 @@ export default {
 - `selectOption`, `setInputFiles`, `scrollIntoView`, `secondaryTap`, and
   `modifiers` are `UNSUPPORTED_CAPABILITY` on a device. `setNetwork('offline')`
   and `setAirplaneMode(true)` are Android only.
+- `press` on a device takes `Enter`, `Space`, `Backspace`, or one character;
+  `Tab`, other named keys, and modifiers are `UNSUPPORTED_CAPABILITY`. With
+  no locator for the field, `device.keyboard.type(text)` and
+  `device.keyboard.press(key)` go to whatever field holds focus.
 - A node the soft keyboard covers is hidden, so `toBeVisible()` fails and a
   tap fails `ACTION_FAILED` naming the cover: dismiss the keyboard or scroll
   the target clear.
