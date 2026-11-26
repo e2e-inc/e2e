@@ -1549,9 +1549,8 @@ per-shard `--max-failures` or `--max-duration` stop keeps its failing verdict.
 The recorded duration spans the earliest shard start to the latest shard
 finish. The merged report leaves `run.shard` unset and records the source
 shards and the sum of their durations in
-[`run.merge`](/reference/reporters#merged-shard-reports). Each merged result
-and attempt keeps its source `shard` index. The command returns the merged run's
-[exit code](#exit-codes), or 2 if the merge could not be made.
+[`run.merge`](/reference/reporters#merged-shard-reports). The command returns
+the merged run's [exit code](#exit-codes), or 2 if the merge could not be made.
 
 See [Sharding](/ci#sharding) for artifact upload and whole-run reruns.
 
