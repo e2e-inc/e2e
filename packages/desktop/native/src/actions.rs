@@ -709,18 +709,25 @@ fn open_menu(button: &Element, deadline: Instant) -> Option<Element> {
     menu
 }
 
-/// How long closing a menu nothing was chosen from may take past the action's deadline: an open menu covers the window.
+/// How long each way of closing a menu nothing was chosen from waits for it, past the action's deadline too: an open
+/// menu covers the window.
 const MENU_CLOSE_WAIT: Duration = Duration::from_millis(500);
 
-/// Closes a menu nothing was chosen from, and answers whether it closed. It runs after the action's deadline too.
-fn close_menu(pid: i32, menu: &Element, deadline: Instant) -> bool {
-    let deadline = deadline.max(Instant::now() + MENU_CLOSE_WAIT);
-    let _ = menu.perform("AXCancel");
-    if until(deadline, || windows::open_menus(pid) == 0) {
+/// How long a menu that refused `AXCancel` is watched before Escape: the refusal may still have closed it.
+const MENU_CLOSE_GLANCE: Duration = Duration::from_millis(100);
+
+/// Closes a menu nothing was chosen from, and answers whether it closed. It runs after the action's deadline too: each
+/// way of closing gets a wait of its own, so an `AXCancel` that used its wait still leaves Escape time to be seen.
+fn close_menu(pid: i32, menu: &Element) -> bool {
+    let closed = || windows::open_menus(pid) == 0;
+    // A menu that answered the action with an error gets only a glance: an Escape sent once the menu closed would reach
+    // the window under it (a sheet it cancels), so even then the driver looks before it sends one.
+    let wait = if menu.perform("AXCancel").is_ok() { MENU_CLOSE_WAIT } else { MENU_CLOSE_GLANCE };
+    if until(Instant::now() + wait, closed) {
         return true;
     }
     let _ = input::parse_combo("escape").and_then(|combo| input::press(&combo, Route::Process(pid)));
-    until(deadline, || windows::open_menus(pid) == 0)
+    until(Instant::now() + MENU_CLOSE_WAIT, closed)
 }
 
 /// A select's failure before anything was chosen, once its menu was closed or failed to close. A menu that stayed open
@@ -748,7 +755,7 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         };
         // Until the item is pressed nothing is chosen: a failure closes the menu again, and says when it stayed open,
         // since an open menu covers the window for the next action.
-        let unchosen = |failure: Failure| unclosed(failure, close_menu(entry.pid, &menu, deadline));
+        let unchosen = |failure: Failure| unclosed(failure, close_menu(entry.pid, &menu));
         let items = all(&menu, "AXChildren", "read the list's options").map_err(unchosen)?;
         // A title the app did not answer in time may be the option asked for: that is no proof it is missing.
         let mut stalled = false;
