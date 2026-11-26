@@ -443,17 +443,17 @@ class LocatorImpl extends ScreenImpl implements Locator {
   private tapWith(
     api: 'tap' | 'click' | 'doubleTap' | 'dblclick' | 'secondaryTap',
     options: TapOptions | undefined,
-    fixed: { readonly count?: 2; readonly button?: 'right' } = {},
+    fixed?: { readonly count?: 2; readonly button?: 'right' },
   ): Promise<void> {
     const keys = ['timeout', 'position', 'modifiers'];
-    rejectUnknownOptions(api, options, api === 'tap' || api === 'click' ? [...keys, 'count', 'button'] : keys);
+    rejectUnknownOptions(api, options, fixed === undefined ? [...keys, 'count', 'button'] : keys);
     const modifiers = requireModifiers(options?.modifiers, api);
     const count = requireTapCount(options?.count, api);
     const button = options?.button === 'left' ? undefined : options?.button;
     if (button !== undefined && button !== 'middle' && button !== 'right') {
       throw new TestError('INVALID_ARGUMENT', `${api}() button ${describeValue(button)} is not one of left, middle, right`);
     }
-    const action = tapAction(fixed.count ?? count, fixed.button ?? button);
+    const action = tapAction(fixed?.count ?? count, fixed?.button ?? button);
     const label = this.tapLabel(count === 1 ? undefined : count, button, modifiers.modifiers);
     if (options?.position === undefined) return this.dispatchTap(api, { ...action, ...modifiers }, label, options?.timeout);
     if (modifiers.modifiers !== undefined) {
