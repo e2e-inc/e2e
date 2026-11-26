@@ -1049,6 +1049,38 @@ describe('engine protocol against a server written from the messages alone', () 
     rmSync(second, { recursive: true, force: true });
   });
 
+  it('keeps a screenshot answered while its attempt is ending out of that attempt\'s directory', async () => {
+    const methods = ['engine/observe', 'artifacts/screenshot', 'lifecycle/startAttempt', 'lifecycle/endAttempt'] as const;
+    let answer: (() => void) | undefined;
+    let ended: (() => void) | undefined;
+    const { transport } = handWritten(methods, {
+      'lifecycle/endAttempt': async () => {
+        await new Promise<void>((resolve) => (ended = resolve));
+        return null;
+      },
+      'artifacts/screenshot': async () => {
+        await new Promise<void>((resolve) => (answer = resolve));
+        return { data: Buffer.from('late png bytes').toString('base64'), mediaType: 'image/png' };
+      },
+    });
+    const remote = connectEngine({ manifest: { name: 'hand', version: '1', spiVersion: 1, methods: [...methods] }, transport });
+    const artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-protocol-'));
+    await remote.init!(initInfo());
+    await remote.startAttempt!({ attemptId: 'attempt-1', artifactsDir, signal: new AbortController().signal, resolveSecret: async () => '', appLog: () => {}, navigation: () => {}, environment: () => {} });
+    const late = remote.artifacts!.screenshot('late', operation()).then(() => undefined, (cause: unknown) => cause);
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    const ending = remote.endAttempt!(cleanup);
+    await vi.waitFor(() => expect(ended).toBeDefined());
+    answer?.();
+    const refused = await late;
+    expect(readdirSync(artifactsDir)).toEqual([]);
+    expect(refused).toMatchObject({ code: 'INVALID_STATE' });
+    ended?.();
+    await ending;
+    await remote.dispose!(cleanup);
+    rmSync(artifactsDir, { recursive: true, force: true });
+  });
+
   it('refuses a screenshot path outside the attempt directory', async () => {
     const local = defineEngine(toy({ artifacts: { screenshot: async () => '../../elsewhere.png' }, startAttempt: async () => {} }));
     const remote = connectEngine({ manifest: describeEngine(local), transport: loopbackTransport(local) });

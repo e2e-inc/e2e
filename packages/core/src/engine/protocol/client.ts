@@ -204,6 +204,8 @@ class EngineClient {
    */
   readonly #workers: Promise<Link>[] = [];
   #attempt: EngineAttemptContext | undefined;
+  /** Attempts whose `endAttempt` has begun: a screenshot's bytes no longer land in them, though callbacks still reach them until it settles. */
+  readonly #ending = new WeakSet<EngineAttemptContext>();
   #screenshots = 0;
 
   constructor(manifest: EngineManifest, options: ConnectEngineOptions) {
@@ -340,6 +342,7 @@ class EngineClient {
   /** Tracks the attempt, which the server's callbacks and a screenshot's bytes land in, and forwards it when the server answers. */
   async #startAttempt(context: EngineAttemptContext): Promise<void> {
     this.#attempt = context;
+    this.#ending.delete(context);
     this.#screenshots = 0;
     if (!this.#manifest.methods.includes('lifecycle/startAttempt')) return;
     const link = await this.#workerLink();
@@ -355,6 +358,8 @@ class EngineClient {
     // A hook that outlived its budget settles after the next attempt
     // started: it retires only the attempt it ended.
     const ending = this.#attempt;
+    // The runner may stop waiting for a server that never answers; bytes it sends meanwhile have no attempt to land in.
+    if (ending !== undefined) this.#ending.add(ending);
     try {
       if (this.#manifest.methods.includes('lifecycle/endAttempt')) await this.#forward('lifecycle/endAttempt', context);
     } finally {
@@ -410,7 +415,7 @@ class EngineClient {
   /**
    * Where a screenshot landed: a path the server wrote, which must stay under
    * the artifact directory of the attempt that asked for it, or the bytes it
-   * returned, written there by the client while that attempt is still open.
+   * returned, written there by the client until that attempt starts ending.
    */
   async #screenshot(attempt: EngineAttemptContext | undefined, result: ScreenshotResult, label: string | undefined): Promise<string> {
     if ('path' in result) {
@@ -420,7 +425,7 @@ class EngineClient {
       return result.path;
     }
     if (attempt === undefined) throw new EngineError('INVALID_STATE', 'screenshot outside an attempt', { retryable: false });
-    if (attempt !== this.#attempt) throw new EngineError('INVALID_STATE', 'screenshot answered after its attempt ended', { retryable: false });
+    if (attempt !== this.#attempt || this.#ending.has(attempt)) throw new EngineError('INVALID_STATE', 'screenshot answered after its attempt ended', { retryable: false });
     this.#screenshots += 1;
     const name = (label ?? 'screenshot').replaceAll(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'screenshot';
     const relative = path.join('screenshots', `${String(this.#screenshots).padStart(3, '0')}-${name}.png`);
