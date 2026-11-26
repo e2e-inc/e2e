@@ -205,9 +205,14 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
 }
 
 /// The text of the element that labels another (`AXTitleUIElement`).
-fn label_of(element: &Element) -> Option<String> {
-    let values = element.attributes(&["AXValue", "AXTitle"]).ok()?;
-    values.into_iter().flatten().find_map(|value| label(value.text().map(str::to_owned)))
+/// `Err` for a read the app did not answer in time: a name it may have had.
+fn label_of(element: &Element) -> Result<Option<String>, ax::AXError> {
+    let values = match element.attributes(&["AXValue", "AXTitle"]) {
+        Ok(values) => values,
+        Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+        Err(_) => return Ok(None),
+    };
+    Ok(values.into_iter().flatten().find_map(|value| label(value.text().map(str::to_owned))))
 }
 
 /// The part of the screen a node's children can show in, from the node's own `clip`. What a scroll area shows is its
@@ -451,7 +456,16 @@ impl Walk {
         let secure = read.subrole.as_deref() == Some("AXSecureTextField") || read.ax_role == "AXSecureTextField";
         let actions = self.actions(element, &read);
 
-        let labelled = read.title_element.as_ref().and_then(label_of);
+        // The name a control takes from its label element: a stall reading it leaves the name unknown, a hole in the read,
+        // so a locator cannot take the control's absence by that name as proof.
+        let labelled = match read.title_element.as_ref().map(label_of) {
+            Some(Ok(text)) => text,
+            Some(Err(_)) => {
+                self.lose();
+                None
+            }
+            None => None,
+        };
         let text_value = if secure { None } else { read.value.as_ref().and_then(Value::display).map(cap) };
         let name = read
             .title
