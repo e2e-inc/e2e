@@ -229,56 +229,79 @@ pub fn press(combo: &Combo, route: Route) -> Outcome<()> {
 /// The most UTF-16 units one key event carries: some apps drop the rest of a longer string.
 const CHUNK_UNITS: usize = 16;
 
-/// Types text as keystrokes that carry their characters, whatever the keyboard layout. A newline presses Return and a tab Tab.
+/// One key event's worth of text to type: a chunk of characters, or Return or Tab.
+#[derive(Debug, PartialEq)]
+enum Piece {
+    Text(Vec<u16>),
+    Return,
+    Tab,
+}
+
+/// Cuts text into key events: chunks of at most `CHUNK_UNITS` UTF-16 units, cut on a character boundary so a
+/// surrogate pair never splits, and Return for a line break (`\r\n` is one) and Tab for a tab.
+fn pieces(text: &str) -> Vec<Piece> {
+    let mut out = Vec::new();
+    let mut chunk: Vec<u16> = Vec::with_capacity(CHUNK_UNITS);
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        let key = match character {
+            '\r' => {
+                characters.next_if_eq(&'\n');
+                Some(Piece::Return)
+            }
+            '\n' => Some(Piece::Return),
+            '\t' => Some(Piece::Tab),
+            _ => None,
+        };
+        if let Some(key) = key {
+            if !chunk.is_empty() {
+                out.push(Piece::Text(std::mem::take(&mut chunk)));
+            }
+            out.push(key);
+            continue;
+        }
+        let mut units = [0u16; 2];
+        let encoded = character.encode_utf16(&mut units);
+        if chunk.len() + encoded.len() > CHUNK_UNITS {
+            out.push(Piece::Text(std::mem::take(&mut chunk)));
+        }
+        chunk.extend_from_slice(encoded);
+    }
+    if !chunk.is_empty() {
+        out.push(Piece::Text(chunk));
+    }
+    out
+}
+
+/// Types text as keystrokes that carry their characters, whatever the keyboard layout (`pieces`).
 /// Before each event it checks `run` and `deadline`: a cancelled run, or one out of time, sends nothing more, so keys never
 /// keep going after the caller gave up, when another app may have taken the keyboard.
 pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time::Instant) -> Outcome<()> {
     let source = source()?;
-    let go_on = || -> Outcome<()> {
+    for piece in pieces(text) {
         if run.cancelled() {
             return Err(Failure::unconfirmed(codes::TIMEOUT, "typing was cancelled; the text sent before then stays sent"));
         }
         if std::time::Instant::now() >= deadline {
             return Err(Failure::unconfirmed(codes::TIMEOUT, "typing ran out of time; the text sent before then stays sent"));
         }
-        Ok(())
-    };
-    let send = |chunk: &[u16]| -> Outcome<()> {
-        go_on()?;
+        let chunk = match piece {
+            Piece::Return | Piece::Tab => {
+                let code = if piece == Piece::Tab { 48 } else { 36 };
+                press(&Combo { key: Key { code, character: None }, flags: CGEventFlags::CGEventFlagNull }, route)?;
+                continue;
+            }
+            Piece::Text(chunk) => chunk,
+        };
         for down in [true, false] {
             let event =
                 CGEvent::new_keyboard_event(source.clone(), 0, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
             // No modifiers: a key the user holds would otherwise ride along on an HID-state event and turn text into a shortcut.
             event.set_flags(CGEventFlags::CGEventFlagNull);
-            event.set_string_from_utf16_unchecked(chunk);
+            event.set_string_from_utf16_unchecked(&chunk);
             post(&event, route);
         }
         sleep(Duration::from_millis(3));
-        Ok(())
-    };
-    let mut chunk: Vec<u16> = Vec::with_capacity(CHUNK_UNITS);
-    for character in text.chars() {
-        if character == '\n' || character == '\r' || character == '\t' {
-            if !chunk.is_empty() {
-                send(&chunk)?;
-                chunk.clear();
-            }
-            go_on()?;
-            let combo = Combo { key: Key { code: if character == '\t' { 48 } else { 36 }, character: None }, flags: CGEventFlags::CGEventFlagNull };
-            press(&combo, route)?;
-            continue;
-        }
-        let mut units = [0u16; 2];
-        let encoded = character.encode_utf16(&mut units);
-        // A character never splits across events: both halves of a surrogate pair go in one.
-        if chunk.len() + encoded.len() > CHUNK_UNITS {
-            send(&chunk)?;
-            chunk.clear();
-        }
-        chunk.extend_from_slice(encoded);
-    }
-    if !chunk.is_empty() {
-        send(&chunk)?;
     }
     Ok(())
 }
@@ -313,4 +336,51 @@ pub fn pointer(x: f64, y: f64, action: Pointer) -> Outcome<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CHUNK_UNITS, Piece, parse_combo, pieces};
+
+    fn text(units: &Piece) -> String {
+        match units {
+            Piece::Text(units) => String::from_utf16(units).expect("a chunk holds whole characters"),
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn keeps_a_surrogate_pair_in_one_event() {
+        let typed = pieces("123456789012345😀x");
+        assert_eq!(typed.len(), 2);
+        assert_eq!(text(&typed[0]), "123456789012345");
+        assert_eq!(text(&typed[1]), "😀x");
+        assert!(typed.iter().all(|piece| matches!(piece, Piece::Text(units) if units.len() <= CHUNK_UNITS)));
+    }
+
+    #[test]
+    fn presses_return_once_for_a_windows_line_break() {
+        assert_eq!(
+            pieces("a\r\nb\nc\rd\te"),
+            [
+                Piece::Text("a".encode_utf16().collect()),
+                Piece::Return,
+                Piece::Text("b".encode_utf16().collect()),
+                Piece::Return,
+                Piece::Text("c".encode_utf16().collect()),
+                Piece::Return,
+                Piece::Text("d".encode_utf16().collect()),
+                Piece::Tab,
+                Piece::Text("e".encode_utf16().collect()),
+            ]
+        );
+    }
+
+    #[test]
+    fn refuses_command_q_however_it_is_written() {
+        for combo in ["cmd+q", "command+Q", "meta+q"] {
+            assert!(parse_combo(combo).is_err(), "{combo}");
+        }
+        assert!(parse_combo("ctrl+q").is_ok());
+    }
 }
