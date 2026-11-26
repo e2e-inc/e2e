@@ -15,7 +15,7 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { ConfigurationError, EngineError, TestError, appleUserDefaults, type ResolvedLaunchArguments } from '@e2e-dev/core/engine';
+import { ConfigurationError, EngineError, TestError, appleUserDefaults, raceAbort, type ResolvedLaunchArguments } from '@e2e-dev/core/engine';
 import type { MobileOptions, MobilePlatform } from './options.ts';
 import { isDeviceList } from './pool.ts';
 import type { DeviceProvider } from './provider.ts';
@@ -139,12 +139,14 @@ function appleLocaleArguments(locale: string): readonly string[] {
  * left as it was found.
  */
 export class AndroidAppLocales {
+  /** The locales each app this worker changed had before, as `set-app-locales` takes them (`''` for none). */
+  private readonly original = new Map<string, string>();
   /**
-   * The locales each app this worker changed had before, as `set-app-locales`
-   * takes them (`''` for none). The read itself is kept, so two launches of
-   * one app that overlap share it, and neither reads the other's locale.
+   * Settles when every change queued so far has: changes run one at a time,
+   * in call order, so a put-back between two overlapping launches cannot
+   * land before the other launch's locale and leave it set.
    */
-  private readonly original = new Map<string, Promise<string>>();
+  private queue: Promise<unknown> = Promise.resolve();
   /** The device's API level, read once per device. */
   private sdk: Promise<number> | undefined;
 
@@ -161,31 +163,25 @@ export class AndroidAppLocales {
    * screen.
    */
   async beforeOpen(app: string, locale: string | undefined, relaunch: boolean, signal: AbortSignal): Promise<void> {
-    if (locale !== undefined) {
-      await this.requireSdk(signal);
-      let original = this.original.get(app);
-      if (original === undefined) {
-        const read = this.get(app, signal);
-        original = read;
-        this.original.set(app, read);
-        // A failed read is not an original: the next launch reads again.
-        read.catch(() => {
-          if (this.original.get(app) === read) this.original.delete(app);
-        });
-      }
-      await original;
-      await this.set(app, locale, signal);
+    if (locale === undefined) {
+      if (relaunch) await this.putBack(app, signal);
       return;
     }
-    if (relaunch) await this.putBack(app, signal);
+    await this.serialized(signal, async () => {
+      await this.requireSdk(signal);
+      if (!this.original.has(app)) this.original.set(app, await this.get(app, signal));
+      await this.set(app, locale, signal);
+    });
   }
 
   /** Puts back the locales of every app this worker changed; failures are left, as the worker is going away. */
   async restore(signal: AbortSignal): Promise<void> {
-    for (const app of this.original.keys()) {
-      await this.putBack(app, signal).catch(() => undefined);
-    }
-    this.original.clear();
+    await this.serialized(signal, async () => {
+      for (const [app, locales] of this.original) {
+        await this.set(app, locales, signal).catch(() => undefined);
+      }
+      this.original.clear();
+    });
   }
 
   /**
@@ -194,10 +190,19 @@ export class AndroidAppLocales {
    * launch by display name, whose package only the launch names.
    */
   async putBack(app: string, signal: AbortSignal): Promise<void> {
-    const original = this.original.get(app);
-    if (original === undefined) return;
-    await this.set(app, await original, signal);
-    this.original.delete(app);
+    await this.serialized(signal, async () => {
+      const locales = this.original.get(app);
+      if (locales === undefined) return;
+      await this.set(app, locales, signal);
+      this.original.delete(app);
+    });
+  }
+
+  /** Runs `change` once every change queued before it has settled, or fails with `CANCELLED` when `signal` aborts first. */
+  private serialized(signal: AbortSignal, change: () => Promise<void>): Promise<void> {
+    const run = raceAbort(this.queue, signal, 'waiting for an earlier Android locale change').then(change);
+    this.queue = Promise.allSettled([this.queue, run]);
+    return run;
   }
 
   /** Refuses a device older than Android 13, which has no per-app language to set. */
