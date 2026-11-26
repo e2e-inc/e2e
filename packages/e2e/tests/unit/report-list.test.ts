@@ -1460,6 +1460,42 @@ describe('ListReporter', () => {
         expect(rows).toEqual(['× agent.act "side" 1.20s cancelled', '✓ Log in 1.20s', '  ✓ agent.act "pay" 1.20s']);
       });
 
+      it('keeps a test.step of the attempt before under the one around it when it ends after a retry began', () => {
+        const { chunks, output } = liveCapture();
+        const reporter = plainReporter(output, true);
+        reporter.handle(runStarted());
+        reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 1 }]));
+        reporter.handle(testStarted('t1', 'pays', 'chromium'));
+        const at = (attemptIndex: number) => (stepIndex: number, parent: number | undefined, progress: object) =>
+          reporter.handle({
+            type: 'step', testId: 't1', agent: 'default', repeat: 0, target: 'chromium',
+            progress: { ...progress, identity: { attemptId: `a${attemptIndex}`, attemptIndex, stepId: `a${attemptIndex}:${stepIndex}`, stepIndex, ...(parent === undefined ? {} : { parentStepId: `a${attemptIndex}:${parent}` }) } },
+          } as never);
+        at(0)(0, undefined, { phase: 'start', ...group('Outer') });
+        at(0)(1, 0, { phase: 'start', ...group('Inner') });
+        at(1)(0, undefined, { phase: 'start', ...group('Outer') });
+        at(0)(1, 0, { ...ended, ...group('Inner'), status: 'cancelled' });
+        at(0)(0, undefined, { ...ended, ...group('Outer'), status: 'cancelled' });
+        at(1)(0, undefined, { ...ended, ...group('Outer') });
+        const rows = chunks.at(-1)!.replace(ANSI_PATTERN, '').split('\n').filter((row) => /[◌✓×]/.test(row)).map((row) => row.replace(/^ {7}/, ''));
+        expect(rows).toEqual(['× Outer 1.20s cancelled', '  × Inner 1.20s cancelled', '✓ Outer 1.20s']);
+      });
+
+      it('lists a test.step whose end never came above the steps that ran in it', () => {
+        const { lines, output } = liveCapture();
+        const reporter = plainReporter(output, true);
+        reporter.handle(runStarted());
+        reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 1 }]));
+        reporter.handle(testStarted('t1', 'pays', 'chromium'));
+        const step = feed(reporter);
+        step(0, undefined, { phase: 'start', ...group('Log in') });
+        step(1, 0, { phase: 'start', ...act });
+        step(1, 0, { ...ended, ...act });
+        reporter.handle(finished(result({ status: 'failed', id: 't1', title: ['pays'] })));
+        const block = lines.slice(lines.findIndex((line) => line.includes('pays')) + 1).filter((line) => /[◌×✓]/.test(line));
+        expect(block.slice(0, 2)).toEqual(['     ◌ Log in', '       ✓ agent.act "pay" 1.20s']);
+      });
+
       it('never lets control characters of a test.step title through in the name of a step printed inside it', () => {
         const lines: string[] = [];
         const reporter = plainReporter({ write: (line) => lines.push(line) });

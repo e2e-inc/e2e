@@ -236,6 +236,65 @@ describe('StepRecorder.group', () => {
     expect(steps.busy).toBe(false);
   });
 
+  it('keeps the cancellation on the call alone, however many awaits sit between the call and the step', async () => {
+    const cut = new AbortController();
+    const steps = new StepRecorder('a', { signal: cut.signal });
+    const pending = steps
+      .group('Log in', async () => {
+        await (async () => { await tap(steps, 'button', () => new Promise<void>(() => {})); })();
+      })
+      .catch((error: unknown) => error);
+    cut.abort(new TestError('CANCELLED', 'the test timed out'));
+    expect(await pending).toMatchObject({ code: 'CANCELLED' });
+    expect(steps.all().map((step) => [step.label, step.status, step.error?.code])).toEqual([
+      ['Log in', 'cancelled', undefined],
+      ['button', 'cancelled', 'CANCELLED'],
+    ]);
+  });
+
+  it('ends after a call another session runs inside it', async () => {
+    const cut = new AbortController();
+    const steps = new StepRecorder('a');
+    let guest: ReturnType<StepRecorder['guest']> | undefined;
+    const pending = steps
+      .group('Second user waits', () => {
+        guest = steps.guest({ kind: 'locator', api: 'locator.waitFor', label: 'button', actor: 'launch-1', source: undefined });
+        return new Promise<void>(() => {});
+      }, { signal: cut.signal })
+      .catch((error: unknown) => error);
+    cut.abort();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(steps.busy).toBe(true);
+    guest!.end({ status: 'cancelled', durationMs: 1 });
+    expect(await pending).toMatchObject({ code: 'CANCELLED' });
+    expect(steps.all().map((step) => [step.label, step.status, step.parent])).toEqual([
+      ['Second user waits', 'cancelled', undefined],
+      ['button', 'cancelled', 0],
+    ]);
+  });
+
+  it('ends after a call its body starts in answer to the cut', async () => {
+    const cut = new AbortController();
+    const steps = new StepRecorder('a', { signal: cut.signal });
+    let cleanup: ReturnType<StepRecorder['guest']> | undefined;
+    const pending = steps
+      .group('Log in', async () => {
+        try {
+          await tap(steps, 'button', () => new Promise<void>(() => {}));
+        } catch {
+          cleanup = steps.guest({ kind: 'locator', api: 'locator.tap', label: 'cleanup', actor: 'launch-1', source: undefined });
+          await new Promise<void>(() => {});
+        }
+      })
+      .catch((error: unknown) => error);
+    cut.abort(new TestError('CANCELLED', 'the test timed out'));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(steps.busy).toBe(true);
+    cleanup!.end({ status: 'passed', durationMs: 1 });
+    expect(await pending).toMatchObject({ code: 'CANCELLED' });
+    expect(steps.all().map((step) => [step.label, step.status])).toEqual([['Log in', 'cancelled'], ['button', 'cancelled'], ['cleanup', 'passed']]);
+  });
+
   it('is cut by the signal it is given beside the recorder\'s own', async () => {
     const phase = new AbortController();
     const steps = new StepRecorder('a', { signal: new AbortController().signal });

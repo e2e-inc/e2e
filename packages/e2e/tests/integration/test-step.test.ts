@@ -150,7 +150,7 @@ describe('test.step around a test timeout', () => {
   it('cuts the call running in a step as the timeout cuts any call, not as one the test did not await', () => {
     expect(resultByTitle(outcome, 'times out in a call').status).toBe('timed-out');
     expect(steps('times out in a call').slice(1)).toEqual([
-      ['test.step', 'cancelled', 'CANCELLED'],
+      ['test.step', 'cancelled', undefined],
       ['locator.waitFor', 'cancelled', 'CANCELLED'],
     ]);
   });

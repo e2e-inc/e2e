@@ -449,7 +449,7 @@ export interface StepHoldRequest {
 /** A step call waiting at its hold, kept so a body that returns without awaiting it still fails as `STEP_NOT_AWAITED`. */
 interface HeldCall {
   /** The `test.step` the call was made in, kept for a call recorded from outside it. */
-  readonly group: ActiveStep | undefined;
+  readonly group: ActiveGroup | undefined;
   readonly kind: StepKind;
   readonly api: string;
   readonly label: string;
@@ -532,9 +532,7 @@ export interface StepGroupOptions {
 interface ActiveStep {
   readonly record: StepRecord;
   /** The `test.step` the step runs inside. */
-  readonly group: ActiveStep | undefined;
-  /** Of a `test.step`: what the steps that failed inside it threw on. Each is that step's error, which this one does not record again. */
-  rethrown?: Set<unknown>;
+  readonly group: ActiveGroup | undefined;
   /** The `owner` that started the step, as `abandonRunning` names it. */
   readonly owner: string;
   /** The stack the step was started from, for the error it fails with when abandoned or named. */
@@ -549,12 +547,20 @@ interface ActiveStep {
   seenScreen?: () => ScreenText | undefined;
 }
 
+/** A running `test.step`. */
+interface ActiveGroup extends ActiveStep {
+  /** What the steps that failed inside it threw on. Each is that step's error, which this one does not record again. */
+  readonly rethrown: Set<unknown>;
+  /** The calls still running directly inside it, a `launch()` session's included. */
+  readonly inside: Set<Promise<unknown>>;
+}
+
 export class StepRecorder {
   private readonly attempt: { readonly id: string; readonly index: number };
   private readonly steps: StepRecord[] = [];
   private readonly scope = new AsyncLocalStorage<StepRecord>();
   /** The `test.step` this code runs inside, with the ones around it. Apart from `scope`: a step called in a `test.step` is still a top-level step, held and verified as one. */
-  private readonly groups = new AsyncLocalStorage<ActiveStep>();
+  private readonly groups = new AsyncLocalStorage<ActiveGroup>();
   /** The hook steps run in from now on; undefined while the test body runs. */
   phase: StepPhase | undefined = undefined;
   /**
@@ -675,10 +681,11 @@ export class StepRecorder {
   group<T>(rawTitle: string, body: () => T | Promise<T>, options: StepGroupOptions = {}): Promise<T> {
     const refused = this.refuseInAbortedRead();
     if (refused !== undefined) return refused;
-    const step = this.open('step', TEST_STEP_API, this.redactText(rawTitle), stepStack(this.projectRoot), {}, this.enclosingGroup());
-    step.rethrown = new Set();
+    const opened = this.open('step', TEST_STEP_API, this.redactText(rawTitle), stepStack(this.projectRoot), {}, this.enclosingGroup());
+    const step: ActiveGroup = Object.assign(opened, { rethrown: new Set<unknown>(), inside: new Set<Promise<unknown>>() });
     const promise = this.executeGroup(step, body, options);
     step.pending = promise;
+    this.runsInside(step.group, promise);
     return promise;
   }
 
@@ -699,7 +706,7 @@ export class StepRecorder {
     return undefined;
   }
 
-  private async executeGroup<T>(step: ActiveStep, body: () => T | Promise<T>, options: StepGroupOptions): Promise<T> {
+  private async executeGroup<T>(step: ActiveGroup, body: () => T | Promise<T>, options: StepGroupOptions): Promise<T> {
     const { record } = step;
     const startedMs = Date.now();
     const reading = pollReadSignal();
@@ -707,7 +714,7 @@ export class StepRecorder {
     try {
       const work = this.groups.run(step, async () => body());
       // A body waiting on something that is no step would never end it.
-      return await (cut === undefined ? work : withAbort(work, cut.signal, () => new TestError('CANCELLED', `${record.api} cancelled`)));
+      return await (cut === undefined ? work : withAbort(work, cut.signal, () => cut.signal.reason));
     } catch (thrown) {
       // The body may have set a provider key since the step started, and quote it in what it threw.
       registerProviderKeys(process.env);
@@ -716,9 +723,9 @@ export class StepRecorder {
       if (options.passesThrough?.(thrown) !== true) {
         const error = classifyError(thrown);
         record.status = failedStatus(error, thrown);
-        if (step.rethrown?.has(thrown) !== true) record.error = serializeError(error, { projectRoot: this.projectRoot, redact: this.redact });
+        if (!step.rethrown.has(thrown)) record.error = serializeError(error, { projectRoot: this.projectRoot, redact: this.redact });
       }
-      step.group?.rethrown?.add(thrown);
+      step.group?.rethrown.add(thrown);
       throw thrown;
     } finally {
       cut?.release();
@@ -731,24 +738,34 @@ export class StepRecorder {
   }
 
   /**
-   * A signal that follows `signal` once the steps running inside `group` have
-   * ended. Their engine calls are cut by the same abort, and each keeps its
-   * own outcome: a `test.step` that ended first would leave them running
-   * past the body, to be recorded as not awaited.
+   * A signal that aborts with the step's own cancellation once `signal` has
+   * and the calls running inside `group` have ended. Their engine calls are
+   * cut by the same abort, and each keeps its own outcome: a `test.step` that
+   * ended first would leave them running past the body, to be recorded as
+   * not awaited. A step that waited for such a call does not record the
+   * cancellation again.
    */
-  private cutAfterCallsInside(group: ActiveStep, signal: AbortSignal | undefined): { readonly signal: AbortSignal; release(): void } | undefined {
+  private cutAfterCallsInside(group: ActiveGroup, signal: AbortSignal | undefined): { readonly signal: AbortSignal; release(): void } | undefined {
     if (signal === undefined) return undefined;
     const after = new AbortController();
-    const cut = (): void => {
-      const inside = [...this.active.values()].filter((running) => {
-        for (let around = running.group; around !== undefined; around = around.group) if (around === group) return true;
-        return false;
-      });
-      void Promise.allSettled(inside.map((running) => running.pending)).then(() => after.abort(signal.reason));
+    const cut = async (): Promise<void> => {
+      const cancelled = new TestError('CANCELLED', `${group.record.api} cancelled`);
+      if (group.inside.size > 0) group.rethrown.add(cancelled);
+      // A body may answer a cut call by starting another.
+      while (group.inside.size > 0) await Promise.allSettled(group.inside);
+      after.abort(cancelled);
     };
-    if (signal.aborted) cut();
+    if (signal.aborted) void cut();
     else signal.addEventListener('abort', cut, { once: true });
     return { signal: after.signal, release: () => signal.removeEventListener('abort', cut) };
+  }
+
+  /** Keeps `call` among what runs inside `group` until it settles. */
+  private runsInside(group: ActiveGroup | undefined, call: Promise<unknown>): void {
+    if (group === undefined) return;
+    group.inside.add(call);
+    const ended = (): void => void group.inside.delete(call);
+    call.then(ended, ended);
   }
 
   /**
@@ -855,7 +872,7 @@ export class StepRecorder {
     body: () => Promise<T>,
     options: StepRunOptions,
     parent: StepRecord | undefined,
-    group: ActiveStep | undefined,
+    group: ActiveGroup | undefined,
   ): Promise<T> {
     // A verification run inside another step (an `onAction` hook's) proves
     // only what the steps before that one left, never the step still running.
@@ -863,6 +880,7 @@ export class StepRecorder {
     const step = this.open(kind, api, label, stack, options, group);
     const promise = this.execute(step, body, options, verifiesBefore);
     step.pending = promise;
+    this.runsInside(group, promise);
     return promise;
   }
 
@@ -892,7 +910,7 @@ export class StepRecorder {
   }
 
   /** Records a step as started now and tells reporters. */
-  private open(kind: StepKind, api: string, label: string, stack: string | undefined, options: StepRunOptions, group: ActiveStep | undefined): ActiveStep {
+  private open(kind: StepKind, api: string, label: string, stack: string | undefined, options: StepRunOptions, group: ActiveGroup | undefined): ActiveStep {
     const record = this.file({ kind, api, label, source: sourceLocation(stack, this.projectRoot), agent: options.agent, parent: group?.record.index });
     const step: ActiveStep = { record, group, owner: this.owner, ...(stack === undefined ? {} : { stack }) };
     this.active.set(record.id, step);
@@ -944,7 +962,7 @@ export class StepRecorder {
         markAbandonedRejection(onward);
       }
       if (failure === undefined && this.redactThrown && this.redact !== undefined) redactErrorInPlace(error, this.redact);
-      step.group?.rethrown?.add(onward);
+      step.group?.rethrown.add(onward);
       throw onward;
     } finally {
       this.active.delete(record.id);
@@ -1216,7 +1234,10 @@ export class StepRecorder {
    * it verifies nothing.
    */
   guest(step: Pick<StepRecord, 'kind' | 'api' | 'label' | 'actor'> & { readonly source: SourceLocation | undefined }): GuestRecord {
-    const record = this.file({ ...step, label: this.redactText(step.label), parent: this.enclosingGroup()?.record.index });
+    const group = this.enclosingGroup();
+    const record = this.file({ ...step, label: this.redactText(step.label), parent: group?.record.index });
+    let ended = (): void => undefined;
+    this.runsInside(group, new Promise<void>((resolve) => { ended = resolve; }));
     this.publishStart(record);
     return {
       tell: (progress) => {
@@ -1228,6 +1249,7 @@ export class StepRecorder {
         Object.assign(record, fields);
         if (cache !== undefined) record.cache = this.cacheForReport(cache);
         this.publishEnd(record);
+        ended();
       },
     };
   }
@@ -1258,7 +1280,7 @@ export class StepRecorder {
   }
 
   /** The innermost `test.step` still running that this call is inside; one that ended is no parent to work it left behind. */
-  private enclosingGroup(): ActiveStep | undefined {
+  private enclosingGroup(): ActiveGroup | undefined {
     for (let group = this.groups.getStore(); group !== undefined; group = group.group) {
       if (this.active.has(group.record.id) && group.abandoned === undefined) return group;
     }

@@ -59,11 +59,16 @@ export interface CurrentStep extends StepCall {
   activity: StepActivity | undefined;
 }
 
-/** The step the live window shows for a pair: the call it started last of those still open. An open `test.step` has its own row among the listed steps. */
+/**
+ * The step the live window shows for a pair: the call its running attempt
+ * started last of those still open. An open `test.step` has its own row
+ * among the listed steps.
+ */
 export function currentStep(test: RunningTest): CurrentStep | undefined {
+  const attempt = test.attemptIndex ?? 0;
   let last: CurrentStep | undefined;
   for (const step of test.open.values()) {
-    if (step.kind !== 'step') last = step;
+    if (step.kind !== 'step' && (step.path === undefined || step.path[0] === attempt)) last = step;
   }
   return last;
 }
@@ -71,15 +76,13 @@ export function currentStep(test: RunningTest): CurrentStep | undefined {
 /** How a step ended, as its `end` progress reported it. */
 export type StepOutcome = Pick<Extract<StepProgress, { phase: 'end' }>, 'status' | 'durationMs' | 'modelCalls'>;
 
-/** A step listed under its test. Only a `test.step` is listed before it ends, so the steps inside it follow it: it has no outcome until then. */
+/**
+ * A step listed under its test. Only a `test.step` is listed before it ends,
+ * so the steps inside it follow it: it has no outcome until then, or ever
+ * when its worker died first.
+ */
 export interface ListedStep extends StepCall {
   readonly outcome: StepOutcome | undefined;
-}
-
-export type FinishedStep = ListedStep & { readonly outcome: StepOutcome };
-
-export function isFinished(step: ListedStep): step is FinishedStep {
-  return step.outcome !== undefined;
 }
 
 /** Whether a step of this kind is listed under its test in the scrollback: an agent step or a `test.step`. Other steps are fast and many. */
@@ -99,7 +102,7 @@ export function listStep(steps: ListedStep[], step: ListedStep): void {
   const { path } = step;
   const at = path === undefined ? -1 : steps.findIndex((listed) => listed.path !== undefined && comparePaths(listed.path, path) >= 0);
   if (at === -1 || path === undefined) steps.push(step);
-  else steps.splice(at, comparePaths(steps[at]!.path ?? [], path) === 0 ? 1 : 0, step);
+  else steps.splice(at, comparePaths(steps[at]!.path!, path) === 0 ? 1 : 0, step);
 }
 
 /** A pair that has started and whose result is still to come. */
@@ -120,18 +123,15 @@ export interface RunningTest {
   /**
    * Steps started and not yet ended, by step id, oldest first. A step can
    * open inside another (an `onAction` hook's screenshot inside an act) or
-   * beside it (`Promise.all`), so each phase updates the step it names.
+   * beside it (`Promise.all`), so each phase updates the step it names. One
+   * an earlier attempt left open stays, so its late end still finds the
+   * `test.step` calls it ran in.
    */
   readonly open: Map<string, CurrentStep>;
   /**
-   * The attempt whose steps `open` holds. A retry starts no new pair, and a
-   * step of a timed-out attempt may never end.
-   */
-  attemptId: string | undefined;
-  /**
-   * That attempt's index. The body of a timed-out attempt keeps running, so
-   * it can start a step after the retry began; a step of an older attempt is
-   * not shown.
+   * The index of the attempt running now. A retry starts no new pair, and
+   * the body of a timed-out attempt keeps running: a step it left open may
+   * never end, and one it starts after the retry began is not shown.
    */
   attemptIndex: number | undefined;
   /**
@@ -181,7 +181,7 @@ export interface TestLine {
   readonly expectedFailure?: { readonly reason: string; readonly errorLine: string } | undefined;
   /** Cleanup-phase secondary errors of attempts whose cleanup failed. */
   readonly cleanupErrors: readonly SerializedError[];
-  readonly steps: readonly FinishedStep[];
+  readonly steps: readonly ListedStep[];
   readonly replays: readonly ReplayNotice[];
 }
 
