@@ -502,9 +502,13 @@ fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
 
 fn type_text(entry: &Entry, text: &str, physical: bool, id: Option<u32>, deadline: Instant) -> Outcome<()> {
     let run = input::TypingRun::start(id);
+    let window = windows::find(entry.pid, entry.window)?;
+    // Text sent to the app goes to its key window, which must be the one the field is in, as for `press`.
+    if !physical {
+        key_window(entry.pid, &window)?;
+    }
     focus(&entry.element, deadline)?;
     let route = if physical {
-        let window = windows::find(entry.pid, entry.window)?;
         raise(entry.pid, &window).map_err(Failure::delivered)?;
         Route::Physical
     } else {
@@ -553,15 +557,22 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool) -> Outcome<()> 
         raise(pid, &element)?;
         return input::press(&combo, Route::Physical).map_err(Failure::delivered);
     }
+    key_window(pid, &element)?;
+    input::press(&combo, Route::Process(pid)).map_err(Failure::delivered)
+}
+
+/// Refuses unless `window` is the app's key window, or holds the focused sheet or alert: a key or text sent to the app
+/// goes to its key window, and would land in another one.
+fn key_window(pid: i32, window: &Element) -> Outcome<()> {
     let app = Element::application(pid);
     // A sheet or an alert on the window is the app's focused window then, and keys reach the window through it.
     let focused = app.element("AXFocusedWindow");
-    let on_window = focused.as_ref() == Some(&element) || focused.as_ref().and_then(|focused| focused.element("AXParent")).as_ref() == Some(&element);
-    if !on_window {
-        return Err(Failure::refused(codes::ACTION_FAILED, "the window is not the app's key window, so a key sent to the app would land elsewhere")
-            .with_details(serde_json::json!({ "cause": "exact_window_focus_unconfirmed" })));
+    let on_window = focused.as_ref() == Some(window) || focused.as_ref().and_then(|focused| focused.element("AXParent")).as_ref() == Some(window);
+    if on_window {
+        return Ok(());
     }
-    input::press(&combo, Route::Process(pid)).map_err(Failure::delivered)
+    Err(Failure::refused(codes::ACTION_FAILED, "the window is not the app's key window, so a key sent to the app would land elsewhere")
+        .with_details(serde_json::json!({ "cause": "exact_window_focus_unconfirmed" })))
 }
 
 /// Brings a window of `pid` forward.
