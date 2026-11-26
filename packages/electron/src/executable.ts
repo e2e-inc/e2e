@@ -12,6 +12,9 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { ConfigurationError, InfrastructureError } from '@e2e-dev/core/engine';
 
+/** How much of a failed download's output its error quotes, in characters. */
+const INSTALL_OUTPUT_TAIL = 2000;
+
 /** The `electron` package a project installed: its directory and the binary it runs. */
 interface ElectronPackage {
   readonly directory: string;
@@ -42,17 +45,6 @@ function electronPackage(projectRoot: string): ElectronPackage | undefined {
   return { directory, binary: binary !== undefined && existsSync(binary) ? binary : undefined, version, ...(overridden && binary !== undefined ? { override: binary } : {}) };
 }
 
-/** A missing binary where `ELECTRON_OVERRIDE_DIST_PATH` points: the variable is wrong, and downloading would not help. */
-function overrideMissing(binary: string): ConfigurationError {
-  return new ConfigurationError('INVALID_CONFIG', `ELECTRON_OVERRIDE_DIST_PATH names the directory of the Electron binary, and none is at ${binary}; fix the variable or unset it`);
-}
-
-/** An `executablePath` that names no executable file, with the fix for the common case: a macOS `.app` bundle. */
-function notExecutable(resolved: string): ConfigurationError {
-  const bundle = /\.app\/?$/.test(resolved) ? `; a macOS app runs as the binary inside its bundle, ${path.join(resolved, 'Contents', 'MacOS', path.basename(resolved, '.app'))}` : '';
-  return new ConfigurationError('INVALID_CONFIG', `electron({ executablePath }) names ${resolved}, which is not an executable file${bundle}`);
-}
-
 /**
  * Whether a path names a regular file this process may execute: a directory
  * passes the execute-permission check too (search permission), so it is
@@ -69,49 +61,73 @@ function isExecutableFile(file: string): boolean {
   }
 }
 
-function notInstalled(projectRoot: string): ConfigurationError {
-  return new ConfigurationError(
-    'INVALID_CONFIG',
-    `electron() starts the electron package installed in the project, and ${projectRoot} has none: install it (npm install --save-dev electron), or name an executable with electron({ executablePath })`,
-  );
+/** What a launch would start, or why it has nothing to start: the one answer `prepare`, `init`, and `doctor` each act on. */
+type Executable =
+  /** An `executablePath` that runs. */
+  | { readonly kind: 'named'; readonly file: string }
+  /** The project's Electron binary, downloaded. */
+  | { readonly kind: 'installed'; readonly file: string; readonly version: string }
+  /** The project's `electron` package, its binary not downloaded yet. */
+  | { readonly kind: 'undownloaded'; readonly package: ElectronPackage }
+  | { readonly kind: 'misconfigured'; readonly problem: string };
+
+function locateExecutable(projectRoot: string, executablePath: string | undefined): Executable {
+  if (executablePath !== undefined) {
+    const resolved = path.resolve(projectRoot, executablePath);
+    if (isExecutableFile(resolved)) return { kind: 'named', file: resolved };
+    // The fix for the common case: a macOS `.app` bundle.
+    const bundle = /\.app\/?$/.test(resolved) ? `; a macOS app runs as the binary inside its bundle, ${path.join(resolved, 'Contents', 'MacOS', path.basename(resolved, '.app'))}` : '';
+    return { kind: 'misconfigured', problem: `electron({ executablePath }) names ${resolved}, which is not an executable file${bundle}` };
+  }
+  const installed = electronPackage(projectRoot);
+  if (installed === undefined) {
+    return {
+      kind: 'misconfigured',
+      problem: `electron() starts the electron package installed in the project, and ${projectRoot} has none: install it (npm install --save-dev electron), or name an executable with electron({ executablePath })`,
+    };
+  }
+  if (installed.binary !== undefined) return { kind: 'installed', file: installed.binary, version: installed.version };
+  // The variable is wrong, and downloading would not help.
+  if (installed.override !== undefined) {
+    return { kind: 'misconfigured', problem: `ELECTRON_OVERRIDE_DIST_PATH names the directory of the Electron binary, and none is at ${installed.override}; fix the variable or unset it` };
+  }
+  return { kind: 'undownloaded', package: installed };
 }
 
 /** The executable a launch starts, checked: an `executablePath` that runs, or the project's downloaded Electron binary. */
-export async function resolveExecutable(projectRoot: string, executablePath: string | undefined): Promise<string> {
-  if (executablePath !== undefined) {
-    const resolved = path.resolve(projectRoot, executablePath);
-    if (!isExecutableFile(resolved)) throw notExecutable(resolved);
-    return resolved;
+export function resolveExecutable(projectRoot: string, executablePath: string | undefined): string {
+  const found = locateExecutable(projectRoot, executablePath);
+  switch (found.kind) {
+    case 'named':
+    case 'installed':
+      return found.file;
+    case 'misconfigured':
+      throw new ConfigurationError('INVALID_CONFIG', found.problem);
+    case 'undownloaded':
+      throw new InfrastructureError(
+        'ELECTRON_INSTALL_FAILED',
+        `electron ${found.package.version} is installed at ${found.package.directory} without its binary; the engine's prepare step downloads it before the first test`,
+      );
   }
-  const installed = electronPackage(projectRoot);
-  if (installed === undefined) throw notInstalled(projectRoot);
-  if (installed.binary === undefined && installed.override !== undefined) throw overrideMissing(installed.override);
-  if (installed.binary === undefined) {
-    throw new InfrastructureError(
-      'ELECTRON_INSTALL_FAILED',
-      `electron ${installed.version} is installed at ${installed.directory} without its binary; the engine's prepare step downloads it before the first test`,
-    );
-  }
-  return installed.binary;
 }
 
 /**
- * Downloads the project's Electron binary when it is missing, with the
- * package's own `install.js` (what its first `require` would run), its
- * output sent to `log`. Nothing to do with `executablePath`, or with the
- * binary in place.
+ * Downloads the project's Electron binary when it is missing. Nothing to do
+ * with `executablePath`, or with the binary in place; a wrong path fails
+ * here, once for the run rather than once per test.
  */
 export async function ensureElectronBinary(projectRoot: string, executablePath: string | undefined, log: (line: string) => void, signal: AbortSignal): Promise<void> {
-  if (executablePath !== undefined) {
-    // Checked once for the run, so a wrong path is one error rather than one per test.
-    const resolved = path.resolve(projectRoot, executablePath);
-    if (!isExecutableFile(resolved)) throw notExecutable(resolved);
-    return;
+  const found = locateExecutable(projectRoot, executablePath);
+  if (found.kind === 'misconfigured') throw new ConfigurationError('INVALID_CONFIG', found.problem);
+  if (found.kind !== 'undownloaded') return;
+  await download(found.package, log, signal);
+  if (electronPackage(projectRoot)?.binary === undefined) {
+    throw new InfrastructureError('ELECTRON_INSTALL_FAILED', `electron ${found.package.version}'s install.js finished, but its binary is still missing at ${found.package.directory}`);
   }
-  const installed = electronPackage(projectRoot);
-  if (installed === undefined) throw notInstalled(projectRoot);
-  if (installed.binary !== undefined) return;
-  if (installed.override !== undefined) throw overrideMissing(installed.override);
+}
+
+/** Runs the package's own `install.js` (what its first `require` would run), its output sent to `log`. */
+async function download(installed: ElectronPackage, log: (line: string) => void, signal: AbortSignal): Promise<void> {
   const script = path.join(installed.directory, 'install.js');
   if (!existsSync(script)) {
     throw new InfrastructureError('ELECTRON_INSTALL_FAILED', `electron ${installed.version} at ${installed.directory} has no binary and no install.js to download it with; reinstall the electron package`);
@@ -122,7 +138,7 @@ export async function ensureElectronBinary(projectRoot: string, executablePath: 
     let tail = '';
     const read = (chunk: Buffer): void => {
       const text = chunk.toString('utf8');
-      tail = (tail + text).slice(-2000);
+      tail = (tail + text).slice(-INSTALL_OUTPUT_TAIL);
       for (const line of text.split(/\r?\n/)) if (line.trim() !== '') log(line.trim());
     };
     child.stdout.on('data', read);
@@ -131,24 +147,21 @@ export async function ensureElectronBinary(projectRoot: string, executablePath: 
     child.on('close', (code) => resolve(code === 0 ? undefined : `install.js exited with ${code}: ${tail.trim()}`));
   });
   if (failure !== undefined) throw new InfrastructureError('ELECTRON_INSTALL_FAILED', `downloading the Electron ${installed.version} binary failed: ${failure}`);
-  if (electronPackage(projectRoot)?.binary === undefined) {
-    throw new InfrastructureError('ELECTRON_INSTALL_FAILED', `electron ${installed.version}'s install.js finished, but its binary is still missing at ${installed.directory}`);
-  }
 }
 
 /** For `e2e doctor`: what a run would start, without downloading anything. */
 export function describeExecutable(projectRoot: string, executablePath: string | undefined): { readonly status: 'pass' | 'warn' | 'fail'; readonly message: string } {
-  if (executablePath !== undefined) {
-    const resolved = path.resolve(projectRoot, executablePath);
-    return isExecutableFile(resolved)
-      ? { status: 'pass', message: `starts ${resolved}` }
-      : { status: 'fail', message: notExecutable(resolved).message };
+  const found = locateExecutable(projectRoot, executablePath);
+  switch (found.kind) {
+    case 'named':
+      return { status: 'pass', message: `starts ${found.file}` };
+    case 'installed':
+      return { status: 'pass', message: `electron ${found.version} at ${found.file}` };
+    case 'undownloaded':
+      return { status: 'warn', message: `electron ${found.package.version} is installed without its binary; the first run downloads it` };
+    case 'misconfigured':
+      return { status: 'fail', message: found.problem };
   }
-  const installed = electronPackage(projectRoot);
-  if (installed === undefined) return { status: 'fail', message: notInstalled(projectRoot).message };
-  if (installed.binary === undefined && installed.override !== undefined) return { status: 'fail', message: overrideMissing(installed.override).message };
-  if (installed.binary === undefined) return { status: 'warn', message: `electron ${installed.version} is installed without its binary; the first run downloads it` };
-  return { status: 'pass', message: `electron ${installed.version} at ${installed.binary}` };
 }
 
 /**

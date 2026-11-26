@@ -156,7 +156,7 @@ export class AppProcess {
       if (cause instanceof EngineError) throw cause;
       // The app exiting while Playwright attached is the app's doing, as one that quits before its first window is.
       if (closedWindow(cause)) throw new EngineError('INVALID_STATE', `the app quit while it was launching: ${launchFailure(cause)}`, { retryable: false, cause });
-      throw new EngineError('ENGINE_FAILURE', `could not launch ${setup.executable}${appPath === undefined ? '' : ` with ${appPath}`}: ${launchFailure(cause)}`, { retryable: false, cause });
+      throw new EngineError('ENGINE_FAILURE', `could not launch ${setup.executable}${appPath === undefined ? '' : ` with ${appPath}`}: ${launchFailure(cause)}${unansweredHint(cause)}`, { retryable: false, cause });
     }
   }
 
@@ -287,11 +287,21 @@ async function placeDownloads(app: ElectronApplication, directory: string, withi
 }
 
 /**
+ * What to check when the app started but its inspector never answered: the
+ * two causes seen on real apps, neither of which the timeout names.
+ */
+function unansweredHint(cause: unknown): string {
+  if (!(cause instanceof Error) || !/Timeout \d+ms exceeded/.test(cause.message)) return '';
+  const keychain = process.platform === 'darwin' ? ', or the app waits on a keychain prompt (pass electron({ args: [\'--use-mock-keychain\'] }))' : '';
+  return `. The app never answered on its inspector: a packaged app built with the EnableNodeCliInspectArguments fuse off cannot be driven${keychain}`;
+}
+
+/**
  * A failed launch's own message and what the app wrote to stderr: Playwright
  * puts the app's output in its call log, below the first line, which is often
  * only a timeout.
  */
-function launchFailure(cause: unknown): string {
+export function launchFailure(cause: unknown): string {
   if (!(cause instanceof Error)) return String(cause);
   const [first = '', ...rest] = cause.message.split('\n');
   // Playwright logs a line once per listener; each is kept once, in order.
@@ -303,7 +313,7 @@ function launchFailure(cause: unknown): string {
 }
 
 /** The run's environment for the app, without `ELECTRON_RUN_AS_NODE`, with the engine's `env` option over it. */
-function launchEnv(runEnv: Readonly<Record<string, string | undefined>>, extra: Readonly<Record<string, string>>): Record<string, string> {
+export function launchEnv(runEnv: Readonly<Record<string, string | undefined>>, extra: Readonly<Record<string, string>>): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(runEnv)) if (value !== undefined) env[key] = value;
   // A runner started from an Electron-based editor inherits this, and the binary would run as plain Node.js.

@@ -356,7 +356,7 @@ function modifierKey(modifier: string): string {
  * `UNSUPPORTED_CAPABILITY`, as the contract asks of a key a surface cannot
  * deliver.
  */
-function playwrightKey(key: string): string {
+export function playwrightKey(key: string): string {
   const parsed = parseKey(key);
   if (parsed === undefined) throw unsupported(`${JSON.stringify(key)} is not a key of the contract grammar`);
   if (parsed.key.kind === 'char' && !/^[\x20-\x7e]$/.test(parsed.key.char)) {

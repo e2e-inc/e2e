@@ -23,7 +23,7 @@ function thrown(details: { readonly text: string; readonly exception?: { readonl
 let objectGroups = 0;
 
 /** A DevTools object group of one call's own: releasing it frees that call's handles and never another's still in use. */
-function objectGroup(): string {
+function newObjectGroup(): string {
   objectGroups += 1;
   return `${WORLD_NAME}${objectGroups}`;
 }
@@ -79,7 +79,7 @@ export class DevTools {
   private async inWorld<T>(page: Page, work: (session: CDPSession, contextId: number, group: string) => Promise<T>): Promise<T> {
     const session = await this.session(page);
     const contextId = await this.world(page);
-    const group = objectGroup();
+    const group = newObjectGroup();
     try {
       return await work(session, contextId, group);
     } finally {

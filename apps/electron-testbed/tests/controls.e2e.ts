@@ -130,7 +130,7 @@ test.describe('controls page', () => {
 
   test('releases a long press its timeout cuts short before the step fails', async ({ screen }) => {
     const cut = await failure(screen.getByRole('button', 'Hold').longPress({ duration: 3000, timeout: 1000 }));
-    expect(cut).toBeDefined();
+    expect((cut as { cause?: { code?: string } }).cause?.code).toBe('ACTION_MAY_HAVE_COMMITTED');
     await expect(screen.getByTestId('hold-state')).toHaveText('up', { timeout: 100 });
   });
 

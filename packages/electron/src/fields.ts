@@ -121,7 +121,7 @@ export function isFocusable(node: AXNode): boolean {
   return !node.ignored && property(node, 'focusable') === true;
 }
 
-export function isEditingHost(facts: DomFacts | undefined): boolean {
+function isEditingHost(facts: DomFacts | undefined): boolean {
   const editable = facts?.attributes['contenteditable'];
   return editable !== undefined && editable.toLowerCase() !== 'false';
 }

@@ -91,7 +91,7 @@ export class ElectronSurface {
     this.projectRoot = info.projectRoot;
     this.appInfo = info.app;
     this.runEnv = info.env;
-    this.executable = await resolveExecutable(info.projectRoot, this.options.executablePath);
+    this.executable = resolveExecutable(info.projectRoot, this.options.executablePath);
     // Checked once here, so a wrong path is one error rather than every test's launch failing.
     const problem = info.app.appPath === undefined ? undefined : appPathProblem(info.projectRoot, info.app.appPath);
     if (problem !== undefined) throw new ConfigurationError('INVALID_CONFIG', problem);

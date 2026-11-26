@@ -26,7 +26,7 @@ describe('the project\'s electron package', () => {
     expect(describeExecutable(project, undefined).status).toBe('warn');
     process.env['ELECTRON_OVERRIDE_DIST_PATH'] = override;
     try {
-      await expect(resolveExecutable(project, undefined)).resolves.toBe(path.join(override, 'electron'));
+      expect(resolveExecutable(project, undefined)).toBe(path.join(override, 'electron'));
       expect(describeExecutable(project, undefined).status).toBe('pass');
     } finally {
       delete process.env['ELECTRON_OVERRIDE_DIST_PATH'];
@@ -37,7 +37,7 @@ describe('the project\'s electron package', () => {
     const project = path.join(root, 'project');
     process.env['ELECTRON_OVERRIDE_DIST_PATH'] = path.join(root, 'nowhere');
     try {
-      await expect(resolveExecutable(project, undefined)).rejects.toThrow(/ELECTRON_OVERRIDE_DIST_PATH/);
+      expect(() => resolveExecutable(project, undefined)).toThrow(/ELECTRON_OVERRIDE_DIST_PATH/);
       await expect(ensureElectronBinary(project, undefined, () => undefined, new AbortController().signal)).rejects.toThrow(/ELECTRON_OVERRIDE_DIST_PATH/);
       expect(describeExecutable(project, undefined)).toMatchObject({ status: 'fail', message: expect.stringContaining('ELECTRON_OVERRIDE_DIST_PATH') });
     } finally {
@@ -62,16 +62,16 @@ describe('app.appPath', () => {
 
 describe('executablePath', () => {
   it('starts a regular file it may execute', async () => {
-    await expect(resolveExecutable(root, 'run.sh')).resolves.toBe(path.join(root, 'run.sh'));
+    expect(resolveExecutable(root, 'run.sh')).toBe(path.join(root, 'run.sh'));
     expect(describeExecutable(root, 'run.sh').status).toBe('pass');
   });
 
   it('refuses a directory, such as an .app bundle, and a file it may not execute, in doctor as at launch', async () => {
     for (const name of ['MyApp.app', 'package.json', 'missing']) {
-      await expect(resolveExecutable(root, name)).rejects.toThrow(/not an executable file/);
+      expect(() => resolveExecutable(root, name)).toThrow(/not an executable file/);
       expect(describeExecutable(root, name)).toMatchObject({ status: 'fail', message: expect.stringContaining('not an executable file') });
     }
-    await expect(resolveExecutable(root, 'MyApp.app')).rejects.toThrow(path.join(root, 'MyApp.app', 'Contents', 'MacOS', 'MyApp'));
+    expect(() => resolveExecutable(root, 'MyApp.app')).toThrow(path.join(root, 'MyApp.app', 'Contents', 'MacOS', 'MyApp'));
     // Checked once in prepare, so a wrong path is one error for the run.
     await expect(ensureElectronBinary(root, 'missing', () => undefined, new AbortController().signal)).rejects.toThrow(/not an executable file/);
   });

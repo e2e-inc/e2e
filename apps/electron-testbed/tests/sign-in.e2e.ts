@@ -3,6 +3,11 @@ import { Transformer } from '@napi-rs/image';
 import { test } from '@e2e-dev/electron';
 import { credentials, expect } from 'e2e';
 
+/** The engine error code under a failed step. */
+function causeCode(error: unknown): string | undefined {
+  return (error as { cause?: { code?: string } } | undefined)?.cause?.code;
+}
+
 test.describe('sign-in window', () => {
   test.beforeEach(async ({ app }) => {
     await app.open();
@@ -112,7 +117,8 @@ test.describe('sign-in window', () => {
 
   test('sends no text once a fill has run out of time', async ({ screen }) => {
     const refused = await screen.getByTestId('slow').fill('late', { timeout: 1000 }).then(() => undefined, (error: unknown) => error);
-    expect(String(refused)).not.toBe('undefined');
+    // Focus went to the field before the time ran out, so the step may have reached the app and is never retried.
+    expect(causeCode(refused)).toBe('ACTION_MAY_HAVE_COMMITTED');
     // The focus handler returns after two seconds; a fill still running then would type now.
     await new Promise((resolve) => setTimeout(resolve, 2500));
     await expect(screen.getByTestId('slow')).toHaveValue('');
@@ -134,7 +140,8 @@ test.describe('sign-in window', () => {
   test('stops typing once pressSequentially has run out of time', async ({ screen }) => {
     const laggy = screen.getByTestId('laggy');
     const refused = await laggy.pressSequentially('abcdefgh', { timeout: 1000 }).then(() => undefined, (error: unknown) => error);
-    expect(String(refused)).not.toBe('undefined');
+    // The time runs out between two keys or under one: either way the step says it timed out, and is never retried.
+    expect(['OPERATION_TIMEOUT', 'ACTION_MAY_HAVE_COMMITTED']).toContain(causeCode(refused));
     // Eight keys take 2.4 seconds; typing that went on past the timeout would finish by now.
     await new Promise((resolve) => setTimeout(resolve, 3000));
     expect((await laggy.inputValue()).length).toBeLessThan(8);

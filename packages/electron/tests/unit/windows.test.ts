@@ -1,0 +1,110 @@
+import { EventEmitter } from 'node:events';
+import type { Page } from 'playwright-core';
+import { describe, expect, it } from 'vitest';
+import { nodeId, Windows } from '../../src/windows.ts';
+
+/** The part of a Playwright page the registry reads: its URL, whether it closed, and its close event. */
+class FakePage extends EventEmitter {
+  private closed = false;
+  readonly address: string;
+
+  constructor(address = 'file:///app/index.html') {
+    super();
+    this.address = address;
+  }
+
+  url(): string {
+    return this.address;
+  }
+
+  isClosed(): boolean {
+    return this.closed;
+  }
+
+  close(): void {
+    this.closed = true;
+    this.emit('close');
+  }
+}
+
+function open(windows: Windows, address?: string): { readonly page: FakePage; readonly serial: number } {
+  const page = new FakePage(address);
+  const window = windows.add(page as unknown as Page);
+  if (window === undefined) throw new Error('the page was not registered');
+  return { page, serial: window.serial };
+}
+
+describe('Windows', () => {
+  it('shows the first window the app opened, and one a later window does not take over', () => {
+    const windows = new Windows();
+    const first = open(windows);
+    open(windows);
+    expect(windows.current()?.serial).toBe(first.serial);
+    expect(windows.open()).toHaveLength(2);
+  });
+
+  it('registers a page once, and never a closed one', () => {
+    const windows = new Windows();
+    const { page } = open(windows);
+    expect(windows.add(page as unknown as Page)).toBeUndefined();
+    const closed = new FakePage();
+    closed.close();
+    expect(windows.add(closed as unknown as Page)).toBeUndefined();
+  });
+
+  it('goes back to the window shown before when the shown one closes, else to the newest', () => {
+    const windows = new Windows();
+    const first = open(windows);
+    const second = open(windows);
+    const third = open(windows);
+    windows.show(2);
+    windows.show(1);
+    second.page.close();
+    expect(windows.current()?.serial).toBe(third.serial);
+    third.page.close();
+    expect(windows.current()?.serial).toBe(first.serial);
+    first.page.close();
+    expect(windows.current()).toBeUndefined();
+    expect(() => windows.require()).toThrow(/no open window/);
+  });
+
+  it('leaves an inspector the app opened out of its windows', () => {
+    const windows = new Windows();
+    open(windows);
+    open(windows, 'devtools://devtools/bundled/devtools_app.html');
+    expect(windows.open()).toHaveLength(1);
+  });
+
+  it('binds a ref to the shown window only, so a node of another window is stale', () => {
+    const windows = new Windows();
+    const first = open(windows);
+    const second = open(windows);
+    const shown = windows.current()!;
+    expect(windows.bind({ id: nodeId(shown, 42), revision: '' })).toEqual({ window: shown, backendNodeId: 42 });
+    expect(() => windows.bind({ id: `${second.serial}.42`, revision: '' })).toThrow(/not shown now/);
+    expect(() => windows.bind({ id: 'window', revision: '' })).toThrow(/not a node of this app/);
+    expect(first.serial).not.toBe(second.serial);
+  });
+
+  it('refuses to close the only window, and a window that is not there', () => {
+    const windows = new Windows();
+    open(windows);
+    expect(() => windows.closable(0)).toThrow(/only window/);
+    expect(() => windows.closable(3)).toThrow(/has 1 window open/);
+    open(windows);
+    expect(windows.closable(1).serial).toBe(2);
+  });
+
+  it('keeps a crashed window marked until it loads again, and forgets everything when the app quits', () => {
+    const windows = new Windows();
+    const { page } = open(windows);
+    const shown = windows.current()!;
+    windows.markCrashed(page as unknown as Page);
+    expect(windows.isCrashed(shown)).toBe(true);
+    windows.markLoaded(page as unknown as Page);
+    expect(windows.isCrashed(shown)).toBe(false);
+    windows.clear();
+    expect(windows.open()).toEqual([]);
+    expect(windows.current()).toBeUndefined();
+  });
+});
