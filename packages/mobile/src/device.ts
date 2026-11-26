@@ -206,9 +206,9 @@ export interface Device {
   /**
    * Presses one hardware button: `'volume-up'`, `'volume-down'`, or
    * `'power'`. An Android emulator or phone takes all three, and a physical
-   * iPhone the volume buttons; an iOS simulator, an Android TV (use
-   * `pressRemote`), and any other device or button is
-   * `UNSUPPORTED_CAPABILITY`. A name outside the list is `INVALID_ARGUMENT`.
+   * iPhone the volume buttons; an iOS simulator, an Android TV, and any
+   * other device or button is `UNSUPPORTED_CAPABILITY`. A name outside the
+   * list is `INVALID_ARGUMENT`.
    * It resolves once the press is sent, with no volume level or screen state,
    * so assert on what the screen shows next.
    */
