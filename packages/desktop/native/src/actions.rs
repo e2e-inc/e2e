@@ -395,8 +395,8 @@ fn same(a: f64, b: f64) -> bool {
 }
 
 /// Steps a value toward `target`, one increment or decrement at a time, until it shows it. It stops when the value
-/// cannot be read or a step changed nothing. A step that went past the target (the step does not divide the distance)
-/// is stepped back, so a value the stepper cannot take leaves it as it was. It never steps past `deadline`: the steps
+/// cannot be read or a step changed nothing. When a step goes past the target (the step does not divide the distance),
+/// it steps back to the value it started from, so a value the stepper cannot take leaves it as it was. It never steps past `deadline`: the steps
 /// sent by then stay sent, delivered but unverified. A failed first step sent nothing; a failed later one follows steps
 /// that landed. A step that answered with an error but may have landed is judged by the value it led to.
 fn step_to(
@@ -406,7 +406,8 @@ fn step_to(
     mut step: impl FnMut(bool) -> Outcome<()>,
     mut settle: impl FnMut() -> Option<f64>,
 ) -> Outcome<bool> {
-    let Some(mut now) = shown else { return Ok(false) };
+    let Some(start) = shown else { return Ok(false) };
+    let mut now = start;
     for attempt in 0..MAX_STEPS {
         if same(now, target) {
             return Ok(true);
@@ -427,13 +428,23 @@ fn step_to(
             return stepped.map(|()| false);
         }
         if !same(next, target) && ((up && next > target) || (!up && next < target)) {
-            // Put back the value it had: a fill the stepper cannot take must not leave it changed.
-            let back = step(!up).is_ok() && settle().is_some_and(|value| same(value, now));
+            // Put back the value it had before the fill, a step at a time: a fill the stepper cannot take must not leave
+            // it changed. As many steps back as went forward, and none more once a step changes nothing.
+            let mut value = next;
+            for _ in 0..=attempt {
+                if same(value, start) || step(!up).is_err() {
+                    break;
+                }
+                match settle() {
+                    Some(back) if !same(back, value) => value = back,
+                    _ => break,
+                }
+            }
             let failure = Failure::unconfirmed(codes::ACTION_FAILED, format!("the stepper steps from {now} to {next}, past {target}"));
-            return Err(if back {
-                Failure { message: format!("{}; it was stepped back to {now}", failure.message), ..failure }
+            return Err(if same(value, start) {
+                Failure { message: format!("{}; it was stepped back to {start}", failure.message), ..failure }
             } else {
-                Failure { message: format!("{}, and could not be stepped back", failure.message), ..failure }
+                Failure { message: format!("{}, and could not be stepped back to {start}", failure.message), ..failure }
             });
         }
         now = next;
@@ -942,8 +953,8 @@ mod tests {
         );
         let failure = past.expect_err("2 does not divide 3");
         assert_eq!(failure.delivery, crate::failure::Delivery::Unknown);
-        assert!(failure.message.contains("stepped back to 2"), "{}", failure.message);
-        assert_eq!(value.get(), 2.0);
+        assert!(failure.message.contains("stepped back to 0"), "{}", failure.message);
+        assert_eq!(value.get(), 0.0);
         let count = Cell::new(0);
         let stuck = step_to(
             3.0,
