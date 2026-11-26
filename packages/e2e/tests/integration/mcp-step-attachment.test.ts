@@ -228,7 +228,14 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     const tapped = await invoke(client, 'call', { tool: 'tap', args: { target } });
     expect(tapped.isError, tapped.text).toBe(false);
     expect(tapped.text).toContain('Submitted');
-    expect((await invoke(client, 'call', { tool: 'test_lines' })).text).toContain('.tap()');
+    const linesTool = await invoke(client, 'tools', { session: opened.session, tool: 'test_lines' });
+    expect(linesTool.isError, linesTool.text).toBe(false);
+    expect(linesTool.text).toContain('Use these lines at the pause point of the held test');
+    expect(linesTool.text).not.toMatch(/split the draft into tests/i);
+    const drafted = await invoke(client, 'call', { tool: 'test_lines' });
+    expect(drafted.text).toContain('.tap()');
+    expect(drafted.text).toContain('Put them in the held test at the pause point');
+    expect(drafted.text).not.toMatch(/split these lines into tests/i);
     expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
     expect(await held.exited).toBe(0);
   });
@@ -662,6 +669,43 @@ ${CONFIG.replace('  video: true,', `  video: true,
     // Thrown after the call ended: nobody is left to fail, and the worker goes on.
     expect((await run("setTimeout(() => { throw new Error('late'); }, 150);\nreturn 'returned';")).text).toContain('Returned: "returned"');
     await sleep(400);
+
+    expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
+    expect(await held.exited).toBe(0);
+  });
+
+  it("reads the config's services in attached run_code and calls their functions in the run's process", async () => {
+    const config = `import { appendFileSync } from 'node:fs';
+${CONFIG.replace('export default {', `const inbox = {
+  async *start() {
+    yield {
+      url: 'http://inbox.test',
+      record: (what: string) => {
+        appendFileSync('events.log', 'record ' + what + '\\n');
+
+        return what.length;
+      },
+    };
+  },
+};
+
+export default {
+  services: { inbox },`)}`;
+
+    const dir = project(`await screen.pause(); ${STEP}`, config);
+    const held = await pause(dir);
+    const { client } = await mcp(dir);
+
+    await openSession(client, { attach: held.id });
+
+    const ran = await invoke(client, 'call', {
+      tool: 'run_code',
+      args: { code: "return { url: services.inbox.url, length: await services.inbox.record('attached') };" },
+    });
+
+    expect(ran.isError, ran.text).toBe(false);
+    expect(ran.text).toContain('{"url":"http://inbox.test","length":8}');
+    expect(readFileSync(path.join(dir, 'events.log'), 'utf8')).toBe('record attached\n');
 
     expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
     expect(await held.exited).toBe(0);

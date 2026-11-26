@@ -8,6 +8,7 @@
  * | SESSION_NOT_FOUND, or a session-or-device-selector refusal  | INVALID_STATE                |
  * | UNSUPPORTED_OPERATION, NOT_IMPLEMENTED, UNSUPPORTED_PLATFORM | UNSUPPORTED_CAPABILITY      |
  * | "not supported on this device" under any code                | UNSUPPORTED_CAPABILITY       |
+ * | a daemon with no runtime for the command (`details.reason`)  | UNSUPPORTED_CAPABILITY       |
  * | a stale-ref refusal by `details.reason` (action paths only)  | NODE_STALE (retryable)        |
  * | target_still_moving with `details.dispatched: no`            | NODE_STALE (retryable)        |
  * | a covered or keyboard-occluded target, `dispatched: no`      | NOT_ACTIONABLE, with the hint |
@@ -80,6 +81,14 @@ const UNSUPPORTED_PATTERN = /\b(?:is )?not supported\b|\bunsupported\b/i;
  * session and no device selector to fall back on (0.21.21).
  */
 const NO_SESSION_REASON = 'session_or_device_selector_required';
+
+/**
+ * The `details.reason` an agent-device daemon fails a command with when it
+ * has no runtime for it: a daemon older than the command, such as one a
+ * device provider pinned to an earlier version. The daemon reports it as
+ * `COMMAND_FAILED`, but nothing was sent and the backend cannot do it.
+ */
+const RUNTIME_MISSING_REASON = 'generic-route-runtime-missing';
 
 /**
  * The `details.reason` values agent-device refuses an `@ref` with: the ref
@@ -257,7 +266,7 @@ export function translateError(cause: unknown, operation: string, where?: string
   if (isNoSession(cause)) {
     return new EngineError('INVALID_STATE', text, options);
   }
-  if (UNSUPPORTED_CODES.has(normalized.code) || UNSUPPORTED_PATTERN.test(normalized.message)) {
+  if (UNSUPPORTED_CODES.has(normalized.code) || UNSUPPORTED_PATTERN.test(normalized.message) || details(cause).reason === RUNTIME_MISSING_REASON) {
     return new EngineError('UNSUPPORTED_CAPABILITY', text, options);
   }
   const state = runnerState(cause);
@@ -356,7 +365,7 @@ function notInstalledCause(cause: unknown): boolean {
 }
 
 /** True for a translated `open` agent-device refused because no installed app matches the name. */
-export function isAppNotInstalled(error: unknown): boolean {
+export function isAppNotInstalled(error: unknown): error is Error {
   return error instanceof Error && notInstalledCause(error.cause);
 }
 
@@ -372,7 +381,7 @@ export function appNotInstalled(error: unknown, app: string, where: string | und
   return new ConfigurationError(
     'TEST_SETUP_FAILED',
     `${operation} ${app} failed: ${app} is not installed on the device${location}. Install it with device.installApp() first (with no path, it installs the target's app.appPath), or check the bundle id or package name.`,
-    { cause: (error as Error).cause },
+    { cause: error.cause },
   );
 }
 
