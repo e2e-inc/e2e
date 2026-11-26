@@ -139,6 +139,7 @@ rules:
 | `tapModifiers` | Not a boolean, or `true` without `perform`. |
 | `selectsDevice` | Not a boolean, or `true` without `prepare`. |
 | `grantsAllPermissions` | Not a boolean. |
+| `appLocale` | Not a boolean. |
 | `launchArgumentValues` | Not a boolean. |
 | `fileApps` | Not a boolean. |
 | `isolation` | Anything but `'attempt'` or `'worker'`. |
@@ -174,6 +175,7 @@ The body of one target. Every member but `name`, `version`, and
 | [`tapModifiers`](#capabilities) | `boolean` |
 | [`selectsDevice`](#capabilities) | `boolean` |
 | [`grantsAllPermissions`](#capabilities) | `boolean` |
+| [`appLocale`](#capabilities) | `boolean` |
 | [`launchArgumentValues`](#engineappinfo) | `boolean` |
 | [`fileApps`](#capabilities) | `boolean` |
 | [`keyboard`](#keyboard) | `EngineKeyboard` |
@@ -291,6 +293,12 @@ export interface Engine {
    * config load, so an engine that predates the value never receives it.
    */
   readonly grantsAllPermissions?: boolean;
+  /**
+   * The engine launches the app in `app.locale`, which reaches it as
+   * `EngineAppInfo.locale`. Without it the harness refuses `app.locale` at
+   * config load, so an engine that predates the field never ignores it.
+   */
+  readonly appLocale?: boolean;
   /**
    * The engine reads the object form of `app.launchArguments` from
    * `EngineAppInfo.launchArgumentValues`. Without it the harness refuses an
@@ -456,6 +464,7 @@ member. Two gaps end differently:
 | `tapModifiers: true` | - | `perform` | `modifiers` on `tap`, `doubleTap`, `multiTap`, and `secondaryTap`. |
 | `selectsDevice: true` | - | `prepare` | `e2e run --device`, the device `prepare` binds. |
 | `grantsAllPermissions: true` | - | - | `app.permissions: 'all'`, which the engine receives as `EngineAppInfo.allPermissions`. Without it, config load refuses `'all'`, so an engine released before it never receives the string. |
+| `appLocale: true` | - | - | `app.locale`, a BCP 47 tag, in `EngineAppInfo.locale`. Without it, config load refuses `app.locale`. |
 | `launchArgumentValues: true` | - | - | The object form of `app.launchArguments`, in `EngineAppInfo.launchArgumentValues`. |
 | `fileApps: true` | - | - | A target whose `app.url` is a `file:` URL. `validateApp` is told with `fileApp: true`. |
 | `performAt` + `pointerActions` | `pointer` | `observe` | One pointer action at a viewport point, with no node behind it. |
@@ -1605,6 +1614,12 @@ export interface EngineAppInfo {
    * `grantsAllPermissions` receives it; for any other, the config is refused.
    */
   readonly allPermissions?: true;
+  /**
+   * `app.locale`: the BCP 47 tag the app runs in, as the target declared it.
+   * Only an engine that declares `appLocale` receives it; for any other, the
+   * config is refused.
+   */
+  readonly locale?: string;
 }
 ```
 

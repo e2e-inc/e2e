@@ -393,11 +393,15 @@ export default {
   'NO']` loads that dev server on every fresh launch, dev menu off;
   `app.command` (`npx expo start --port 8081`) with `readyUrl:
   'http://localhost:8081/status'` starts it.
-- Another language on iOS: `app.launchArguments: { AppleLanguages: ['fr'],
-  AppleLocale: 'fr_FR' }`, one target per language; the app must ship it.
-  Android has no such argument, and these names in an object fail at config load there:
-  on a hosted device set `language` and `locale` on `browserstack()` or
-  `testmu()`, on a local one set the device's language.
+- Another language: `app.locale: 'fr-FR'` (a BCP 47 tag), one target per
+  language, or `device.openApp(app, { relaunch: true, locale })` for one
+  launch; the app must ship it. iOS gets `AppleLanguages`/`AppleLocale`
+  launch arguments (don't set those in `launchArguments` too). Android gets
+  the app's own language over this machine's `adb` (Android 13+), and the
+  app's earlier language comes back at the end of the run; on a provider's Android device it fails at
+  config load, and so does iOS on `browserstack()` or `testmu()`, whose
+  devices drop launch arguments: set `language` and `locale` on the
+  provider there.
 - One worker per device. No `device`: every booted simulator or emulator of
   the platform, and every reachable paired iPhone or iPad or connected Android phone, is the pool, up to `workers`,
   minus devices another agent-device session holds (one another session takes while `prepare` boots it, starts the runner, or opens the app is swapped for the next free one, or its worker dropped when none is free, unless a short-lived agent-device command only had it busy; none booted: agent-device boots

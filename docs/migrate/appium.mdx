@@ -301,7 +301,7 @@ is not a step, so it skips the report and secret redaction.
 | `bstack:options.local`, `lt:options.tunnel` | Point the app at a backend the hosted device can reach |
 | `appium:appActivity`, `appWaitActivity`, `startActivity()` | `device.openLink(url)`, or `client.apps.open` through [`unstable_raw`](/reference/mobile#unstable_raw) |
 | `appium:processArguments.env` | Pass a launch argument and read it in the app |
-| `appium:language`, `appium:locale` on a local device | On iOS, `app.launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`, see [Run the app in another language](/mobile#run-the-app-in-another-language). On Android, set the device language before the run |
+| `appium:language`, `appium:locale` on a local device | `app.locale: 'fr-FR'`, see [Run the app in another language](/mobile#run-the-app-in-another-language). On Android it needs Android 13 or newer |
 | `appium:disableWindowAnimation`, `reduceMotion` | On Android, `client.settings.update` through [`unstable_raw`](/reference/mobile#unstable_raw) |
 
 </Accordion>

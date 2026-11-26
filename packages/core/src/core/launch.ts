@@ -38,7 +38,7 @@ export interface CoreFixtures {
 }
 
 /** The app a host drives: what `app.open()` opens on a browser, or launches on a device. */
-export type LaunchApp = Pick<TargetApp, 'url' | 'bundleId' | 'appPath' | 'linkBase' | 'identity' | 'launchArguments' | 'permissions'>;
+export type LaunchApp = Pick<TargetApp, 'url' | 'bundleId' | 'appPath' | 'linkBase' | 'identity' | 'launchArguments' | 'permissions' | 'locale'>;
 
 export interface LaunchOptions {
   /** The app: `url` on a browser; `bundleId` or `appPath` on a device, and `linkBase` for `app.open(path)` there. */
@@ -120,7 +120,7 @@ export interface Host<Fixtures extends object = {}> extends AsyncDisposable {
 }
 
 const LAUNCH_OPTION_KEYS = ['app', 'secrets', 'headed', 'timeout', 'signal', 'handleSignals', 'artifactsDir', 'cwd', 'env', 'onNotice'] as const;
-const LAUNCH_APP_KEYS = ['url', 'bundleId', 'appPath', 'linkBase', 'identity', 'launchArguments', 'permissions'] as const satisfies readonly (keyof LaunchApp)[];
+const LAUNCH_APP_KEYS = ['url', 'bundleId', 'appPath', 'linkBase', 'identity', 'launchArguments', 'permissions', 'locale'] as const satisfies readonly (keyof LaunchApp)[];
 const SESSION_OPTION_KEYS = ['state', 'signal'] as const;
 /** The finished steps a session keeps, what its agent reads as the steps before its own; a bot's session runs for days. */
 const RETAINED_STEPS = 500;

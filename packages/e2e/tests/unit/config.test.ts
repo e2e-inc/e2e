@@ -623,6 +623,36 @@ describe('resolveConfig', () => {
     );
   });
 
+  it('takes app.locale as a BCP 47 tag, only on an engine that declares appLocale, which receives it as declared', () => {
+    // An engine that predates the field would launch the app in the device's own language.
+    expect(() => resolveApp({ bundleId: 'dev.shop.app', locale: 'fr-FR' })).toThrow(
+      new ConfigurationError('INVALID_CONFIG', 'target "web" app.locale is set, and engine "fake" does not take it (it declares no appLocale)'),
+    );
+    const seen: unknown[] = [];
+    const localizing = defineEngine({
+      name: 'localizing',
+      version: '1.0.0',
+      spiVersion: 1,
+      appLocale: true,
+      validateApp(app) {
+        seen.push(app);
+      },
+    });
+    const resolveLocale = (locale: unknown) =>
+      resolve({ targets: [{ ...WEB, engine: localizing, app: { bundleId: 'dev.shop.app', locale: locale as string } }] }).targets[0]!.app;
+    const app = resolveLocale('zh-Hans-CN');
+    expect(app.locale).toBe('zh-Hans-CN');
+    expect(seen).toEqual([{ bundleId: 'dev.shop.app', locale: 'zh-Hans-CN' }]);
+    expect(engineAppInfo(app)).toEqual({ bundleId: 'dev.shop.app', locale: 'zh-Hans-CN' });
+    expect(resolveLocale(undefined).locale).toBeUndefined();
+    for (const refused of ['', 'und', 'fr_FR', 'not a tag', 42]) {
+      expect(() => resolveLocale(refused)).toThrow(
+        new ConfigurationError('INVALID_CONFIG', `target "web" app.locale must be a BCP 47 language tag such as "fr-FR", got ${JSON.stringify(refused)}`),
+      );
+    }
+    expect(() => defineEngine({ name: 'bad', version: '1.0.0', spiVersion: 1, appLocale: invalid<boolean>('yes') })).toThrow(/appLocale must be a boolean/);
+  });
+
   it('takes launch arguments as an object of name to string, number, boolean, or list of strings, and leaves out an undefined value', () => {
     const launchArguments = { AppleLanguages: ['fr'], AppleLocale: 'fr_FR', e2e: true, retries: 3, skipOnboarding: undefined };
     expect(resolveApp({ bundleId: 'dev.shop.app', launchArguments }).launchArguments).toEqual({

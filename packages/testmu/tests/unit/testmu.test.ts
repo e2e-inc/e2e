@@ -64,6 +64,8 @@ describe('testmu()', () => {
   it("is a device provider named testmu that leases through agent-device's testmu plugin and records TestMu AI's session video", () => {
     const provider = testmu(options);
     expect(provider.name).toBe('testmu');
+    // agent-device's WebDriver backend drops launch arguments, so app.locale is refused on its iOS devices.
+    expect(provider.launchArguments).toBe(false);
     expect(provider.record).toBeTypeOf('function');
     expect(mocks.leases).toHaveBeenCalledWith({ provider: 'testmu', label: 'TestMu AI' });
   });

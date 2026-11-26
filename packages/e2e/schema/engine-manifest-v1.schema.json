@@ -128,6 +128,10 @@
       "description": "The engine grants app.permissions: 'all', which it receives as the app's allPermissions.",
       "type": "boolean"
     },
+    "appLocale": {
+      "description": "The engine launches the app in app.locale, which it receives as the app's locale; without it the harness refuses app.locale at config load.",
+      "type": "boolean"
+    },
     "launchArgumentValues": {
       "description": "The engine reads the object form of app.launchArguments from EngineAppInfo.launchArgumentValues; without it the harness refuses an object at config load.",
       "type": "boolean"

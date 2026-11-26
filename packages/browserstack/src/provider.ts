@@ -153,6 +153,8 @@ export function browserstack(options: BrowserStackOptions): DeviceProvider {
 
   return {
     name: PROVIDER,
+    // agent-device drives BrowserStack over Appium WebDriver, whose open activates the app and drops launch arguments.
+    launchArguments: false,
     async acquire(request: DeviceRequest): Promise<DeviceLease> {
       if (request.appPath !== undefined) throw new Error("BrowserStack installs the app from `app`; leave the target's `app.appPath` out");
       if (noResignApp && request.platform !== 'ios') throw new ConfigurationError('INVALID_CONFIG', 'browserstack: `noResignApp` applies to iOS only');

@@ -316,13 +316,13 @@ export default {
 
 | Throws | When |
 | --- | --- |
-| `INVALID_CONFIG` | At config load: no `app.bundleId` and no `app.appPath`; an `app.url` (not supported yet); a link in `bundleId` (a test opens one with `device.openLink`); an unknown permission name; an Apple launch argument such as `AppleLocale`, or a list item `am start` cannot carry, in an object on an Android target. |
+| `INVALID_CONFIG` | At config load: no `app.bundleId` and no `app.appPath`; an `app.url` (not supported yet); a link in `bundleId` (a test opens one with `device.openLink`); an unknown permission name; an Apple launch argument such as `AppleLocale`, or a list item `am start` cannot carry, in an object on an Android target; an `app.locale` the engine refuses (see [Launch arguments and permissions](#launch-arguments-and-permissions)). |
 | `UNSUPPORTED_CAPABILITY` | `app.open()`, `app.restart()`, or `app.clearState()` on a target with no `app.bundleId` before its build is installed. |
 
 #### Launch arguments and permissions
 
-`app.launchArguments` and `app.permissions` ride every fresh launch of the
-pinned app: `app.open()`, `app.restart()`, and `app.clearState()`, which
+`app.launchArguments`, `app.permissions`, and `app.locale` ride every fresh
+launch of the pinned app: `app.open()`, `app.restart()`, and `app.clearState()`, which
 resets the permissions with the data.
 
 ```ts title="e2e.config.ts"
@@ -371,7 +371,8 @@ export default {
     The app reads it with the matching `Intent` getter. A whole number such
     as `1.0` is an `int`. Android does not read Apple arguments, so
     `AppleLanguages` or `AppleLocale` in an object on an Android target fails
-    with `INVALID_CONFIG`. A list of strings goes to `am start` unchanged.
+    with `INVALID_CONFIG`: set `app.locale` instead. A list
+    of strings goes to `am start` unchanged.
 - `am start` splits a list extra at each comma that has no backslash before
   it, and it keeps that backslash. So on Android, a list in an object fails
   with `INVALID_CONFIG` when the list is empty, or when an item is empty,
@@ -401,14 +402,44 @@ export default {
 - The permissions are set on the app by name before it starts, with no open
   first, since iOS terminates a running app whose permission changed and
   Android one whose permission was revoked.
-- The warm-up passes no launch argument and touches no permission.
-- [`device.openApp(app, { relaunch: true, launchArguments, permissions })`](#openapp)
+- The warm-up passes no launch argument, touches no permission, and sets no
+  locale.
+- [`device.openApp(app, { relaunch: true, launchArguments, permissions, locale })`](#openapp)
   does the same for one launch of any app.
+
+`app.locale` runs the app in a language and region, a BCP 47 tag with a
+language, a script, and a region only (`fr-FR`, `zh-Hans-CN`), on every fresh
+launch:
+
+- On iOS it is the launch's arguments: `locale: 'zh-Hans-CN'` adds
+  `-AppleLanguages (zh-Hans-CN) -AppleLocale zh-Hans_CN` after the target's
+  own. It holds for that launch, and the device keeps its own language. A
+  phone agent-device drives through XCTest refuses launch arguments
+  (`UNSUPPORTED_CAPABILITY`). A provider that declares
+  `launchArguments: false` (`testmu()`, `browserstack()`) drops them, so
+  `app.locale` fails at config load on its iOS devices.
+- On Android the engine runs `adb -s <serial> shell cmd locale
+  set-app-locales <package> --locales <tag>` on this machine before the launch.
+  `adb` is found under `ANDROID_SDK_ROOT`, `ANDROID_HOME`, the SDK's default
+  folder, then on `PATH`. It needs Android 13 (API 33) or newer. Before the
+  first change the engine reads the app's own locales (`get-app-locales`). A
+  later fresh launch of that app without a locale puts them back (by display
+  name, once the launch names the package, so Android recreates its screen),
+  and so do `device.closeApp()` and the worker's end, before its session
+  closes.
+  The worker's end is best effort, like the rest of its cleanup: within half
+  the cleanup budget, then the session closes anyway. A worker that is
+  killed, or an `adb` that fails or hangs then, leaves the locale set.
+- A provider's Android devices are not on this machine's `adb`, so
+  `app.locale` fails at config load there. Neither is a device behind a
+  remote agent-device daemon (`AGENT_DEVICE_DAEMON_BASE_URL`): a launch with a
+  locale fails there with `UNSUPPORTED_CAPABILITY`. Set `language` and `locale` on
+  `browserstack()` or `testmu()` instead.
 
 | Throws | When |
 | --- | --- |
-| `INVALID_CONFIG` | In `app.permissions`: a permission name outside `DevicePermission` (naming the nearest one when it is a likely typo), or a state other than `grant`, `deny`, or `reset`. Fails before any device command. |
-| `INVALID_ARGUMENT` | The same, in `device.openApp`. |
+| `INVALID_CONFIG` | In `app.permissions`: a permission name outside `DevicePermission` (naming the nearest one when it is a likely typo), or a state other than `grant`, `deny`, or `reset`. In `app.locale`: a tag with an extension (`-u-ca-japanese`) or a variant (`-valencia`), `AppleLanguages` or `AppleLocale` in the target's `launchArguments` on iOS, an Android `bundleId` that is not a package name, a target whose Android devices a provider leases, or one whose iOS devices come from a provider with `launchArguments: false`. Fails before any device command. |
+| `INVALID_ARGUMENT` | The same, in `device.openApp`, except that a locale the provider's device cannot carry is `UNSUPPORTED_CAPABILITY` there. |
 
 #### Boot and prepare
 
@@ -862,8 +893,8 @@ expect(await device.isAppInstalled('com.example.companion')).toBe(true);
 ```ts
 /**
  * Brings an app to the foreground by bundle id, package, or display name;
- * `relaunch` restarts it fresh. `launchArguments` and `permissions` apply
- * to this launch alone; the target's configured ones apply to a `relaunch`
+ * `relaunch` restarts it fresh. `launchArguments`, `permissions`, and
+ * `locale` apply to this launch alone; the target's configured ones apply to a `relaunch`
  * of the pinned app, and to no foreground-only open. A link is
  * `INVALID_ARGUMENT` (`file:`, `data:`, `javascript:`, `view-source:`,
  * `blob:`, and `filesystem:` are `POLICY_DENIED`): `openLink` opens one.
@@ -874,7 +905,8 @@ openApp(app: string, options?: OpenAppOptions): Promise<void>;
 ```ts
 await device.openApp('Settings');
 await device.openApp('com.example.app', { relaunch: true, permissions: { camera: 'grant' } });
-await device.openApp('com.example.app', { relaunch: true, launchArguments: { AppleLocale: 'fr_FR' } });
+await device.openApp('com.example.app', { relaunch: true, launchArguments: { e2e: true } });
+await device.openApp('com.example.app', { relaunch: true, locale: 'fr-FR' });
 ```
 
 - A link is refused before the device sees it, since agent-device opens any
@@ -883,7 +915,9 @@ await device.openApp('com.example.app', { relaunch: true, launchArguments: { App
 | Throws | When |
 | --- | --- |
 | `POLICY_DENIED` | A `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, or `filesystem:` link. |
-| `INVALID_ARGUMENT` | Any other link, with a message pointing at `openLink`; an invalid permission name or state; or `launchArguments` outside the declared shape, or one Android cannot carry (see [Launch arguments and permissions](#launch-arguments-and-permissions)). |
+| `INVALID_ARGUMENT` | Any other link, with a message pointing at `openLink`; an invalid permission name or state; `launchArguments` outside the declared shape, or one Android cannot carry; or a `locale` without `relaunch: true`, one that is no language tag, or one beside the same Apple arguments in `launchArguments` (see [Launch arguments and permissions](#launch-arguments-and-permissions)). |
+| `UNSUPPORTED_CAPABILITY` | A `locale` the device cannot carry: on a provider's Android device, on an Android device behind a remote daemon or older than Android 13, or on the iOS device of a provider with `launchArguments: false`. |
+| `ENGINE_FAILURE` | `adb` failed to set the Android app's locale, for example for a package that is not installed. |
 
 #### `openLink`
 
@@ -1478,6 +1512,15 @@ export interface OpenAppOptions {
    * target's `app.permissions` for a relaunch of the pinned app.
    */
   readonly permissions?: LaunchPermissions;
+  /**
+   * The language and region this launch runs the app in, as a BCP 47 tag
+   * (`fr-FR`). Replaces the target's `app.locale` for a relaunch of the
+   * pinned app. On iOS it is this launch's `AppleLanguages` and `AppleLocale`;
+   * on Android the app's own locale (Android 13 and newer), set through this
+   * machine's adb before the launch. Needs `relaunch: true`: a locale takes
+   * effect when the open launches the app fresh.
+   */
+  readonly locale?: string;
 }
 
 /** Permissions agent-device can grant, deny, or reset on an app. */

@@ -25,6 +25,7 @@ export interface TargetAppDeclaration {
   readonly environment: 'test' | 'staging' | 'production' | undefined;
   readonly launchArguments: ResolvedLaunchArguments | undefined;
   readonly permissions: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
+  readonly locale: string | undefined;
   readonly command: CommandConfig | undefined;
   readonly readyUrl: string | undefined;
 }
@@ -71,6 +72,8 @@ export interface ResolvedApp {
   readonly linkBase: string | undefined;
   readonly launchArguments: ResolvedLaunchArguments | undefined;
   readonly permissions: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
+  /** The BCP 47 tag the app runs in; see `TargetApp.locale`. */
+  readonly locale: string | undefined;
   /** `app.command` with `{port}` expanded to the port the app is served on. */
   readonly command: CommandConfig | undefined;
   /** Readiness probe for `command`; defined whenever `command` is. */
@@ -91,6 +94,7 @@ const TARGET_APP_KEYS: readonly string[] = Object.keys({
   environment: true,
   launchArguments: true,
   permissions: true,
+  locale: true,
   command: true,
   readyUrl: true,
 } satisfies Record<keyof TargetApp, true>);
@@ -162,6 +166,7 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
       `${where}.permissions is 'all', which engine "${engine.name}" does not take (it declares no grantsAllPermissions)`,
     );
   }
+  const locale = checkLocale(app.locale, engine, where);
   const checked: TargetAppDeclaration = {
     url: nonEmptyString(app.url, `${where}.url`),
     bundleId: nonEmptyString(app.bundleId, `${where}.bundleId`),
@@ -171,6 +176,7 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
     environment,
     launchArguments,
     permissions,
+    locale,
     command: app.command === undefined ? undefined : normalizeCommand(app.command, `${where}.command`),
     readyUrl: nonEmptyString(app.readyUrl, `${where}.readyUrl`),
   };
@@ -182,8 +188,41 @@ export function checkTargetApp(targetName: string, engine: EngineHandle | undefi
       `${where}.url is a file, and engine "${engine.name}" does not declare that it opens one from this machine's disk: use an engine version that does, or serve the app over http(s)`,
     );
   }
-  engine?.validateApp?.(obj({ url, bundleId, appPath, ...engineLaunchArguments(launchArguments), ...enginePermissions(permissions) }) satisfies EngineAppDeclaration, { targetName, ...(file ? { fileApp: true } : {}) });
+  engine?.validateApp?.(obj({ url, bundleId, appPath, ...engineLaunchArguments(launchArguments), ...enginePermissions(permissions), locale }) satisfies EngineAppDeclaration, { targetName, ...(file ? { fileApp: true } : {}) });
   return checked;
+}
+
+/**
+ * A locale: a BCP 47 tag `Intl.Locale` parses that names a language (not the
+ * undetermined `und`), on an engine that declares `appLocale`; an engine
+ * released before the field would launch the app in the device's own
+ * language without a word.
+ */
+function checkLocale(value: unknown, engine: EngineHandle | undefined, where: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !isLanguageTag(value)) {
+    throw new ConfigurationError('INVALID_CONFIG', `${where}.locale must be a BCP 47 language tag such as "fr-FR", got ${JSON.stringify(value)}`);
+  }
+  if (engine !== undefined && engine.appLocale !== true) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `${where}.locale is set, and engine "${engine.name}" does not take it (it declares no appLocale)${engine.name === 'web' ? ': a browser target sets its locale with web({ locale })' : ''}`,
+    );
+  }
+  return value;
+}
+
+/**
+ * True when `tag` parses as a Unicode locale whose language is known: not
+ * `und`, which the ICU of Node 22 and 24 reports as no language at all.
+ */
+function isLanguageTag(tag: string): boolean {
+  try {
+    const { language } = new Intl.Locale(tag);
+    return language !== undefined && language !== 'und';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -318,6 +357,7 @@ export function resolveTargetApp(targetName: string, app: TargetAppDeclaration, 
     linkBase: app.linkBase,
     launchArguments: app.launchArguments,
     permissions: app.permissions,
+    locale: app.locale,
     command,
     readyUrl: command === undefined ? undefined : readyUrl,
   };
@@ -335,11 +375,11 @@ export function isFileApp(app: Pick<ResolvedApp, 'base'>): boolean {
  * report it on port `0`.
  */
 export function engineAppInfo(app: ResolvedApp): EngineAppInfo {
-  const { base, portRequest, site, bundleId, appPath, launchArguments, permissions } = app;
+  const { base, portRequest, site, bundleId, appPath, launchArguments, permissions, locale } = app;
   const unassigned = portRequest !== undefined && portRequest.port === undefined;
   // A file has no origin to scope a credential to.
   const origin = unassigned || base === undefined || isFileBase(base) ? undefined : base.origin;
-  return obj({ origin, site, bundleId, appPath, ...engineLaunchArguments(launchArguments), ...enginePermissions(permissions) });
+  return obj({ origin, site, bundleId, appPath, ...engineLaunchArguments(launchArguments), ...enginePermissions(permissions), locale });
 }
 
 /** `app.permissions` as an engine receives it: a map under `permissions`, or `'all'` as `allPermissions`. */

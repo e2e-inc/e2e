@@ -153,9 +153,10 @@ export interface Device {
   isAppInstalled(app?: string): Promise<boolean>;
   /**
    * Brings an app to the foreground; `relaunch` restarts it fresh.
-   * `launchArguments` and `permissions` apply to this launch alone; the
-   * target's `app.launchArguments` and `app.permissions` apply to a
-   * `relaunch` of the pinned app, and to no foreground-only open.
+   * `launchArguments`, `permissions`, and `locale` apply to this launch
+   * alone; the target's `app.launchArguments`, `app.permissions`, and
+   * `app.locale` apply to a `relaunch` of the pinned app, and to no
+   * foreground-only open.
    */
   openApp(app: string, options?: OpenAppOptions): Promise<void>;
   /**

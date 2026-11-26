@@ -10,6 +10,7 @@ import { buildEngine } from '../../src/engine.ts';
 import type { MobileOptions } from '../../src/options.ts';
 import type { DeviceConnection } from '../../src/bindings.ts';
 import { AgentDeviceSurface } from '../../src/surface.ts';
+import type { AdbResult } from '../../src/locale.ts';
 import { createFakeClient, SETTINGS_SNAPSHOT, type FakeClient } from './fake-client.ts';
 
 /** Deliberately not `process.cwd()`: relative build paths must resolve here, not there. */
@@ -53,10 +54,21 @@ export interface Harness {
   readonly app: EngineAppInfo;
   /** Runs the engine's `prepare` with the target's app. */
   prepare(info: Omit<EnginePrepareInfo, 'app'>): Promise<EnginePrepareResult | void>;
+  /** Every `adb` argument list the engine ran, in order. */
+  readonly adbCalls: (readonly string[])[];
+  /** Replaces what `adb` answers; by default `defaultAdbOutput`. */
+  respondAdb(responder: (args: readonly string[], signal: AbortSignal) => AdbResult | Promise<AdbResult>): void;
 }
 
 /** The engine's options and its target's app, in one literal: what a test varies. */
-export type HarnessOptions = Partial<MobileOptions> & Pick<EngineAppInfo, 'bundleId' | 'appPath' | 'launchArguments' | 'launchArgumentValues' | 'permissions' | 'allPermissions'>;
+export type HarnessOptions = Partial<MobileOptions> & Pick<EngineAppInfo, 'bundleId' | 'appPath' | 'launchArguments' | 'launchArgumentValues' | 'permissions' | 'allPermissions' | 'locale'>;
+
+/** What `adb` prints by default: API 36 for `getprop`, no app locale for `get-app-locales`, and nothing for anything else. */
+export function defaultAdbOutput(args: readonly string[]): string {
+  if (args.includes('getprop')) return '36\n';
+  if (args.includes('get-app-locales')) return `Locales for ${args.at(-1)} for user 0 are []\n`;
+  return '';
+}
 
 /** An engine over the scripted client; `pinned` false leaves the target's `bundleId` out. */
 export function harness(options: HarnessOptions = {}, pinned = true): Harness {
@@ -68,13 +80,34 @@ export function harness(options: HarnessOptions = {}, pinned = true): Harness {
   });
   const sessions: string[] = [];
   const connections: (DeviceConnection | undefined)[] = [];
-  const { bundleId, appPath, launchArguments, launchArgumentValues, permissions, allPermissions, ...engineOptions } = options;
-  const surface = new AgentDeviceSurface({ platform: 'ios', ...engineOptions }, (session, connection) => {
-    sessions.push(session);
-    connections.push(connection);
-    return fake.client;
-  });
+  const { bundleId, appPath, launchArguments, launchArgumentValues, permissions, allPermissions, locale, ...engineOptions } = options;
+  const adbCalls: (readonly string[])[] = [];
+  let adb = (args: readonly string[], _signal: AbortSignal): AdbResult | Promise<AdbResult> => ({ stdout: defaultAdbOutput(args), stderr: '', exitCode: 0 });
+  const surface = new AgentDeviceSurface(
+    { platform: 'ios', ...engineOptions },
+    (session, connection) => {
+      sessions.push(session);
+      connections.push(connection);
+      return fake.client;
+    },
+    async (args, _env, signal) => {
+      adbCalls.push(args);
+      return adb(args, signal);
+    },
+  );
   const engine = buildEngine(surface);
-  const app = obj({ bundleId: bundleId ?? (pinned ? 'Settings' : undefined), appPath, launchArguments, launchArgumentValues, permissions, allPermissions });
-  return { engine, fake, sessions, connections, surface, app, prepare: (info) => engine.prepare!({ ...info, app }) };
+  const app = obj({ bundleId: bundleId ?? (pinned ? 'Settings' : undefined), appPath, launchArguments, launchArgumentValues, permissions, allPermissions, locale });
+  return {
+    engine,
+    fake,
+    sessions,
+    connections,
+    surface,
+    app,
+    prepare: (info) => engine.prepare!({ ...info, app }),
+    adbCalls,
+    respondAdb: (responder) => {
+      adb = responder;
+    },
+  };
 }

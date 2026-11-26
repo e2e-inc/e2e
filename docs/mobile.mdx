@@ -112,28 +112,44 @@ await device.openApp('com.example.app', { relaunch: true, permissions: { camera:
 
 ### Run the app in another language
 
-On iOS, launch arguments set the app's language and region for that launch.
-The device keeps its own language. Add one target per language:
+Set `app.locale` to a BCP 47 tag with a language, a script, and a region
+only, such as `fr-FR` or `zh-Hans-CN`. Every fresh launch of the target's
+app runs in that language and region. Add one target per language:
 
 ```ts
 {
   name: 'ios-fr',
   engine: mobile({ platform: 'ios' }),
-  app: {
-    bundleId: 'com.example.app',
-    launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' },
-  },
+  app: { bundleId: 'com.example.app', locale: 'fr-FR' },
 }
 ```
 
-- As a list, the same launch is
-  `['-AppleLanguages', '(fr)', '-AppleLocale', 'fr_FR']`.
-- The app must ship the language. If it doesn't, iOS shows its development
-  language.
-- Android has no launch argument for the language. `AppleLanguages` or
-  `AppleLocale` in an object on an Android target fails at config load. On
-  a hosted device, set `language` and `locale` on `browserstack()` or
-  `testmu()`. On a local device, set the device's language before the run.
+To launch one test in another language, pass `locale` to `device.openApp`:
+
+```ts
+await device.openApp('com.example.app', { relaunch: true, locale: 'ar-EG' });
+```
+
+- On iOS the locale becomes the launch's `AppleLanguages` and `AppleLocale`
+  arguments, so don't set those in `launchArguments` too. The device keeps
+  its own language.
+- On Android the engine sets the app's own language with this machine's
+  `adb` before the launch. It needs Android 13 or newer and the app's
+  package name, not its display name. The app's earlier language comes back
+  on its next fresh launch without a locale and at the end of the run,
+  unless the run is killed or `adb` fails then.
+- A provider's Android devices aren't on this machine's `adb`, and TestMu AI
+  and BrowserStack iOS devices drop launch arguments, so `app.locale` fails
+  there. Set `language` and `locale` on `testmu()` or `browserstack()`
+  instead. `@e2e-dev/testmu` before 0.0.8 and `@e2e-dev/browserstack` before
+  0.1.2 don't refuse it, and run the app in the device's language.
+- The warm-up opens the app without the locale. Start each test with
+  `app.open()`.
+- The app must ship the language. If it doesn't, the OS shows its
+  development language.
+
+[Launch arguments and permissions](/reference/mobile#launch-arguments-and-permissions)
+lists every case that fails.
 
 ### Expo development builds
 
@@ -655,6 +671,8 @@ export interface DeviceProvider {
   acquire(request: DeviceRequest): Promise<DeviceLease>;
   release(lease: DeviceLease, context: DeviceReleaseContext): Promise<void>;
   record?(lease: DeviceLease, context: ProviderRecordContext): Promise<ProviderRecording>;
+  /** `false` when the devices drop launch arguments: `app.locale` is then refused on their iOS devices. */
+  readonly launchArguments?: false;
 }
 
 export interface DeviceLease {

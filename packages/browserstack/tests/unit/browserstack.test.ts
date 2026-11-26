@@ -65,6 +65,8 @@ describe('browserstack()', () => {
   it("is a device provider named browserstack that leases through agent-device's browserstack provider and records BrowserStack's session video", () => {
     const provider = browserstack(options);
     expect(provider.name).toBe('browserstack');
+    // agent-device's WebDriver backend drops launch arguments, so app.locale is refused on its iOS devices.
+    expect(provider.launchArguments).toBe(false);
     expect(provider.record).toBeTypeOf('function');
     expect(mocks.leases).toHaveBeenCalledWith({ provider: 'browserstack', label: 'BrowserStack' });
   });

@@ -284,6 +284,8 @@ engineApp.launchArgumentValues?.['AppleLanguages'] satisfies string | number | b
   name: 'toy', version: '1.0.0', spiVersion: 1, grantsAllPermissions: true,
   validateApp: (app) => void [app.permissions?.['camera'] satisfies AppPermissionState | undefined, app.allPermissions satisfies true | undefined],
 }) satisfies Engine;
+// `app.locale` reaches an engine that declares `appLocale` as the tag the target wrote.
+({ name: 'toy', version: '1.0.0', spiVersion: 1, appLocale: true, validateApp: (app) => void (app.locale satisfies string | undefined) }) satisfies Engine;
 // `e2e run --device`: an engine that selects devices reads the name `prepare` hands it.
 ({ name: 'toy', version: '1.0.0', spiVersion: 1, selectsDevice: true, prepare: async ({ device }) => void (device satisfies string | undefined) }) satisfies Engine;
 // @ts-expect-error a target declares its app; there is no services list in this version

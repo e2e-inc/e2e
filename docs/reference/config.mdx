@@ -436,6 +436,7 @@ targets: [
 | [`environment`](#environment) | `'test' \| 'staging' \| 'production'` | `'test'` or `'production'` |
 | [`launchArguments`](#launcharguments) | `string[] \| Record<string, LaunchArgumentValue>` | - |
 | [`permissions`](#permissions) | `Record<string, AppPermissionState> \| 'all'` | - |
+| [`locale`](#locale) | `string` | - |
 | [`command`](#command) | `CommandConfig` | - |
 | [`readyUrl`](#readyurl) | `string` | `url` |
 
@@ -624,6 +625,23 @@ every permission the target's engine can grant.
 
 A browser provider or `connect` takes the `chromium` names: the engine drives
 it over CDP, Lightpanda included.
+
+#### `locale`
+
+The language and region the app runs in, as a BCP 47 tag.
+
+```ts
+locale: 'fr-FR',
+```
+
+- A `mobile()` target launches the app in it on every fresh launch. See
+  [Run the app in another language](/mobile#run-the-app-in-another-language).
+- Only an engine that declares [`appLocale`](/reference/engine#capabilities)
+  takes it. A `web()` target sets its locale with `web({ locale })`.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_CONFIG` | Not a tag `Intl.Locale` parses, or `und`. The engine declares no `appLocale`. The engine adds its own rules: see [the mobile reference](/reference/mobile#launch-arguments-and-permissions). |
 
 #### `command`
 

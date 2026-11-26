@@ -141,6 +141,14 @@ export interface DeviceProvider {
    * by URL.
    */
   record?(lease: DeviceLease, context: ProviderRecordContext): Promise<ProviderRecording>;
+  /**
+   * `false` when the provider's devices drop the launch arguments an open
+   * hands the app, as agent-device's Appium WebDriver backend does. The
+   * engine then refuses `app.locale` on its iOS devices, where the locale
+   * rides the launch arguments, rather than run the app in the device's
+   * own language. Absent, the devices take them.
+   */
+  readonly launchArguments?: false;
 }
 
 /** A provider whose service records the devices it leases. */
@@ -159,6 +167,9 @@ export function asDeviceProvider(device: unknown): DeviceProvider {
   }
   if (candidate.record !== undefined && typeof candidate.record !== 'function') {
     throw new ConfigurationError('INVALID_CONFIG', `mobile: device provider "${candidate.name}" has a record that is not a function`);
+  }
+  if (candidate.launchArguments !== undefined && candidate.launchArguments !== false) {
+    throw new ConfigurationError('INVALID_CONFIG', `mobile: device provider "${candidate.name}" has launchArguments ${JSON.stringify(candidate.launchArguments)}; leave it out, or set false when its devices drop launch arguments`);
   }
   return device as DeviceProvider;
 }
