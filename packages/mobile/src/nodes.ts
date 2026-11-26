@@ -418,10 +418,10 @@ function describesLink(node: RawNode): boolean {
 }
 
 /**
- * The positions of the nodes that a `Link`-described `Button` child echoes
- * under the same name. Before React Native 0.84, a `Text` with `role="link"`
+ * The positions of the nodes whose text a `Link`-described `Button` child
+ * echoes. Before React Native 0.84, a `Text` with `role="link"`
  * (expo-router's `Link`) holds a virtual `Button` child for its link span,
- * described as a `Link` under the span's text. A tap on the text lands on
+ * described as a `Link` and named by the span's text. A tap on the text lands on
  * that button, so the button is the link and the text keeps its class role,
  * also when an `accessibilityLabel` gives the text a different name.
  */
@@ -431,8 +431,7 @@ function echoedLinks(raw: readonly RawNode[], parents: readonly (number | undefi
     const parent = parents[position];
     if (parent === undefined || !describesLink(node) || kindOf(node) !== 'button') return;
     const name = rawName(node);
-    const text = raw[parent] as RawNode;
-    if (name !== undefined && (rawName(text) === name || nonEmpty(text.label) === name)) echoed.add(parent);
+    if (name !== undefined && nonEmpty((raw[parent] as RawNode).label) === name) echoed.add(parent);
   });
   return echoed;
 }
