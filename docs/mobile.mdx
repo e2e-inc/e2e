@@ -265,6 +265,33 @@ await device.openLink('myapp://orders/42');
 await expect(screen.getByText('Order #42')).toBeVisible();
 ```
 
+`device.openLink` opens the link in the running app. To start the app from
+a link, declare [`app.linkBase`](/reference/config#linkbase) on the target
+and call `app.open` with `relaunch: true`. The app is stopped if it's
+running, then launched from the link:
+
+```ts
+await app.open('/orders/42', { relaunch: true });
+```
+
+Before the app starts, the iOS simulator can ask "Open in ...?" for a
+custom-scheme link. Accept it with `device.alert('accept')`.
+
+`app.open` fails with `UNSUPPORTED_CAPABILITY` when the app can't start from
+the link:
+
+- On an iOS simulator with an `http(s)` link, since agent-device launches the
+  app before opening the URL. Use a custom scheme in `app.linkBase`.
+- On a physical iPhone driven through agent-device's XCTest backend, which
+  can't launch the app with a URL. With XCTest, the call fails after stopping
+  the app, leaving it closed. If the iPhone appears in
+  `xcrun devicectl list devices`, agent-device uses CoreDevice and relaunches
+  from the link.
+- On a target with a device provider, launch arguments, or permissions.
+
+See the [reference](/reference/mobile#the-app-under-test). On a web target,
+`app.open` opens the path in a fresh tab ([`app.open`](/reference/app#open)).
+
 `device.setNetwork('offline')` and `device.setAirplaneMode(true)` work on
 Android only. An iOS simulator shares the Mac's network, and simctl can only
 change its status bar, so on iOS both fail with `UNSUPPORTED_CAPABILITY`.

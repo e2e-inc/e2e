@@ -242,6 +242,8 @@ class EngineClient {
         actions: manifest.actions,
         pointerActions: manifest.pointerActions,
         tapModifiers: manifest.tapModifiers,
+        // Drop the server's linkRelaunch flag when this process handles openLink locally, since the flag describes the server's hook.
+        linkRelaunch: this.#options.session?.openLink === undefined ? manifest.linkRelaunch : undefined,
         selectsDevice: manifest.selectsDevice,
         grantsAllPermissions: manifest.grantsAllPermissions,
         launchArgumentValues: manifest.launchArgumentValues,

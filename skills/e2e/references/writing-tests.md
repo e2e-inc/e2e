@@ -374,9 +374,21 @@ label. `browser` (`Browser`): browser targets, import `test` from `@e2e-dev/web`
 - `baseUrl` (`string | undefined`): the target's app URL with the run's
   port and no trailing slash (`${app.baseUrl}/api/users`); `undefined` when
   the target declares no `app.url`. `string` with `test` from `@e2e-dev/web`.
-- `open(path?)`: opens the target's `app.url`, a relative path, or an absolute
-  http(s) URL. On a device it relaunches the pinned app, and a path opens as
-  a link in it only when the target declares `app.linkBase`.
+- `open(path?, options?)`:
+  - `open()` opens the target's `app.url`. On a device it launches the
+    pinned app fresh.
+  - `open(path)` on the web takes a relative path or an absolute http(s)
+    URL. On a device with `app.linkBase`, it takes a relative path or an
+    absolute app link such as `shopapp://orders/42`, and the link opens in
+    the running app.
+  - `open(path, { relaunch: true })` starts the app fresh first. On a device
+    with `app.linkBase`, the app is stopped if it's running, then launched
+    from the link. `relaunch: true` throws `UNSUPPORTED_CAPABILITY` on a
+    device from a provider, with an `http(s)` link on an iOS simulator, or
+    when `app.launchArguments` or `app.permissions` is set. On a physical
+    iPhone driven through XCTest, it fails after stopping the app. In a browser, the open tabs are closed and a new one
+    is opened, as in `restart()`. Then the path is opened instead of the
+    base URL.
 - `back()`: one history step back.
 - `restart()`: recreates the context keeping persisted state (a restored
   session included), then reopens the base URL.

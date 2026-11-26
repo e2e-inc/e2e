@@ -49,7 +49,7 @@ import {
   ConfigurationError,
   TestError,
 } from '@e2e-dev/core/engine';
-import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
+import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, isXctestRefusal, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS, MAX_TAP_COUNT } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import { launchArgumentList, launchArgumentsForOpen } from './launch-arguments.ts';
@@ -112,6 +112,10 @@ export interface InstalledApp {
 }
 
 /** Why nothing is pinned with `appPath` alone: the install is the suite's. */
+/** Why a relaunch from a link fails on an iPhone agent-device drives through XCTest, and what to do instead. */
+const XCTEST_RELAUNCH =
+  "app.open(path, { relaunch: true }) can't launch the app from a link on this iPhone because agent-device is using its XCTest backend. XCTest stopped the app, then couldn't launch it with a URL, leaving it closed. Run the test on an iOS simulator or Android device, or connect the iPhone so it appears in `xcrun devicectl list devices` and agent-device uses CoreDevice.";
+
 const UNINSTALLED_BUILD = "the build the target's `app.appPath` names installed first with `device.installApp()`";
 
 /** How `device.openApp` launches an app. */
@@ -978,9 +982,36 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * device anyway. An unbound open reports the URL as its app name, which is
    * no identity, and the package that took the link as its bundle id when
    * the OS told it; the next snapshot names the foreground app either way.
+   *
+   * With `relaunch`, the app is stopped if running, then launched from the
+   * link. Provider devices are refused since their drivers can open the link
+   * in the running app. Targets with launch arguments or permissions are also
+   * refused, since neither can be passed when launching from a link.
+   *
+   * On an iOS simulator, only custom-scheme links launch the app. For http(s)
+   * links, agent-device launches the app first and then opens the URL.
+   *
+   * Physical iPhones use CoreDevice or XCTest, and agent-device doesn't report
+   * which one. CoreDevice launches the app with the URL. XCTest stops the app
+   * and refuses the URL, leaving it closed, so that error is rethrown with
+   * next steps.
    */
-  async openLink(url: URL, app: string | undefined, signal: AbortSignal, input?: InputBudget): Promise<void> {
+  async openLink(url: URL, app: string | undefined, signal: AbortSignal, input?: InputBudget, relaunch = false): Promise<void> {
     const target = app ?? this.pinnedApp;
+    if (relaunch) {
+      if (!this.pool.isLocal) {
+        throw unsupported("app.open(path, { relaunch: true }) can't launch the app from a link on a device from a provider, since its driver can open the link in the running app");
+      }
+      if (target === undefined) throw unsupported(`relaunching the app from a link needs the target's \`app.bundleId\`, or ${UNINSTALLED_BUILD}`);
+      const launchArguments = launchArgumentList(this.options.platform, this.app.launchArgumentValues ?? this.app.launchArguments);
+      const permissions = configuredPermissions(this.app);
+      if (launchArguments !== undefined || permissions === 'all' || Object.keys(permissions ?? {}).length > 0) {
+        throw unsupported("app.open(path, { relaunch: true }) can't pass the target's `app.launchArguments` or `app.permissions` when launching from a link. Remove them from the target to use relaunch.");
+      }
+      if (this.options.platform === 'ios' && (url.protocol === 'http:' || url.protocol === 'https:')) {
+        throw unsupported("app.open(path, { relaunch: true }) only supports custom-scheme links on an iOS simulator because agent-device launches the app before opening an http(s) URL. Set app.linkBase to the app's custom scheme, or use device.openLink(url) to open the http(s) link in the running app.");
+      }
+    }
     if (target === undefined && this.options.platform === 'ios') {
       throw new TestError(
         'INVALID_ARGUMENT',
@@ -993,12 +1024,16 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
         const open = () => client.apps.open({
           ...this.selection(),
           ...(target === undefined ? { app: url.href } : { app: target, url: url.href }),
+          ...(relaunch ? { relaunch: true } : {}),
         });
         // An `app.open(path)` is an input like a tap: past its budget the link may have opened, so it is never repeated.
         return input === undefined ? open() : input.send(open);
       },
       signal,
-    );
+    ).catch((error: unknown) => {
+      if (relaunch && isXctestRefusal(error)) throw unsupported(XCTEST_RELAUNCH);
+      throw error;
+    });
     this.launched(result.appBundleId ?? (target === undefined ? undefined : (result.appName ?? target)));
   }
 

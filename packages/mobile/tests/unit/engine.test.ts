@@ -3489,6 +3489,77 @@ describe('device fixture', () => {
     await expect(h.engine.session!.openLink!('javascript:alert(1)', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED' });
   });
 
+  it('relaunches the pinned app for app.open(path, { relaunch: true }) in one agent-device open call', async () => {
+    const h = harness({ bundleId: 'dev.e2e.benchmark' });
+    expect(h.engine.linkRelaunch).toBe(true);
+    await openAttempt(h);
+    const before = h.fake.calls.length;
+    await h.engine.session!.openLink!('e2e-benchmark://orders/42', operation(), { relaunch: true });
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
+      ['apps.open', { platform: 'ios', app: 'dev.e2e.benchmark', url: 'e2e-benchmark://orders/42', relaunch: true }],
+    ]);
+  });
+
+  it('refuses http(s) relaunch on an iOS simulator before running commands, and relaunches on Android', async () => {
+    const ios = harness({ bundleId: 'dev.e2e.benchmark' });
+    await openAttempt(ios);
+    const before = ios.fake.calls.length;
+    await expect(ios.engine.session!.openLink!('https://shop.example.com/orders/42', operation(), { relaunch: true })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('only supports custom-scheme links'),
+    });
+    expect(ios.fake.calls.slice(before)).toEqual([]);
+
+    const android = harness({ platform: 'android', bundleId: 'dev.e2e.benchmark' });
+    await openAttempt(android);
+    await android.engine.session!.openLink!('https://shop.example.com/orders/42', operation(), { relaunch: true });
+    expect(android.fake.lastArgs('apps.open')).toEqual({ platform: 'android', app: 'dev.e2e.benchmark', url: 'https://shop.example.com/orders/42', relaunch: true });
+  });
+
+  it("relaunches from a link on a physical iPhone, and explains what to do if agent-device's XCTest backend refuses it", async () => {
+    const physical = () => ({ platform: 'ios', target: 'mobile', device: 'iPhone', id: '00008110-0001', kind: 'device', booted: true });
+    const coredevice = harness({ bundleId: 'dev.e2e.benchmark' });
+    coredevice.fake.respond('devices.boot', physical);
+    await openAttempt(coredevice);
+    await coredevice.engine.session!.openLink!('e2e-benchmark://orders/42', operation(), { relaunch: true });
+    expect(coredevice.fake.lastArgs('apps.open')).toMatchObject({ app: 'dev.e2e.benchmark', url: 'e2e-benchmark://orders/42', relaunch: true });
+
+    const xctest = harness({ bundleId: 'dev.e2e.benchmark' });
+    xctest.fake.respond('devices.boot', physical);
+    await openAttempt(xctest);
+    xctest.fake.respond('apps.open', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'XCTest-backed physical iOS devices do not support deep links or launch arguments during open.', { deviceId: '00008110-0001', backend: 'xctest' });
+    });
+    await expect(xctest.engine.session!.openLink!('e2e-benchmark://orders/42', operation(), { relaunch: true })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('xcrun devicectl list devices'),
+    });
+  });
+
+  it('refuses to relaunch from a link on a target with launch arguments or permissions, before any device command', async () => {
+    for (const options of [{ launchArguments: ['-e2e', 'YES'] }, { permissions: { camera: 'grant' as const } }, { allPermissions: true as const }]) {
+      const h = harness({ bundleId: 'dev.e2e.benchmark', ...options });
+      await openAttempt(h);
+      const before = h.fake.calls.length;
+      await expect(h.engine.session!.openLink!('e2e-benchmark://orders/42', operation(), { relaunch: true })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('app.launchArguments'),
+      });
+      expect(h.fake.calls.slice(before)).toEqual([]);
+    }
+  });
+
+  it.each(['ios', 'android'] as const)('on %s, refuses to relaunch from a link with no pinned app, before any device command', async (platform) => {
+    const h = harness({ platform }, false);
+    await openAttempt(h);
+    const before = h.fake.calls.length;
+    await expect(h.engine.session!.openLink!('e2e-benchmark://orders/42', operation(), { relaunch: true })).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('relaunching the app from a link'),
+    });
+    expect(h.fake.calls.slice(before)).toEqual([]);
+  });
+
   it('lets Android route a link without an app, and needs one on iOS, where an unbound open leaves no session', async () => {
     const android = harness({ platform: 'android' }, false);
     await openAttempt(android);

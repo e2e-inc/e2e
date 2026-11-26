@@ -247,10 +247,12 @@ export class DevicePool {
   }
 
   /**
-   * Whether `e2e run --device` can name the device: a local pool can bind
-   * any device by name or id, and a provider's leases have none to name.
+   * True when the engine drives a local device rather than a leased device
+   * from a provider. Only local devices can be selected with
+   * `e2e run --device` or relaunched from a link (provider drivers like
+   * Revyl's can launch the app first and then pass it the link).
    */
-  get selectsDevice(): boolean {
+  get isLocal(): boolean {
     return !(this.source instanceof LeasedDevices);
   }
 
