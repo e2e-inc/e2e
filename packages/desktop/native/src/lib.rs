@@ -56,14 +56,14 @@ fn data<T: serde::Serialize>(value: T) -> Outcome<Value> {
 pub struct Status {
     pub accessibility: bool,
     pub screen_recording: bool,
-    pub version: String,
 }
 
-/// The permissions this process holds, and the driver's version.
+/// The permissions this process holds. The driver's version is the version of the package it ships in, which the
+/// loader reads; the crate itself is never versioned.
 #[napi]
 pub fn status() -> Status {
     init();
-    Status { accessibility: ax::trusted(), screen_recording: system::screen_recording(), version: env!("CARGO_PKG_VERSION").to_owned() }
+    Status { accessibility: ax::trusted(), screen_recording: system::screen_recording() }
 }
 
 /// Whether the screen is locked; `null` when that cannot be told.
