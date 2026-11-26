@@ -230,6 +230,10 @@ fn intersect(a: Rect, b: Rect) -> Rect {
 
 /// Whether `inner` lies wholly outside `outer`.
 fn outside(inner: Rect, outer: Rect) -> bool {
+    // A node with no size has no place to judge: an open menu reports a zero frame while its items have real ones.
+    if inner.width <= 0.0 || inner.height <= 0.0 {
+        return false;
+    }
     outer.width <= 0.0
         || outer.height <= 0.0
         || inner.x + inner.width <= outer.x
@@ -557,4 +561,24 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         tree,
         window: WindowRef { id: request.window.to_string(), title },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::outside;
+    use crate::windows::Rect;
+
+    const WINDOW: Rect = Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+
+    #[test]
+    fn reads_a_node_past_the_clip_as_outside() {
+        assert!(outside(Rect { x: 0.0, y: 700.0, width: 100.0, height: 20.0 }, WINDOW));
+        assert!(!outside(Rect { x: 10.0, y: 10.0, width: 100.0, height: 20.0 }, WINDOW));
+    }
+
+    #[test]
+    fn never_reads_a_zero_size_node_as_outside() {
+        // An open context menu on macOS 27: its `AXMenu` is 0x0 at the screen's corner, its items are in the window.
+        assert!(!outside(Rect { x: 0.0, y: 1080.0, width: 0.0, height: 0.0 }, WINDOW));
+    }
 }
