@@ -1351,6 +1351,9 @@ takes the role in place of its type's: `alert`, `checkbox`, `combo box`,
 `radio group`, `scroll bar`, `spin button`, `switch`, `tab`, `tab list`,
 `timer`, and `tool bar`. The `scrollbar` and `timer` roles that `scroll bar`
 and `timer` give are not `getByRole` roles.
+React Native writes the Android description in the device's language, so
+only a device set to English gives these roles; elsewhere the node keeps its
+type's role.
 On iOS only an `Other` carries one, and the state words after the role set
 `checked` and `expanded`; only what follows them is the node's value.
 

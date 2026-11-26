@@ -361,15 +361,16 @@ describe('snapshot projection', () => {
       // A link inside plain text, and a link card holding another link.
       { ref: 'e5', index: 4, parentIndex: 0, depth: 1, type: 'android.widget.TextView', label: 'Read the terms' },
       { ref: 'e6', index: 5, parentIndex: 4, depth: 2, type: 'android.widget.Button', label: 'terms', roleDescription: 'Link' },
-      { ref: 'e7', index: 6, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Order 42', roleDescription: 'Link' },
+      // A disabled link card isn't an echo, so the link inside it keeps its own state.
+      { ref: 'e7', index: 6, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Order 42', roleDescription: 'Link', enabled: false },
       { ref: 'e8', index: 7, parentIndex: 6, depth: 2, type: 'android.widget.Button', label: 'Track parcel', roleDescription: 'Link' },
       // Unnamed links share no name, so neither echoes the other.
       { ref: 'e9', index: 8, parentIndex: 0, depth: 1, type: 'android.view.View', roleDescription: 'Link' },
       { ref: 'e10', index: 9, parentIndex: 8, depth: 2, type: 'android.widget.Button', roleDescription: 'Link' },
-      // Only a direct Button child echoes, so a link card keeps a same-named link two levels down, or one directly inside that isn't a Button.
+      // Only a direct Button child echoes, so a link card keeps a same-named link Button two levels down, or one directly inside that isn't a Button.
       { ref: 'e11', index: 10, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Docs', roleDescription: 'Link' },
       { ref: 'e12', index: 11, parentIndex: 10, depth: 2, type: 'android.view.ViewGroup' },
-      { ref: 'e13', index: 12, parentIndex: 11, depth: 3, type: 'android.view.View', label: 'Docs', roleDescription: 'Link' },
+      { ref: 'e13', index: 12, parentIndex: 11, depth: 3, type: 'android.widget.Button', label: 'Docs', roleDescription: 'Link' },
       { ref: 'e14', index: 13, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Help', roleDescription: 'Link' },
       { ref: 'e15', index: 14, parentIndex: 13, depth: 2, type: 'android.view.View', label: 'Help', roleDescription: 'Link' },
       // A plain Button under a same-named link isn't a link span, so it echoes nothing.
@@ -381,6 +382,9 @@ describe('snapshot projection', () => {
       // A disabled Text link: React Native disables the Text, and the span it echoes is the link.
       { ref: 'e20', index: 19, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Profile', roleDescription: 'Link', enabled: false },
       { ref: 'e21', index: 20, parentIndex: 19, depth: 2, type: 'android.widget.Button', label: 'Profile', roleDescription: 'Link', enabled: true },
+      // A span echoes only a Text described as a Link, so a disabled plain Text keeps its state to itself.
+      { ref: 'e22', index: 21, parentIndex: 0, depth: 1, type: 'android.widget.TextView', label: 'Terms', enabled: false },
+      { ref: 'e23', index: 22, parentIndex: 21, depth: 2, type: 'android.widget.Button', label: 'Terms', roleDescription: 'Link', enabled: true },
     ]);
     const nodes = projected.index.slice(1).map((entry) => `${entry.node.role} ${entry.node.name ?? ''}`.trim());
     expect(nodes).toEqual([
@@ -404,9 +408,11 @@ describe('snapshot projection', () => {
       'link Home',
       'group Profile',
       'link Profile',
+      'text Terms',
+      'link Terms',
     ]);
-    const profile = projected.index.find((entry) => entry.ref === 'e21');
-    expect(profile?.node.states?.disabled).toBe(true);
+    const disabled = (ref: string) => projected.index.find((entry) => entry.ref === ref)?.node.states?.disabled === true;
+    expect(['e7', 'e8', 'e21', 'e22', 'e23'].map(disabled)).toEqual([true, false, true, true, false]);
   });
 
   it('reads the role and state React Native spells into an iOS accessibility value, and reports the rest as the value', () => {
