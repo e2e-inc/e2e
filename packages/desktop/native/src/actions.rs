@@ -494,9 +494,11 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     }
     // A field that holds focus commits its text the way typing does; one that cannot take focus still takes the value.
     // Focus moved by this call has reached the app (its handlers may have run), so a later failure is no longer "nothing sent".
+    // A focus write that failed after the app took it (a focus handler that replaced the field) may still have run its
+    // handlers: only a refusal shows it did not.
     let moved_focus = roles::takes_text(role) && settable(element, "AXFocused", "set value")? && element.boolean("AXFocused") != Some(true) && {
         go("set value")?;
-        element.set_bool("AXFocused", true).is_ok()
+        element.set_bool("AXFocused", true).map_or_else(|error| !refuses(error), |()| true)
     };
     let numeric = matches!(element.attribute("AXValue"), Ok(Value::Number(_)));
     // The reads above can take long on a slow app; the caller may have given up since.
