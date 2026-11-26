@@ -331,9 +331,14 @@ impl Walk {
         if has("AXScrollToVisible") {
             push(&mut out, "ScrollTo");
         }
-        if (role == "scrollarea" && (read.scrollbar || [true, false].into_iter().any(|vertical| crate::actions::scroll_bar(element, vertical).is_some())))
-            || ["AXScrollDownByPage", "AXScrollUpByPage", "AXScrollLeftByPage", "AXScrollRightByPage"].into_iter().any(&has)
-        {
+        // SwiftUI gives every scroll area the page actions, also one whose content fits: only a scroll bar says a scroll
+        // area scrolls. A viewport swipe goes to the first node offered Scroll, so one that cannot scroll must not be.
+        let scrolls = if role == "scrollarea" {
+            read.scrollbar || [true, false].into_iter().any(|vertical| crate::actions::scroll_bar(element, vertical).is_some())
+        } else {
+            ["AXScrollDownByPage", "AXScrollUpByPage", "AXScrollLeftByPage", "AXScrollRightByPage"].into_iter().any(&has)
+        };
+        if scrolls {
             push(&mut out, "Scroll");
         }
         let value_settable = roles::bears_value(role) && self.settable(element, "AXValue");
