@@ -213,6 +213,8 @@ describe('manifest', () => {
     expect(() => ios({ bundleId: 'com.example.app', locale: 'fr-FR', launchArguments: ['-AppleLanguages', '(fr)'] }, info)).toThrowError(
       expect.objectContaining({ code: 'INVALID_CONFIG' }),
     );
+    // A list item without the dash is another argument's value, not an Apple default.
+    expect(() => ios({ bundleId: 'com.example.app', locale: 'fr-FR', launchArguments: ['-screen', 'AppleLocale'] }, info)).not.toThrow();
     const provider = { name: 'cloud', acquire: async () => ({ id: 'lease-1' }), release: async () => undefined };
     const leased = harness({ platform: 'android', device: provider as never }).engine.validateApp!;
     expect(() => leased({ bundleId: 'com.example.app', locale: 'fr-FR' }, info)).toThrowError(

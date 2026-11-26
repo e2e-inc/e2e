@@ -65,12 +65,15 @@ export function checkLocale(label: string, value: unknown, code: Code): string {
 /**
  * Refuses a locale beside launch arguments that set the same Apple defaults
  * (`AppleLanguages`, `AppleLocale`) as an object key or a `-name` list item:
- * one launch would carry two answers. Android reads none of them.
+ * one launch would carry two answers. A list item without the dash is a
+ * value, such as `AppleLocale` in `['-screen', 'AppleLocale']`. Android reads
+ * none of them.
  */
 export function assertNoAppleLocaleArguments(label: string, launchArguments: ResolvedLaunchArguments | undefined, code: Code): void {
   if (launchArguments === undefined) return;
-  const names = Array.isArray(launchArguments) ? launchArguments.map((item) => item.replace(/^-/, '')) : Object.keys(launchArguments);
-  const clash = APPLE_LOCALE_ARGUMENTS.find((name) => names.includes(name));
+  const clash = Array.isArray(launchArguments)
+    ? APPLE_LOCALE_ARGUMENTS.find((name) => launchArguments.includes(`-${name}`))
+    : APPLE_LOCALE_ARGUMENTS.find((name) => Object.hasOwn(launchArguments, name));
   if (clash !== undefined) {
     fail(code, `${label} sets ${clash}, and the locale sets it too: set the language and region with the locale only`);
   }
