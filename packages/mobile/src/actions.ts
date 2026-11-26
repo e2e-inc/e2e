@@ -42,13 +42,13 @@ export const DEVICE_ACTIONS: readonly LocatorActionKind[] = [
 
 /**
  * The pointer actions a device honors at a bare point: agent-device presses
- * and swipes by coordinates, so taps, double taps, long presses, and a swipe
- * to another point land anywhere. A coordinate hover, secondary tap, or drag
- * (a hold before the move, unlike a swipe) has no touch equivalent it exposes
- * without a node, and a directional swipe at a bare point has no length, so
- * only the screen root scrolls that way.
+ * and swipes by coordinates, so taps, double and multi taps, long presses,
+ * and a swipe to another point land anywhere. A coordinate hover, secondary
+ * tap, or drag (a hold before the move, unlike a swipe) has no touch
+ * equivalent it exposes without a node, and a directional swipe at a bare
+ * point has no length, so only the screen root scrolls that way.
  */
-export const DEVICE_POINTER_ACTIONS: readonly PointerActionKind[] = ['tap', 'doubleTap', 'longPress', 'swipeTo'];
+export const DEVICE_POINTER_ACTIONS: readonly PointerActionKind[] = ['tap', 'doubleTap', 'multiTap', 'longPress', 'swipeTo'];
 
 /**
  * Issues one pointer action at a screen point in logical pixels. `settle` is
@@ -75,6 +75,12 @@ export function pointerInteraction(
       return input.press(client, { ...at, ...settle });
     case 'doubleTap':
       return input.press(client, { ...at, count: 2, ...settle });
+    case 'multiTap':
+      if (action.count > MAX_TAP_COUNT) {
+        throw unsupported(`agent-device presses at most ${MAX_TAP_COUNT} times in a row; got a count of ${action.count}`);
+      }
+
+      return input.press(client, { ...at, count: action.count, ...settle });
     case 'longPress':
       return input.send(
         () => client.interactions.longPress({ ...at, ...settle, durationMs: action.durationMs ?? DEFAULT_LONG_PRESS_MS }),
@@ -94,7 +100,6 @@ export function pointerInteraction(
       }
       return input.send(() => client.interactions.swipe({ from: at, to, ...stabilization }));
     }
-    case 'multiTap':
     case 'secondaryTap':
     case 'hover':
     case 'dragTo':

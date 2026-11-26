@@ -4942,6 +4942,14 @@ describe('deterministic actions', () => {
     expect(h.fake.lastArgs('interactions.press')).toEqual({ x: 10, y: 20 });
     await h.engine.performAt!({ x: 10, y: 20 }, { kind: 'doubleTap' }, test());
     expect(h.fake.lastArgs('interactions.press')).toEqual({ x: 10, y: 20, count: 2 });
+    await h.engine.performAt!({ x: 10, y: 20 }, { kind: 'multiTap', count: 3 }, test());
+    expect(h.fake.lastArgs('interactions.press')).toEqual({ x: 10, y: 20, count: 3 });
+    const pressesBeforeRefusal = h.fake.calls.filter((call) => call.method === 'interactions.press').length;
+    await expect(h.engine.performAt!({ x: 10, y: 20 }, { kind: 'multiTap', count: 201 }, test())).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+      message: expect.stringContaining('at most 200'),
+    });
+    expect(h.fake.calls.filter((call) => call.method === 'interactions.press')).toHaveLength(pressesBeforeRefusal);
     await h.engine.performAt!({ x: 10, y: 20 }, { kind: 'longPress', durationMs: 700 }, test());
     expect(h.fake.lastArgs('interactions.longPress')).toEqual({ x: 10, y: 20, durationMs: 700 });
     await h.engine.performAt!({ x: 10, y: 20 }, { kind: 'longPress' }, test());
@@ -4950,7 +4958,7 @@ describe('deterministic actions', () => {
     expect(h.fake.lastArgs('interactions.swipe')).toEqual({ from: { x: 10, y: 20 }, to: { x: 10, y: 300 }, postGestureStabilization: false });
     await h.engine.performAt!({ x: 10, y: 20 }, { kind: 'swipeTo', target: { x: 10, y: 300 }, durationMs: 400 }, test());
     expect(h.fake.lastArgs('interactions.pan')).toEqual({ x: 10, y: 20, dx: 0, dy: 280, durationMs: 400 });
-    expect(h.engine.pointerActions).toEqual(['tap', 'doubleTap', 'longPress', 'swipeTo']);
+    expect(h.engine.pointerActions).toEqual(['tap', 'doubleTap', 'multiTap', 'longPress', 'swipeTo']);
 
     const about = await observed(h, 'About');
     await h.engine.perform!(about.ref, { kind: 'tap' }, { ...operation(), origin: 'agent' });

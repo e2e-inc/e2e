@@ -355,6 +355,12 @@ test.describe('control inventory', () => {
     await expect(screen.getByTestId('tap-count')).toContainText('3 taps');
   });
 
+  test('tap({ count: 3, position }) lands three presses at the point', async ({ screen }) => {
+    await showSection(screen, 'Gestures');
+    await screen.getByRole('button', 'Double-tap me').tap({ count: 3, position: { x: 10, y: 10 } });
+    await expect(screen.getByTestId('tap-count')).toContainText('3 taps');
+  });
+
   // Android bounds and points are the screen's physical pixels: agent-device
   // 0.21.15 reports the emulator's display density in its snapshot metadata,
   // but rects and points stay physical pixels and the engine does not scale
