@@ -87,19 +87,30 @@ fn until(deadline: Instant, mut check: impl FnMut() -> bool) -> bool {
     }
 }
 
-/// Performs an AX action. An action that opens a menu or a modal runs inside the app's handler and answers only once it
-/// closes, so the call times out: the action is running if the app still answers another request meanwhile, which it
-/// does only from inside that handler's own event loop. An app that answers nothing may never have taken the action.
+/// Performs an AX action. Once the action is sent, an error answer cannot show that nothing happened, so the element is
+/// read again to tell:
+/// - gone now: the action closed what held it (an alert's button, a panel's), so it landed;
+/// - a timeout while the app still answers: the action opened a menu or a modal and runs inside the app's handler;
+/// - a timeout the app does not answer after: it may never have taken the action, delivered but unverified;
+/// - the action refused outright (no such action, no permission, a bad argument), or the element already gone when
+///   the action was sent: nothing reached the app;
+/// - any other error: it may have landed, delivered but unverified.
 fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
     element.set_timeout(BLOCKING_ACTION_SECONDS);
     let result = element.perform(action);
     let outcome = match result {
         Ok(()) => Ok(()),
-        Err(ax::AX_CANNOT_COMPLETE) if element.attribute("AXRole").is_ok() => Ok(()),
-        Err(ax::AX_CANNOT_COMPLETE) => {
-            Err(Failure::unconfirmed(codes::APP_UNRESPONSIVE, format!("{what}: the app did not answer the action, or anything after it")))
+        Err(error @ (ax::AX_INVALID_ELEMENT | ax::AX_ACTION_UNSUPPORTED | ax::AX_NOT_IMPLEMENTED | ax::AX_API_DISABLED | ax::AX_ILLEGAL_ARGUMENT)) => {
+            Err(refused(error, what))
         }
-        Err(error) => Err(refused(error, what)),
+        Err(error) => match (error, element.attribute("AXRole")) {
+            (_, Err(ax::AX_INVALID_ELEMENT)) => Ok(()),
+            (ax::AX_CANNOT_COMPLETE, Ok(_)) => Ok(()),
+            (ax::AX_CANNOT_COMPLETE, Err(_)) => {
+                Err(Failure::unconfirmed(codes::APP_UNRESPONSIVE, format!("{what}: the app did not answer the action, or anything after it")))
+            }
+            (error, _) => Err(refused(error, what).delivered()),
+        },
     };
     element.set_timeout(0.0);
     outcome
