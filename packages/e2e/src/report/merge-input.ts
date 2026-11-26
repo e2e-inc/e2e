@@ -115,7 +115,7 @@ export async function readShard(directory: string): Promise<ShardInput> {
   if (chosen.run.finishedAt === undefined) {
     throw new Error(`${layout.report} is unfinished; supply output from a finished shard run`);
   }
-  if (chosen.run.explore !== undefined || chosen.run.merge !== undefined || shard === undefined || shard.index > shard.total) {
+  if (chosen.run.explore !== undefined || shard === undefined || shard.index > shard.total) {
     throw new Error(`${layout.report} has no valid shard identity; supply output from e2e run --shard`);
   }
   const document = normalize(chosen, chosen.run.finishedAt);
