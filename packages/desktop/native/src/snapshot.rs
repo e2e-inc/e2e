@@ -70,6 +70,9 @@ pub struct RawNode {
     states: Vec<&'static str>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     available_actions: Vec<&'static str>,
+    /// The axes a node offered `Scroll` scrolls along: `vertical`, `horizontal`, or both.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    scroll_axes: Vec<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bounds: Option<Rect>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -155,7 +158,10 @@ struct Read {
     placeholder: Option<String>,
     help: Option<String>,
     title_element: Option<Element>,
-    scrollbar: bool,
+    /// A vertical scroll bar, listed as an attribute.
+    vertical_bar: bool,
+    /// A horizontal scroll bar, listed as an attribute.
+    horizontal_bar: bool,
     heading_level: Option<u32>,
 }
 
@@ -180,7 +186,8 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
     let help = label(take(13).and_then(|value| value.text().map(str::to_owned)));
     let title_element = take(14).and_then(|value| value.element().cloned());
     // Only an element is a scroll bar: macOS may answer an attribute the area does not support with null.
-    let scrollbar = matches!(take(15), Some(Value::Element(_))) || matches!(take(16), Some(Value::Element(_)));
+    let vertical_bar = matches!(take(15), Some(Value::Element(_)));
+    let horizontal_bar = matches!(take(16), Some(Value::Element(_)));
     let heading_level = level_of(take(17));
     let role = roles::role(&ax_role, subrole.as_deref());
     Ok(Read {
@@ -199,7 +206,8 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
         placeholder,
         help,
         title_element,
-        scrollbar,
+        vertical_bar,
+        horizontal_bar,
         heading_level,
     })
 }
@@ -316,8 +324,8 @@ impl Walk {
         })
     }
 
-    /// The actions a control takes, in the raw vocabulary.
-    fn actions(&mut self, element: &Element, read: &Read) -> Vec<&'static str> {
+    /// The actions a control takes, in the raw vocabulary, and the axes it scrolls along when it takes `Scroll`.
+    fn actions(&mut self, element: &Element, read: &Read) -> (Vec<&'static str>, Vec<&'static str>) {
         let mut out = Vec::new();
         let role = read.role;
         let names = if roles::inert(role) {
@@ -349,12 +357,23 @@ impl Walk {
         }
         // SwiftUI gives every scroll area the page actions, also one whose content fits: only a scroll bar says a scroll
         // area scrolls. A viewport swipe goes to the first node offered Scroll, so one that cannot scroll must not be.
-        let scrolls = if role == "scrollarea" {
-            read.scrollbar || [true, false].into_iter().any(|vertical| crate::actions::scroll_bar(element, vertical).is_some())
+        let (vertical, horizontal) = if role == "scrollarea" {
+            (
+                read.vertical_bar || crate::actions::scroll_bar(element, true).is_some(),
+                read.horizontal_bar || crate::actions::scroll_bar(element, false).is_some(),
+            )
         } else {
-            ["AXScrollDownByPage", "AXScrollUpByPage", "AXScrollLeftByPage", "AXScrollRightByPage"].into_iter().any(&has)
+            (has("AXScrollDownByPage") || has("AXScrollUpByPage"), has("AXScrollLeftByPage") || has("AXScrollRightByPage"))
         };
-        if scrolls {
+        // A viewport swipe goes to the first node that scrolls along its axis: a carousel does not take a swipe down.
+        let mut axes = Vec::new();
+        if vertical {
+            axes.push("vertical");
+        }
+        if horizontal {
+            axes.push("horizontal");
+        }
+        if !axes.is_empty() {
             push(&mut out, "Scroll");
         }
         let value_settable = roles::bears_value(role) && self.settable(element, "AXValue");
@@ -376,7 +395,7 @@ impl Walk {
             push(&mut out, "Expand");
             push(&mut out, "Collapse");
         }
-        out
+        (out, axes)
     }
 
     /// The children of an element, at most `MAX_CHILDREN`, and how many it has.
@@ -456,14 +475,15 @@ impl Walk {
                     placeholder: None,
                     help: None,
                     title_element: None,
-                    scrollbar: false,
+                    vertical_bar: false,
+                    horizontal_bar: false,
                     heading_level: None,
                 }
             }
         };
         let role = if root && read.role == "unknown" { "window" } else { read.role };
         let secure = read.subrole.as_deref() == Some("AXSecureTextField") || read.ax_role == "AXSecureTextField";
-        let actions = self.actions(element, &read);
+        let (actions, scroll_axes) = self.actions(element, &read);
 
         // The name a control takes from its label element: a stall reading it leaves the name unknown, a hole in the read,
         // so a locator cannot take the control's absence by that name as proof.
@@ -551,6 +571,7 @@ impl Walk {
             native_id: read.identifier.clone().map(|value| NativeId { kind: "ax_identifier", value }),
             states,
             available_actions: actions,
+            scroll_axes,
             bounds: read.bounds,
             subtree_truncated: false,
             children_count: None,
