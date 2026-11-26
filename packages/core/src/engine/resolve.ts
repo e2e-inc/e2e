@@ -158,16 +158,16 @@ function resolve(
       const scope = expression.scope === undefined ? undefined : resolve(expression.scope, within, tree, options);
       const pool = scope === undefined ? [within] : descendantRanges(scope, within, tree);
       const matchesQuery = compileQueryMatcher(expression.query, textQuery);
-      const found = new Set<SemanticNode>();
+      const inside: SemanticNode[] = [];
       for (const { start, end } of pool) {
         for (let index = start; index < end; index += 1) {
           const node = tree.all[index]!;
-          if (matchesQuery(node)) found.add(node);
+          if (matchesQuery(node)) inside.push(node);
         }
       }
       // An element whose text is its own content is what a browser's scoped text query answers with.
-      if (textQuery === 'text' && expression.query.kind === 'text') for (const node of scope ?? []) if (matchesQuery(node)) found.add(node);
-      const matches = found.size === 0 ? [] : tree.all.slice(within.start, within.end).filter((node) => found.has(node));
+      const own = textQuery === 'text' && expression.query.kind === 'text' ? (scope ?? []).filter(matchesQuery) : [];
+      const matches = own.length === 0 ? inside : inDocumentOrder([...own, ...inside], within, tree);
       return INNERMOST_KINDS.has(expression.query.kind) ? innermostOnly(matches, tree) : matches;
     }
     case 'filter': {
@@ -209,6 +209,12 @@ function resolve(
         { retryable: false },
       );
   }
+}
+
+/** `nodes` without repeats, in the order the tree has them within `within`. */
+function inDocumentOrder(nodes: readonly SemanticNode[], within: Range, tree: TreeIndex): SemanticNode[] {
+  const wanted = new Set(nodes);
+  return tree.all.slice(within.start, within.end).filter((node) => wanted.has(node));
 }
 
 /** The query kinds a container answers for its descendants, so only the innermost match counts. */
