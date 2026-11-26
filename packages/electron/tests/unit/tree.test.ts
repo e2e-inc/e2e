@@ -149,10 +149,10 @@ describe('projectTree', () => {
     expect(find(root, (node) => node.role === 'checkbox').states).toMatchObject({ checked: false });
   });
 
-  it('reads the options of a closed select as shown as the select, with their labels as text, as the web does', () => {
+  it('marks nodes with no box hidden, such as the options of a closed select, which read their labels as text', () => {
     const { root } = project('node');
     const option = find(root, (node) => node.role === 'option' && node.name === 'Team');
-    expect(option.states?.hidden).toBeUndefined();
+    expect(option.states?.hidden).toBe(true);
     expect(option.text).toBe('Team');
   });
 
