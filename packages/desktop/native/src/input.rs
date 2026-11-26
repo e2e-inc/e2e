@@ -260,10 +260,7 @@ pub fn press(combo: &Combo, route: Route) -> Outcome<()> {
     Ok(())
 }
 
-/// The most UTF-16 units one key event carries: some apps drop the rest of a longer string.
-const CHUNK_UNITS: usize = 16;
-
-/// One key event's worth of text to type: a chunk of characters, or Return or Tab.
+/// One key event's worth of text to type: one character (a surrogate pair stays whole), or Return or Tab.
 #[derive(Debug, PartialEq)]
 enum Piece {
     Text(Vec<u16>),
@@ -271,38 +268,25 @@ enum Piece {
     Tab,
 }
 
-/// Cuts text into key events: chunks of at most `CHUNK_UNITS` UTF-16 units, cut on a character boundary so a
-/// surrogate pair never splits, and Return for a line break (`\r\n` is one) and Tab for a tab.
+/// Cuts text into key events, one per character as a keyboard sends them: a handler that reads each key (a field that
+/// checks every digit, or moves focus after one) sees every character. A surrogate pair is one character, so it is
+/// never split; a line break is Return (`\r\n` is one) and a tab is Tab.
 fn pieces(text: &str) -> Vec<Piece> {
     let mut out = Vec::new();
-    let mut chunk: Vec<u16> = Vec::with_capacity(CHUNK_UNITS);
     let mut characters = text.chars().peekable();
     while let Some(character) = characters.next() {
-        let key = match character {
+        out.push(match character {
             '\r' => {
                 characters.next_if_eq(&'\n');
-                Some(Piece::Return)
+                Piece::Return
             }
-            '\n' => Some(Piece::Return),
-            '\t' => Some(Piece::Tab),
-            _ => None,
-        };
-        if let Some(key) = key {
-            if !chunk.is_empty() {
-                out.push(Piece::Text(std::mem::take(&mut chunk)));
+            '\n' => Piece::Return,
+            '\t' => Piece::Tab,
+            _ => {
+                let mut units = [0u16; 2];
+                Piece::Text(character.encode_utf16(&mut units).to_vec())
             }
-            out.push(key);
-            continue;
-        }
-        let mut units = [0u16; 2];
-        let encoded = character.encode_utf16(&mut units);
-        if chunk.len() + encoded.len() > CHUNK_UNITS {
-            out.push(Piece::Text(std::mem::take(&mut chunk)));
-        }
-        chunk.extend_from_slice(encoded);
-    }
-    if !chunk.is_empty() {
-        out.push(Piece::Text(chunk));
+        });
     }
     out
 }
@@ -319,23 +303,23 @@ pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time:
         if std::time::Instant::now() >= deadline {
             return Err(Failure::unconfirmed(codes::TIMEOUT, "typing ran out of time; the text sent before then stays sent"));
         }
-        let chunk = match piece {
+        let units = match piece {
             Piece::Return | Piece::Tab => {
                 let code = if piece == Piece::Tab { 48 } else { 36 };
                 press(&Combo { key: Key { code, character: None }, flags: CGEventFlags::CGEventFlagNull }, route)?;
                 continue;
             }
-            Piece::Text(chunk) => chunk,
+            Piece::Text(units) => units,
         };
         for down in [true, false] {
             let event =
                 CGEvent::new_keyboard_event(source.clone(), 0, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
             // No modifiers: a key the user holds would otherwise ride along on an HID-state event and turn text into a shortcut.
             event.set_flags(CGEventFlags::CGEventFlagNull);
-            event.set_string_from_utf16_unchecked(&chunk);
+            event.set_string_from_utf16_unchecked(&units);
             post(&event, route);
         }
-        sleep(Duration::from_millis(3));
+        sleep(Duration::from_millis(1));
     }
     Ok(())
 }
@@ -380,23 +364,21 @@ pub fn pointer(x: f64, y: f64, action: Pointer, proceed: &dyn Fn() -> Outcome<()
 
 #[cfg(test)]
 mod tests {
-    use super::{CHUNK_UNITS, Piece, TypingRun, cancel_input, parse_combo, pieces};
+    use super::{Piece, TypingRun, cancel_input, parse_combo, pieces};
     use core_graphics::event::CGEventFlags;
 
     fn text(units: &Piece) -> String {
         match units {
-            Piece::Text(units) => String::from_utf16(units).expect("a chunk holds whole characters"),
+            Piece::Text(units) => String::from_utf16(units).expect("a key event holds a whole character"),
             other => panic!("expected text, got {other:?}"),
         }
     }
 
     #[test]
-    fn keeps_a_surrogate_pair_in_one_event() {
-        let typed = pieces("123456789012345😀x");
-        assert_eq!(typed.len(), 2);
-        assert_eq!(text(&typed[0]), "123456789012345");
-        assert_eq!(text(&typed[1]), "😀x");
-        assert!(typed.iter().all(|piece| matches!(piece, Piece::Text(units) if units.len() <= CHUNK_UNITS)));
+    fn sends_one_character_per_key_event_and_keeps_a_surrogate_pair_in_one() {
+        let typed = pieces("12😀x");
+        assert_eq!(typed.iter().map(text).collect::<Vec<_>>(), ["1", "2", "😀", "x"]);
+        assert!(matches!(&typed[2], Piece::Text(units) if units.len() == 2));
     }
 
     #[test]
