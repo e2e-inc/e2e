@@ -566,8 +566,8 @@ describe('FileCacheStore', () => {
   });
 
   describe('a writer killed between the two renames of a pair', () => {
-    /** Records a second recording in a child process that kills itself as it renames onto a file ending `dies`. */
-    async function killedWriter(directory: string, dies: string): Promise<void> {
+    /** Records `trace` (by default a second recording) in a child process that kills itself as it renames onto a file ending `dies`. */
+    async function killedWriter(directory: string, dies: string, key = OTHER_KEY, trace = payload('ios')): Promise<void> {
       const script = `
         import fsp from 'node:fs/promises';
         import { syncBuiltinESMExports } from 'node:module';
@@ -582,7 +582,7 @@ describe('FileCacheStore', () => {
         syncBuiltinESMExports();
         const { FileCacheStore } = await import('@e2e-dev/core/lib/cache/store');
         const store = new FileCacheStore({ directory: ${JSON.stringify(directory)}, maxBytes: ${String(MAX_CACHE_WIRE_BYTES)}, writable: true });
-        await store.write(${JSON.stringify(OTHER_KEY)}, ${JSON.stringify(payload('ios'))});
+        await store.write(${JSON.stringify(key)}, ${JSON.stringify(trace)});
       `;
       const signal = await new Promise<NodeJS.Signals | null>((resolve) => {
         spawn(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), stdio: 'ignore' }).on('exit', (_code, killedBy) => resolve(killedBy));
@@ -616,6 +616,21 @@ describe('FileCacheStore', () => {
       expect(JSON.parse(await readFile(lockPath(directory), 'utf8')).entries).toHaveLength(1);
       expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toEqual([]);
       expect(await store.write(OTHER_KEY, payload('ios'))).toBeDefined();
+    });
+
+    it("finishes the pair of a test whose name collided, under that test's own name", async () => {
+      const { directory, store } = await makeStore();
+      const otherTest = 'tests/settings.e2e.ts::settings::upgrades%20the%20plan!';
+      const other = (targetId: string): TraceProvenance => step(targetId, { testId: otherTest });
+      const third = 'c'.repeat(64);
+      await store.write(KEY, payload());
+      await store.write(OTHER_KEY, payload('web', { recordedFor: other('web') }));
+      await killedWriter(directory, '.lock.json', third, payload('ios', { recordedFor: other('ios') }));
+      expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toHaveLength(1);
+      expect((await store.read(third, other('ios'))).status).toBe('hit');
+      expect((await store.read(OTHER_KEY, other('web'))).status).toBe('hit');
+      expect((await store.read(KEY, step())).status).toBe('hit');
+      expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toEqual([]);
     });
 
     it('settles nothing when not writable, and reads the pair as it is', async () => {
