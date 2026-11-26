@@ -731,9 +731,11 @@ fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
     let vertical = matches!(direction, "up" | "down");
     let forward = matches!(direction, "down" | "right");
     if let Some(bar) = scroll_bar(element, vertical) {
+        // A position the app did not answer is no position: one step from the top could move the view the wrong way.
         let current = match bar.attribute("AXValue") {
-            Ok(Value::Number(number)) => number,
-            _ => 0.0,
+            Ok(Value::Number(number)) => Some(number),
+            Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, "scroll")),
+            _ => None,
         };
         let (_, _, width, height) = element.frame().unwrap_or((0.0, 0.0, 0.0, 0.0));
         let visible = if vertical { height } else { width };
@@ -744,8 +746,10 @@ fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
             .map(|(_, _, width, height)| if vertical { height } else { width })
             .unwrap_or(0.0);
         let step = if content > visible && visible > 0.0 { pages * visible / (content - visible) } else { pages * 0.25 };
-        let next = (current + if forward { step } else { -step }).clamp(0.0, 1.0);
-        if settable(&bar, "AXValue", "scroll")? {
+        if let Some(current) = current
+            && settable(&bar, "AXValue", "scroll")?
+        {
+            let next = (current + if forward { step } else { -step }).clamp(0.0, 1.0);
             go("scroll")?;
             return bar.set_number("AXValue", next).map_err(|error| refused(error, "scroll"));
         }
