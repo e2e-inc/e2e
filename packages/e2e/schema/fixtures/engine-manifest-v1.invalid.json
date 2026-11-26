@@ -6,5 +6,6 @@
     "engine/viewportIntersection"
   ],
   "fileApps": "yes",
-  "tapButtons": "yes"
+  "tapButtons": "yes",
+  "pointerModifiers": "yes"
 }

@@ -139,6 +139,8 @@ export interface FakeEngineBehavior {
   tapModifiers?: boolean;
   /** Set to declare `tapButtons`, so a middle or right button on the tap action is passed to `perform`. */
   tapButtons?: boolean;
+  /** Declares `pointerModifiers`, so modifiers on the tap and hover pointer actions reach `performAt`. */
+  pointerModifiers?: boolean;
   /** Declares `session.back`, `restart`, and `reset` beside `open`; with a scene, the last two close the app. */
   navigation?: boolean;
   /**
@@ -373,6 +375,7 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
     },
     ...(behavior.tapModifiers === undefined ? {} : { tapModifiers: behavior.tapModifiers }),
     ...(behavior.tapButtons === undefined ? {} : { tapButtons: behavior.tapButtons }),
+    ...(behavior.pointerModifiers === undefined ? {} : { pointerModifiers: behavior.pointerModifiers }),
     ...(behavior.isolation === undefined ? {} : { isolation: behavior.isolation }),
     ...(behavior.pointerActions === undefined
       ? {}

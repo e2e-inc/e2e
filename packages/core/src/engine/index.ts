@@ -842,6 +842,18 @@ export interface Engine {
    */
   readonly tapButtons?: boolean;
   /**
+   * Set to `true` when the engine handles `modifiers` on the `tap`,
+   * `doubleTap`, `multiTap`, `secondaryTap`, and `hover` actions `performAt`
+   * receives, and on the `hover` action `perform` receives, holding exactly
+   * those keys for the gesture. Otherwise, either action with `modifiers`
+   * fails with `UNSUPPORTED_CAPABILITY` before reaching the engine.
+   *
+   * `tapModifiers` covers the node taps only, so an engine that declares it
+   * and predates this field never drops the keys of a positioned tap or a
+   * hover.
+   */
+  readonly pointerModifiers?: boolean;
+  /**
    * `prepare` binds the target to the device `EnginePrepareInfo.device`
    * names, for `e2e run --device`, over the device the engine was configured
    * with. Without it the runner refuses the flag for the target before

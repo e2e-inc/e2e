@@ -58,6 +58,8 @@ export interface ScreenOverOptions {
   readonly tapModifiers?: boolean;
   /** Set to `true` to declare `tapButtons` on the engine (off by default). */
   readonly tapButtons?: boolean;
+  /** Set to `true` to declare `pointerModifiers` on the engine (off by default). */
+  readonly pointerModifiers?: boolean;
   /** Action and assertion timeout in milliseconds. */
   readonly timeoutMs: number;
 }
@@ -94,6 +96,7 @@ export function screenOver(options: ScreenOverOptions): { screen: Screen; steps:
     ...(screenshot === undefined ? {} : { artifacts: { screenshot: async (label: string | undefined) => screenshot(label) } }),
     ...(options.tapModifiers === undefined ? {} : { tapModifiers: options.tapModifiers }),
     ...(options.tapButtons === undefined ? {} : { tapButtons: options.tapButtons }),
+    ...(options.pointerModifiers === undefined ? {} : { pointerModifiers: options.pointerModifiers }),
   });
   const steps = new StepRecorder('attempt');
   const signal = new AbortController().signal;

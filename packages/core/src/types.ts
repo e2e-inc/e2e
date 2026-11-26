@@ -504,7 +504,12 @@ export interface ClickOptions extends ActionOptions {
    * Keys held while the pointer clicks, as a Shift-click extends a selection:
    * `Shift`, `Control`, `Alt`, `Meta`, or `ControlOrMeta` (Control on Windows
    * and Linux, Meta on macOS). Needs an engine that declares `tapModifiers`,
-   * `UNSUPPORTED_CAPABILITY` otherwise.
+   * or `pointerModifiers` with `position`, `UNSUPPORTED_CAPABILITY` otherwise.
+   * On the browser, exactly these keys are held for the click: a key the
+   * test holds with `browser.keyboard.down` and does not list is released
+   * for it and pressed again after, as in Playwright. An empty list holds
+   * no keys, so it releases every key the test holds for the click, and
+   * needs the same capability.
    */
   modifiers?: readonly KeyModifier[];
 }
@@ -538,6 +543,13 @@ export interface HoverOptions extends ActionOptions {
    * action, `UNSUPPORTED_CAPABILITY` otherwise.
    */
   position?: ScreenPoint;
+  /**
+   * Keys held while the pointer moves, and only those, as a tap's
+   * `modifiers` are. An empty list releases the keys the test holds. Needs
+   * an engine that declares `pointerModifiers`, `UNSUPPORTED_CAPABILITY`
+   * otherwise.
+   */
+  modifiers?: readonly KeyModifier[];
 }
 
 /** `longPress` options: the hold time in milliseconds, 100 through 10000, default the engine's own. */
@@ -660,7 +672,7 @@ export interface Locator extends Omit<Screen, 'tree' | 'debug' | 'pause'> {
   focus(options?: ActionOptions): Promise<void>;
   /** Removes focus from exactly one node if it is focused. */
   blur(options?: ActionOptions): Promise<void>;
-  /** Hovers over exactly one matching actionable node; with `position`, moves the pointer to that point of its box once it is in view, with no other actionability check. */
+  /** Hovers over exactly one matching actionable node; with `position`, moves the pointer to that point of its box once it is in view, with no other actionability check. `modifiers` holds keys for either. */
   hover(options?: HoverOptions): Promise<void>;
   /** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, payloads supply bytes in memory, and an empty array clears the input. */
   setInputFiles(files: string | readonly string[] | FilePayload | readonly FilePayload[], options?: ActionOptions): Promise<void>;

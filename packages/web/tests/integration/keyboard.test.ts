@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { EngineFixtureContext } from '@e2e-dev/core/engine';
+import type { EngineFixtureContext, KeyModifier, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
 import { createBrowserFixture, type Browser } from '../../src/browser.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
@@ -57,5 +57,111 @@ describe('held keyboard input', () => {
     await browser.keyboard.up('a');
     const events = await browser.evaluate(() => document.querySelector('#events')?.textContent ?? '');
     expect(events).toBe('keydown|a|false|false;keydown|a|false|true;keyup|a|false|false;keydown|a|false|false;keyup|a|false|false;');
+  });
+
+  describe('with a modified tap at a point', () => {
+    const metaKey = process.platform === 'darwin' ? 'Meta' : 'Control';
+
+    const operation = (): OperationContext => ({ signal, timeoutMs: 5000, runId: 'held', attemptId: 'held', origin: 'test' });
+
+    beforeEach(async () => {
+      await browser.evaluate(() => {
+        document.body.insertAdjacentHTML(
+          'beforeend',
+          '<input aria-label="Field" value="old"><div id="pad" style="position: fixed; left: 0; top: 100px; width: 200px; height: 100px"></div><p id="log"></p>',
+        );
+        const log = document.querySelector('#log')!;
+        for (const type of ['keydown', 'keyup']) {
+          document.addEventListener(type, (event) => {
+            if (event instanceof KeyboardEvent && !event.repeat) log.textContent += `${type} ${event.key};`;
+          });
+        }
+
+        document.querySelector('#pad')!.addEventListener('click', (event) => {
+          if (!(event instanceof MouseEvent)) return;
+          const held = [event.altKey && 'Alt', event.ctrlKey && 'Control', event.metaKey && 'Meta', event.shiftKey && 'Shift'].filter(Boolean);
+          log.textContent += `click ${held.join('+') || 'none'};`;
+        });
+        return null;
+      });
+      await surface.observe(operation());
+    });
+
+    /** Taps the pad at a point holding `modifiers`. */
+    const tapPad = (modifiers?: readonly KeyModifier[]): Promise<void> =>
+      surface.performAt({ x: 50, y: 150 }, { kind: 'tap', ...(modifiers === undefined ? {} : { modifiers }) }, operation());
+
+    /** The key and click events since the last call, then clears them. */
+    const log = (): Promise<string[]> =>
+      browser.evaluate(() => {
+        const node = document.querySelector('#log')!;
+        const events = (node.textContent ?? '').split(';').filter((event) => event !== '');
+        node.textContent = '';
+        return events;
+      });
+
+    it('restores a key held with down(ControlOrMeta) after a tap that names another', async () => {
+      await browser.keyboard.down('ControlOrMeta');
+      await tapPad(['Alt']);
+      await browser.keyboard.up('ControlOrMeta');
+      expect(await log()).toEqual([`keydown ${metaKey}`, 'keydown Alt', `keyup ${metaKey}`, 'click Alt', 'keyup Alt', `keydown ${metaKey}`, `keyup ${metaKey}`]);
+    });
+
+    it('keeps a modifier held after a chord that fails on an unknown key, as Playwright does', async () => {
+      await expect(browser.keyboard.press('Shift+Bogus')).rejects.toThrow(/Unknown key: "Bogus"/);
+      await tapPad(['Alt']);
+      await tapPad();
+      await browser.keyboard.up('Shift');
+      expect(await log()).toEqual([
+        'keydown Shift', 'keydown Alt', 'keyup Shift', 'click Alt', 'keyup Alt', 'keydown Shift', 'click Shift', 'keyup Shift',
+      ]);
+    });
+
+    it.each([
+      ['a node press', async () => {
+        const field = (await surface.observe(operation())).root;
+        const find = (node: SemanticNode): SemanticNode | undefined => node.name === 'Field' ? node : node.children?.map(find).find((match) => match !== undefined);
+        const node = find(field);
+        if (node === undefined) throw new Error('no Field on the screen');
+        await surface.perform(node.ref, { kind: 'press', key: 'Shift+ArrowLeft' }, operation());
+      }],
+      ['a keyboard press', async () => {
+        await surface.pressKey('Shift+ArrowLeft', operation());
+      }],
+      ['a replacing type', async () => {
+        await browser.evaluate(() => {
+          document.querySelector('input')!.focus();
+          return null;
+        });
+        await surface.typeText('new', { replace: true }, operation());
+      }],
+    ])('forgets a modifier the engine releases in %s, so a later tap does not press it again', async (_name, release) => {
+      const modifier = _name === 'a replacing type' ? 'ControlOrMeta' : 'Shift';
+      await browser.keyboard.down(modifier);
+      await release();
+      await log();
+      await tapPad(['Alt']);
+      expect(await log()).toEqual(['keydown Alt', 'click Alt', 'keyup Alt']);
+    });
+
+    it('runs concurrent taps one after another, each holding only its own keys', async () => {
+      await browser.keyboard.down('Shift');
+      await Promise.all([tapPad(['Alt']), tapPad(['Meta'])]);
+      expect(await log()).toEqual([
+        'keydown Shift',
+        'keydown Alt', 'keyup Shift', 'click Alt', 'keyup Alt', 'keydown Shift',
+        'keydown Meta', 'keyup Shift', 'click Meta', 'keyup Meta', 'keydown Shift',
+      ]);
+    });
+
+    it('lets a release sent during a tap stand, never undone by the tap restoring its keys', async () => {
+      await browser.keyboard.down('Shift');
+      await Promise.all([tapPad(['Alt']), browser.keyboard.up('Shift')]);
+      await tapPad();
+      const events = await log();
+      expect(events.filter((event) => event.startsWith('click'))).toEqual(['click Alt', 'click none']);
+      expect(events.at(-2)).toBe('keyup Shift');
+      expect(events.filter((event) => event === 'keyup Shift')).toHaveLength(events.filter((event) => event === 'keydown Shift').length);
+    });
   });
 });

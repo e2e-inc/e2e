@@ -25,9 +25,69 @@ import type { ConnectionBudget } from './operation-budget.ts';
 /** How long a long press holds the button when the action names no duration. */
 const DEFAULT_LONG_PRESS_MS = 500;
 
-/** The keys a click holds, as Playwright's `modifiers` takes them; the contract spells them the same. */
-function heldKeys(action: Extract<LocatorAction, { kind: 'tap' | 'doubleTap' | 'secondaryTap' | 'multiTap' }>): { modifiers?: KeyModifier[] } {
+/** The keys a click or hover holds, as Playwright's `modifiers` takes them; the contract spells them the same. */
+function heldKeys(action: { readonly modifiers?: readonly KeyModifier[] }): { modifiers?: KeyModifier[] } {
   return action.modifiers === undefined ? {} : { modifiers: [...action.modifiers] };
+}
+
+/** The modifier keys a page holds, in the order Playwright's `ensureModifiers` presses and releases them. */
+const MODIFIER_KEYS = ['Alt', 'Control', 'Meta', 'Shift'] as const;
+
+/** One modifier key a page holds down. */
+export type ModifierKey = (typeof MODIFIER_KEYS)[number];
+
+/** The key a contract modifier holds: `ControlOrMeta` is Meta on macOS and Control elsewhere, as Playwright resolves it. */
+function resolveModifier(modifier: KeyModifier): ModifierKey {
+  if (modifier === 'ControlOrMeta') return process.platform === 'darwin' ? 'Meta' : 'Control';
+  return modifier;
+}
+
+/** The modifier a key name holds down, as Playwright reads it: `ShiftLeft` and `ShiftRight` hold Shift. */
+export function modifierKey(key: string): ModifierKey | undefined {
+  if (key === 'ControlOrMeta') return resolveModifier(key);
+  return MODIFIER_KEYS.find((modifier) => key === modifier || key === `${modifier}Left` || key === `${modifier}Right`);
+}
+
+/** The keys of a `browser.keyboard.press` chord, split as Playwright's `press` splits them: `Shift++` is Shift and `+`. */
+export function chordKeys(chord: string): string[] {
+  const keys: string[] = [];
+  let building = '';
+  for (const char of chord) {
+    if (char === '+' && building !== '') {
+      keys.push(building);
+      building = '';
+    } else {
+      building += char;
+    }
+  }
+
+  keys.push(building);
+  return keys;
+}
+
+/**
+ * Holds exactly `wanted` on the page: presses each one `held` lacks and
+ * releases each other one it has, keeping `held` in step with the page.
+ * Playwright counts a key held or released before it sends the key, so a
+ * key that fails to send changes `held` too. With a `signal`, an aborted
+ * operation changes no further key.
+ */
+async function holdExactly(page: Page, held: Set<ModifierKey>, wanted: ReadonlySet<ModifierKey>, signal?: AbortSignal): Promise<void> {
+  for (const key of MODIFIER_KEYS) {
+    if (wanted.has(key) === held.has(key)) {
+      continue;
+    }
+
+    signal?.throwIfAborted();
+
+    if (wanted.has(key)) {
+      held.add(key);
+      await page.keyboard.down(key);
+    } else {
+      held.delete(key);
+      await page.keyboard.up(key);
+    }
+  }
 }
 
 /**
@@ -365,7 +425,7 @@ export async function dispatchLocatorAction(
       }
       return;
     case 'hover':
-      await locator.hover({ timeout });
+      await locator.hover({ timeout, ...heldKeys(action) });
       return;
     case 'scrollIntoView':
       await locator.scrollIntoViewIfNeeded({ timeout });
@@ -423,13 +483,40 @@ export async function dispatchLocatorAction(
  * Dispatches one pointer action at a viewport point with nothing resolved
  * behind it: no actionability wait, because there is no element to wait on,
  * and the page decides what the gesture lands on, as it does for a person.
+ *
+ * With `modifiers`, exactly those keys are held for the gesture, as
+ * Playwright's `click({ modifiers })` does: each one `held` lacks is
+ * pressed, every other key in `held` released, and `held` restored after,
+ * even when the gesture fails. A click count the browser refuses is refused
+ * before any key changes, and an aborted `signal` stops the keys and the
+ * gesture before they are sent, never the restore.
  */
 export async function dispatchPointerAction(
   page: Page,
   at: ViewportPoint,
   action: PointerAction,
+  held: Set<ModifierKey>,
   signal?: AbortSignal,
 ): Promise<void> {
+  if (action.kind === 'multiTap') clickCount(action.count);
+  signal?.throwIfAborted();
+  if (!('modifiers' in action) || action.modifiers === undefined) {
+    await dispatchPointer(page, at, action, signal);
+    return;
+  }
+
+  const before = new Set(held);
+  try {
+    await holdExactly(page, held, new Set(action.modifiers.map(resolveModifier)), signal);
+    signal?.throwIfAborted();
+    await dispatchPointer(page, at, action, signal);
+  } finally {
+    await holdExactly(page, held, before);
+  }
+}
+
+/** Sends one pointer gesture at the point with the keys the page holds. */
+async function dispatchPointer(page: Page, at: ViewportPoint, action: PointerAction, signal: AbortSignal | undefined): Promise<void> {
   const { mouse } = page;
   const point = nearestPixel(at);
   switch (action.kind) {

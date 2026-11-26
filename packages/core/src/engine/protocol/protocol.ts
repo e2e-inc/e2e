@@ -119,6 +119,8 @@ export interface EngineManifest {
   readonly tapModifiers?: boolean;
   /** See `Engine.tapButtons`. */
   readonly tapButtons?: boolean;
+  /** See `Engine.pointerModifiers`. */
+  readonly pointerModifiers?: boolean;
   /** See `Engine.selectsDevice`. */
   readonly selectsDevice?: boolean;
   /** See `Engine.grantsAllPermissions`. */

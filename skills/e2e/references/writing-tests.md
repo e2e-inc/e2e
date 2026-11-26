@@ -487,7 +487,7 @@ more need `multiTap`, up to 200 on browser and mobile),
 `fill(value | Secret)`, `pressSequentially(text, { delay? })`, `clear()`,
 `press(key)`, `check()`, `uncheck()`,
 `selectOption(label | { label } | { value } | { index })` (one option; an
-array is `INVALID_ARGUMENT`), `focus()`, `blur()`, `hover({ position? })`, `setInputFiles(files)`
+array is `INVALID_ARGUMENT`), `focus()`, `blur()`, `hover({ position?, modifiers? })`, `setInputFiles(files)`
 (paths relative to the project root, or `{ name, mimeType, buffer: Buffer }` payloads, singly or as an array; `[]` clears; a missing path, or one under a directory the runner cannot search, is `INVALID_ARGUMENT`), `dragTo(locator)`, `scrollIntoView()`,
 `swipe({ direction, momentum? })`. Web only, `UNSUPPORTED_CAPABILITY` on a
 device: `blur`, `secondaryTap`, `selectOption`, `setInputFiles`, `scrollIntoView`,
@@ -501,9 +501,13 @@ field and types one character per `delay`, plain string only (a `Secret` is
 `INVALID_ARGUMENT` and goes through `fill`).
 
 Coordinates are CSS pixels, for what the tree does not list: `tap({ position:
-{ x, y } })` offsets from the node's top-left corner inside its border (with `modifiers` it is
-`INVALID_ARGUMENT`). `doubleTap`, `secondaryTap`, and `hover` take the same
-`position`. A position percentage is a share of the node's box as
+{ x, y } })` offsets from the node's top-left corner inside its border, and
+`modifiers` work beside it. `doubleTap`, `secondaryTap`, and `hover` take the same
+`position`. On the web, exactly the named `modifiers` are held: a key held with
+`browser.keyboard.down` is released for the click and pressed again after,
+as in Playwright, and an empty list releases every held key. Don't mix the
+raw Playwright page's keyboard with modified taps: e2e doesn't see its keys.
+A position percentage is a share of the node's box as
 `boundingBox()` reports it, the border included, cut to the viewport:
 `{ x: '50%', y: '50%' }` is the center of the part in view. Nothing else cuts
 it: not a scroll container or `overflow: hidden` ancestor, and not an outer

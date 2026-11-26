@@ -11,7 +11,7 @@ import path from 'node:path';
 import type { ElementHandle, Locator as PwLocator, Page } from 'playwright-core';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { EngineError, TestError, type LocatorAction } from '@e2e-dev/core/engine';
-import { classifyActionError, dispatchLocatorAction, dispatchPointerAction } from '../../src/actions.ts';
+import { classifyActionError, dispatchLocatorAction, dispatchPointerAction, type ModifierKey } from '../../src/actions.ts';
 import { dispatchedInput, type ActionTarget } from '../../src/support.ts';
 
 /** A real file: setInputFiles stats every path before it touches the element. */
@@ -413,29 +413,114 @@ describe('dispatchPointerAction', () => {
       dblclick: async (x: number, y: number) => { calls.push(`dblclick ${x},${y}`); },
       wheel: async (dx: number, dy: number) => { calls.push(`wheel ${dx},${dy}`); },
     };
-    const page = { mouse, evaluate: async () => { calls.push('frame'); }, viewportSize: () => ({ width: 800, height: 600 }) } as unknown as Page;
-    return { page, calls };
+    const keyboard = {
+      down: async (key: string) => { calls.push(`down ${key}`); },
+      up: async (key: string) => { calls.push(`up ${key}`); },
+    };
+    const page = {
+      mouse,
+      keyboard,
+      isClosed: () => false,
+      evaluate: async () => { calls.push('frame'); },
+      viewportSize: () => ({ width: 800, height: 600 }),
+    } as unknown as Page;
+    return { page, mouse, calls };
   }
+
+  it('holds exactly the modifiers it names and presses the held ones again after', async () => {
+    const { page, calls } = stubPage();
+    const held = new Set<ModifierKey>(['Shift', 'Meta']);
+    await dispatchPointerAction(page, { x: 1, y: 2 }, { kind: 'tap', modifiers: ['Alt', 'Shift'] }, held);
+    expect(calls).toEqual(['down Alt', 'up Meta', 'click 1,2', 'up Alt', 'down Meta']);
+    expect(held).toEqual(new Set(['Shift', 'Meta']));
+  });
+
+  it('restores the held modifiers when the gesture fails', async () => {
+    const { page, mouse, calls } = stubPage();
+    mouse.move = async () => {
+      throw new Error('page crashed');
+    };
+    const held = new Set<ModifierKey>(['Shift']);
+    await expect(dispatchPointerAction(page, { x: 1, y: 2 }, { kind: 'hover', modifiers: ['Control'] }, held)).rejects.toThrow('page crashed');
+    expect(calls).toEqual(['down Control', 'up Shift', 'up Control', 'down Shift']);
+    expect(held).toEqual(new Set(['Shift']));
+  });
+
+  it('releases every held modifier for an empty list and presses them again after', async () => {
+    const { page, calls } = stubPage();
+    const held = new Set<ModifierKey>(['Shift', 'Meta']);
+    await dispatchPointerAction(page, { x: 1, y: 2 }, { kind: 'tap', modifiers: [] }, held);
+    expect(calls).toEqual(['up Meta', 'up Shift', 'click 1,2', 'down Meta', 'down Shift']);
+    expect(held).toEqual(new Set(['Shift', 'Meta']));
+  });
+
+  it('refuses a click count above the limit before it changes any key', async () => {
+    const { page, calls } = stubPage();
+    const held = new Set<ModifierKey>(['Meta']);
+    await expect(dispatchPointerAction(page, { x: 1, y: 2 }, { kind: 'multiTap', count: 201, modifiers: ['Shift'] }, held)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_CAPABILITY',
+    });
+    expect(calls).toEqual([]);
+    expect(held).toEqual(new Set(['Meta']));
+  });
+
+  it.each([
+    ['the next key', ['Alt', 'Shift'] as const],
+    ['the gesture', ['Alt'] as const],
+  ])('sends neither %s nor anything after it once the operation is cancelled during a key, and restores the keys', async (_what, modifiers) => {
+    const { page, calls } = stubPage();
+    const controller = new AbortController();
+    const { keyboard } = page as unknown as { keyboard: { down: (key: string) => Promise<void> } };
+    const down = keyboard.down;
+    keyboard.down = async (key: string) => {
+      await down(key);
+      controller.abort(new Error('deadline'));
+    };
+    const held = new Set<ModifierKey>();
+    await expect(dispatchPointerAction(page, { x: 1, y: 2 }, { kind: 'tap', modifiers }, held, controller.signal)).rejects.toThrow('deadline');
+    expect(calls).toEqual(['down Alt', 'up Alt']);
+    expect(held).toEqual(new Set());
+  });
+
+  it('counts a key that failed to send as changed, as Playwright does', async () => {
+    const { page, calls } = stubPage();
+    const { keyboard } = page as unknown as { keyboard: { up: (key: string) => Promise<void> } };
+    keyboard.up = async (key: string) => {
+      calls.push(`up ${key} failed`);
+      throw new Error('keyboard.up: Target page, context or browser has been closed');
+    };
+    const held = new Set<ModifierKey>(['Shift']);
+    await expect(dispatchPointerAction(page, { x: 1, y: 2 }, { kind: 'tap', modifiers: ['Alt'] }, held)).rejects.toThrow('has been closed');
+    // Playwright released Shift and Alt in its own count before either send failed.
+    expect(calls).toEqual(['down Alt', 'up Shift failed', 'up Alt failed']);
+    expect(held).toEqual(new Set());
+  });
+
+  it('leaves the held modifiers alone for a gesture that names none', async () => {
+    const { page, calls } = stubPage();
+    await dispatchPointerAction(page, { x: 1, y: 2 }, { kind: 'tap' }, new Set(['Shift']));
+    expect(calls).toEqual(['click 1,2']);
+  });
 
   it('taps, double-taps, secondary-taps, and long-presses at the point as given', async () => {
     const { page, calls } = stubPage();
-    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'tap' });
-    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'doubleTap' });
-    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'secondaryTap' });
-    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'longPress', durationMs: 700 });
+    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'tap' }, new Set());
+    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'doubleTap' }, new Set());
+    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'secondaryTap' }, new Set());
+    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'longPress', durationMs: 700 }, new Set());
     expect(calls).toEqual(['click 10,20', 'dblclick 10,20', 'click 10,20 right', 'click 10,20 700ms']);
   });
 
   it('rounds a fractional point to the nearest CSS pixel: the browser would truncate it a pixel early', async () => {
     const { page, calls } = stubPage();
-    await dispatchPointerAction(page, { x: 332, y: 158.875 }, { kind: 'tap' });
-    await dispatchPointerAction(page, { x: 10.4, y: 20.5 }, { kind: 'swipeTo', target: { x: 110.6, y: 20.5 } });
+    await dispatchPointerAction(page, { x: 332, y: 158.875 }, { kind: 'tap' }, new Set());
+    await dispatchPointerAction(page, { x: 10.4, y: 20.5 }, { kind: 'swipeTo', target: { x: 110.6, y: 20.5 } }, new Set());
     expect(calls).toEqual(['click 332,159', 'move 10,21', 'down', 'move 61,21', 'move 111,21', 'up']);
   });
 
   it('swipes along a path as a pointer drag: down at the point, through the midpoint, up at the end', async () => {
     const { page, calls } = stubPage();
-    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'swipeTo', target: { x: 110, y: 20 } });
+    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'swipeTo', target: { x: 110, y: 20 } }, new Set());
     expect(calls).toEqual(['move 10,20', 'down', 'move 60,20', 'move 110,20', 'up']);
   });
 
@@ -443,7 +528,7 @@ describe('dispatchPointerAction', () => {
     vi.useFakeTimers();
     try {
       const { page, calls } = stubPage();
-      const promise = dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'swipeTo', target: { x: 70, y: 20 }, durationMs: 48 });
+      const promise = dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'swipeTo', target: { x: 70, y: 20 }, durationMs: 48 }, new Set());
       await vi.advanceTimersByTimeAsync(0);
       expect(calls).toEqual(['move 10,20', 'down']);
       await vi.advanceTimersByTimeAsync(16);
@@ -467,6 +552,7 @@ describe('dispatchPointerAction', () => {
         page,
         { x: 10, y: 20 },
         { kind: 'swipeTo', target: { x: 70, y: 20 }, durationMs: 48 },
+        new Set(),
         controller.signal,
       );
       await vi.advanceTimersByTimeAsync(16);
@@ -481,7 +567,7 @@ describe('dispatchPointerAction', () => {
 
   it('swipes in a direction as a wheel gesture over the point, sized by the viewport', async () => {
     const { page, calls } = stubPage();
-    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'swipe', direction: 'down' });
+    await dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'swipe', direction: 'down' }, new Set());
     expect(calls).toEqual(['move 10,20', 'wheel 0,300', 'frame']);
   });
 
@@ -490,7 +576,7 @@ describe('dispatchPointerAction', () => {
     let render!: () => void;
     (page as unknown as { evaluate: () => Promise<void> }).evaluate = () => new Promise((resolve) => (render = resolve));
     let done = false;
-    const swipe = dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'swipe', direction: 'down' }).then(() => (done = true));
+    const swipe = dispatchPointerAction(page, { x: 10, y: 20 }, { kind: 'swipe', direction: 'down' }, new Set()).then(() => (done = true));
     await vi.waitFor(() => expect(render).toBeDefined());
     expect(done).toBe(false);
     render();

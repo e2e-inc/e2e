@@ -145,6 +145,8 @@ export function web(options: WebOptions = {}): WebEngine<'web', 'attempt'> {
     // A page takes every pointer action of the contract at a bare point too.
     performAt: (point, action, operation) => surface.performAt(point, action, operation),
     pointerActions: [...POINTER_ACTION_KINDS, 'multiTap'],
+    // A point's tap or hover holds exactly its modifiers, as Playwright's click does; `dispatchPointerAction`.
+    pointerModifiers: true,
     keyboard: {
       type: (text, keyboardOptions, operation) => surface.typeText(text, keyboardOptions, operation),
       press: (key, operation) => surface.pressKey(key, operation),

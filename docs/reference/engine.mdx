@@ -138,6 +138,7 @@ rules:
 | `performAt`, `pointerActions` | One without the other. A `pointerActions` list that is empty, repeats a kind, or names one outside `KNOWN_POINTER_ACTION_KINDS`. |
 | `tapModifiers` | Not a boolean, or `true` without `perform`. |
 | `tapButtons` | Not a boolean, or `true` without `perform` or `performAt`. |
+| `pointerModifiers` | Not a boolean, or `true` without `perform` or `performAt`. |
 | `selectsDevice` | Not a boolean, or `true` without `prepare`. |
 | `grantsAllPermissions` | Not a boolean. |
 | `launchArgumentValues` | Not a boolean. |
@@ -174,6 +175,7 @@ The body of one target. Every member but `name`, `version`, and
 | [`performAt`, `pointerActions`](#pointer-actions) | method, kinds |
 | [`tapModifiers`](#capabilities) | `boolean` |
 | [`tapButtons`](#capabilities) | `boolean` |
+| [`pointerModifiers`](#capabilities) | `boolean` |
 | [`selectsDevice`](#capabilities) | `boolean` |
 | [`grantsAllPermissions`](#capabilities) | `boolean` |
 | [`launchArgumentValues`](#engineappinfo) | `boolean` |
@@ -289,6 +291,18 @@ export interface Engine {
    * so they don't need `tapButtons`.
    */
   readonly tapButtons?: boolean;
+  /**
+   * Set to `true` when the engine handles `modifiers` on the `tap`,
+   * `doubleTap`, `multiTap`, `secondaryTap`, and `hover` actions `performAt`
+   * receives, and on the `hover` action `perform` receives, holding exactly
+   * those keys for the gesture. Otherwise, either action with `modifiers`
+   * fails with `UNSUPPORTED_CAPABILITY` before reaching the engine.
+   *
+   * `tapModifiers` covers the node taps only, so an engine that declares it
+   * and predates this field never drops the keys of a positioned tap or a
+   * hover.
+   */
+  readonly pointerModifiers?: boolean;
   /**
    * `prepare` binds the target to the device `EnginePrepareInfo.device`
    * names, for `e2e run --device`. Without it the runner refuses the flag
@@ -465,6 +479,7 @@ member. Two gaps end differently:
 | `viewportIntersection` | `viewport-intersection` | `locate` | `expect(locator).toBeInViewport()`. |
 | `tapModifiers: true` | - | `perform` | `modifiers` on `tap`, `doubleTap`, `multiTap`, and `secondaryTap`. |
 | `tapButtons: true` | - | `perform` or `performAt` | `button` on `tap`, `doubleTap`, and `multiTap`, on a node and at a point. |
+| `pointerModifiers: true` | - | `perform` or `performAt` | `modifiers` on the `tap`, `doubleTap`, `multiTap`, `secondaryTap`, and `hover` pointer kinds, and on the `hover` node action. An empty list holds no keys. |
 | `selectsDevice: true` | - | `prepare` | `e2e run --device`, the device `prepare` binds. |
 | `grantsAllPermissions: true` | - | - | `app.permissions: 'all'`, which the engine receives as `EngineAppInfo.allPermissions`. Without it, config load refuses `'all'`, so an engine released before it never receives the string. |
 | `launchArgumentValues: true` | - | - | The object form of `app.launchArguments`, in `EngineAppInfo.launchArgumentValues`. |
@@ -572,7 +587,10 @@ An undeclared verb is absent from the toolset.
 The test-facing APIs each engine member backs. A `screen` or `Locator`
 method for an undeclared kind, or a call with `modifiers` and no
 `tapModifiers`, fails with `UNSUPPORTED_CAPABILITY` before it reaches the
-engine. Without `tapButtons`, an action with a `button` fails the same way.
+engine. Without `tapButtons`, an action with a `button` fails the same way,
+and without `pointerModifiers`, a pointer action or a `hover` with
+`modifiers`. An empty `modifiers` list needs the same capability as any
+other, since it releases the keys the test holds.
 
 | API | Needs |
 | --- | --- |
@@ -580,6 +598,7 @@ engine. Without `tapButtons`, an action with a `button` fails the same way.
 | `screen` and `Locator` actions | `perform`, each only for a kind listed in `actions` |
 | `screen.swipe()` | `perform` with `swipe` on the observation root |
 | `modifiers` on a tap (`row.click({ modifiers: ['Shift'] })`) | `tapModifiers: true`; the keys are held for the click |
+| `modifiers` with `position` on a tap, `hover({ modifiers })` | `pointerModifiers: true`, and the pointer kind with `position`; exactly these keys are held for the gesture |
 | `button` on a tap (`link.click({ button: 'middle' })`) | `tapButtons: true` for a middle tap or a right tap with `count` above 1, and `secondaryTap` for a single right tap. A `left` tap doesn't need either. |
 | `screen.tapAt`, `tap({ position })` | `performAt` with the `tap` pointer kind |
 | `tap({ position })` with a `count` or `button` | `performAt` with the `doubleTap` pointer kind for 2 taps, `multiTap` for 3 or more, or `secondaryTap` for a single right tap |
@@ -1269,10 +1288,10 @@ honors in `actions` and `pointerActions`.
 
 | Kind | Fields | `actions` | `pointerActions` |
 | --- | --- | --- | --- |
-| `tap` | `modifiers?` on a node, `button?` (`'middle'`) | yes | yes |
-| `doubleTap` | `modifiers?` on a node, `button?` | yes | yes |
-| `multiTap` | `count` (3 or more), `modifiers?` on a node, `button?`; `tap({ count })` | yes | yes |
-| `secondaryTap` | `modifiers?` on a node | yes | yes |
+| `tap` | `modifiers?`, `button?` (`'middle'`) | yes | yes |
+| `doubleTap` | `modifiers?`, `button?` | yes | yes |
+| `multiTap` | `count` (3 or more), `modifiers?`, `button?`; `tap({ count })` | yes | yes |
+| `secondaryTap` | `modifiers?` | yes | yes |
 | `longPress` | `durationMs?` | yes | yes |
 | `fill` | `value`, `sensitive` | yes | - |
 | `clear` | - | yes | - |
@@ -1281,7 +1300,7 @@ honors in `actions` and `pointerActions`.
 | `uncheck` | - | yes | - |
 | `focus` | - | yes | - |
 | `blur` | - | yes | - |
-| `hover` | - | yes | yes |
+| `hover` | `modifiers?` | yes | yes |
 | `scrollIntoView` | - | yes | - |
 | `selectOption` | `value` | yes | - |
 | `setInputFiles` | `paths`; empty clears the input | yes | - |
@@ -1308,7 +1327,7 @@ async perform(ref, action, context) {
 ```
 
 ```ts
-/** Tap kinds shared by `perform` and `performAt`. On `LocatorAction`, each also has `modifiers`. */
+/** Tap kinds shared by `perform` and `performAt`. Each adds `modifiers` on `LocatorAction` and `PointerAction`. */
 type TapActions =
   | {
       readonly kind: 'tap';
@@ -1339,7 +1358,7 @@ type TapActions =
  */
 export type LocatorAction =
   | (TapActions & {
-      /** Keys held for the click; only an engine that declares `tapModifiers` receives it. */
+      /** Keys held for the click, none for an empty list; only an engine that declares `tapModifiers` receives it. */
       readonly modifiers?: readonly KeyModifier[];
     })
   | {
@@ -1349,8 +1368,12 @@ export type LocatorAction =
         | 'clear'
         | 'focus'
         | 'blur'
-        | 'hover'
         | 'scrollIntoView';
+    }
+  | {
+      readonly kind: 'hover';
+      /** Keys held while the pointer moves over the node, and only those; only an engine that declares `pointerModifiers` receives it. */
+      readonly modifiers?: readonly KeyModifier[];
     }
   | { readonly kind: 'longPress'; readonly durationMs?: number }
   | { readonly kind: 'fill'; readonly value: string; readonly sensitive: boolean }
@@ -1409,8 +1432,20 @@ Pointer actions use viewport coordinates when no semantic node is available.
 
 ```ts
 export type PointerAction =
-  | TapActions
-  | { readonly kind: 'hover' }
+  | (TapActions & {
+      /**
+       * Keys held for the click, and only those: a key the test holds that
+       * is not listed is released for the click, so an empty list holds
+       * none. Only an engine that declares `pointerModifiers` receives it;
+       * the harness refuses it for any other before dispatch.
+       */
+      readonly modifiers?: readonly KeyModifier[];
+    })
+  | {
+      readonly kind: 'hover';
+      /** Keys held while the pointer moves, as `modifiers` on a tap. Needs `pointerModifiers`. */
+      readonly modifiers?: readonly KeyModifier[];
+    }
   | { readonly kind: 'longPress'; readonly durationMs?: number }
   | { readonly kind: 'dragTo'; readonly target: ViewportPoint }
   | {

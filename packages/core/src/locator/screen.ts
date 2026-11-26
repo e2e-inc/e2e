@@ -453,12 +453,9 @@ class LocatorImpl extends ScreenImpl implements Locator {
     if (button !== undefined && button !== 'middle' && button !== 'right') {
       throw new TestError('INVALID_ARGUMENT', `${api}() button ${describeValue(button)} is not one of left, middle, right`);
     }
-    const action = tapAction(fixed?.count ?? count, fixed?.button ?? button);
+    const action = { ...tapAction(fixed?.count ?? count, fixed?.button ?? button), ...modifiers };
     const label = this.tapLabel(count === 1 ? undefined : count, button, modifiers.modifiers);
-    if (options?.position === undefined) return this.dispatchTap(api, { ...action, ...modifiers }, label, options?.timeout);
-    if (modifiers.modifiers !== undefined) {
-      throw new TestError('INVALID_ARGUMENT', `${api}() does not take modifiers with a position yet; drop one of them`);
-    }
+    if (options?.position === undefined) return this.dispatchTap(api, action, label, options?.timeout);
     const position = requireScreenPoint(options.position, `${api} position`);
     return this.context.steps.run(
       'locator',
@@ -482,7 +479,7 @@ class LocatorImpl extends ScreenImpl implements Locator {
     modifiers: readonly KeyModifier[] | undefined,
   ): string {
     const times = count === undefined ? '' : ` ${count} times`;
-    const held = [button === undefined ? undefined : `the ${button} button`, modifiers?.join('+')].filter((part) => part !== undefined);
+    const held = [button === undefined ? undefined : `the ${button} button`, describeModifiers(modifiers)].filter((part) => part !== undefined);
     return `${this.label}${times}${held.length === 0 ? '' : ` with ${held.join(' and ')}`}`;
   }
 
@@ -559,19 +556,27 @@ class LocatorImpl extends ScreenImpl implements Locator {
     return this.perform('blur', { kind: 'blur' }, options);
   }
 
+  /**
+   * Moves the pointer over the node: the node `hover` action, with the
+   * engine's own actionability checks, or with a position the `hover`
+   * pointer action at that point of its box. `modifiers` go with either.
+   */
   hover(options?: HoverOptions): Promise<void> {
-    rejectUnknownOptions('hover', options, ['timeout', 'position']);
+    rejectUnknownOptions('hover', options, ['timeout', 'position', 'modifiers']);
+    const modifiers = requireModifiers(options?.modifiers, 'hover');
+    const held = describeModifiers(modifiers.modifiers);
+    const label = `${this.label}${held === undefined ? '' : ` with ${held}`}`;
     if (options?.position === undefined) {
-      return this.action('locator.hover', () =>
-        this.context.engine.perform(this.expression, { kind: 'hover' }, options?.timeout),
+      return this.context.steps.run('locator', 'locator.hover', label, () =>
+        this.context.engine.perform(this.expression, { kind: 'hover', ...modifiers }, options?.timeout),
       );
     }
     const position = requireScreenPoint(options.position, 'hover position');
     return this.context.steps.run(
       'locator',
       'locator.hover',
-      `${this.label} at ${describePoint(position)}`,
-      () => this.context.engine.performWithin(this.expression, position, { kind: 'hover' }, options.timeout),
+      `${label} at ${describePoint(position)}`,
+      () => this.context.engine.performWithin(this.expression, position, { kind: 'hover', ...modifiers }, options.timeout),
     );
   }
 
@@ -885,7 +890,7 @@ function validateSwipeDuration(duration: number | undefined): number | undefined
  * - 2 presses: `doubleTap`.
  * - 3 or more: `multiTap`.
  *
- * The node action has the same fields, plus `modifiers`.
+ * The caller adds `modifiers` to the node or pointer action.
  */
 function tapAction(count: number, button: 'middle' | 'right' | undefined): PointTapAction {
   if (count === 2) return obj({ kind: 'doubleTap' as const, button });
@@ -904,8 +909,9 @@ function requireTapCount(value: unknown, api: string): number {
 }
 
 /**
- * The `modifiers` of a click, validated: a list of distinct key modifiers,
- * spread into the action only when it names one.
+ * The `modifiers` of a click or hover, validated: a list of distinct key
+ * modifiers, spread into the action whenever it is given. An empty list holds
+ * no keys, so it releases those the test holds, as in Playwright.
  */
 function requireModifiers(value: unknown, api: string): { modifiers?: readonly KeyModifier[] } {
   if (value === undefined) return {};
@@ -923,5 +929,11 @@ function requireModifiers(value: unknown, api: string): { modifiers?: readonly K
     if (modifiers.includes(modifier)) throw new TestError('INVALID_ARGUMENT', `${api}() names a modifier twice`);
     modifiers.push(modifier);
   }
-  return modifiers.length === 0 ? {} : { modifiers };
+  return { modifiers };
+}
+
+/** The held keys of a step label, `Shift+Alt` or `no modifiers`, when the test passed `modifiers`. */
+function describeModifiers(modifiers: readonly KeyModifier[] | undefined): string | undefined {
+  if (modifiers === undefined) return undefined;
+  return modifiers.length === 0 ? 'no modifiers' : modifiers.join('+');
 }

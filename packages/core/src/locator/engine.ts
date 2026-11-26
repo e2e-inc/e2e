@@ -207,7 +207,8 @@ export class LocatorEngine {
   /**
    * Refuses an action the session would refuse, before the locator is
    * resolved: an undeclared kind, or modifiers on an engine that does not
-   * declare `tapModifiers`, is `UNSUPPORTED_CAPABILITY`, a `press` key
+   * declare `tapModifiers` (`pointerModifiers` for a hover), is
+   * `UNSUPPORTED_CAPABILITY`, a `press` key
    * outside the grammar is `INVALID_ARGUMENT`. Waiting for a node the engine
    * could never act on would report it as missing instead. Passing `button`
    * without `tapButtons` fails before lookup.
@@ -229,11 +230,14 @@ export class LocatorEngine {
         }`,
       );
     }
-    if ('modifiers' in action && action.modifiers !== undefined && !this.session.tapModifiers) {
-      throw new ConfigurationError(
-        'UNSUPPORTED_CAPABILITY',
-        `modifiers on the "${action.kind}" action are not available on this target: its engine does not declare tapModifiers`,
-      );
+    if ('modifiers' in action && action.modifiers !== undefined) {
+      const capability = action.kind === 'hover' ? 'pointerModifiers' : 'tapModifiers';
+      if (!this.session[capability]) {
+        throw new ConfigurationError(
+          'UNSUPPORTED_CAPABILITY',
+          `modifiers on the "${action.kind}" action are not available on this target: its engine does not declare ${capability}`,
+        );
+      }
     }
     if ('button' in action && action.button !== undefined && !this.session.tapButtons) {
       throw new ConfigurationError(
@@ -246,7 +250,8 @@ export class LocatorEngine {
 
   /**
    * Refuses a pointer action the session would refuse: an undeclared kind,
-   * or a `button` on an engine without `tapButtons`, is `UNSUPPORTED_CAPABILITY`.
+   * `modifiers` on an engine without `pointerModifiers`, or a `button` on an
+   * engine without `tapButtons`, is `UNSUPPORTED_CAPABILITY`.
    */
   private checkPointerAction(action: ScreenPointerAction): void {
     if (!this.session.pointerActions.has(action.kind)) {
@@ -257,6 +262,12 @@ export class LocatorEngine {
             ? 'no pointer actions'
             : [...this.session.pointerActions].join(', ')
         }`,
+      );
+    }
+    if ('modifiers' in action && action.modifiers !== undefined && !this.session.pointerModifiers) {
+      throw new ConfigurationError(
+        'UNSUPPORTED_CAPABILITY',
+        `modifiers on the "${action.kind}" action at a point are not available on this target: its engine does not declare pointerModifiers`,
       );
     }
     if ('button' in action && action.button !== undefined && !this.session.tapButtons) {

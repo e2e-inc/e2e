@@ -695,6 +695,7 @@ click(options?: TapOptions): Promise<void>;
 await screen.getByRole('button', 'Save').tap({ timeout: 10_000 });
 await screen.getByRole('image', 'Seat map').tap({ position: { x: 120, y: 48 } });
 await row.click({ modifiers: ['Shift'] });
+await screen.getByRole('grid', 'Files').click({ position: { x: 12, y: '50%' }, modifiers: ['Shift'] });
 await screen.getByText('Shipping address').tap({ count: 3 });
 await screen.getByRole('link', 'Docs').click({ button: 'middle' });
 ```
@@ -715,7 +716,14 @@ The options are [`TapOptions`](#types):
   need an engine that lists the `multiTap` action; the browser and mobile
   engines both do. With `position`, 2 taps need the `doubleTap` pointer
   action and 3 or more need `multiTap`.
-- `modifiers`: the browser engine holds them.
+- `modifiers`: keys held for the click. Without `position` the engine needs
+  `tapModifiers`, with `position` it needs `pointerModifiers`. The browser
+  engine declares both, and holds exactly the keys you name, as Playwright
+  does: a key the test holds with `browser.keyboard.down` and doesn't list is
+  released for the click and pressed again after it. An empty list holds no
+  keys, so it releases every held key for the click, and needs the same
+  capability as any other list. Don't mix the raw Playwright page's keyboard
+  with modified clicks: see [Keyboard](/reference/web#keyboard).
 - `position`: a point in the node, as a [`ScreenPoint`](#types). A pixel
   coordinate is measured from the node's top-left corner, inside its border.
   A percentage from `'0%'` through `'100%'` is a share of the node's border
@@ -751,10 +759,10 @@ await button.tap({ position: { x: 20, y: '50%' } });
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | An unknown or repeated modifier, `modifiers` beside `position`, or a `count` that is not a positive safe integer. |
+| `INVALID_ARGUMENT` | An unknown or repeated modifier, or a `count` that is not a positive safe integer. |
 | `INVALID_ARGUMENT` | A `position` coordinate that is negative, not finite, or a string that is not a percentage from `'0%'` through `'100%'`. |
 | `INVALID_ARGUMENT` | A `button` other than `left`, `middle`, or `right`. |
-| `UNSUPPORTED_CAPABILITY` | `modifiers` on an engine that does not declare `tapModifiers`, the mobile engine among them; thrown before it acts. |
+| `UNSUPPORTED_CAPABILITY` | `modifiers` on an engine that does not declare `tapModifiers`, or with `position` on one that does not declare `pointerModifiers`, the mobile engine among them; thrown before the node is resolved. |
 | `UNSUPPORTED_CAPABILITY` | A `count` of 3 or more on an engine without the `multiTap` action, or above the engine's limit (200 on the browser and mobile engines); thrown before it acts. |
 | `UNSUPPORTED_CAPABILITY` | A middle `button`, or a right `button` with `count` above 1, on an engine without `tapButtons` (such as mobile). Thrown before acting. |
 | `UNSUPPORTED_CAPABILITY` | A single right tap on an engine that doesn't list `secondaryTap`. A `secondaryTap()` call fails the same way. |
@@ -976,23 +984,35 @@ await screen.getByLabel('Email').blur();
 #### `hover`
 
 ```ts
-/** Hovers over exactly one matching actionable node; with `position`, moves the pointer to that point of its box once it is in view, with no other actionability check. */
+/** Hovers over exactly one matching actionable node; with `position`, moves the pointer to that point of its box once it is in view, with no other actionability check. `modifiers` holds keys for either. */
 hover(options?: HoverOptions): Promise<void>;
 ```
 
 ```ts
 await screen.getByRole('button', 'Account').hover();
 await screen.getByRole('slider', 'Volume').hover({ position: { x: '75%', y: '50%' } });
+await screen.getByRole('link', 'Preview').hover({ modifiers: ['Alt'] });
 ```
 
 - `position`: a point in the node, with the same rules as
   [`tap`](#tap)'s. The engine needs the `hover` pointer action. The browser
   and the headed desktop engines list it, the mobile engine does not.
+- `modifiers`: keys held while the pointer moves, with the same rules as a
+  [`tap`](#tap)'s, an empty list included. The engine needs
+  `pointerModifiers`, which only the browser engine declares. Without
+  `position`, the hover keeps the engine's actionability checks, so a node
+  under an overlay fails as in Playwright.
+
+With `position`, the hover is the `hover` pointer action. The engine scrolls
+the node into view and moves the pointer to the point, as a tap with
+`position` does, so the other actionability checks don't run.
 
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | A `position` coordinate that is negative, not finite, or a string that is not a percentage from `'0%'` through `'100%'`. |
+| `INVALID_ARGUMENT` | An unknown or repeated modifier. |
 | `UNSUPPORTED_CAPABILITY` | `position` on an engine without the `hover` pointer action, such as mobile. Thrown before the node is resolved. |
+| `UNSUPPORTED_CAPABILITY` | `modifiers` on an engine that does not declare `pointerModifiers`, such as mobile. Thrown before the node is resolved. |
 | `ACTION_FAILED` | `position` on a node the browser engine cannot bring into view. |
 | `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout, or for a percentage, never shows a pixel of it inside the viewport. When the screen read for the viewport kept failing until the timeout, the message says so and the error's `cause` is the last failure. |
 
@@ -1597,7 +1617,12 @@ export interface ClickOptions extends ActionOptions {
    * Keys held while the pointer clicks, as a Shift-click extends a selection:
    * `Shift`, `Control`, `Alt`, `Meta`, or `ControlOrMeta` (Control on Windows
    * and Linux, Meta on macOS). Needs an engine that declares `tapModifiers`,
-   * `UNSUPPORTED_CAPABILITY` otherwise.
+   * or `pointerModifiers` with `position`, `UNSUPPORTED_CAPABILITY` otherwise.
+   * On the browser, exactly these keys are held for the click: a key the
+   * test holds with `browser.keyboard.down` and does not list is released
+   * for it and pressed again after, as in Playwright. An empty list holds
+   * no keys, so it releases every key the test holds for the click, and
+   * needs the same capability.
    */
   modifiers?: readonly KeyModifier[];
 }
@@ -1634,6 +1659,13 @@ export interface HoverOptions extends ActionOptions {
    * action, `UNSUPPORTED_CAPABILITY` otherwise.
    */
   position?: ScreenPoint;
+  /**
+   * Keys held while the pointer moves, and only those, as a tap's
+   * `modifiers` are. An empty list releases the keys the test holds. Needs
+   * an engine that declares `pointerModifiers`, `UNSUPPORTED_CAPABILITY`
+   * otherwise.
+   */
+  modifiers?: readonly KeyModifier[];
 }
 
 /** One option of a select: its label (a bare string too), its `value` attribute, or its zero-based index. */
