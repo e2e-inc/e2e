@@ -938,7 +938,7 @@ await expect(screen.getByText('Order #42')).toBeVisible();
 | `POLICY_DENIED` | A `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, or `filesystem:` link. |
 | `INVALID_ARGUMENT` | No app on iOS: an open bound to none leaves no app session to observe. |
 | `INVALID_ARGUMENT` | A string that does not parse as an absolute URL. The message names no part of the input, which may carry a magic-link token in its query, path, or userinfo. |
-| `TEST_SETUP_FAILED` | The app the link opens into is not on the device, on Android and iOS devices. On an iOS simulator, agent-device does not check the install, so this is `ENGINE_FAILURE`. |
+| `TEST_SETUP_FAILED` | The app the link opens into is not on the device, on Android and iOS devices. On an iOS simulator, a missing dotted bundle id is `ENGINE_FAILURE`, because agent-device does not report it as not installed there. |
 
 #### `closeApp`
 
