@@ -141,7 +141,8 @@ Methods: `setNetwork`, `setAirplaneMode`, `setPermission`, `setLocation`,
 `enrollBiometrics`, `installApp`, `uninstallApp`, `isAppInstalled`,
 `openApp`, `openLink`, `closeApp`, `clearKeychain`, `foregroundApp`, `home`,
 `back`, `pressRemote`, `pressButton`, `shake`, `lock`, `unlock`, `alert`,
-`dismissKeyboard`, `isKeyboardShown`, `clipboard`, `setClipboard`, and the
+`dismissKeyboard`, `isKeyboardShown`, `clipboard`, `setClipboard`,
+`keyboard.type` and `keyboard.press` for the focused field, and the
 `locator` accessor.
 
 `device.unstable_raw` is the raw driver session, for what the methods do not
