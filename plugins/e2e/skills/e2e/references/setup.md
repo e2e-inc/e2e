@@ -466,6 +466,10 @@ export default {
   `setPermission`, `setNetwork`, `setAppearance`, `clearKeychain`, `fold`
   for a foldable's hinge (iPhone Duo, Android foldable emulators), `locator`, more). Portable suites declare
   `platforms: ['ios', 'android']`.
+- `device.pressButton('volume-up' | 'volume-down' | 'power')` presses a
+  hardware button as a step: all three on Android, volume on a physical
+  iPhone, `UNSUPPORTED_CAPABILITY` on an iOS simulator. It returns nothing,
+  so assert on the screen next (Android shows its volume panel).
 - `device.viewport()` reads `{ width, height }` fresh on each call, in the coordinate space of `screen.tapAt()`.
 - `device.unstable_raw` gives the session name, device id and name, a
   `selection` to spread into a call, and a

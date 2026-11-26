@@ -266,4 +266,22 @@ test.describe('device fixture', () => {
       await device.enrollBiometrics('faceid', false);
     }
   });
+
+  // A volume press brings up Android's volume panel over the app, and the
+  // tree reads its sliders. The second press puts the level back; the panel
+  // hides itself a few seconds later, before the next test taps.
+  test('pressButton shows the volume panel on Android', { platforms: ['android'] }, async ({ device, screen }) => {
+    const media = screen.getByRole('slider', { name: 'Media' });
+    await device.pressButton('volume-up');
+    await expect(media).toBeVisible();
+    await device.pressButton('volume-down');
+    await expect(media).toBeHidden({ timeout: 10_000 });
+  });
+
+  // XCUIDevice has no volume press on a simulator, so agent-device refuses
+  // before it sends anything.
+  test('pressButton is refused on an iOS simulator', { platforms: ['ios'] }, async ({ device }) => {
+    const refused = await device.pressButton('volume-up').then(() => undefined, (error: unknown) => error);
+    expect(refused).toHaveProperty('code', 'UNSUPPORTED_CAPABILITY');
+  });
 });
