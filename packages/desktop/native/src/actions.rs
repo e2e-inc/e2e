@@ -520,18 +520,27 @@ fn select_all(element: &Element, deadline: Instant) -> Outcome<()> {
 }
 
 /// The text an item of a list or menu shows.
-fn item_label(element: &Element) -> Option<String> {
-    let values = element.attributes(&["AXTitle", "AXValue", "AXDescription"]).ok()?;
+fn item_label(element: &Element) -> Result<Option<String>, AXError> {
+    let values = match element.attributes(&["AXTitle", "AXValue", "AXDescription"]) {
+        Ok(values) => values,
+        Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+        Err(_) => return Ok(None),
+    };
     if let Some(text) = values.into_iter().flatten().find_map(|value| value.text().map(str::to_owned).filter(|text| !text.trim().is_empty())) {
-        return Some(text);
+        return Ok(Some(text));
     }
     // A row's text is in a cell or a text inside it.
-    for child in element.elements("AXChildren", 16).unwrap_or_default() {
-        if let Some(text) = item_label(&child) {
-            return Some(text);
+    let children = match element.elements("AXChildren", 16) {
+        Ok(children) => children,
+        Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+        Err(_) => Vec::new(),
+    };
+    for child in children {
+        if let Some(text) = item_label(&child)? {
+            return Ok(Some(text));
         }
     }
-    None
+    Ok(None)
 }
 
 /// The open menu of a pop-up button, once it shows.
@@ -621,7 +630,19 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
             rows if rows.is_empty() => all(element, "AXChildren", "read the list's rows")?,
             rows => rows,
         };
-        let Some(row) = rows.into_iter().find(|row| item_label(row).as_deref() == Some(label)) else {
+        // A row the app did not answer in time may be the option asked for: that is no proof it is missing.
+        let mut stalled = false;
+        let row = rows.into_iter().find(|row| match item_label(row) {
+            Ok(text) => text.as_deref() == Some(label),
+            Err(error) => {
+                stalled |= error == ax::AX_CANNOT_COMPLETE;
+                false
+            }
+        });
+        let Some(row) = row else {
+            if stalled {
+                return Err(unread(ax::AX_CANNOT_COMPLETE, "read the list's rows"));
+            }
             return Err(Failure::refused(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\"")));
         };
         let (_, row_role) = raw_role(&row);
