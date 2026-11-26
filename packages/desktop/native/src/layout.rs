@@ -42,6 +42,10 @@ const COMMAND: u32 = 1;
 /// Command held when `command`, since a layout such as Dvorak-QWERTY Command types other characters then, and with no
 /// modifier otherwise. `None` when the layout cannot be read.
 pub fn characters(command: bool) -> Option<Vec<(u16, char)>> {
+    // Text Input Sources aborts the process when two threads call it at once, and native calls run on a pool of threads:
+    // one read at a time.
+    static LAYOUT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _held = LAYOUT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     unsafe {
         let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource();
         if source.is_null() {
