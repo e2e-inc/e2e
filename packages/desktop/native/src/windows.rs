@@ -194,7 +194,11 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
     let mut unresolved = 0;
     for (element, id) in &accessible {
         let Some(id) = *id else {
-            unresolved += 1;
+            // Only a window counts: an app's AXWindows can hold other elements that never get an id (Finder's desktop, an
+            // app's own AXApplication element), and they are no window the list leaves out.
+            if element.text("AXRole").as_deref() == Some("AXWindow") {
+                unresolved += 1;
+            }
             continue;
         };
         let entry = server.iter().find(|window| window.id == id);
