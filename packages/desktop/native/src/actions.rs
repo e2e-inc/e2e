@@ -93,6 +93,12 @@ fn action_names(element: &Element, what: &str) -> Outcome<Vec<String>> {
     }
 }
 
+/// Every element of an array attribute, however many it holds.
+fn all(element: &Element, name: &str) -> Vec<Element> {
+    let count = element.count(name).unwrap_or(0).max(1);
+    element.elements(name, count).unwrap_or_default()
+}
+
 /// The element a ref names, checked to still exist.
 fn resolve(reference: &str) -> Outcome<Entry> {
     let entry = refs::get(reference).ok_or_else(|| Failure::refused(codes::STALE_REF, format!("{reference} names no element of a recent snapshot")))?;
@@ -450,7 +456,7 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         let Some(menu) = open_menu(element, deadline) else {
             return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the list's menu did not open"));
         };
-        let items = menu.elements("AXChildren", 512).unwrap_or_default();
+        let items = all(&menu, "AXChildren");
         let Some(item) = items.into_iter().find(|item| item.text("AXTitle").as_deref() == Some(label) && item.boolean("AXEnabled") != Some(false)) else {
             // Nothing was chosen: the menu opened and closed again, and the list's value is as it was.
             if close_menu(entry.pid, &menu, deadline) {
@@ -471,8 +477,7 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         return set_value(element, label, deadline);
     }
     if roles::collection(role) {
-        let rows =
-            element.elements("AXRows", 4096).ok().filter(|rows| !rows.is_empty()).unwrap_or_else(|| element.elements("AXChildren", 4096).unwrap_or_default());
+        let rows = Some(all(element, "AXRows")).filter(|rows| !rows.is_empty()).unwrap_or_else(|| all(element, "AXChildren"));
         let Some(row) = rows.into_iter().find(|row| item_label(row).as_deref() == Some(label)) else {
             return Err(Failure::refused(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\"")));
         };
