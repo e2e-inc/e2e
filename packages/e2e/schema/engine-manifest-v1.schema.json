@@ -113,11 +113,15 @@
           "hover",
           "dragTo",
           "swipe",
-          "swipeTo"
+          "swipeTo",
+          "multiTap"
         ]
       }
     },
     "tapModifiers": {
+      "type": "boolean"
+    },
+    "tapButtons": {
       "type": "boolean"
     },
     "selectsDevice": {
@@ -191,6 +195,36 @@
             "contains": {
               "const": "engine/perform"
             }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "tapButtons": {
+            "const": true
+          }
+        },
+        "required": [
+          "tapButtons"
+        ]
+      },
+      "then": {
+        "properties": {
+          "methods": {
+            "anyOf": [
+              {
+                "contains": {
+                  "const": "engine/perform"
+                }
+              },
+              {
+                "contains": {
+                  "const": "engine/performAt"
+                }
+              }
+            ]
           }
         }
       }

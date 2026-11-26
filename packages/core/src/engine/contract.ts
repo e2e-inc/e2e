@@ -298,24 +298,23 @@ export interface ObservationPixels {
   readonly scale: number;
 }
 
-/**
- * One deterministic action `perform` carries out on a node. The `swipe`
- * kind on the observation's root node is the viewport swipe: the agent's
- * `scroll` verb and `screen.swipe()` both arrive as `perform(root, swipe)`,
- * so a surface implements scrolling once.
- *
- * `press` takes one key in the `Key` grammar below.
- */
-export type LocatorAction =
+/** Tap kinds shared by `perform` and `performAt`. On `LocatorAction`, each also has `modifiers`. */
+type TapActions =
   | {
-      readonly kind: 'tap' | 'doubleTap' | 'secondaryTap';
+      readonly kind: 'tap';
       /**
-       * Keys held for the click, as a Shift-click extends a selection. Only
-       * an engine that declares `tapModifiers` receives it; the harness
-       * refuses it for any other before dispatch.
+       * Set to `'middle'` for a middle click. It's sent only to an engine
+       * that declares `tapButtons`. For any other engine, it's refused before
+       * dispatch. A single right click is the `secondaryTap` kind.
        */
-      readonly modifiers?: readonly KeyModifier[];
+      readonly button?: 'middle';
     }
+  | {
+      readonly kind: 'doubleTap';
+      /** Mouse button for both clicks (defaults to left). Sent only to engines that declare `tapButtons`. */
+      readonly button?: 'middle' | 'right';
+    }
+  | { readonly kind: 'secondaryTap' }
   | {
       /**
        * `count` taps in a row on one point: 3 or more, since 2 is
@@ -326,9 +325,27 @@ export type LocatorAction =
        */
       readonly kind: 'multiTap';
       readonly count: number;
-      /** As on `tap`: only an engine that declares `tapModifiers` receives it. */
+      /** Mouse button for every click (defaults to left). Sent only to engines that declare `tapButtons`. */
+      readonly button?: 'middle' | 'right';
+    };
+
+/**
+ * One deterministic action `perform` carries out on a node. The `swipe`
+ * kind on the observation's root node is the viewport swipe: the agent's
+ * `scroll` verb and `screen.swipe()` both arrive as `perform(root, swipe)`,
+ * so a surface implements scrolling once.
+ *
+ * `press` takes one key in the `Key` grammar below.
+ */
+export type LocatorAction =
+  | (TapActions & {
+      /**
+       * Keys held for the click, as a Shift-click extends a selection. Only
+       * an engine that declares `tapModifiers` receives it; the harness
+       * refuses it for any other before dispatch.
+       */
       readonly modifiers?: readonly KeyModifier[];
-    }
+    })
   | {
       readonly kind:
         | 'check'
@@ -396,7 +413,8 @@ export const KNOWN_LOCATOR_ACTION_KINDS = [...LOCATOR_ACTION_KINDS, 'blur', 'set
  * before it drags.
  */
 export type PointerAction =
-  | { readonly kind: 'tap' | 'doubleTap' | 'secondaryTap' | 'hover' }
+  | TapActions
+  | { readonly kind: 'hover' }
   | { readonly kind: 'longPress'; readonly durationMs?: number }
   | { readonly kind: 'dragTo'; readonly target: ViewportPoint }
   | {
@@ -413,7 +431,7 @@ export type PointerAction =
 /** Every pointer action kind; what an engine declares in `pointerActions`. */
 export type PointerActionKind = PointerAction['kind'];
 
-/** The closed list of pointer action kinds, in contract order; the type is derived from it. */
+/** The pointer action kinds of SPI v1. List newer kinds explicitly. Use KNOWN_POINTER_ACTION_KINDS to check a pointer action kind. */
 export const POINTER_ACTION_KINDS = [
   'tap',
   'doubleTap',
@@ -424,6 +442,9 @@ export const POINTER_ACTION_KINDS = [
   'swipe',
   'swipeTo',
 ] as const satisfies readonly PointerActionKind[];
+
+/** Every pointer action kind understood by this version of core. */
+export const KNOWN_POINTER_ACTION_KINDS = [...POINTER_ACTION_KINDS, 'multiTap'] as const satisfies readonly PointerActionKind[];
 
 /**
  * The key grammar of `press`, shared by every engine so a test's key names are

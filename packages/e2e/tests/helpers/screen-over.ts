@@ -17,6 +17,7 @@ import {
   type NodeRef,
   type OperationContext,
   type PointerAction,
+  type PointerActionKind,
   type SemanticNode,
   type ViewportPoint,
   type ViewportIntersection,
@@ -39,8 +40,10 @@ export interface ScreenOverOptions {
   readonly perform?: (ref: NodeRef, action: LocatorAction, operation: OperationContext) => void | Promise<void>;
   /** Action kinds the engine declares with `perform`; default every kind. */
   readonly actions?: readonly LocatorActionKind[];
-  /** Receives every pointer action at a viewport point; with it the engine declares the `tap` pointer action. */
+  /** Receives every pointer action at a viewport point; with it the engine declares `pointerActions`. */
   readonly performAt?: (point: ViewportPoint, action: PointerAction) => void | Promise<void>;
+  /** Pointer action kinds declared with `performAt`. Defaults to `tap`. */
+  readonly pointerActions?: readonly PointerActionKind[];
   /** Answers every `viewportIntersection`; without it the engine declares none. */
   readonly viewportIntersection?: (ref: NodeRef) => ViewportIntersection | Promise<ViewportIntersection>;
   /** The keyboard the engine declares, if any. */
@@ -53,6 +56,8 @@ export interface ScreenOverOptions {
   readonly registered?: (relativePath: string) => void;
   /** Whether the engine declares `tapModifiers`; default not. */
   readonly tapModifiers?: boolean;
+  /** Set to `true` to declare `tapButtons` on the engine (off by default). */
+  readonly tapButtons?: boolean;
   /** Action and assertion timeout in milliseconds. */
   readonly timeoutMs: number;
 }
@@ -77,7 +82,7 @@ export function screenOver(options: ScreenOverOptions): { screen: Screen; steps:
     ...(performAt === undefined
       ? {}
       : {
-          pointerActions: ['tap'] as const,
+          pointerActions: options.pointerActions ?? ['tap'],
           performAt: async (point: ViewportPoint, action: PointerAction) => {
             await performAt(point, action);
           },
@@ -88,6 +93,7 @@ export function screenOver(options: ScreenOverOptions): { screen: Screen; steps:
     ...(options.keyboard === undefined ? {} : { keyboard: options.keyboard }),
     ...(screenshot === undefined ? {} : { artifacts: { screenshot: async (label: string | undefined) => screenshot(label) } }),
     ...(options.tapModifiers === undefined ? {} : { tapModifiers: options.tapModifiers }),
+    ...(options.tapButtons === undefined ? {} : { tapButtons: options.tapButtons }),
   });
   const steps = new StepRecorder('attempt');
   const signal = new AbortController().signal;

@@ -288,6 +288,48 @@ test('clicks hold the modifiers they name', async ({ app, screen, browser }) => 
   await expect(status).toHaveText('click');
 });
 
+test('taps use the requested mouse button, count, and position', async ({ app, screen, browser }) => {
+  await app.open();
+  await browser.evaluate(() => {
+    document.body.innerHTML = '<a href="/next" style="display: inline-block; padding: 20px">Next</a>';
+    const link = document.querySelector('a')!;
+    const log: string[] = [];
+    (window as unknown as { pressed: string[] }).pressed = log;
+    for (const type of ['click', 'auxclick', 'contextmenu']) {
+      link.addEventListener(type, (event) => {
+        event.preventDefault();
+        const mouse = event as MouseEvent;
+        const x = Math.round(mouse.clientX - link.getBoundingClientRect().left);
+        log.push([type, 'b' + mouse.button, 'd' + mouse.detail, 'x' + x, mouse.shiftKey && 'shift', mouse.ctrlKey && 'ctrl', mouse.altKey && 'alt'].filter(Boolean).join(' '));
+      });
+    }
+    return null;
+  });
+  const next = screen.getByRole('link', { name: 'Next' });
+  const pressed = async (options: Parameters<typeof next.tap>[0]) => {
+    await browser.evaluate(() => {
+      (window as unknown as { pressed: string[] }).pressed.length = 0;
+      return null;
+    });
+    await next.tap(options);
+    return browser.evaluate(() => (window as unknown as { pressed: string[] }).pressed);
+  };
+  const onNode = (events: string[]) => events.map((event) => event.replace(/ x\\d+/, ''));
+  expect(onNode(await pressed({ button: 'middle' }))).toEqual(['auxclick b1 d1']);
+  expect(onNode(await pressed({ button: 'middle', modifiers: ['Shift', 'Control'] }))).toEqual(['auxclick b1 d1 shift ctrl']);
+  expect(onNode(await pressed({ button: 'right', modifiers: ['Alt'] }))).toEqual(['contextmenu b2 d0 alt', 'auxclick b2 d1 alt']);
+  expect(onNode(await pressed({ button: 'left' }))).toEqual(['click b0 d1']);
+  expect(onNode(await pressed({ button: 'middle', count: 2 }))).toEqual(['auxclick b1 d1', 'auxclick b1 d2']);
+  expect(onNode(await pressed({ button: 'right', count: 3 }))).toEqual([
+    'contextmenu b2 d0', 'auxclick b2 d1', 'contextmenu b2 d0', 'auxclick b2 d2', 'contextmenu b2 d0', 'auxclick b2 d3',
+  ]);
+  expect(await pressed({ button: 'middle', position: { x: 5, y: 5 } })).toEqual(['auxclick b1 d1 x5']);
+  expect(await pressed({ button: 'right', count: 2, position: { x: 7, y: 5 } })).toEqual([
+    'contextmenu b2 d0 x7', 'auxclick b2 d1 x7', 'contextmenu b2 d0 x7', 'auxclick b2 d2 x7',
+  ]);
+  expect(await pressed({ count: 3, position: { x: 9, y: 5 } })).toEqual(['click b0 d1 x9', 'click b0 d2 x9', 'click b0 d3 x9']);
+});
+
 test('a trigger that starts no download times out saying so', async ({ app, browser }) => {
   await app.open('/downloads');
   await browser.waitForDownload(() => new Promise((resolve) => setTimeout(resolve, 200)), { timeout: 500 });
@@ -602,6 +644,7 @@ describe('web platform integration', () => {
     'a *css= capture is refused before the last selector part',
     'downloads are captured as artifacts',
     'clicks hold the modifiers they name',
+    'taps use the requested mouse button, count, and position',
     'a viewport set before the first navigation holds through app.open',
     'an empty class attribute is an empty class list',
     'reads wait for a node that arrives late',

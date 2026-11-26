@@ -492,17 +492,27 @@ export interface TapOptions extends ClickOptions {
    * on a document platform. Without it the platform picks a point of the
    * node, usually its center, behind its own actionability checks; with it
    * the pointer is dispatched at that point once the node is in view and has
-   * a box, which needs the engine's `tap` pointer action.
+   * a box. The engine needs the matching pointer action: `tap`,
+   * `secondaryTap` for a single right tap, `doubleTap` for 2 taps, or
+   * `multiTap` for 3 or more.
    */
   position?: Point;
   /**
    * How many taps in a row, a positive safe integer, default 1. `2` is the
    * same as `doubleTap()`; 3 or more needs an engine that declares the
    * `multiTap` action, `UNSUPPORTED_CAPABILITY` otherwise. A count above the
-   * engine's own limit (200 on the mobile engine) is also
-   * `UNSUPPORTED_CAPABILITY`. A count above 1 is not combined with `position`.
+   * engine's own limit (200 on the browser and mobile engines) is also
+   * `UNSUPPORTED_CAPABILITY`. With `position`, the matching pointer action is
+   * needed instead.
    */
   count?: number;
+  /**
+   * The mouse button to click with: `left` (default), `middle`, or `right`.
+   * A right tap with a `count` of 1 is the same as `secondaryTap()`. A middle
+   * tap, or a right tap with a `count` above 1, needs an engine that declares
+   * `tapButtons`, and fails with `UNSUPPORTED_CAPABILITY` otherwise.
+   */
+  button?: 'left' | 'middle' | 'right';
 }
 
 /** `longPress` options: the hold time in milliseconds, 100 through 10000, default the engine's own. */

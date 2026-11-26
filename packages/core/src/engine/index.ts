@@ -80,6 +80,7 @@ export {
   KEY_MODIFIERS,
   KEY_NAMES,
   KNOWN_LOCATOR_ACTION_KINDS,
+  KNOWN_POINTER_ACTION_KINDS,
   LOCATOR_ACTION_KINDS,
   OBSERVED_NAME_LIMIT,
   OBSERVED_TEXT_LIMIT,
@@ -829,6 +830,17 @@ export interface Engine {
    * that predates the field never drops one silently.
    */
   readonly tapModifiers?: boolean;
+  /**
+   * Set to `true` when the engine handles `button` on `tap`, `doubleTap`,
+   * and `multiTap` in `perform` or `performAt`. Otherwise, actions with
+   * `button` fail with `UNSUPPORTED_CAPABILITY` before reaching the engine.
+   * Left taps and single right taps (`secondaryTap`) don't carry `button`,
+   * so they don't need `tapButtons`.
+   *
+   * Older engines never receive `button`, so they can't treat a middle or
+   * right click as a left click.
+   */
+  readonly tapButtons?: boolean;
   /**
    * `prepare` binds the target to the device `EnginePrepareInfo.device`
    * names, for `e2e run --device`, over the device the engine was configured

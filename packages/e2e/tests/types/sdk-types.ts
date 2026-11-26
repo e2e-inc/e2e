@@ -886,6 +886,17 @@ void screen.getByRole('row').secondaryTap({ modifiers: ['Alt'] });
 void screen.getByRole('row').dblclick({ modifiers: ['Shift'], timeout: 1_000 });
 // @ts-expect-error modifiers are the key grammar's modifier names
 void screen.getByRole('row').doubleTap({ modifiers: ['Hyper'] });
+void screen.getByRole('link').tap({ button: 'middle', modifiers: ['Shift'] });
+void screen.getByRole('link').click({ button: 'right' });
+// @ts-expect-error a button is left, middle, or right
+void screen.getByRole('link').tap({ button: 'back' });
+// @ts-expect-error only tap and click take a button
+void screen.getByRole('link').doubleTap({ button: 'middle' });
+void screen.getByRole('link').click({ button: 'right', count: 3, position: { x: 4, y: 4 } });
+void ({ kind: 'doubleTap', button: 'right' } satisfies import('e2e/engine').LocatorAction);
+void ({ kind: 'multiTap', count: 3, button: 'middle' } satisfies import('e2e/engine').PointerAction);
+// @ts-expect-error single right clicks use secondaryTap, so tap only accepts 'middle'
+void ({ kind: 'tap', button: 'right' } satisfies import('e2e/engine').LocatorAction);
 void screen.getByRole('image').click({ position: point });
 void screen.getByRole('button').tap({ count: 3, timeout: 1_000 });
 void screen.getByRole('button').click({ count: 3, modifiers: ['Shift'] });
@@ -1758,3 +1769,4 @@ void (blurTarget.blur satisfies (options?: ActionOptions) => Promise<void>);
 void blurTarget.blur('input');
 
 void (true satisfies (Exclude<import('e2e/engine').LocatorActionKind, (typeof import('e2e/engine').KNOWN_LOCATOR_ACTION_KINDS)[number]> extends never ? true : false));
+void (true satisfies (Exclude<import('e2e/engine').PointerActionKind, (typeof import('e2e/engine').KNOWN_POINTER_ACTION_KINDS)[number]> extends never ? true : false));

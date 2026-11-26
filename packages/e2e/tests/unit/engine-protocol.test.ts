@@ -13,7 +13,7 @@ import {
   ENGINE_METHODS,
   KNOWN_LOCATOR_ACTION_KINDS,
   LOCATOR_ACTION_KINDS,
-  POINTER_ACTION_KINDS,
+  KNOWN_POINTER_ACTION_KINDS,
   EngineError,
   loopbackTransport,
   spawnTransport,
@@ -566,12 +566,13 @@ describe('engine protocol', () => {
     };
     expect(schema.properties['methods']?.items?.enum).toEqual([...ENGINE_METHODS]);
     expect(schema.properties['actions']?.items?.enum).toEqual([...KNOWN_LOCATOR_ACTION_KINDS]);
-    expect(schema.properties['pointerActions']?.items?.enum).toEqual([...POINTER_ACTION_KINDS]);
+    expect(schema.properties['pointerActions']?.items?.enum).toEqual([...KNOWN_POINTER_ACTION_KINDS]);
     const validate = new Ajv2020({ strict: false }).compile(schema);
     const { local } = overLoopback(
       toy({
         actions: ['tap', 'blur'],
         perform: async () => {},
+        tapButtons: true,
         pointerActions: ['tap'],
         performAt: async () => {},
         keyboard: { type: async () => {}, press: async () => {} },
@@ -590,6 +591,7 @@ describe('engine protocol', () => {
       { ...base, methods: ['engine/observe'], actions: ['blur'] },
       { ...base, methods: ['engine/viewportIntersection'] },
       { ...base, methods: ['engine/observe'], tapModifiers: true },
+      { ...base, methods: ['engine/observe'], tapButtons: true },
       { ...base, methods: ['engine/observe'], selectsDevice: true },
       // The client serves prepare for finish alone, which would drop the device it never forwards.
       { ...base, methods: ['lifecycle/finish'], selectsDevice: true },

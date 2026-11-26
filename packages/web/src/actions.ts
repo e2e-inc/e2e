@@ -1,7 +1,7 @@
 /** Locator action dispatch for the Playwright engine. */
 
 import type { ElementHandle, Page } from 'playwright-core';
-import { Deadline, EngineError, pollCondition, TestError, type KeyModifier, type LocatorAction, type NodeRef, type PointerAction, type ViewportPoint } from '@e2e-dev/core/engine';
+import { Deadline, EngineError, obj, pollCondition, TestError, type KeyModifier, type LocatorAction, type NodeRef, type PointerAction, type ViewportPoint } from '@e2e-dev/core/engine';
 import {
   asActionable,
   isClassified,
@@ -28,6 +28,22 @@ const DEFAULT_LONG_PRESS_MS = 500;
 /** The keys a click holds, as Playwright's `modifiers` takes them; the contract spells them the same. */
 function heldKeys(action: Extract<LocatorAction, { kind: 'tap' | 'doubleTap' | 'secondaryTap' | 'multiTap' }>): { modifiers?: KeyModifier[] } {
   return action.modifiers === undefined ? {} : { modifiers: [...action.modifiers] };
+}
+
+/**
+ * Max clicks per multi-tap. Playwright queues every press before sending the
+ * first, so a larger count could hold the worker past its timeout.
+ */
+const MAX_CLICK_COUNT = 200;
+
+/** Returns the click count of a multi-tap, refusing one above `MAX_CLICK_COUNT` before any input. */
+function clickCount(count: number): number {
+  if (count > MAX_CLICK_COUNT) {
+    throw new EngineError('UNSUPPORTED_CAPABILITY', `the browser engine clicks at most ${MAX_CLICK_COUNT} times in a row, got ${count}`, {
+      retryable: false,
+    });
+  }
+  return count;
 }
 
 /** Playwright's words for an element handle whose element left the DOM. */
@@ -290,14 +306,20 @@ export async function dispatchLocatorAction(
   const locator = asActionable(target);
   switch (action.kind) {
     case 'tap':
+      // Send middle clicks directly to the node so a label stand-in doesn't intercept them.
+      if (action.button === 'middle') {
+        await locator.click({ button: 'middle', timeout, ...heldKeys(action) });
+        return;
+      }
+
       await clickControl(target, 'tap', { timeout, signal: operation.signal, ...heldKeys(action) });
       return;
     case 'doubleTap':
-      await locator.dblclick({ timeout, ...heldKeys(action) });
+      await locator.dblclick({ timeout, ...heldKeys(action), ...obj({ button: action.button }) });
       return;
     case 'multiTap':
       // One click sequence with a rising `detail`, as a person's triple click is.
-      await locator.click({ clickCount: action.count, timeout, ...heldKeys(action) });
+      await locator.click({ clickCount: clickCount(action.count), timeout, ...heldKeys(action), ...obj({ button: action.button }) });
       return;
     case 'secondaryTap':
       await locator.click({ button: 'right', timeout, ...heldKeys(action) });
@@ -412,10 +434,13 @@ export async function dispatchPointerAction(
   const point = nearestPixel(at);
   switch (action.kind) {
     case 'tap':
-      await mouse.click(point.x, point.y);
+      await mouse.click(point.x, point.y, obj({ button: action.button }));
       return;
     case 'doubleTap':
-      await mouse.dblclick(point.x, point.y);
+      await mouse.dblclick(point.x, point.y, obj({ button: action.button }));
+      return;
+    case 'multiTap':
+      await mouse.click(point.x, point.y, obj({ clickCount: clickCount(action.count), button: action.button }));
       return;
     case 'secondaryTap':
       await mouse.click(point.x, point.y, { button: 'right' });

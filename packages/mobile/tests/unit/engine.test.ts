@@ -110,6 +110,8 @@ describe('manifest', () => {
     expect([...pinned.capabilities].toSorted()).toEqual(['actions', 'artifacts', 'device', 'keyboard', 'location', 'observation', 'pointer', 'viewport-intersection']);
     expect(pinned.name).toBe('mobile');
     expect(describeEngine(pinned).launchArgumentValues).toBe(true);
+    // Without `tapButtons`, core rejects a middle click or right click with `count` above 1 before waiting.
+    expect(describeEngine(pinned).tapButtons).toBeUndefined();
     expect(pinned.version).not.toBe('unknown');
     expect(Object.keys(pinned.session!).toSorted()).toEqual(['back', 'openLink', 'reset', 'restart']);
     // No `open`: a device app has no URL. No select verb either: the touch surface has no option lists to pick from.
