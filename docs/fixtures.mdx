@@ -135,11 +135,12 @@ export default {
 } as const satisfies E2EConfig;
 ```
 
-Use `as const satisfies E2EConfig` or `defineConfig` to keep the config's
-inferred type, instead of a type annotation such as `const config: E2EConfig`.
-With an annotation, `typeof config` is plain `E2EConfig`. When you call
-`test.extend<{}, {}, typeof config>()`, the config's engine fixtures aren't
-added, and `platform` is typed as `string`.
+Use `as const satisfies E2EConfig` or
+[`defineConfig`](/reference/config#defineconfig) to keep the config's inferred
+type. With a type annotation such as `const config: E2EConfig`,
+`typeof config` is plain `E2EConfig`, so the target types aren't inferred. If
+you pass that type to `test.extend<{}, {}, typeof config>()`, you get a type
+error.
 
 Pass `typeof config` as the third type argument of `test.extend`. Check
 `platform === 'ios'` to narrow `device` to `Device`:
