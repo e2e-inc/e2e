@@ -507,9 +507,8 @@ export interface ClickOptions extends ActionOptions {
    * or `pointerModifiers` with `position`, `UNSUPPORTED_CAPABILITY` otherwise.
    * On the browser, exactly these keys are held for the click: a key the
    * test holds with `browser.keyboard.down` and does not list is released
-   * for it and pressed again after, as in Playwright. An empty list holds
-   * no keys, so it releases every key the test holds for the click, and
-   * needs the same capability.
+   * for it and pressed again after, as in Playwright. An empty list is the
+   * same as no `modifiers`.
    */
   modifiers?: readonly KeyModifier[];
 }
@@ -545,9 +544,8 @@ export interface HoverOptions extends ActionOptions {
   position?: ScreenPoint;
   /**
    * Keys held while the pointer moves, and only those, as a tap's
-   * `modifiers` are. An empty list releases the keys the test holds. Needs
-   * an engine that declares `pointerModifiers`, `UNSUPPORTED_CAPABILITY`
-   * otherwise.
+   * `modifiers` are. Needs an engine that declares `pointerModifiers`,
+   * `UNSUPPORTED_CAPABILITY` otherwise.
    */
   modifiers?: readonly KeyModifier[];
 }

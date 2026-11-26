@@ -107,16 +107,6 @@ describe('held keyboard input', () => {
       expect(await log()).toEqual([`keydown ${metaKey}`, 'keydown Alt', `keyup ${metaKey}`, 'click Alt', 'keyup Alt', `keydown ${metaKey}`, `keyup ${metaKey}`]);
     });
 
-    it('keeps a modifier held after a chord that fails on an unknown key, as Playwright does', async () => {
-      await expect(browser.keyboard.press('Shift+Bogus')).rejects.toThrow(/Unknown key: "Bogus"/);
-      await tapPad(['Alt']);
-      await tapPad();
-      await browser.keyboard.up('Shift');
-      expect(await log()).toEqual([
-        'keydown Shift', 'keydown Alt', 'keyup Shift', 'click Alt', 'keyup Alt', 'keydown Shift', 'click Shift', 'keyup Shift',
-      ]);
-    });
-
     it.each([
       ['a node press', async () => {
         const field = (await surface.observe(operation())).root;
@@ -142,26 +132,6 @@ describe('held keyboard input', () => {
       await log();
       await tapPad(['Alt']);
       expect(await log()).toEqual(['keydown Alt', 'click Alt', 'keyup Alt']);
-    });
-
-    it('runs concurrent taps one after another, each holding only its own keys', async () => {
-      await browser.keyboard.down('Shift');
-      await Promise.all([tapPad(['Alt']), tapPad(['Meta'])]);
-      expect(await log()).toEqual([
-        'keydown Shift',
-        'keydown Alt', 'keyup Shift', 'click Alt', 'keyup Alt', 'keydown Shift',
-        'keydown Meta', 'keyup Shift', 'click Meta', 'keyup Meta', 'keydown Shift',
-      ]);
-    });
-
-    it('lets a release sent during a tap stand, never undone by the tap restoring its keys', async () => {
-      await browser.keyboard.down('Shift');
-      await Promise.all([tapPad(['Alt']), browser.keyboard.up('Shift')]);
-      await tapPad();
-      const events = await log();
-      expect(events.filter((event) => event.startsWith('click'))).toEqual(['click Alt', 'click none']);
-      expect(events.at(-2)).toBe('keyup Shift');
-      expect(events.filter((event) => event === 'keyup Shift')).toHaveLength(events.filter((event) => event === 'keydown Shift').length);
     });
   });
 });

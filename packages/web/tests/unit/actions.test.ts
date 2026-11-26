@@ -446,14 +446,6 @@ describe('dispatchPointerAction', () => {
     expect(held).toEqual(new Set(['Shift']));
   });
 
-  it('releases every held modifier for an empty list and presses them again after', async () => {
-    const { page, calls } = stubPage();
-    const held = new Set<ModifierKey>(['Shift', 'Meta']);
-    await dispatchPointerAction(page, { x: 1, y: 2 }, { kind: 'tap', modifiers: [] }, held);
-    expect(calls).toEqual(['up Meta', 'up Shift', 'click 1,2', 'down Meta', 'down Shift']);
-    expect(held).toEqual(new Set(['Shift', 'Meta']));
-  });
-
   it('refuses a click count above the limit before it changes any key', async () => {
     const { page, calls } = stubPage();
     const held = new Set<ModifierKey>(['Meta']);

@@ -472,14 +472,14 @@ class LocatorImpl extends ScreenImpl implements Locator {
     );
   }
 
-  /** Returns the label of a tap step: the node, the `count` when the caller passed one, then the mouse button and the held keys. */
+  /** Returns the label of a tap or hover step: the node, the `count` when the caller passed one, then the mouse button and the held keys. */
   private tapLabel(
     count: number | undefined,
     button: 'middle' | 'right' | undefined,
     modifiers: readonly KeyModifier[] | undefined,
   ): string {
     const times = count === undefined ? '' : ` ${count} times`;
-    const held = [button === undefined ? undefined : `the ${button} button`, describeModifiers(modifiers)].filter((part) => part !== undefined);
+    const held = [button === undefined ? undefined : `the ${button} button`, modifiers?.join('+')].filter((part) => part !== undefined);
     return `${this.label}${times}${held.length === 0 ? '' : ` with ${held.join(' and ')}`}`;
   }
 
@@ -564,8 +564,7 @@ class LocatorImpl extends ScreenImpl implements Locator {
   hover(options?: HoverOptions): Promise<void> {
     rejectUnknownOptions('hover', options, ['timeout', 'position', 'modifiers']);
     const modifiers = requireModifiers(options?.modifiers, 'hover');
-    const held = describeModifiers(modifiers.modifiers);
-    const label = `${this.label}${held === undefined ? '' : ` with ${held}`}`;
+    const label = this.tapLabel(undefined, undefined, modifiers.modifiers);
     if (options?.position === undefined) {
       return this.context.steps.run('locator', 'locator.hover', label, () =>
         this.context.engine.perform(this.expression, { kind: 'hover', ...modifiers }, options?.timeout),
@@ -910,8 +909,7 @@ function requireTapCount(value: unknown, api: string): number {
 
 /**
  * The `modifiers` of a click or hover, validated: a list of distinct key
- * modifiers, spread into the action whenever it is given. An empty list holds
- * no keys, so it releases those the test holds, as in Playwright.
+ * modifiers, spread into the action only when it names one.
  */
 function requireModifiers(value: unknown, api: string): { modifiers?: readonly KeyModifier[] } {
   if (value === undefined) return {};
@@ -929,11 +927,5 @@ function requireModifiers(value: unknown, api: string): { modifiers?: readonly K
     if (modifiers.includes(modifier)) throw new TestError('INVALID_ARGUMENT', `${api}() names a modifier twice`);
     modifiers.push(modifier);
   }
-  return { modifiers };
-}
-
-/** The held keys of a step label, `Shift+Alt` or `no modifiers`, when the test passed `modifiers`. */
-function describeModifiers(modifiers: readonly KeyModifier[] | undefined): string | undefined {
-  if (modifiers === undefined) return undefined;
-  return modifiers.length === 0 ? 'no modifiers' : modifiers.join('+');
+  return modifiers.length === 0 ? {} : { modifiers };
 }

@@ -483,7 +483,7 @@ describe('createEngineSession', () => {
         targetName: 'toy-target',
       });
     const tapOnly = sessionOf({ tapModifiers: true });
-    await expect(tapOnly.perform({ id: 'n1', revision: 'b1' }, { kind: 'hover', modifiers: [] }, OP)).rejects.toMatchObject({
+    await expect(tapOnly.perform({ id: 'n1', revision: 'b1' }, { kind: 'hover', modifiers: ['Alt'] }, OP)).rejects.toMatchObject({
       code: 'UNSUPPORTED_CAPABILITY',
       message: expect.stringContaining('modifiers on the "hover" action'),
     });

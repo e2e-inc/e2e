@@ -1273,8 +1273,15 @@ await browser.keyboard.type('hello');
 - `type(text)` types plain text only, never a `Secret`.
 - A modifier held with `down` stays held until `up`, or a `press` that
   names it. A tap or hover with `modifiers` releases it for that action and
-  presses it again after, as Playwright does. An empty `modifiers` list
-  releases every held key.
+  presses it again after, as Playwright does.
+- A tap or hover with `modifiers` changes the held keys for as long as it
+  runs. Input sent to the same page meanwhile sees those keys:
+  another tap, typing, or a key sent from an [`onDialog`](#ondialog) handler.
+  Don't overlap input on one page.
+- A `press` that fails partway, such as `press('Shift+Bogus')` or
+  `press('Shift+é')`, can leave a modifier down that e2e doesn't track, so a
+  later tap with `modifiers` doesn't release it. Release it with
+  `browser.keyboard.up`.
 - For a tap or hover with `position`, e2e tracks the modifiers
   `browser.keyboard` holds. It doesn't see the raw Playwright page's
   keyboard. A key held there stays held through the tap. A key released

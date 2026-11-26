@@ -150,21 +150,11 @@ describe('locator action options', () => {
       ]);
     });
 
-    it('hands an empty list to the engine as holding no keys, and leaves the field off when none is given', async () => {
-      const { screen, steps, received } = tapScreen({ tapModifiers: true });
+    it('leaves the field off an action that names no modifier, an empty list included', async () => {
+      const { screen, received } = tapScreen();
       await screen.getByLabel('Agree').tap({ modifiers: [] });
       await screen.getByLabel('Agree').doubleTap();
-      expect(received).toEqual([{ kind: 'tap', modifiers: [] }, { kind: 'doubleTap' }]);
-      expect(steps.all().map((step) => step.label)).toEqual(['getByLabel("Agree") with no modifiers', 'getByLabel("Agree")']);
-    });
-
-    it('refuses an empty list on an engine that does not declare tapModifiers, as any other list', async () => {
-      const { screen, received } = tapScreen();
-      await expect(screen.getByLabel('Agree').click({ modifiers: [] })).rejects.toMatchObject({
-        code: 'UNSUPPORTED_CAPABILITY',
-        message: expect.stringContaining('its engine does not declare tapModifiers'),
-      });
-      expect(received).toEqual([]);
+      expect(received).toEqual([{ kind: 'tap' }, { kind: 'doubleTap' }]);
     });
 
     it('refuses modifiers before the button on the node and at a point alike', async () => {
@@ -652,24 +642,23 @@ describe('locator action options', () => {
       ]);
     });
 
-    it('hovers with modifiers and no position through the node hover action, an empty list included', async () => {
+    it('hovers with modifiers and no position through the node hover action', async () => {
       const { screen, steps, received } = tapScreen({ pointerModifiers: true });
       await screen.getByLabel('Agree').hover({ modifiers: ['Alt', 'ControlOrMeta'] });
-      await screen.getByLabel('Agree').hover({ modifiers: [] });
       await screen.getByLabel('Agree').hover();
-      expect(received).toEqual([{ kind: 'hover', modifiers: ['Alt', 'ControlOrMeta'] }, { kind: 'hover', modifiers: [] }, { kind: 'hover' }]);
-      expect(steps.all().map((step) => step.label)).toEqual([
-        'getByLabel("Agree") with Alt+ControlOrMeta',
-        'getByLabel("Agree") with no modifiers',
-        'getByLabel("Agree")',
-      ]);
+      expect(received).toEqual([{ kind: 'hover', modifiers: ['Alt', 'ControlOrMeta'] }, { kind: 'hover' }]);
+      expect(steps.all().map((step) => step.label)).toEqual(['getByLabel("Agree") with Alt+ControlOrMeta', 'getByLabel("Agree")']);
     });
 
-    it('holds an empty modifiers list at a position as holding no keys', async () => {
-      const { screen, steps, at } = pointScreen({ pointerModifiers: true });
-      await screen.getByLabel('Agree').click({ modifiers: [], position: { x: 1, y: 2 } });
-      expect(at).toEqual([{ action: { kind: 'tap', modifiers: [] }, point: { x: 11, y: 22 } }]);
-      expect(steps.all()).toEqual([expect.objectContaining({ label: 'getByLabel("Agree") with no modifiers at (1, 2)' })]);
+    it('treats an empty modifiers list as none, so an engine without pointerModifiers takes it', async () => {
+      const point = pointScreen();
+      await point.screen.getByLabel('Agree').click({ modifiers: [], position: { x: 1, y: 2 } });
+      expect(point.at).toEqual([{ action: { kind: 'tap' }, point: { x: 11, y: 22 } }]);
+      expect(point.steps.all()).toEqual([expect.objectContaining({ label: 'getByLabel("Agree") at (1, 2)', status: 'passed' })]);
+      const node = tapScreen();
+      await node.screen.getByLabel('Agree').hover({ modifiers: [] });
+      expect(node.received).toEqual([{ kind: 'hover' }]);
+      expect(node.steps.all()).toEqual([expect.objectContaining({ label: 'getByLabel("Agree")', status: 'passed' })]);
     });
 
     it.each([
@@ -678,7 +667,6 @@ describe('locator action options', () => {
       ['secondaryTap', (locator: Locator) => locator.secondaryTap({ modifiers: ['Alt'], position: { x: 1, y: 1 } })],
       ['hover', (locator: Locator) => locator.hover({ modifiers: ['Shift'], position: { x: 1, y: 1 } })],
       ['hover', (locator: Locator) => locator.hover({ modifiers: ['Shift'] })],
-      ['click', (locator: Locator) => locator.click({ modifiers: [], position: { x: 1, y: 1 } })],
     ] as const)('%s with modifiers refuses an engine without pointerModifiers before the lookup and any input', async (verb, call) => {
       const { screen, steps, at, locate } = pointScreen({ tapModifiers: true });
       await expect(call(screen.getByLabel('Missing'))).rejects.toMatchObject({

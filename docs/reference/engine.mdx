@@ -479,7 +479,7 @@ member. Two gaps end differently:
 | `viewportIntersection` | `viewport-intersection` | `locate` | `expect(locator).toBeInViewport()`. |
 | `tapModifiers: true` | - | `perform` | `modifiers` on `tap`, `doubleTap`, `multiTap`, and `secondaryTap`. |
 | `tapButtons: true` | - | `perform` or `performAt` | `button` on `tap`, `doubleTap`, and `multiTap`, on a node and at a point. |
-| `pointerModifiers: true` | - | `perform` or `performAt` | `modifiers` on the `tap`, `doubleTap`, `multiTap`, `secondaryTap`, and `hover` pointer kinds, and on the `hover` node action. An empty list holds no keys. |
+| `pointerModifiers: true` | - | `perform` or `performAt` | `modifiers` on the `tap`, `doubleTap`, `multiTap`, `secondaryTap`, and `hover` pointer kinds, and on the `hover` node action. One flag covers both paths, so an engine handles `modifiers` on both or declares neither. |
 | `selectsDevice: true` | - | `prepare` | `e2e run --device`, the device `prepare` binds. |
 | `grantsAllPermissions: true` | - | - | `app.permissions: 'all'`, which the engine receives as `EngineAppInfo.allPermissions`. Without it, config load refuses `'all'`, so an engine released before it never receives the string. |
 | `launchArgumentValues: true` | - | - | The object form of `app.launchArguments`, in `EngineAppInfo.launchArgumentValues`. |
@@ -589,8 +589,8 @@ method for an undeclared kind, or a call with `modifiers` and no
 `tapModifiers`, fails with `UNSUPPORTED_CAPABILITY` before it reaches the
 engine. Without `tapButtons`, an action with a `button` fails the same way,
 and without `pointerModifiers`, a pointer action or a `hover` with
-`modifiers`. An empty `modifiers` list needs the same capability as any
-other, since it releases the keys the test holds.
+`modifiers`. The harness drops an empty `modifiers` list, so an engine
+never receives one.
 
 | API | Needs |
 | --- | --- |
@@ -1358,7 +1358,7 @@ type TapActions =
  */
 export type LocatorAction =
   | (TapActions & {
-      /** Keys held for the click, none for an empty list; only an engine that declares `tapModifiers` receives it. */
+      /** Keys held for the click; only an engine that declares `tapModifiers` receives it. */
       readonly modifiers?: readonly KeyModifier[];
     })
   | {
@@ -1435,9 +1435,9 @@ export type PointerAction =
   | (TapActions & {
       /**
        * Keys held for the click, and only those: a key the test holds that
-       * is not listed is released for the click, so an empty list holds
-       * none. Only an engine that declares `pointerModifiers` receives it;
-       * the harness refuses it for any other before dispatch.
+       * is not listed is released for the click. Only an engine that
+       * declares `pointerModifiers` receives it; the harness refuses it for
+       * any other before dispatch.
        */
       readonly modifiers?: readonly KeyModifier[];
     })

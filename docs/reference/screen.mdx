@@ -720,10 +720,10 @@ The options are [`TapOptions`](#types):
   `tapModifiers`, with `position` it needs `pointerModifiers`. The browser
   engine declares both, and holds exactly the keys you name, as Playwright
   does: a key the test holds with `browser.keyboard.down` and doesn't list is
-  released for the click and pressed again after it. An empty list holds no
-  keys, so it releases every held key for the click, and needs the same
-  capability as any other list. Don't mix the raw Playwright page's keyboard
-  with modified clicks: see [Keyboard](/reference/web#keyboard).
+  released for the click and pressed again after it. An empty list is the
+  same as no `modifiers`, where Playwright's `click({ modifiers: [] })`
+  releases the keys the test holds. Don't mix the raw Playwright page's
+  keyboard with modified clicks: see [Keyboard](/reference/web#keyboard).
 - `position`: a point in the node, as a [`ScreenPoint`](#types). A pixel
   coordinate is measured from the node's top-left corner, inside its border.
   A percentage from `'0%'` through `'100%'` is a share of the node's border
@@ -998,7 +998,7 @@ await screen.getByRole('link', 'Preview').hover({ modifiers: ['Alt'] });
   [`tap`](#tap)'s. The engine needs the `hover` pointer action. The browser
   and the headed desktop engines list it, the mobile engine does not.
 - `modifiers`: keys held while the pointer moves, with the same rules as a
-  [`tap`](#tap)'s, an empty list included. The engine needs
+  [`tap`](#tap)'s. The engine needs
   `pointerModifiers`, which only the browser engine declares. Without
   `position`, the hover keeps the engine's actionability checks, so a node
   under an overlay fails as in Playwright.
@@ -1620,9 +1620,8 @@ export interface ClickOptions extends ActionOptions {
    * or `pointerModifiers` with `position`, `UNSUPPORTED_CAPABILITY` otherwise.
    * On the browser, exactly these keys are held for the click: a key the
    * test holds with `browser.keyboard.down` and does not list is released
-   * for it and pressed again after, as in Playwright. An empty list holds
-   * no keys, so it releases every key the test holds for the click, and
-   * needs the same capability.
+   * for it and pressed again after, as in Playwright. An empty list is the
+   * same as no `modifiers`.
    */
   modifiers?: readonly KeyModifier[];
 }
@@ -1661,9 +1660,8 @@ export interface HoverOptions extends ActionOptions {
   position?: ScreenPoint;
   /**
    * Keys held while the pointer moves, and only those, as a tap's
-   * `modifiers` are. An empty list releases the keys the test holds. Needs
-   * an engine that declares `pointerModifiers`, `UNSUPPORTED_CAPABILITY`
-   * otherwise.
+   * `modifiers` are. Needs an engine that declares `pointerModifiers`,
+   * `UNSUPPORTED_CAPABILITY` otherwise.
    */
   modifiers?: readonly KeyModifier[];
 }

@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EngineCleanupContext, EngineFixtureContext, EngineHandle, EngineSnapshot, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
-import { web, type Browser } from '../../src/index.ts';
+import { surfaceOf, web, type Browser } from '../../src/index.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 const PAGES: Readonly<Record<string, string>> = {
@@ -181,6 +181,24 @@ describe('tabs', () => {
       const center = { x: close.rect.x + close.rect.width / 2, y: close.rect.y + close.rect.height / 2 };
       await engine.performAt!(center, { kind: 'tap', modifiers: ['Shift'] }, operation());
       expect((await screenAt(engine, '/opener')).tabs).toBeUndefined();
+    });
+  });
+
+  it('a modified tap at a point fails when its tab closes before the gesture is sent', async () => {
+    await withAttempt(async (engine) => {
+      await tap(engine, 'Open window');
+      await withTabs(engine, 2);
+      await engine.session!.switchTab!(1, operation());
+      const close = nodesOf(await screenAt(engine, '/popup')).find((candidate) => candidate.name === 'Close me');
+      if (close?.rect === undefined) throw new Error('no box for Close me on the screen');
+      const page = surfaceOf(engine)!.page();
+      const down = page.keyboard.down.bind(page.keyboard);
+      page.keyboard.down = async (key) => {
+        await down(key);
+        await page.close();
+      };
+      const center = { x: close.rect.x + close.rect.width / 2, y: close.rect.y + close.rect.height / 2 };
+      await expect(engine.performAt!(center, { kind: 'tap', modifiers: ['Shift'] }, operation())).rejects.toThrow(/closed/);
     });
   });
 

@@ -340,10 +340,9 @@ type TapActions =
 export type LocatorAction =
   | (TapActions & {
       /**
-       * Keys held for the click, as a Shift-click extends a selection. An
-       * empty list holds no keys, releasing any the test holds for the
-       * click. Only an engine that declares `tapModifiers` receives it; the
-       * harness refuses it for any other before dispatch.
+       * Keys held for the click, as a Shift-click extends a selection. Only
+       * an engine that declares `tapModifiers` receives it; the harness
+       * refuses it for any other before dispatch.
        */
       readonly modifiers?: readonly KeyModifier[];
     })
@@ -425,9 +424,9 @@ export type PointerAction =
   | (TapActions & {
       /**
        * Keys held for the click, and only those: a key the test holds that
-       * is not listed is released for the click, so an empty list holds
-       * none. Only an engine that declares `pointerModifiers` receives it;
-       * the harness refuses it for any other before dispatch.
+       * is not listed is released for the click. Only an engine that
+       * declares `pointerModifiers` receives it; the harness refuses it for
+       * any other before dispatch.
        */
       readonly modifiers?: readonly KeyModifier[];
     })

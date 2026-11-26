@@ -489,7 +489,8 @@ export async function dispatchLocatorAction(
  * pressed, every other key in `held` released, and `held` restored after,
  * even when the gesture fails. A click count the browser refuses is refused
  * before any key changes, and an aborted `signal` stops the keys and the
- * gesture before they are sent, never the restore.
+ * gesture before they are sent, never the restore. `onGesture` runs right
+ * before the gesture is sent.
  */
 export async function dispatchPointerAction(
   page: Page,
@@ -497,10 +498,12 @@ export async function dispatchPointerAction(
   action: PointerAction,
   held: Set<ModifierKey>,
   signal?: AbortSignal,
+  onGesture?: () => void,
 ): Promise<void> {
   if (action.kind === 'multiTap') clickCount(action.count);
   signal?.throwIfAborted();
   if (!('modifiers' in action) || action.modifiers === undefined) {
+    onGesture?.();
     await dispatchPointer(page, at, action, signal);
     return;
   }
@@ -509,6 +512,7 @@ export async function dispatchPointerAction(
   try {
     await holdExactly(page, held, new Set(action.modifiers.map(resolveModifier)), signal);
     signal?.throwIfAborted();
+    onGesture?.();
     await dispatchPointer(page, at, action, signal);
   } finally {
     await holdExactly(page, held, before);

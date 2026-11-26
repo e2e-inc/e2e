@@ -531,15 +531,6 @@ describe.each(KINDS)('a mouse button, through the %s target', (kind) => {
     expect(await pressed()).toEqual([expect.stringMatching(/^auxclick b1 d1 x\d+ shift$/)]);
   });
 
-  it('clicks without a held key for an empty modifiers list and holds it again after', async () => {
-    await page.setContent(PRESSED_LINK);
-    await page.keyboard.down('Shift');
-    expect(await perform(await targetOf(kind, '#next'), { kind: 'tap', modifiers: [] })).toBeUndefined();
-    await page.keyboard.up('Shift');
-    expect(await pressed()).toEqual([expect.stringMatching(/^click b0 d1 x\d+$/)]);
-    expect(await keys()).toEqual(['keydown Shift', 'keyup Shift', 'keydown Shift', 'keyup Shift']);
-  });
-
   it('hovers holding exactly the modifiers it names, and waits for a node an overlay covers', async () => {
     await page.setContent(`<button id="target">Target</button><p id="moved"></p>
       <script>
@@ -642,15 +633,5 @@ describe('a mouse button at a point', () => {
     });
     expect(await pressed()).toEqual([]);
     expect(await keys()).toEqual([]);
-  });
-
-  it('clicks without a held key for an empty modifiers list and holds it again after', async () => {
-    await page.setContent(PRESSED_LINK);
-    await page.keyboard.down('Shift');
-    await dispatchPointerAction(page, await into(9), { kind: 'tap', modifiers: [] }, new Set(['Shift']));
-    await dispatchPointerAction(page, await into(9), { kind: 'tap' }, new Set(['Shift']));
-    await page.keyboard.up('Shift');
-    expect(await pressed()).toEqual(['click b0 d1 x9', 'click b0 d1 x9 shift']);
-    expect(await keys()).toEqual(['keydown Shift', 'keyup Shift', 'keydown Shift', 'keyup Shift']);
   });
 });

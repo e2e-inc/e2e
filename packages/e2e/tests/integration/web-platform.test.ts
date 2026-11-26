@@ -463,29 +463,6 @@ test('taps and hovers at a position hold exactly the modifiers they name', async
   });
 });
 
-test('an empty modifiers list holds no keys, on the node and at a position', async ({ app, screen, browser }) => {
-  await app.open();
-  await browser.evaluate(() => {
-    document.body.innerHTML =
-      '<button style="position: absolute; left: 20px; top: 30px; width: 200px; height: 100px; border: 0; padding: 0">Pad</button>';
-    const pad = document.querySelector('button')!;
-    const clicks: string[] = [];
-    (window as unknown as { clicks: string[] }).clicks = clicks;
-    pad.addEventListener('click', (event) => {
-      const box = pad.getBoundingClientRect();
-      clicks.push([event.clientX - box.left, event.clientY - box.top, event.shiftKey ? 'Shift' : 'none'].join(' '));
-    });
-    return null;
-  });
-  const pad = screen.getByRole('button', { name: 'Pad' });
-  await browser.keyboard.down('Shift');
-  await pad.click({ modifiers: [] });
-  await pad.click({ position: { x: 5, y: 6 }, modifiers: [] });
-  await pad.click();
-  await browser.keyboard.up('Shift');
-  await expect.poll(() => browser.evaluate(() => (window as unknown as { clicks: string[] }).clicks)).toEqual(['100 50 none', '5 6 none', '100 50 Shift']);
-});
-
 test('a modified hover without a position waits for a node an overlay covers', async ({ app, browser, screen }) => {
   await app.open();
   await browser.evaluate(() => {
@@ -813,7 +790,6 @@ describe('web platform integration', () => {
     'double taps, secondary taps, and hovers land at the position they name',
     'a percentage position is of the part of the node its frame and the viewport show',
     'taps and hovers at a position hold exactly the modifiers they name',
-    'an empty modifiers list holds no keys, on the node and at a position',
     'a viewport set before the first navigation holds through app.open',
     'an empty class attribute is an empty class list',
     'reads wait for a node that arrives late',

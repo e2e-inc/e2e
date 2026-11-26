@@ -392,13 +392,6 @@ export class PlaywrightSurface {
    * the browser. Keys sent through the raw Playwright page aren't seen.
    */
   private readonly heldModifiers = new WeakMap<Page, Set<ModifierKey>>();
-  /**
-   * The pointer actions at a point and the `browser.keyboard` keys of each
-   * page, chained to run one at a time. A gesture changes the held keys and
-   * restores them after, so a second gesture or a key sent meanwhile would
-   * read keys that aren't the test's, or be undone by the restore.
-   */
-  private readonly keyInput = new WeakMap<Page, Promise<void>>();
 
   constructor(options: WebOptions) {
     this.browserName = typeof options.browser === 'string' ? options.browser : 'chromium';
@@ -1277,53 +1270,39 @@ export class PlaywrightSurface {
       const session = this.requireSession();
       session.requireObservation();
       const page = this.requirePage();
+      let sent = false;
       try {
-        await this.afterKeyInput(page, () => dispatchPointerAction(page, point, action, this.heldOn(page), currentOperation.signal));
+        await dispatchPointerAction(page, point, action, this.heldOn(page), currentOperation.signal, () => {
+          sent = !page.isClosed();
+        });
       } catch (cause) {
         // A gesture that closes its own tab can fail on the close, or on the
-        // key restore after it: closing was what it did.
-        if (session.tabClosed(page)) return;
+        // key restore after it: closing was what it did. A gesture that was
+        // never sent to an open page did nothing, so it fails.
+        if (sent && session.tabClosed(page)) return;
         throw cause;
       }
     }, classifyInputError));
   }
 
   /**
-   * `browser.keyboard`'s `down`, `up`, or `press` on the current page, after
-   * the key input queued there, keeping its held modifiers in step. A press
-   * is sent as the downs and ups Playwright's own `press` sends, and each
-   * modifier is counted before it is sent, as Playwright counts it. So a
-   * chord that fails on an unknown key, `Shift+Bogus`, leaves Shift held
-   * here as it does in Playwright.
+   * `browser.keyboard`'s `down`, `up`, or `press` on the current page,
+   * keeping its held modifiers in step. `down` and `up` count a modifier
+   * before it is sent, as Playwright counts it, and a press releases the
+   * modifiers it names once it is sent.
    */
-  keyboardKey(method: 'down' | 'up' | 'press', key: string, signal: AbortSignal): Promise<void> {
+  async keyboardKey(method: 'down' | 'up' | 'press', key: string): Promise<void> {
     const page = this.requirePage();
-    const held = this.heldOn(page);
-    const send = async (direction: 'down' | 'up', name: string): Promise<void> => {
-      const modifier = modifierKey(name);
-      if (modifier !== undefined && direction === 'down') held.add(modifier);
-      if (modifier !== undefined && direction === 'up') held.delete(modifier);
-      await page.keyboard[direction](name);
-    };
+    if (method === 'press') {
+      await page.keyboard.press(key);
+      this.releasedBy(page, key);
+      return;
+    }
 
-    return this.afterKeyInput(page, async () => {
-      signal.throwIfAborted();
-      if (method !== 'press') {
-        await send(method, key);
-        return;
-      }
-
-      const keys = chordKeys(key);
-      for (const name of keys) await send('down', name);
-      for (const name of keys.toReversed()) await send('up', name);
-    });
-  }
-
-  /** Runs `input` on `page` once the key input queued there before it settles; see `keyInput`. */
-  private afterKeyInput(page: Page, input: () => Promise<void>): Promise<void> {
-    const done = (this.keyInput.get(page) ?? Promise.resolve()).then(input);
-    this.keyInput.set(page, done.catch(() => undefined));
-    return done;
+    const modifier = modifierKey(key);
+    if (modifier !== undefined && method === 'down') this.heldOn(page).add(modifier);
+    if (modifier !== undefined && method === 'up') this.heldOn(page).delete(modifier);
+    await page.keyboard[method](key);
   }
 
   /** The modifier keys the page holds down; see `heldModifiers`. */
@@ -1340,7 +1319,7 @@ export class PlaywrightSurface {
   private releasedBy(page: Page, key: string): void {
     const held = this.heldModifiers.get(page);
     if (held === undefined) return;
-    for (const part of key.split('+')) {
+    for (const part of chordKeys(key)) {
       const modifier = modifierKey(part);
       if (modifier !== undefined) held.delete(modifier);
     }

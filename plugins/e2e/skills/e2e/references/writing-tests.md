@@ -505,7 +505,7 @@ Coordinates are CSS pixels, for what the tree does not list: `tap({ position:
 `modifiers` work beside it. `doubleTap`, `secondaryTap`, and `hover` take the same
 `position`. On the web, exactly the named `modifiers` are held: a key held with
 `browser.keyboard.down` is released for the click and pressed again after,
-as in Playwright, and an empty list releases every held key. Don't mix the
+as in Playwright, and an empty list is the same as none. Don't mix the
 raw Playwright page's keyboard with modified taps: e2e doesn't see its keys.
 A position percentage is a share of the node's box as
 `boundingBox()` reports it, the border included, cut to the viewport:
