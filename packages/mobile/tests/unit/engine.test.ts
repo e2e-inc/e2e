@@ -155,7 +155,7 @@ describe('manifest', () => {
     expect(() => android(app({ AppleLocale: 'fr_FR' }), info)).toThrowError(
       expect.objectContaining({
         code: 'INVALID_CONFIG',
-        message: `target "pixel" app.launchArguments.AppleLocale is an iOS launch argument, and Android reads none of Apple's; set the language and region with app.locale or device.openApp({ locale })`,
+        message: `target "pixel" app.launchArguments.AppleLocale is an iOS launch argument, and Android reads none of Apple's; set the language and region with app.locale or device.openApp({ locale }), or with language and locale on a hosted device provider`,
       }),
     );
 
