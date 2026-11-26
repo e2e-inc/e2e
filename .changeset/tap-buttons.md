@@ -7,3 +7,5 @@
 ---
 
 On the web, `tap` and `click` accept `{ button: 'middle' }` and `{ button: 'right' }`, including with `count` and `position` like Playwright's `click({ button, clickCount, position })`. Using `count` with `position` now works on any engine that declares the matching pointer action. Engines declare `tapButtons: true` for mouse buttons and the `multiTap` pointer kind for 3 or more taps at a position.
+
+The web and mobile engines now need `@e2e-dev/core` and `e2e` 0.25.1 or later, since older releases refuse `tapButtons` and the `multiTap` pointer kind as unknown.
