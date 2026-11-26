@@ -492,7 +492,10 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool) -> Outcome<()> 
         return input::press(&combo, Route::Physical).map_err(Failure::delivered);
     }
     let app = Element::application(pid);
-    if app.element("AXFocusedWindow").as_ref() != Some(&element) {
+    // A sheet or an alert on the window is the app's focused window then, and keys reach the window through it.
+    let focused = app.element("AXFocusedWindow");
+    let on_window = focused.as_ref() == Some(&element) || focused.as_ref().and_then(|focused| focused.element("AXParent")).as_ref() == Some(&element);
+    if !on_window {
         return Err(Failure::refused(codes::ACTION_FAILED, "the window is not the app's key window, so a key sent to the app would land elsewhere")
             .with_details(serde_json::json!({ "cause": "exact_window_focus_unconfirmed" })));
     }
