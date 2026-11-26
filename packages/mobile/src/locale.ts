@@ -15,6 +15,8 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { ConfigurationError, EngineError, TestError, appleUserDefaults, type ResolvedLaunchArguments } from '@e2e-dev/core/engine';
 import type { MobileOptions, MobilePlatform } from './options.ts';
+import { isDeviceList } from './pool.ts';
+import type { DeviceProvider } from './provider.ts';
 import { unsupported } from './support.ts';
 
 type Code = 'INVALID_CONFIG' | 'INVALID_ARGUMENT';
@@ -80,24 +82,32 @@ export function assertNoAppleLocaleArguments(label: string, launchArguments: Res
 }
 
 /**
- * Refuses a locale on an Android target whose devices a provider leases: the
- * engine sets an Android app's locale with this machine's `adb`, which does
- * not reach a hosted device. The provider's own options set its language.
+ * Refuses a locale on a target whose devices a provider leases when the
+ * engine cannot carry it there: on Android it sets the locale with this
+ * machine's `adb`, which does not reach a hosted device, and on iOS it
+ * rides the launch arguments, which a provider that declares
+ * `launchArguments: false` drops. The provider's own options set its
+ * language.
  */
 export function assertLocaleReachable(label: string, options: Pick<MobileOptions, 'platform' | 'device'>, code: Code): void {
-  if (options.platform !== 'android') return;
   const provider = leasingProvider(options.device);
   if (provider === undefined) return;
-  const text = `${label} is set, and device provider "${provider}" leases this target's Android devices, which this machine's adb does not reach: set the language and locale with the provider's own options instead`;
+  const why =
+    options.platform === 'android'
+      ? `leases this target's Android devices, which this machine's adb does not reach`
+      : provider.launchArguments === false
+        ? `drops the launch arguments that carry the locale on iOS`
+        : undefined;
+  if (why === undefined) return;
+  const text = `${label} is set, and device provider "${provider.name}" ${why}: set the language and locale with the provider's own options instead`;
   if (code === 'INVALID_CONFIG') throw new ConfigurationError(code, text);
   throw unsupported(text);
 }
 
-/** The name of the provider the `device` option names, or `undefined` for a local device, a list, or none. */
-function leasingProvider(device: MobileOptions['device']): string | undefined {
-  if (device === undefined || typeof device === 'string' || Array.isArray(device)) return undefined;
-  const { name } = device as { readonly name?: unknown };
-  return typeof name === 'string' ? name : 'unnamed';
+/** The provider the `device` option names, or `undefined` for a local device, a list, or none. */
+function leasingProvider(device: MobileOptions['device']): Pick<DeviceProvider, 'name' | 'launchArguments'> | undefined {
+  if (device === undefined || typeof device === 'string' || isDeviceList(device)) return undefined;
+  return device;
 }
 
 /** An Android package name: dot-separated segments that each start with a letter. */

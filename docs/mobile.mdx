@@ -131,16 +131,19 @@ await device.openApp('com.example.app', { relaunch: true, locale: 'ar-EG' });
 ```
 
 - On iOS the locale is the launch's `AppleLanguages` and `AppleLocale`
-  arguments, on any simulator, phone, or hosted device. The device keeps its
-  own language. Don't set those two arguments in `launchArguments` as well.
+  arguments. The device keeps its own language. Don't set those two
+  arguments in `launchArguments` as well. A phone that agent-device drives
+  through XCTest refuses launch arguments, so the launch fails with
+  `UNSUPPORTED_CAPABILITY`.
 - On Android the engine sets the app's own language with this machine's
   `adb` before the launch. It needs Android 13 or newer, and the app named by
   its package, such as `com.example.app`, not its display name. A later fresh launch
   without a locale, and the end of the run, put back the app's earlier
   language. A run that is killed leaves the locale set.
-- A provider's Android devices are not reachable over this machine's `adb`,
-  so `app.locale` fails at config load there. Set `language` and `locale` on
-  `browserstack()` or `testmu()` instead.
+- `app.locale` fails at config load on a provider's Android devices, which
+  this machine's `adb` doesn't reach. It also fails on TestMu AI and
+  BrowserStack iOS devices, which drop launch arguments. Set `language` and
+  `locale` on `testmu()` or `browserstack()` instead.
 - The tag takes a language, a script, and a region only, with no extension
   such as `-u-ca-japanese`.
 - The app must ship the language. If it doesn't, the OS shows its
@@ -666,6 +669,8 @@ export interface DeviceProvider {
   acquire(request: DeviceRequest): Promise<DeviceLease>;
   release(lease: DeviceLease, context: DeviceReleaseContext): Promise<void>;
   record?(lease: DeviceLease, context: ProviderRecordContext): Promise<ProviderRecording>;
+  /** `false` when the devices drop launch arguments: `app.locale` is then refused on their iOS devices. */
+  readonly launchArguments?: false;
 }
 
 export interface DeviceLease {

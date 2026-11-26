@@ -412,8 +412,11 @@ launch:
 
 - On iOS it is the launch's arguments: `locale: 'zh-Hans-CN'` adds
   `-AppleLanguages (zh-Hans-CN) -AppleLocale zh-Hans_CN` after the target's
-  own. It holds for that launch on any device, a provider's included. The
-  device keeps its own language.
+  own. It holds for that launch, and the device keeps its own language. A
+  phone agent-device drives through XCTest refuses launch arguments
+  (`UNSUPPORTED_CAPABILITY`). A provider that declares
+  `launchArguments: false` (`testmu()`, `browserstack()`) drops them, so
+  `app.locale` fails at config load on its iOS devices.
 - On Android the engine runs `adb -s <serial> shell cmd locale
   set-app-locales <package> --locales <tag>` on this machine before the launch.
   `adb` is found under `ANDROID_SDK_ROOT`, `ANDROID_HOME`, the SDK's default
@@ -422,12 +425,13 @@ launch:
   later fresh launch of that app without a locale puts them back, and so does
   the worker's end, before its session closes. A worker that is killed leaves
   the locale set.
-- A provider's Android devices are not on this machine's `adb`. Set
-  `language` and `locale` on `browserstack()` or `testmu()` instead.
+- A provider's Android devices are not on this machine's `adb`, so
+  `app.locale` fails at config load there. Set `language` and `locale` on
+  `browserstack()` or `testmu()` instead.
 
 | Throws | When |
 | --- | --- |
-| `INVALID_CONFIG` | In `app.permissions`: a permission name outside `DevicePermission` (naming the nearest one when it is a likely typo), or a state other than `grant`, `deny`, or `reset`. In `app.locale`: a tag with an extension (`-u-ca-japanese`) or a variant (`-valencia`), `AppleLanguages` or `AppleLocale` in the target's `launchArguments` on iOS, an Android `bundleId` that is not a package name, or a target whose Android devices a provider leases. Fails before any device command. |
+| `INVALID_CONFIG` | In `app.permissions`: a permission name outside `DevicePermission` (naming the nearest one when it is a likely typo), or a state other than `grant`, `deny`, or `reset`. In `app.locale`: a tag with an extension (`-u-ca-japanese`) or a variant (`-valencia`), `AppleLanguages` or `AppleLocale` in the target's `launchArguments` on iOS, an Android `bundleId` that is not a package name, a target whose Android devices a provider leases, or one whose iOS devices come from a provider with `launchArguments: false`. Fails before any device command. |
 | `INVALID_ARGUMENT` | The same, in `device.openApp`. |
 
 #### Boot and prepare

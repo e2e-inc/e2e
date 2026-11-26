@@ -129,6 +129,8 @@ export function testmu(options: TestmuOptions): DeviceProvider {
 
   return {
     name: PROVIDER,
+    // agent-device drives TestMu AI over Appium WebDriver, whose open activates the app and drops launch arguments.
+    launchArguments: false,
     async acquire(request: DeviceRequest): Promise<DeviceLease> {
       plugin.assertVersion(request.agentDeviceVersion);
       if (request.appPath !== undefined) throw new Error("TestMu AI installs the app from `app`; leave the target's `app.appPath` out");

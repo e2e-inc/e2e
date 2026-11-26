@@ -229,8 +229,20 @@ describe('manifest', () => {
         message: 'target "phone" app.locale on Android needs the app\'s package name, such as com.example.app, and "Settings" is not one: adb sets the locale of a package',
       }),
     );
-    // A provider's iOS devices launch with the locale's arguments like any other.
+    // A provider's iOS devices launch with the locale's arguments like any other,
     expect(() => harness({ device: provider as never }).engine.validateApp!({ bundleId: 'com.example.app', locale: 'fr-FR' }, info)).not.toThrow();
+    // unless the provider declares that its devices drop them.
+    const dropping = harness({ device: { ...provider, launchArguments: false } as never });
+    expect(() => dropping.engine.validateApp!({ bundleId: 'com.example.app', locale: 'fr-FR' }, info)).toThrowError(
+      expect.objectContaining({
+        code: 'INVALID_CONFIG',
+        message: 'target "phone" app.locale is set, and device provider "cloud" drops the launch arguments that carry the locale on iOS: set the language and locale with the provider\'s own options instead',
+      }),
+    );
+    expect(() => dropping.engine.validateApp!({ bundleId: 'com.example.app', launchArguments: ['-e2e'] }, info)).not.toThrow();
+    expect(() => harness({ device: { ...provider, launchArguments: true } as never })).toThrowError(
+      expect.objectContaining({ code: 'INVALID_CONFIG', message: expect.stringContaining('device provider "cloud" has launchArguments true') }),
+    );
   });
 });
 
