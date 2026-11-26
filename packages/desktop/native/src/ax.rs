@@ -259,6 +259,11 @@ impl Element {
         Self(unsafe { AXUIElementCreateApplication(pid) })
     }
 
+    /// The system-wide element: what it finds at a point is whatever is on top there, of any app.
+    pub fn system_wide() -> Self {
+        Self(unsafe { AXUIElementCreateSystemWide() })
+    }
+
     /// One attribute. `Err` is the AX error: `AX_NO_VALUE` or `AX_ATTRIBUTE_UNSUPPORTED` when it has none.
     pub fn attribute(&self, name: &str) -> Result<Value, AXError> {
         let key = CFString::new(name);
@@ -427,7 +432,8 @@ impl Element {
         if error == AX_SUCCESS && id != 0 { Some(id) } else { None }
     }
 
-    /// The element of this app at a point on screen: `None` when none is there, `Err` when the app did not answer.
+    /// The element at a point on screen, of this app, or of any app on the system-wide element: `None` when none is
+    /// there, `Err` when the app did not answer.
     pub fn element_at(&self, x: f64, y: f64) -> Result<Option<Element>, AXError> {
         let mut element: CFTypeRef = std::ptr::null();
         let error = unsafe { AXUIElementCopyElementAtPosition(self.0, x as f32, y as f32, &mut element) };

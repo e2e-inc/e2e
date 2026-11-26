@@ -267,19 +267,34 @@ enum Aim {
     Other,
 }
 
-/// Roles whose element takes a click of its own.
+/// Roles whose element takes a click of its own: a press, or the text a double-click selects.
 fn presses(ax_role: &str) -> bool {
     matches!(
         ax_role,
-        "AXButton" | "AXCheckBox" | "AXRadioButton" | "AXPopUpButton" | "AXMenuButton" | "AXLink" | "AXDisclosureTriangle" | "AXIncrementor" | "AXSlider"
+        "AXButton"
+            | "AXCheckBox"
+            | "AXSwitch"
+            | "AXRadioButton"
+            | "AXPopUpButton"
+            | "AXMenuButton"
+            | "AXLink"
+            | "AXDisclosureTriangle"
+            | "AXIncrementor"
+            | "AXSlider"
+            | "AXTextField"
+            | "AXTextArea"
+            | "AXComboBox"
     )
 }
 
+/// The most steps a walk up from the element under the pointer takes: deeper than any window a snapshot reads.
+const MAX_WALK: usize = 256;
+
 /// Folds the walk up from the element under the pointer: each step says whether it is the element, and else its
-/// accessibility role. The walk ends (`None`) at the top or after 32 steps without reaching the element.
+/// accessibility role. The walk ends (`None`) at the top, or after `MAX_WALK` steps, without reaching the element.
 fn aim_along(mut walk: impl FnMut() -> Option<Result<(bool, String), AXError>>) -> Result<Aim, AXError> {
     let mut control = false;
-    for _ in 0..32 {
+    for _ in 0..MAX_WALK {
         match walk() {
             Some(Ok((true, _))) => return Ok(if control { Aim::Control } else { Aim::Target }),
             Some(Ok((false, ax_role))) => control = control || presses(&ax_role),
@@ -290,10 +305,10 @@ fn aim_along(mut walk: impl FnMut() -> Option<Result<(bool, String), AXError>>) 
     Ok(Aim::Other)
 }
 
-/// What the pointer lands on at a point on screen, relative to `element`. `Err` when the app did not answer.
-fn aim_at(pid: i32, element: &Element, x: f64, y: f64) -> Result<Aim, AXError> {
-    let app = Element::application(pid);
-    let mut next = app.element_at(x, y)?;
+/// What the pointer lands on at a point on screen, relative to `element`, asked of the whole system: a floating panel
+/// of another app over the element is what a click there reaches. `Err` when the app did not answer.
+fn aim_at(element: &Element, x: f64, y: f64) -> Result<Aim, AXError> {
+    let mut next = Element::system_wide().element_at(x, y)?;
     aim_along(|| {
         let hit = next.take()?;
         if &hit == element {
@@ -334,11 +349,11 @@ fn physical(entry: &Entry, action: Pointer) -> Outcome<()> {
     raise(entry.pid, &window)?;
     let (x, y) = center(&entry.element)?;
     let clicks = matches!(action, Pointer::Click { .. });
-    aimed(aim_at(entry.pid, &entry.element, x, y), clicks, "before the move")?;
+    aimed(aim_at(&entry.element, x, y), clicks, "before the move")?;
     // Raising the window and the hit test can take a second on a slow app: the caller may have given up meanwhile. The
     // pointer's move can reveal a control over the element (a row's inline button): the first click checks the point
     // again. A double-click's second click follows at once, as part of the same gesture.
-    input::pointer(x, y, action, &|click| if click == 1 { still_aimed(|| aim_at(entry.pid, &entry.element, x, y)) } else { go("pointer") })
+    input::pointer(x, y, action, &|click| if click == 1 { still_aimed(|| aim_at(&entry.element, x, y)) } else { go("pointer") })
 }
 
 /// Whether a click may go: the caller still wants it, the point still lands on the element, and the caller still
@@ -1058,8 +1073,9 @@ fn takes_point(frontmost: bool, holds: bool, on_sheet: bool, sheet: bool) -> Out
     Ok(())
 }
 
-/// `takes_point` for a window of `pid`, read now. A read the app did not answer in time is a stall.
-fn window_takes_point(pid: i32, id: u32, sheet: bool) -> Outcome<()> {
+/// `takes_point` for a window of `pid`, read now, and the point on top of that window, not of another app's or
+/// window's over it. A read the app did not answer in time is a stall.
+fn window_takes_point(pid: i32, id: u32, sheet: bool, x: f64, y: f64) -> Outcome<()> {
     let window = windows::find(pid, id)?;
     let app = Element::application(pid);
     let frontmost = match app.attribute("AXFrontmost") {
@@ -1073,7 +1089,13 @@ fn window_takes_point(pid: i32, id: u32, sheet: bool) -> Outcome<()> {
         _ => None,
     };
     let holds = focused.as_ref().is_some_and(|focused| windows::holds_focus(focused, &window));
-    takes_point(frontmost, holds, focused.is_some_and(|focused| focused != window), sheet)
+    takes_point(frontmost, holds, focused.is_some_and(|focused| focused != window), sheet)?;
+    // Any control of the window may be at the point: a tap at a point names no element.
+    match aim_at(&window, x, y) {
+        Ok(Aim::Target | Aim::Control) => Ok(()),
+        Ok(Aim::Other) => Err(Failure::refused(codes::ACTION_FAILED, "another window or app is on top at the point, so no click was sent")),
+        Err(error) => Err(unread(error, "find the element under the pointer")),
+    }
 }
 
 /// Physical pointer input at a point on screen, sent only while `input_id` is not cancelled and `deadline` has not
@@ -1094,7 +1116,7 @@ pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: I
                 // A sheet or window that opened during the move would take the click: the first one checks, and the
                 // caller once more after that check, which waits on the app.
                 Some((pid, window, sheet)) if click == 1 => {
-                    window_takes_point(pid, window, sheet)?;
+                    window_takes_point(pid, window, sheet, x, y)?;
                     go("pointer")
                 }
                 _ => Ok(()),
@@ -1286,6 +1308,10 @@ mod tests {
         assert_eq!(walk(vec![Ok((false, "AXStaticText")), Ok((false, "AXCell")), Ok((true, ""))]), Ok(Aim::Target));
         assert_eq!(walk(vec![Ok((false, "AXStaticText")), Ok((false, "AXButton")), Ok((true, ""))]), Ok(Aim::Control));
         assert_eq!(walk(vec![Ok((false, "AXButton")), Ok((false, "AXWindow"))]), Ok(Aim::Other));
+        // An inline editor of a row takes a double-click of its own.
+        for editor in ["AXTextField", "AXComboBox", "AXTextArea"] {
+            assert_eq!(walk(vec![Ok((false, editor)), Ok((false, "AXCell")), Ok((true, ""))]), Ok(Aim::Control), "{editor}");
+        }
         assert_eq!(walk(vec![Ok((false, "AXStaticText")), Err(crate::ax::AX_CANNOT_COMPLETE)]), Err(crate::ax::AX_CANNOT_COMPLETE));
         // A click refuses the control, a hover does not; a stall is a retryable stall, not a covering element.
         assert_eq!(aimed(Ok(Aim::Control), true, "after the move").expect_err("the click would press the button").code, codes::ACTION_FAILED);
