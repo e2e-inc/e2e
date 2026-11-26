@@ -230,6 +230,11 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
 }
 
 fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
+    // A press on anything but a box would run its handler (a submit, a delete) before the check could fail.
+    let (_, role) = raw_role(element);
+    if !roles::toggleable(role) {
+        return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("a {role} has no checked state to set")));
+    }
     let target = wanted as u8;
     let mut shown = toggle_state(element);
     let reached = press_to_state(
