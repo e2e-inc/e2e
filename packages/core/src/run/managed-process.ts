@@ -11,6 +11,8 @@ import { sleep } from '../internal/time.ts';
 
 const INHERITED_ENV = ['PATH', 'HOME', 'TMPDIR', 'TMP', 'TEMP', 'SystemRoot', 'COMSPEC'] as const;
 
+/** How long an app command gets to become ready, and its `env` function gets to return, when `startupTimeout` isn't set. */
+export const DEFAULT_STARTUP_TIMEOUT_MS = 60_000;
 /** Readiness polling starts fast and backs off; a booting server answers late, not on a schedule. */
 const READY_POLL_MIN_MS = 25;
 const READY_POLL_MAX_MS = 250;
@@ -210,7 +212,7 @@ export class ManagedProcess {
     if (aborted()) return;
     // Without a URL to probe, the process exiting 0 is the readiness event.
     const readyUrl = 'readyUrl' in this.readiness ? this.readiness.readyUrl : undefined;
-    const startupTimeout = this.command.startupTimeout ?? 60_000;
+    const startupTimeout = this.command.startupTimeout ?? DEFAULT_STARTUP_TIMEOUT_MS;
     const deadline = Date.now() + startupTimeout;
     if (readyUrl !== undefined) {
       const reuse = this.command.reuseExisting === true && this.hooks.ci !== true;

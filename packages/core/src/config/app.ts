@@ -277,7 +277,7 @@ function expandEnvPort(env: Readonly<Record<string, string>>, label: string, por
  */
 export function returnedEnv(returned: unknown, label: string, port: number | undefined): Readonly<Record<string, string>> {
   if (!isPlainObject(returned)) {
-    throw new ConfigurationError('INVALID_CONFIG', `${label}.env must return an object of variable names to strings, like { PORT: '3000' }, got ${describeValue(returned)}`);
+    throw new ConfigurationError('INVALID_CONFIG', `${label}.env must return an object of variable names to strings, like { PORT: '3000' }, got ${typeof returned === 'string' ? 'a string' : describeValue(returned)}`);
   }
 
   return expandEnvPort(envVariables(returned, `${label}.env`), label, port);

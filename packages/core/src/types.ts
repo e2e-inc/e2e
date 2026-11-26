@@ -1597,7 +1597,7 @@ export interface CommandConfig<Services = Readonly<Record<string, unknown>>> {
    * A bare `'*'` is `INVALID_CONFIG`.
    */
   inheritEnv?: readonly string[];
-  /** Ready-probe budget in milliseconds; default 60000. Expiry is `APP_UNREACHABLE`. */
+  /** Milliseconds the `env` function gets to return, and then the ready probe gets; default 60000 each. Expiry is `APP_UNREACHABLE`. */
   startupTimeout?: number;
   /** Grace period before force-kill in milliseconds; default 10000. */
   shutdownTimeout?: number;

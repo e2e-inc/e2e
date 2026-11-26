@@ -15,6 +15,7 @@ import { createServer } from 'node:http';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defineEngine } from '@e2e-dev/core/lib/engine/index';
+import { InfrastructureError } from '@e2e-dev/core/lib/internal/errors';
 import { defineService } from '../../src/index.ts';
 import type { CommandConfig, E2EConfig, RunEvent, Service } from '../../src/index.ts';
 import { createFakeEngine, FAKE_APP } from '../helpers/fake-engine.ts';
@@ -584,7 +585,8 @@ test('reads each type', async ({ services }) => {
 
   it.each([
     { returned: () => ({ PORT: 4000 }), message: 'target "fake" app.command.env.PORT must be a string, got' },
-    { returned: () => 'PORT=4000', message: 'target "fake" app.command.env must return an object of variable names to strings, like { PORT: \'3000\' }, got' },
+    { returned: () => 'PORT=4000', message: 'target "fake" app.command.env must return an object of variable names to strings, like { PORT: \'3000\' }, got a string' },
+    { returned: () => new Map([['PORT', '4000']]), message: 'target "fake" app.command.env must return an object of variable names to strings, like { PORT: \'3000\' }, got an object' },
     {
       returned: () => {
         throw new Error('no port today');
@@ -601,6 +603,71 @@ test('reads each type', async ({ services }) => {
 
     expect(runErrors(outcome)).toEqual([{ code: 'INVALID_CONFIG', message: expect.stringContaining(message) }]);
     expect(existsSync(path.join(project.dir, 'events.log'))).toBe(false);
+  });
+
+  it('keeps the code of an error an env function throws with one', async () => {
+    const project = createProject({ 'server.cjs': SERVER, 'tests/a.e2e.ts': PASSING_TEST });
+
+    projects.push(project);
+
+    const outcome = await runExisting(project, {
+      config: {
+        targets: [
+          commandTarget(() => {
+            throw new InfrastructureError('APP_UNREACHABLE', 'the database is down');
+          }),
+        ],
+      },
+    });
+
+    expect(runErrors(outcome)).toEqual([{ code: 'APP_UNREACHABLE', message: 'the database is down' }]);
+  });
+
+  it('fails the run as a config error when an env function passes a service a value it cannot copy', async () => {
+    const project = createProject({ 'server.cjs': SERVER, 'tests/a.e2e.ts': PASSING_TEST });
+
+    projects.push(project);
+
+    const outcome = await runExisting(project, {
+      config: {
+        services: {
+          alpha: defineService({
+            async *start() {
+              yield { take: (value: string) => value };
+            },
+          }),
+        },
+        targets: [
+          commandTarget(async ({ services }) => {
+            const alpha = services['alpha'] as { take(value: unknown): Promise<string> };
+            return { PORT: '{port}', ALPHA: await alpha.take(() => 'not data') };
+          }),
+        ],
+      },
+    });
+
+    expect(runErrors(outcome)).toEqual([{ code: 'INVALID_CONFIG', message: expect.stringContaining('target "fake" app.command.env threw: services.alpha.take()') }]);
+    expect(outcome.exitCode).toBe(2);
+  });
+
+  it.each([
+    { order: 'the long budget first', names: ['long', 'short'] },
+    { order: 'the short budget first', names: ['short', 'long'] },
+  ])('holds each target that shares an env function to its own startupTimeout, with $order', async ({ names }) => {
+    const project = createProject({ 'server.cjs': SERVER, 'tests/a.e2e.ts': PASSING_TEST });
+
+    projects.push(project);
+
+    const env = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return { PORT: '{port}' };
+    };
+
+    const target = (name: string) => ({ ...commandTarget(env, { startupTimeout: name === 'long' ? 5000 : 100 }), name });
+
+    const outcome = await runExisting(project, { config: { targets: names.map(target) } });
+
+    expect(runErrors(outcome)).toEqual([{ code: 'APP_UNREACHABLE', message: 'target "short" app.command.env didn\'t return within 100 ms' }]);
   });
 
   it('calls an env function that two targets share once, and starts one process when it returns the same variables', async () => {
@@ -668,9 +735,17 @@ test('reads each type', async ({ services }) => {
     projects.push(project);
 
     let calls = 0;
+    const notices: string[] = [];
 
     try {
       const outcome = await runExisting(project, {
+        runOptions: {
+          onEvent: (event: RunEvent) => {
+            if (event.type === 'notice') {
+              notices.push(event.message);
+            }
+          },
+        },
         config: {
           targets: [
             {
@@ -697,6 +772,7 @@ test('reads each type', async ({ services }) => {
       expect(outcome.results.map((result) => result.status)).toEqual(['passed']);
       expect(calls).toBe(1);
       expect(existsSync(path.join(project.dir, 'events.log'))).toBe(false);
+      expect(notices.filter((notice) => notice.includes("didn't get the variables from the target's env function"))).toHaveLength(1);
     } finally {
       server.close();
     }

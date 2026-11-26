@@ -17,7 +17,7 @@ import { portOf } from '../internal/urls.ts';
 import { isRetryMode, pairRecording, recordsOnSomeAttempt, type RecordingKind, type ResolvedRecording } from '../internal/recording-modes.ts';
 import type { RecordingMode } from '../types.ts';
 import { declaredCommands } from './declared-processes.ts';
-import { ManagedProcess, type AppProcesses, type ManagedProcessHooks } from './managed-process.ts';
+import { DEFAULT_STARTUP_TIMEOUT_MS, ManagedProcess, type AppProcesses, type ManagedProcessHooks } from './managed-process.ts';
 import { UNSHARED, type ProcessPool } from './process-pool.ts';
 
 /** What grading reads of one test-target pair a run selected. */
@@ -366,6 +366,39 @@ export async function startDeclaredProcesses(
 /** Sentinel returned when the runner stops waiting for an `env` function. */
 const STOPPED = Symbol('stopped');
 
+/** One call of an `env` function, shared by every target that names it. */
+type EnvCall = {
+  readonly result: Promise<unknown>;
+  readonly startedAt: number;
+  settledAt?: number;
+};
+
+/**
+ * Starts one call of an `env` function. A config or infrastructure error the
+ * function throws keeps its code. Any other error becomes `INVALID_CONFIG`,
+ * since the `env` function is setup code: that includes a test error, like a
+ * service call passed a value it can't copy, and an error from a service call
+ * (copied back without its code).
+ */
+function startEnvCall(call: () => unknown, label: string): EnvCall {
+  // Run inside `then` so synchronous throws and rejections take the same error path.
+  const result = Promise.resolve()
+    .then(call)
+    .catch((cause: unknown) => {
+      throw isE2EError(cause) && cause.category !== 'test' ? cause : new ConfigurationError('INVALID_CONFIG', `${label}.env threw: ${errorMessage(cause)}`, { cause });
+    });
+
+  const entry: EnvCall = { result, startedAt: Date.now() };
+
+  const settle = (): void => {
+    entry.settledAt = Date.now();
+  };
+
+  void result.then(settle, settle);
+
+  return entry;
+}
+
 /**
  * Calls each target's `app.command.env` function with `services`.
  * Each distinct function runs once, so targets that share a function share
@@ -381,12 +414,17 @@ async function commandEnvs(
   services: Readonly<Record<string, unknown>>,
   signal: AbortSignal,
 ): Promise<ReadonlyMap<string, Readonly<Record<string, string>>> | undefined> {
-  // Each call keeps when it started, so every target sharing it waits until
-  // its own `startupTimeout` after that, whatever order the targets come in.
-  const calls = new Map<unknown, { readonly result: Promise<unknown>; readonly startedAt: number }>();
+  // Each call keeps when it started and when it settled, so every target
+  // sharing it is held to its own `startupTimeout` from the start, whatever
+  // order the targets come in.
+  const calls = new Map<unknown, EnvCall>();
   const envs = new Map<string, Readonly<Record<string, string>>>();
 
   for (const target of targets) {
+    if (signal.aborted) {
+      return undefined;
+    }
+
     const { command, readyUrl, base } = target.app;
     const env = command?.env;
 
@@ -395,29 +433,20 @@ async function commandEnvs(
     }
 
     const label = `target "${target.name}" app.command`;
-    // Run inside `then` so synchronous throws and rejections take the same error path.
-    const call = calls.get(env) ?? {
-      result: Promise.resolve()
-        .then(() => env({ services }))
-        .catch((cause: unknown) => {
-          // An error that already has a code (like one a service call threw) keeps it.
-          throw isE2EError(cause) ? cause : new ConfigurationError('INVALID_CONFIG', `${label}.env threw: ${errorMessage(cause)}`, { cause });
-        }),
-      startedAt: Date.now(),
-    };
+    const call = calls.get(env) ?? startEnvCall(() => env({ services }), label);
 
     calls.set(env, call);
 
-    const timeoutMs = command.startupTimeout ?? 60_000;
+    const timeoutMs = command.startupTimeout ?? DEFAULT_STARTUP_TIMEOUT_MS;
     const waiting = new AbortController();
-    let returned: unknown;
+    let outcome: { readonly value: unknown } | { readonly cause: unknown } | typeof STOPPED;
 
     try {
-      returned = await Promise.race([
-        call.result,
+      outcome = await Promise.race([
+        call.result.then((value) => ({ value }), (cause: unknown) => ({ cause })),
         sleep(Math.max(0, call.startedAt + timeoutMs - Date.now()), AbortSignal.any([signal, waiting.signal]))
           .catch(() => undefined)
-          .then(() => STOPPED),
+          .then((): typeof STOPPED => STOPPED),
       ]);
     } finally {
       waiting.abort();
@@ -428,11 +457,17 @@ async function commandEnvs(
       return undefined;
     }
 
-    if (returned === STOPPED) {
+    // A call an earlier target waited on may have settled after this
+    // target's own budget ran out.
+    if (outcome === STOPPED || (call.settledAt !== undefined && call.settledAt - call.startedAt > timeoutMs)) {
       throw new InfrastructureError('APP_UNREACHABLE', `${label}.env didn't return within ${timeoutMs} ms`);
     }
 
-    envs.set(target.name, returnedEnv(returned, label, base === undefined ? undefined : portOf(base)));
+    if ('cause' in outcome) {
+      throw outcome.cause;
+    }
+
+    envs.set(target.name, returnedEnv(outcome.value, label, base === undefined ? undefined : portOf(base)));
   }
 
   return envs;

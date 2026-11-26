@@ -63,8 +63,8 @@ export default defineConfig({
 
 ```ts
 export function defineConfig<
+  const Config extends E2EConfig<ServiceValues<Services>>,
   Services extends Readonly<Record<string, Service>> = {},
-  const Config extends E2EConfig<ServiceValues<Services>> = E2EConfig<ServiceValues<Services>>,
 >(config: Config & { readonly services?: Services } & { readonly [Key in Exclude<keyof Config, keyof E2EConfig>]: never }): Config;
 ```
 
@@ -1899,7 +1899,7 @@ export interface CommandConfig<Services = Readonly<Record<string, unknown>>> {
     | ((context: { readonly services: Services }) => Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>);
   /** Variables copied from the runner's environment when set: exact names, or prefixes ending in `*`. */
   inheritEnv?: readonly string[];
-  /** Ready-probe budget in milliseconds; default 60000. */
+  /** Milliseconds the `env` function gets to return, and then the ready probe gets; default 60000 each. */
   startupTimeout?: number;
   /** Grace period before force-kill in milliseconds; default 10000. */
   shutdownTimeout?: number;

@@ -13,7 +13,7 @@ import type { E2EConfig } from '../run-types.ts';
  * `satisfies E2EConfig` so options that depend on other options in the
  * config are typed.
  */
-export function defineConfig<Services extends ServiceMap = {}, const Config extends E2EConfig<ServiceValues<Services>> = E2EConfig<ServiceValues<Services>>>(
+export function defineConfig<const Config extends E2EConfig<ServiceValues<Services>>, Services extends ServiceMap = {}>(
   config: Config & { readonly services?: Services } & { readonly [Key in Exclude<keyof Config, keyof E2EConfig>]: never },
 ): Config {
   return config;

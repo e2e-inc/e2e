@@ -1544,6 +1544,10 @@ defineConfig({
   ],
 });
 
+// defineConfig takes the config's type as its first type argument.
+type PaneOnlyConfig = { readonly targets: readonly [{ readonly engine: typeof paneEngine }] };
+defineConfig<PaneOnlyConfig>({ targets: [{ engine: paneEngine }] });
+
 // defineConfig refuses a key E2EConfig doesn't have, as satisfies E2EConfig does, and still types env from services.
 defineConfig({
   services: { mailbox },
