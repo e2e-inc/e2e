@@ -88,7 +88,8 @@ pub struct WindowRef {
 #[derive(Serialize)]
 pub struct RawSnapshot {
     snapshot_id: String,
-    /// False when the deadline stopped the read: what it did not reach may be there.
+    /// False when the read missed part of the window: the deadline stopped it, or the app did not answer for an
+    /// element that still exists. What it did not reach may be there.
     complete: bool,
     /// True when the node budget stopped the read.
     truncated: bool,
@@ -117,8 +118,15 @@ struct Walk {
     focused: Option<Element>,
     nodes: usize,
     complete: bool,
+    /// How many reads of an element that still exists failed; a parent whose subtree lost one is truncated.
+    lost: usize,
     truncated: bool,
     refs: Vec<(String, Entry)>,
+}
+
+/// Whether a failed read says the element is gone or has no such value, rather than that the app did not answer.
+fn absent(error: ax::AXError) -> bool {
+    matches!(error, ax::AX_INVALID_ELEMENT | ax::AX_NO_VALUE | ax::AX_ATTRIBUTE_UNSUPPORTED)
 }
 
 fn label(value: Option<String>) -> Option<String> {
@@ -241,6 +249,12 @@ impl Walk {
         Instant::now() >= self.deadline
     }
 
+    /// Notes a read of an element that still exists and did not answer: the snapshot is no longer complete.
+    fn lose(&mut self) {
+        self.complete = false;
+        self.lost += 1;
+    }
+
     /// The actions a control takes, in the raw vocabulary.
     fn actions(&self, element: &Element, read: &Read) -> Vec<&'static str> {
         let mut out = Vec::new();
@@ -287,15 +301,36 @@ impl Walk {
     }
 
     /// The children of an element, at most `MAX_CHILDREN`, and how many it has.
-    fn children(&self, element: &Element, role: &str) -> (Vec<Element>, usize) {
+    fn children(&mut self, element: &Element, role: &str) -> (Vec<Element>, usize) {
         if roles::large(role) {
-            let count = element.count("AXChildren").unwrap_or(0);
-            let children = if count == 0 { Vec::new() } else { element.elements("AXChildren", MAX_CHILDREN).unwrap_or_default() };
+            let count = match element.count("AXChildren") {
+                Ok(count) => count,
+                Err(error) => {
+                    if !absent(error) {
+                        self.lose();
+                    }
+                    0
+                }
+            };
+            let children = if count == 0 {
+                Vec::new()
+            } else {
+                element.elements("AXChildren", MAX_CHILDREN).unwrap_or_else(|error| {
+                    if !absent(error) {
+                        self.lose();
+                    }
+                    Vec::new()
+                })
+            };
             return (children, count);
         }
         let children = match element.attribute("AXChildren") {
             Ok(Value::Array(items)) => {
                 items.into_iter().filter_map(|item| if let Value::Element(element) = item { Some(element) } else { None }).collect::<Vec<_>>()
+            }
+            Err(error) if !absent(error) => {
+                self.lose();
+                Vec::new()
             }
             _ => Vec::new(),
         };
@@ -313,7 +348,13 @@ impl Walk {
         self.nodes += 1;
         let read = match read(element) {
             Ok(read) => read,
-            Err(_) if !root => return None,
+            // Gone since its parent listed it: nothing to miss.
+            Err(ax::AX_INVALID_ELEMENT) if !root => return None,
+            // Still there, but the app did not answer: the read has a hole.
+            Err(_) if !root => {
+                self.lose();
+                return None;
+            }
             Err(_) => Read {
                 role: "window",
                 ax_role: "AXWindow".into(),
@@ -434,6 +475,7 @@ impl Walk {
             self.complete = false;
             node.subtree_truncated = element.count("AXChildren").unwrap_or(0) > 0;
         } else {
+            let lost = self.lost;
             let (children, count) = self.children(element, role);
             if count > children.len() {
                 node.subtree_truncated = true;
@@ -452,6 +494,9 @@ impl Walk {
                 if let Some(child) = self.node(child, level + 1, false, inner) {
                     node.children.push(child);
                 }
+            }
+            if self.lost > lost {
+                node.subtree_truncated = true;
             }
         }
 
@@ -486,6 +531,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         focused,
         nodes: 0,
         complete: true,
+        lost: 0,
         truncated: false,
         refs: Vec::new(),
     };
