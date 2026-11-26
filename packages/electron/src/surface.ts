@@ -47,6 +47,9 @@ import { ROOT_ID, Windows, type AppWindow, type ElectronWindow, type WindowMatch
 
 export type { ElectronWindow, WindowMatcher } from './windows.ts';
 
+/** How long a read waits for a crashed window to load again. */
+const CRASH_RELOAD_WAIT_MS = 2_000;
+
 function crashed(): Error {
   return invalidState('the window\'s renderer crashed: reload it from the main process with electron.evaluate, or restart the app');
 }
@@ -181,7 +184,8 @@ export class ElectronSurface {
 
   async observe(operation: OperationContext, options?: EngineObserveOptions): Promise<EngineSnapshot> {
     return await bounded(operation, 'observe', false, async () => {
-      const raw = await this.readShown(waitDeadline(operation));
+      // An observation (the agent's, failure evidence) never waits on a crashed window.
+      const raw = await this.readShown(new Deadline(0));
       if (raw === undefined) return { root: { ref: { id: ROOT_ID, revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } };
       const snapshot = projectRead(raw, 'tree', this.projection());
       return options?.pixels === true ? await withPixels(this.devtools, raw, snapshot) : snapshot;
@@ -190,9 +194,11 @@ export class ElectronSurface {
 
   async locate(expression: LocatorExpression, operation: OperationContext): Promise<readonly SemanticNode[]> {
     // An app that is not running has nothing to find, ever: say so rather than let the locator wait out its timeout.
-    if (this.app.running === undefined) throw invalidState('the app is not running: open it with app.open()');
+    if (this.app.running === undefined) throw this.notRunning();
     return await bounded(operation, 'locate', false, async () => {
-      const raw = await this.readShown(waitDeadline(operation));
+      // A crashed window is waited on briefly, for a reload already under way; every read waiting the whole timeout
+      // would make each step of a test whose app crashed take it.
+      const raw = await this.readShown(new Deadline(Math.min(CRASH_RELOAD_WAIT_MS, waitDeadline(operation).remaining())));
       if (raw === undefined) return [];
       const sink = this.attempt?.screen;
       if (sink !== undefined) {
@@ -228,7 +234,14 @@ export class ElectronSurface {
   }
 
   private requireWindow(): AppWindow {
-    return this.windowList.require(this.app.running !== undefined);
+    if (this.app.running === undefined) throw this.notRunning();
+    return this.windowList.require(true);
+  }
+
+  /** Why nothing can be read: the app quit on its own during the test, or was never opened. */
+  private notRunning(): Error {
+    const exited = this.app.exited;
+    return invalidState(exited === undefined ? 'the app is not running: open it with app.open()' : `the app quit on its own${exited === '' ? '' : ` ${exited}`}: open it again with app.open() or app.restart()`);
   }
 
   async perform(ref: NodeRef, action: LocatorAction, operation: OperationContext): Promise<void> {
@@ -275,12 +288,12 @@ export class ElectronSurface {
   // --- what the fixture asks ---
 
   async windows(): Promise<readonly ElectronWindow[]> {
-    return (await this.windowList.list()).map(({ entry }) => entry);
+    return (await this.windowList.list((page) => this.app.windowTitle(page))).map(({ entry }) => entry);
   }
 
   /** Makes the first open window `which` matches the one read and acted in, waiting for it to open until the operation's deadline. */
   async useWindow(which: WindowMatcher, operation: OperationContext): Promise<ElectronWindow> {
-    return await this.windowList.use(which, operation);
+    return await this.windowList.use(which, (page) => this.app.windowTitle(page), operation);
   }
 
   /** Runs a function in the app's main process. */

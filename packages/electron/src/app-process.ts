@@ -46,6 +46,13 @@ export class AppProcess {
     return this.app;
   }
 
+  /** How the app last ended on its own (`with exit code 1`), or undefined while it runs or after the engine quit it. */
+  get exited(): string | undefined {
+    return this.exit;
+  }
+
+  private exit: string | undefined;
+
   /**
    * Runs a launch or a quit after the ones before it: `app.open()` and
    * `app.restart()` that overlap would each start a main process, and only
@@ -61,6 +68,7 @@ export class AppProcess {
   async quit(budget: { readonly timeoutMs: number }, graceMs: number): Promise<void> {
     const app = this.app;
     this.app = undefined;
+    this.exit = undefined;
     this.windows.clear();
     if (app === undefined) return;
     // A beforeunload guard would keep its window open, and the app's quit handlers from running: Electron ignores one
@@ -96,7 +104,8 @@ export class AppProcess {
     const timeout = Math.max(1, Math.min(waitDeadline(operation).remaining(), this.options.launchTimeoutMs));
     const deadline = new Deadline(timeout);
     const left = (): number => Math.max(1, deadline.remaining());
-    const launching = _electron.launch({ executablePath: setup.executable, args, cwd: setup.projectRoot, env: launchEnv(setup.env, this.options.env), timeout });
+    // colorScheme null leaves prefers-color-scheme to the app (nativeTheme) and the OS, where Playwright would force light.
+    const launching = _electron.launch({ executablePath: setup.executable, args, cwd: setup.projectRoot, env: launchEnv(setup.env, this.options.env), timeout, colorScheme: null });
     let app: ElectronApplication;
     try {
       app = await raceAbort(launching, operation.signal, 'launching the app');
@@ -110,6 +119,8 @@ export class AppProcess {
     }
     this.app = app;
     this.attempt = setup.attempt;
+    // Read now: Playwright refuses the process of an app that has quit, which is when the close handler needs it.
+    const child = app.process();
     let quit = false;
     app.on('window', (page) => this.track(app, page));
     app.on('console', (message) => this.attempt?.appLog({ source: 'console', level: levelOf(message.type()), text: `[main] ${message.text()}` }));
@@ -119,18 +130,25 @@ export class AppProcess {
       if (this.app === app) {
         this.app = undefined;
         this.windows.clear();
+        const { exitCode, signalCode } = child;
+        this.exit = signalCode !== null ? `on ${signalCode}` : exitCode !== null ? `with exit code ${exitCode}` : '';
       }
     });
     for (const page of app.windows()) this.track(app, page);
     // Downloads go to the attempt's own directory, never the user's: Electron saves one without asking in a hidden window.
     await withTimeout(
-      app.evaluate(({ app: main, session }, directory) => {
+      app.evaluate(({ app: main, session, webContents }, directory) => {
         main.setPath('downloads', directory);
-        // The session's path is read when it starts, which may be before this runs: each download is placed explicitly.
+        // A session's path is read when it starts, which may be before this runs: each download is placed explicitly, in
+        // the sessions there are (a partition the app's ready handler made, too) and in every one made later.
+        const placed = new Set<Electron.Session>();
         const place = (target: Electron.Session): void => {
+          if (placed.has(target)) return;
+          placed.add(target);
           target.on('will-download', (_event, item) => item.setSavePath(`${directory}/${item.getFilename()}`));
         };
         place(session.defaultSession);
+        for (const contents of webContents.getAllWebContents()) place(contents.session);
         main.on('session-created', place);
       }, path.join(setup.userDataDir, 'Downloads')),
       Math.min(left(), 2_000),
@@ -175,12 +193,29 @@ export class AppProcess {
       // Playwright types the argument as it arrives after serialization (`Unboxed<A>`); the fixture's own overloads keep `A` honest.
       return await app.evaluate(fn as (electron: ElectronMainModule, arg: unknown) => R | Promise<R>, arg);
     } catch (cause) {
-      // An app that exits under the function fails it before its close event arrives: wait for that a moment.
-      if (this.app === app) await withTimeout(new Promise<void>((resolve) => app.once('close', () => resolve())), 500, () => new Error('still running')).catch(() => undefined);
+      // An app that exits under the function fails it before its close event arrives: wait for that a moment. Only then:
+      // the function's own error is reported at once.
+      if (this.app === app && (closedWindow(cause) || /Execution context was destroyed/.test(String(cause)))) await withTimeout(new Promise<void>((resolve) => app.once('close', () => resolve())), 500, () => new Error('still running')).catch(() => undefined);
       if (this.app !== app) throw new EngineError('INVALID_STATE', 'the app quit while electron.evaluate ran', { retryable: false, cause });
       // Its message is the test's, never read for a pattern.
       const message = (cause instanceof Error ? cause.message.split('\n')[0] : String(cause)) ?? '';
       throw new TestError('EVALUATE_FAILED', `electron.evaluate: ${message.replace(/^electronApplication\.evaluate: /, '')}`, { cause });
+    }
+  }
+
+  /** The OS window title of a page's `BrowserWindow`, read in the main process; undefined for a view, or when the app does not answer. */
+  async windowTitle(page: Page): Promise<string | undefined> {
+    const app = this.app;
+    if (app === undefined) return undefined;
+    try {
+      const handle = await withTimeout(app.browserWindow(page), 1_000, () => new Error('no answer'));
+      try {
+        return await withTimeout(handle.evaluate((window) => window.getTitle()), 1_000, () => new Error('no answer'));
+      } finally {
+        await handle.dispose().catch(() => undefined);
+      }
+    } catch {
+      return undefined;
     }
   }
 
