@@ -8,8 +8,51 @@ use crate::failure::{Failure, Outcome, codes};
 use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGMouseButton, EventField};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
+use std::collections::HashMap;
+use std::sync::{Mutex, PoisonError};
 use std::thread::sleep;
 use std::time::Duration;
+
+/// How far behind the newest run a leftover cancel mark is dropped.
+const STALE_IDS: u32 = 4096;
+
+/// The typing runs by the id their caller gave (one counter for the process), each marked once it is cancelled.
+static TYPING: Mutex<Option<HashMap<u32, bool>>> = Mutex::new(None);
+
+/// Marks the typing run `id` cancelled: it sends no more text. A cancel that comes before the run starts holds too.
+pub fn cancel_typing(id: u32) {
+    TYPING.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert_with(HashMap::new).insert(id, true);
+}
+
+/// One typing run, registered while it lives so `cancel_typing` can reach it.
+pub struct TypingRun(Option<u32>);
+
+impl TypingRun {
+    pub fn start(id: Option<u32>) -> Self {
+        if let Some(id) = id {
+            let mut guard = TYPING.lock().unwrap_or_else(PoisonError::into_inner);
+            let runs = guard.get_or_insert_with(HashMap::new);
+            // A cancel that came after its run ended left a mark; ids only grow, so marks far behind this one go.
+            runs.retain(|other, _| id.wrapping_sub(*other) < STALE_IDS);
+            runs.entry(id).or_insert(false);
+        }
+        TypingRun(id)
+    }
+
+    fn cancelled(&self) -> bool {
+        self.0.is_some_and(|id| TYPING.lock().unwrap_or_else(PoisonError::into_inner).as_ref().and_then(|runs| runs.get(&id).copied()).unwrap_or(false))
+    }
+}
+
+impl Drop for TypingRun {
+    fn drop(&mut self) {
+        if let Some(id) = self.0
+            && let Some(runs) = TYPING.lock().unwrap_or_else(PoisonError::into_inner).as_mut()
+        {
+            runs.remove(&id);
+        }
+    }
+}
 
 /// Where an event goes.
 #[derive(Clone, Copy)]
@@ -187,9 +230,21 @@ pub fn press(combo: &Combo, route: Route) -> Outcome<()> {
 const CHUNK_UNITS: usize = 16;
 
 /// Types text as keystrokes that carry their characters, whatever the keyboard layout. A newline presses Return and a tab Tab.
-pub fn type_text(text: &str, route: Route) -> Outcome<()> {
+/// Before each event it checks `run` and `deadline`: a cancelled run, or one out of time, sends nothing more, so keys never
+/// keep going after the caller gave up, when another app may have taken the keyboard.
+pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time::Instant) -> Outcome<()> {
     let source = source()?;
+    let go_on = || -> Outcome<()> {
+        if run.cancelled() {
+            return Err(Failure::unconfirmed(codes::TIMEOUT, "typing was cancelled; the text sent before then stays sent"));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(Failure::unconfirmed(codes::TIMEOUT, "typing ran out of time; the text sent before then stays sent"));
+        }
+        Ok(())
+    };
     let send = |chunk: &[u16]| -> Outcome<()> {
+        go_on()?;
         for down in [true, false] {
             let event =
                 CGEvent::new_keyboard_event(source.clone(), 0, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
@@ -206,6 +261,7 @@ pub fn type_text(text: &str, route: Route) -> Outcome<()> {
                 send(&chunk)?;
                 chunk.clear();
             }
+            go_on()?;
             let combo = Combo { key: Key { code: if character == '\t' { 48 } else { 36 }, character: None }, flags: CGEventFlags::CGEventFlagNull };
             press(&combo, route)?;
             continue;

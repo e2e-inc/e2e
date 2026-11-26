@@ -36,8 +36,16 @@ pub enum Action {
     Hover,
     SetValue(String),
     Select(String),
-    Scroll { direction: String, pages: f64 },
-    Type { text: String, physical: bool },
+    Scroll {
+        direction: String,
+        pages: f64,
+    },
+    /// `id` names the run for `input::cancel_typing`.
+    Type {
+        text: String,
+        physical: bool,
+        id: Option<u32>,
+    },
 }
 
 /// The failure for an AX error of a request that changed nothing.
@@ -377,7 +385,8 @@ fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
     Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("nothing here scrolls {direction}")))
 }
 
-fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Outcome<()> {
+fn type_text(entry: &Entry, text: &str, physical: bool, id: Option<u32>, deadline: Instant) -> Outcome<()> {
+    let run = input::TypingRun::start(id);
     focus(&entry.element, deadline)?;
     let route = if physical {
         let window = windows::find(entry.pid, entry.window)?;
@@ -386,7 +395,7 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
     } else {
         Route::Process(entry.pid)
     };
-    input::type_text(text, route).map_err(Failure::delivered)
+    input::type_text(text, route, &run, deadline).map_err(Failure::delivered)
 }
 
 /// Runs one action on the element `reference` names.
@@ -415,7 +424,7 @@ pub fn act(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         Action::SetValue(text) => set_value(element, &text, deadline),
         Action::Select(label) => select(&entry, &label, deadline),
         Action::Scroll { direction, pages } => scroll(element, &direction, pages),
-        Action::Type { text, physical } => type_text(&entry, &text, physical, deadline),
+        Action::Type { text, physical, id } => type_text(&entry, &text, physical, id, deadline),
     }
 }
 

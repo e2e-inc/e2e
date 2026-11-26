@@ -175,6 +175,8 @@ pub struct ActOptions {
     pub direction: Option<String>,
     pub pages: Option<f64>,
     pub physical: Option<bool>,
+    /// Names a `type` run, so `cancelTyping` can stop it.
+    pub input_id: Option<u32>,
     pub timeout_ms: f64,
 }
 
@@ -197,13 +199,19 @@ pub async fn act(options: ActOptions) -> Value {
             "setValue" => actions::Action::SetValue(text()?),
             "select" => actions::Action::Select(text()?),
             "scroll" => actions::Action::Scroll { direction: options.direction.clone().unwrap_or_else(|| "down".into()), pages: options.pages.unwrap_or(0.5) },
-            "type" => actions::Action::Type { text: text()?, physical: options.physical.unwrap_or(false) },
+            "type" => actions::Action::Type { text: text()?, physical: options.physical.unwrap_or(false), id: options.input_id },
             other => return Err(Failure::refused(codes::INVALID_ARGS, format!("no action \"{other}\""))),
         };
         actions::act(&options.r#ref, action, deadline)?;
         Ok(serde_json::json!({}))
     })
     .await
+}
+
+/// Stops the `type` run `act` was given `inputId` for: it sends no more text, though what it sent stays sent.
+#[napi]
+pub fn cancel_typing(input_id: u32) {
+    crate::input::cancel_typing(input_id);
 }
 
 #[napi(object)]
