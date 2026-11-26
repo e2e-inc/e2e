@@ -238,6 +238,13 @@ takes over from the current screen when the app no longer matches.
   goal records it again. `step.cache.reason` says why a replay missed.
 - A step that changes nothing on screen or in the route records nothing
   and runs live every run.
+- A recording that leaves a screen and comes back with nothing typed,
+  chosen, or set (an agent that opened the wrong page and backed out) still
+  replays; `step.cache.detour` names the actions and the run summary counts
+  it as `detoured`. Delete the entry and record the step again, naming the
+  destination in the instruction if the agent repeats it. A plain button
+  tap does not end a detour, so a delete that returns to the list takes one
+  too.
 - While you fix a test, keep the cache on so confirmed goals replay (topic
   `debugging`, "Rerunning a test while you fix it"). Use `--no-cache` to
   rule out a stale replay (topic `debugging`, "Tools") and for one live run
