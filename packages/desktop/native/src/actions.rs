@@ -282,15 +282,19 @@ fn physical(entry: &Entry, action: Pointer) -> Outcome<()> {
         return Err(Failure::refused(codes::ACTION_FAILED, "another element covers the center of this one, so the pointer would land there"));
     }
     // Raising the window and the hit test can take a second on a slow app: the caller may have given up meanwhile. The
-    // pointer's move can reveal a control over the element (a row's inline button): each click checks the point again.
-    input::pointer(x, y, action, &|| {
-        go("pointer")?;
-        if hits(entry.pid, &entry.element, x, y) {
-            Ok(())
-        } else {
-            Err(Failure::refused(codes::ACTION_FAILED, "another element is under the pointer now, so no click was sent there"))
-        }
-    })
+    // pointer's move can reveal a control over the element (a row's inline button): each click checks the point again,
+    // and the caller once more after that check, which waits on the app too.
+    input::pointer(x, y, action, &|| still_aimed(|| hits(entry.pid, &entry.element, x, y)))
+}
+
+/// Whether a pointer event may go: the caller still wants it, the point still hits the element, and the caller still
+/// wants it after that check, which waits on the app.
+fn still_aimed(hit: impl FnOnce() -> bool) -> Outcome<()> {
+    go("pointer")?;
+    if !hit() {
+        return Err(Failure::refused(codes::ACTION_FAILED, "another element is under the pointer now, so no click was sent there"));
+    }
+    go("pointer")
 }
 
 /// Waits a moment for a menu an action opened to show, so the next read finds it; an action that opens none waits it out and is still done.
@@ -1109,6 +1113,21 @@ mod tests {
         set(1_000_033, later());
         assert!(super::go("press").is_ok());
         super::CURRENT.with(|current| current.borrow_mut().take());
+    }
+
+    #[test]
+    fn sends_no_click_when_the_action_is_cancelled_during_the_hit_test() {
+        let outcome = super::guarded(Some(1_000_034), later(), || {
+            super::still_aimed(|| {
+                crate::input::cancel_input(1_000_034);
+                true
+            })
+        });
+        let failure = outcome.expect_err("cancelled while the hit test waited on the app");
+        assert_eq!((failure.code, failure.delivery), (crate::failure::codes::TIMEOUT, crate::failure::Delivery::NotDelivered));
+        let missed = super::guarded(Some(1_000_035), later(), || super::still_aimed(|| false)).expect_err("the point hits another element");
+        assert_eq!(missed.code, crate::failure::codes::ACTION_FAILED);
+        assert!(super::guarded(Some(1_000_036), later(), || super::still_aimed(|| true)).is_ok());
     }
 
     #[test]
