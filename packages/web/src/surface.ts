@@ -76,6 +76,7 @@ import { credentialOrigins, httpCredentials, installConfiguredHeaders, lowercase
 import { RefRegistry } from './refs.ts';
 import {
   cancelled,
+  currentViewport,
   DEFAULT_VIEWPORT,
   dispatchedInput,
   ErrorLatch,
@@ -85,7 +86,7 @@ import {
   isPwTimeout,
   message,
   navigationStaleOr,
-  performViewportSwipe,
+  performPointSwipe,
   sanitizeFilename,
   pageScriptFailure,
   staleOr,
@@ -1225,8 +1226,9 @@ export class PlaywrightSurface {
 
   /**
    * One action on a located or observed node. A `swipe` on the observation
-   * root is the viewport swipe: a wheel gesture sized by the viewport, with no
-   * element resolved behind it, so it needs only the page. Every other action
+   * root is the viewport swipe: a wheel gesture at the viewport's center,
+   * sized by the scroll container under it, with no element resolved behind
+   * it, so it needs only the page. Every other action
    * on the root acts on the document element the root stands for.
    */
   perform(ref: NodeRef, action: LocatorAction, operation: OperationContext): Promise<void> {
@@ -1237,7 +1239,7 @@ export class PlaywrightSurface {
         const page = this.requirePage();
         if (action.kind === 'swipe' && ref.id === ROOT_NODE_ID) {
           this.requireSession().requireObservation();
-          return performViewportSwipe(page, action.direction, action.momentum ?? 'none');
+          return currentViewport(page).then((viewport) => performPointSwipe(page, { x: viewport.width / 2, y: viewport.height / 2 }, action.direction, action.distance));
         }
         const session = this.requireSession();
         const { refs } = session;

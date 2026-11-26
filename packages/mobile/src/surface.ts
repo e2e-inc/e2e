@@ -23,6 +23,7 @@ import {
   raceAbort,
   rejectUnknownKeys,
   stopProviderRecording,
+  SCROLL_STEP,
   withinCleanupBudget,
   type EngineAttemptContext,
   type EngineCleanupContext,
@@ -62,6 +63,8 @@ import {
   ROOT_ID,
   screenRoot,
   screenTitle,
+  scrollBoxAt,
+  scrollBoxOf,
   withEmptyState,
   type ProjectedNode,
   type ProjectedSnapshot,
@@ -83,9 +86,12 @@ import {
   sanitizeFilename,
   screenLocation,
   type RawScreenshotResult,
-  swipeWithin,
+  centringDrags,
+  swipeDrags,
   unsupported,
+  type Drag,
   type Rect,
+  type ScrollBox,
   InputBudget,
   type InstallIdentity,
 } from './support.ts';
@@ -229,6 +235,8 @@ interface NodeBinding {
   readonly captureViewport: ViewportSize | undefined;
   /** Whether `fill` and `clear` may type into the node, judged with the children `node` leaves out. */
   readonly takesText: boolean;
+  /** The nearest scroll container strictly around the node, where `scrollIntoView` centres it. */
+  readonly container: ScrollBox | undefined;
 }
 
 
@@ -547,6 +555,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   private screenBeforeAction: ProjectedScreen | undefined;
   /** The most recent projection of the screen, from any observe or locate. */
   private latestScreen: ProjectedScreen | undefined;
+  /** Whether an action went out after `latestScreen` was projected. */
+  private actedSinceLatestScreen = false;
   /** Budget a control that came with the last action gets to finish arriving; see DEFAULT_TRANSITION_MS. */
   private readonly transitionMs: number;
   /** Whether snapshots keep interactive nodes only, from the `snapshot` option. */
@@ -1214,6 +1224,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       originUnknown: raw.warnings?.includes(ORIGIN_WARNING) === true,
     };
     this.latestScreen = projected;
+    this.actedSinceLatestScreen = false;
     const read = projected.viewport;
     if (read !== undefined && (this.knownViewport === undefined || sameScreen(read, this.knownViewport))) this.knownViewport = read;
     return projected;
@@ -1405,6 +1416,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       captureViewport: snapshot.viewport,
       takesText: mayTakeText(entry.node),
       refsGeneration: snapshot.refsGeneration,
+      container: scrollBoxOf(entry.parent),
     };
   }
 
@@ -1484,7 +1496,28 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     return true;
   }
 
-  /** Records that a test's gesture skipped the stabilization wait, so the next action on a control checks it stopped moving. */
+  /**
+   * Sends `drags` one after another, each taking `durationMs`. If there
+   * isn't enough time left for all drags, it throws `OPERATION_TIMEOUT`
+   * without sending anything so `scrollUntilVisible` treats it as a deadline
+   * timeout. If an earlier drag finishes late and a later one runs out of
+   * time, it throws `ACTION_MAY_HAVE_COMMITTED`.
+   */
+  private async pan(client: AgentDeviceClient, drags: readonly Drag[], durationMs: number, input: InputBudget): Promise<void> {
+    const needed = drags.length * durationMs;
+    const remaining = input.remainingMs();
+    if (needed >= remaining) {
+      throw new EngineError('OPERATION_TIMEOUT', `the swipe's drags take ${needed} ms, but only ${Math.floor(remaining)} ms remain. Nothing was sent.`, { retryable: false });
+    }
+    // A drag can move the screen even if the swipe fails later, so the last
+    // capture's containers are stale.
+    this.actedSinceLatestScreen = true;
+    for (const drag of drags) {
+      await input.send((signal) => client.interactions.pan({ ...drag, durationMs, signal }), durationMs);
+    }
+  }
+
+  /** Records that a test's gesture may leave the screen moving, so the next action on a control first checks that the control stopped moving. */
   private noteGesture(operation: OperationContext): void {
     if (operation.origin === 'test') this.skippedStabilizationAt = Date.now();
   }
@@ -1552,6 +1585,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   private markAction(before: ProjectedScreen | undefined): void {
     this.screenBeforeAction = before;
     this.lastActionAt = Date.now();
+    this.actedSinceLatestScreen = true;
   }
 
   async perform(ref: NodeRef, action: LocatorAction, operation: OperationContext, input: InputBudget): Promise<void> {
@@ -1561,24 +1595,25 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     // acting, so its actions settle first.
     const deterministic = operation.origin === 'test';
     const settle = deterministic ? {} : this.settleOptions;
-    // The observation root is the screen: a swipe on it scrolls the whole
-    // viewport, which is the one action a screen takes. It sends no `amount`
-    // and keeps agent-device's default for every momentum and every origin:
-    // agent-device centres the gesture on the viewport, so the finger starts
-    // at `0.5 + amount / 2` of the height, and a larger amount lands it in
-    // bottom chrome (a sticky footer, a tab bar) that swallows the drag. A
-    // live iOS run lost every `slow` scroll of the mobile benchmark's sticky
-    // chrome flow that way.
+    // The observation root is the screen, and a swipe is the only action it
+    // takes. It scrolls the scroll container under the screen's centre, or the
+    // whole screen when there isn't one.
     if (ref.id === ROOT_ID) {
       if (action.kind !== 'swipe') throw notActionable(`the screen root takes swipe only, not ${action.kind}; act on a node`);
       if (deterministic) await this.waitOutTransition(operation, input);
-      const before = this.latestScreen;
-      const stabilization = gestureStabilization(operation);
-      await this.command(
-        'swipe',
-        (client) => input.send(() => client.interactions.scroll({ direction: action.direction, ...settle, ...stabilization })),
-        operation.signal,
-      );
+      // A capture from before the last input can have the wrong containers:
+      // the input may have replaced the screen, or a fill snapshot came
+      // before typing. In that case, the screen is read again. The
+      // viewport is read after it, since the screen may have rotated or
+      // changed size.
+      const latest = this.latestScreen;
+      const before = latest === undefined || this.actedSinceLatestScreen ? this.project(await this.capture(operation.signal, false, input)) : latest;
+      const viewport = await this.viewportFor(before.viewport, operation.signal, input);
+      const centre = { x: viewport.width / 2, y: viewport.height / 2 };
+      // The boxes in a capture that couldn't place its window on the screen are
+      // in another frame, so its containers aren't trusted.
+      const box = (before.originUnknown ? undefined : scrollBoxAt(before.index, centre)) ?? { x: 0, y: 0, ...viewport };
+      await this.command('swipe', (client) => this.pan(client, swipeDrags(box, action.direction, action.distance), action.durationMs, input), operation.signal);
       this.noteGesture(operation);
       this.markAction(before);
       return;
@@ -1655,17 +1690,29 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
         case 'press':
           return this.pressKey(client, target, action.key, settle, input);
         case 'swipe': {
-          const rect = target.node.rect;
-          if (rect === undefined) throw notActionable(`node ${target.id} has no bounds to swipe within`);
+          // The drag crosses the node's box, the way a person swipes a card or
+          // a row. When the node is a scroll container, the drag scrolls it.
+          const box = target.node.rect;
+          if (box === undefined) throw notActionable(`node ${target.id} has no bounds to swipe within`);
           if (target.originUnknown) {
             throw notActionable(
               `${label} failed: the ${ORIGIN_UNKNOWN_BOUNDS} Nothing was sent. Swipe the screen with screen.swipe({ direction }), or between screen points with screen.swipe({ from, to }) not taken from those bounds.`,
             );
           }
-          const stabilization = gestureStabilization(operation);
-          const sent = await input.send(() => client.interactions.swipe({ ...swipeWithin(rect, action.direction, action.momentum), ...stabilization }));
+          await this.pan(client, swipeDrags(box, action.direction, action.distance), action.durationMs, input);
           this.noteGesture(operation);
-          return sent;
+          return undefined;
+        }
+        case 'scrollIntoView': {
+          // Only what's on screen is listed on a device, so the node is at
+          // least partly in view. A node cut off at its container's edge is
+          // dragged to the middle (`centringDrags`).
+          const rect = target.node.rect;
+          const drags = rect === undefined || target.container === undefined || target.originUnknown ? [] : centringDrags(rect, target.container, action.center === true);
+          if (drags.length === 0) return undefined;
+          await this.pan(client, drags, SCROLL_STEP.durationMs, input);
+          this.noteGesture(operation);
+          return undefined;
         }
         case 'dragTo': {
           // A test locates the drop target in a capture of its own, after the
@@ -1679,7 +1726,6 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
             }),
           );
         }
-        case 'scrollIntoView':
         case 'selectOption':
         case 'setInputFiles':
         case 'setInputFilePayloads':
@@ -1693,7 +1739,9 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     } catch (cause) {
       throw staleOr(cause, label, this.where);
     }
-    this.markAction(before);
+    // A `scrollIntoView` with nothing to move sends nothing, so it isn't an
+    // action the next control must wait on.
+    if (input.hasSent) this.markAction(before);
   }
 
   /**

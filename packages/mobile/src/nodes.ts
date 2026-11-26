@@ -9,7 +9,7 @@
 
 import type { CaptureSnapshotResult, SnapshotNode } from 'agent-device';
 import type { SemanticNode, ViewportSize } from '@e2e-dev/core/engine';
-import type { Rect } from './support.ts';
+import { contains, type Point, type Rect, type ScrollBox } from './support.ts';
 
 /**
  * One agent-device snapshot node as this engine reads it: agent-device's own
@@ -877,4 +877,43 @@ export function isWithin(entry: ProjectedNode, ancestor: ProjectedNode): boolean
     if (current === ancestor) return true;
   }
   return false;
+}
+
+/**
+ * Returns the nearest scroll container from `entry` up, `entry` included,
+ * or undefined when no container holds the node.
+ */
+export function scrollBoxOf(entry: ProjectedNode | undefined): ScrollBox | undefined {
+  for (let current = entry; current !== undefined; current = current.parent) {
+    const box = scrollBox(current);
+    if (box !== undefined) return box;
+  }
+  return undefined;
+}
+
+const SCROLL_KINDS: ReadonlySet<string> = new Set(['scroll-area', 'list', 'collection', 'table']);
+
+/**
+ * Returns the node's box if it's a visible scroll container with a non-zero
+ * area. Matches agent-device kinds: `scroll-area` (iOS/Android `ScrollView`,
+ * including React Native lists), `list` (Android `RecyclerView` or
+ * `ListView`), `collection` (iOS `CollectionView`, including SwiftUI lists),
+ * and `table` (iOS `TableView`).
+ */
+function scrollBox(entry: ProjectedNode): ScrollBox | undefined {
+  const rect = entry.node.rect;
+  if (!SCROLL_KINDS.has(entry.raw.kind ?? '') || rect === undefined || rect.width <= 0 || rect.height <= 0 || entry.node.states?.hidden === true) {
+    return undefined;
+  }
+  return { ...rect, hiddenAbove: entry.raw.hiddenContentAbove === true, hiddenBelow: entry.raw.hiddenContentBelow === true };
+}
+
+/** Returns the innermost scroll container under `point` (the smallest one that holds it). */
+export function scrollBoxAt(index: readonly ProjectedNode[], point: Point): ScrollBox | undefined {
+  let found: ScrollBox | undefined;
+  for (const entry of index) {
+    const box = scrollBox(entry);
+    if (box !== undefined && contains(box, point) && (found === undefined || box.width * box.height < found.width * found.height)) found = box;
+  }
+  return found;
 }

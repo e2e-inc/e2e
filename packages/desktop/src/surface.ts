@@ -19,6 +19,7 @@ import {
   OBSERVED_NAME_LIMIT,
   OBSERVED_TEXT_LIMIT,
   resolveExpression,
+  SCROLL_STEP,
   type EngineAppInfo,
   type EngineAttemptContext,
   type EngineCleanupContext,
@@ -37,6 +38,7 @@ import {
   type PointerAction,
   type SelectOption,
   type SemanticNode,
+  type SwipeAction,
   type ViewportPoint,
 } from '@e2e-dev/core/engine';
 import { AGENT_DESKTOP_VERSION, installPinned, pinnedExecutable, pinnedInstalled, resolveExecutable } from './binary.ts';
@@ -1176,7 +1178,7 @@ export class DesktopSurface {
       const target = screen?.scrollTarget;
       if (target === undefined && screen?.cutShort === true) throw partialRead('what in it scrolls');
       if (target === undefined) throw notActionable('the window has nothing that scrolls');
-      await this.scroll(this.binding({ id: target, revision: '' }), action.direction, action.momentum, operation);
+      await this.scroll(this.binding({ id: target, revision: '' }), action, operation);
       return this.settle(operation);
     }
     const binding = this.binding(ref);
@@ -1246,7 +1248,7 @@ export class DesktopSurface {
         await this.select(binding, optionLabel(action.value), operation);
         break;
       case 'swipe':
-        await this.scroll(binding, action.direction, action.momentum, operation);
+        await this.scroll(binding, action, operation);
         break;
       case 'longPress':
       case 'setInputFiles':
@@ -1388,9 +1390,20 @@ export class DesktopSurface {
     }
   }
 
-  private async scroll(binding: NodeBinding, direction: string, momentum: string | undefined, operation: OperationContext): Promise<void> {
-    const amount = momentum === 'fast' ? 10 : momentum === 'slow' ? 2 : 5;
-    await this.refCommand('scroll', binding, operation, ['--direction', direction, '--amount', String(amount)]);
+  /**
+   * Scrolls by the app's scroll units, repeated `--amount` times by
+   * agent-desktop. How far one unit moves depends on the app. A `distance`
+   * of 1 is 10 units, and the default 0.5 is 5. `SCROLL_STEP.distance` (for
+   * `scrollUntilVisible` and the agent's page) is 2 units so a step won't
+   * skip rows in a short pane. Because the deprecated `momentum: 'fast'`
+   * maps to the same distance, `momentum` is checked directly to keep it at
+   * 10 units.
+   * `durationMs` doesn't change anything.
+   */
+  private async scroll(binding: NodeBinding, action: SwipeAction, operation: OperationContext): Promise<void> {
+    const step = action.distance === SCROLL_STEP.distance;
+    const amount = step && action.momentum === 'fast' ? 10 : step ? 2 : Math.max(1, Math.round(action.distance * 10));
+    await this.refCommand('scroll', binding, operation, ['--direction', action.direction, '--amount', String(amount)]);
   }
 
   /** Physical pointer input at a point in the window: only with `headed`, and only then declared. */

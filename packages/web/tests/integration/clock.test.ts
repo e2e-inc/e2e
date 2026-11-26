@@ -187,7 +187,7 @@ describe('browser.clock', () => {
       await open(engine);
       const op = operation(5_000);
       const snapshot = await engine.observe!(op);
-      await engine.perform!(snapshot.root.ref, { kind: 'swipe', direction: 'down' }, op);
+      await engine.perform!(snapshot.root.ref, { kind: 'swipe', direction: 'down', distance: 0.5, durationMs: 400 }, op);
       expect(await surfaceOf(engine)!.page().evaluate(() => window.scrollY)).toBeGreaterThan(0);
       const [footer] = await engine.locate!({ kind: 'selector', selector: '#footer' }, op);
       // The engine's own reads queue nothing in the page's clock: a pending timer would change its requestIdleCallback.

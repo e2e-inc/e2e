@@ -1,7 +1,7 @@
 /** Shared helpers for the agent-device engine: error constructors, filenames, PNG headers, gestures, the screen location and size. */
 
 import type { AppDeployResult, CaptureScreenshotResult, PressOptions } from 'agent-device';
-import { EngineError, withTimeout, type Momentum, type ScrollDirection, type ViewportSize } from '@e2e-dev/core/engine';
+import { EngineError, SCROLL_STEP, withTimeout, type ScrollDirection, type ViewportSize } from '@e2e-dev/core/engine';
 import type { AgentDeviceClient } from './options.ts';
 
 export interface Point {
@@ -14,6 +14,20 @@ export interface Rect {
   readonly y: number;
   readonly width: number;
   readonly height: number;
+}
+
+/** Whether a point lies inside a rect, edges included. */
+export function contains(rect: Rect, point: Point): boolean {
+  return point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height;
+}
+
+/**
+ * A scroll container's box, and whether agent-device reports content hidden
+ * above or below it.
+ */
+export interface ScrollBox extends Rect {
+  readonly hiddenAbove: boolean;
+  readonly hiddenBelow: boolean;
 }
 
 export function cancelled(text: string): EngineError {
@@ -62,19 +76,20 @@ export class InputBudget {
    * nothing: `OPERATION_TIMEOUT`, or `ACTION_MAY_HAVE_COMMITTED` once an
    * earlier input of this operation went out. A gesture that holds (`holdMs`)
    * at least as long as the budget left could only be cut off mid-gesture, so
-   * it is refused unsent. An input that does not answer in time may have
-   * landed, so it is `ACTION_MAY_HAVE_COMMITTED` and the runner never repeats it.
+   * it is refused unsent: `NOT_ACTIONABLE`, or `ACTION_MAY_HAVE_COMMITTED`
+   * once an earlier input went out. An input that does not answer in time
+   * may have landed, so it is `ACTION_MAY_HAVE_COMMITTED` and the runner
+   * never repeats it.
    */
   send<T>(dispatch: (signal: AbortSignal) => Promise<T>, holdMs = 0): Promise<T> {
     const remaining = this.remainingMs();
     if (remaining <= 0) return Promise.reject(this.spent());
     if (holdMs >= remaining) {
+      const left = `holds for ${holdMs} ms, but only ${Math.floor(remaining)} ms of its timeout are left`;
       return Promise.reject(
-        new EngineError(
-          'NOT_ACTIONABLE',
-          `${this.label} holds for ${holdMs} ms, but only ${Math.floor(remaining)} ms of its timeout are left; raise the timeout or shorten the hold`,
-          { retryable: false },
-        ),
+        this.sent
+          ? new EngineError('ACTION_MAY_HAVE_COMMITTED', `${this.label} sent partial input, and the next part ${left}. Raise the timeout.`, { retryable: false })
+          : new EngineError('NOT_ACTIONABLE', `${this.label} ${left}; raise the timeout or shorten the hold`, { retryable: false }),
       );
     }
     const answerMs = Math.max(remaining, MIN_ANSWER_MS);
@@ -102,6 +117,11 @@ export class InputBudget {
         ? this.maybeCommitted()
         : new EngineError('OPERATION_TIMEOUT', `${this.label} timed out before the device answered`, { retryable: false }),
     );
+  }
+
+  /** Whether an input of this operation went out. */
+  get hasSent(): boolean {
+    return this.sent;
   }
 
   /** Milliseconds left of the budget; zero or less once it is spent. */
@@ -152,35 +172,71 @@ export function readPngSize(data: Uint8Array): { width: number; height: number }
   return { width: view.getUint32(16), height: view.getUint32(20) };
 }
 
+/** One finger drag in logical pixels, as agent-device's `pan` takes it: where it starts and how far it travels. */
+export interface Drag {
+  readonly x: number;
+  readonly y: number;
+  readonly dx: number;
+  readonly dy: number;
+}
+
+/** Where a drag starts, as a share of the box in from the edge the content comes from. */
+const DRAG_START = 0.25;
+
 /**
- * The finger gesture that scrolls one rect's content in `direction`. Scrolling
- * down reveals what is below, so the finger travels up; the travel is a share
- * of the rect's extent scaled by momentum, and never leaves the rect. The
- * root scroll sends no share (agent-device's default, see `perform`); these
- * are for a gesture inside one control, and deterministic tests step through
- * a list with `slow`, a quarter of the box, shorter than any row, so every
- * row lands fully on screen at some stop. At three quarters the mobile
- * benchmark's scenario list dragged rows past.
+ * Returns the drags that scroll `box`'s content in `direction` by `distance`
+ * of the box, the way Appium's WebDriverAgent scrolls. Scrolling down shows
+ * what is below, so the finger travels up. Each drag starts a quarter in from
+ * the edge the content comes from, centred on the other axis, so it starts on
+ * the content instead of a footer or tab bar along that edge. One drag
+ * moves `SCROLL_STEP.distance` of the box at most, so it ends a tenth from
+ * the far edge. A longer distance is split into equal drags from the same
+ * start.
  */
-export function swipeWithin(
-  rect: Rect,
-  direction: ScrollDirection,
-  momentum: Momentum | undefined,
-): { from: Point; to: Point } {
-  const ratio = momentum === 'fast' ? 0.8 : momentum === 'slow' ? 0.25 : 0.5;
-  const centre = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-  const dx = (rect.width * ratio) / 2;
-  const dy = (rect.height * ratio) / 2;
-  switch (direction) {
-    case 'down':
-      return { from: { x: centre.x, y: centre.y + dy }, to: { x: centre.x, y: centre.y - dy } };
-    case 'up':
-      return { from: { x: centre.x, y: centre.y - dy }, to: { x: centre.x, y: centre.y + dy } };
-    case 'right':
-      return { from: { x: centre.x + dx, y: centre.y }, to: { x: centre.x - dx, y: centre.y } };
-    case 'left':
-      return { from: { x: centre.x - dx, y: centre.y }, to: { x: centre.x + dx, y: centre.y } };
+export function swipeDrags(box: Rect, direction: ScrollDirection, distance: number): Drag[] {
+  const vertical = direction === 'up' || direction === 'down';
+  const extent = vertical ? box.height : box.width;
+  const sign = direction === 'down' || direction === 'right' ? -1 : 1;
+  const start = (vertical ? box.y : box.x) + extent * (sign < 0 ? 1 - DRAG_START : DRAG_START);
+  const count = Math.ceil(distance / SCROLL_STEP.distance);
+  const travel = (sign * extent * distance) / count;
+  const drag = vertical
+    ? { x: box.x + box.width / 2, y: start, dx: 0, dy: travel }
+    : { x: start, y: box.y + box.height / 2, dx: travel, dy: 0 };
+  return Array.from({ length: count }, () => drag);
+}
+
+/**
+ * Returns the drags that move `rect` to the middle of `container`, or none
+ * when the node stays where it is:
+ *
+ * - Without `center`, a node inside its container, edges included, stays. A
+ *   pull-to-refresh list takes a drag on its first row as a refresh. A row
+ *   flush with an edge that has content hidden past it counts as cut off,
+ *   since agent-device clips a row's box to the screen.
+ * - With `center`, a node also moves when its centre is more than a fifth
+ *   of the container from the middle, as with Maestro's `centerElement`. A
+ *   node that far out can be under a sticky header or footer. It moves only
+ *   toward a side with content hidden past it, so a list at its top isn't
+ *   pulled down.
+ *
+ * The drags are vertical only. A node in a vertical list often sits off the
+ * list's horizontal middle, and a sideways drag on a row can trigger the
+ * row's swipe action.
+ */
+export function centringDrags(rect: Rect, container: ScrollBox, center: boolean): Drag[] {
+  const top = container.y;
+  const bottom = container.y + container.height;
+  const cutAbove = rect.y < top || (container.hiddenAbove && rect.y <= top);
+  const cutBelow = rect.y + rect.height > bottom || (container.hiddenBelow && rect.y + rect.height >= bottom);
+  const offset = rect.y + rect.height / 2 - (top + container.height / 2);
+  const direction = offset > 0 ? 'down' : 'up';
+  if (!cutAbove && !cutBelow) {
+    const far = center && Math.abs(offset) > container.height / 5;
+    const hidden = direction === 'down' ? container.hiddenBelow : container.hiddenAbove;
+    if (!far || !hidden) return [];
   }
+  return swipeDrags(container, direction, Math.abs(offset) / container.height);
 }
 
 /**

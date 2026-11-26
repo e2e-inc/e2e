@@ -12,8 +12,21 @@
 
 /** A swipe or scroll direction. */
 export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
-/** Fling strength of a swipe. */
+/**
+ * @deprecated In an engine action, read `distance` and `durationMs`. In a
+ * test's options, use `distance` and `speed`. It will be removed no earlier
+ * than April 1, 2027.
+ */
 export type Momentum = 'none' | 'slow' | 'fast';
+/**
+ * One step of a scroll that reads the screen between steps
+ * (`scrollUntilVisible` and the agent's `scroll_to`): 0.65 of the scroll
+ * container, the longest single drag. On a device, the drag takes 800 ms,
+ * since after a faster one the list keeps moving further once the finger
+ * lifts. How much of the previous view stays on screen depends on how far
+ * the list moves after that.
+ */
+export const SCROLL_STEP = { distance: 0.65, durationMs: 800 } as const;
 /** One option of a select: its label (a bare string too), its `value` attribute, or its zero-based index. */
 export type SelectOption =
   | string
@@ -336,8 +349,24 @@ export type LocatorAction =
         | 'clear'
         | 'focus'
         | 'blur'
-        | 'hover'
-        | 'scrollIntoView';
+        | 'hover';
+    }
+  | {
+      readonly kind: 'scrollIntoView';
+      /**
+       * Set by `scrollUntilVisible` and the agent's `scroll_to` after a
+       * scroll step, for a node already read as visible.
+       *
+       * On a device, if a node is more than a fifth of its container from
+       * the center and content is hidden on that side, it's dragged toward
+       * the middle. Edge nodes can sit under a sticky header or footer. One
+       * drag runs without checking coverage afterward, so a sticky view can
+       * still cover it.
+       *
+       * On the web, the node is brought in with the browser's minimal
+       * scroll, without waiting for it to stop moving.
+       */
+      readonly center?: boolean;
     }
   | { readonly kind: 'longPress'; readonly durationMs?: number }
   | { readonly kind: 'fill'; readonly value: string; readonly sensitive: boolean }
@@ -350,11 +379,33 @@ export type LocatorAction =
       readonly files: readonly { readonly name: string; readonly mimeType: string; readonly buffer: Uint8Array }[];
     }
   | { readonly kind: 'dragTo'; readonly target: NodeRef }
-  | {
-      readonly kind: 'swipe';
-      readonly direction: ScrollDirection;
-      readonly momentum?: Momentum;
-    };
+  | SwipeAction;
+
+/**
+ * A scroll gesture in a direction. `direction` is the way the content
+ * scrolls (`down` shows what is below).
+ */
+export interface SwipeAction {
+  readonly kind: 'swipe';
+  readonly direction: ScrollDirection;
+  /**
+   * How far the content scrolls, as a share of the swiped box along the
+   * swipe (above 0 and at most 1). The box is the node, or the scroll
+   * container under the viewport's center for the root. On a touch surface,
+   * a distance longer than one drag is split into several drags.
+   */
+  readonly distance: number;
+  /** How long each drag takes. It's ignored on a platform that scrolls without a drag (a wheel). */
+  readonly durationMs: number;
+  /**
+   * @deprecated Read `distance` and `durationMs`. Core still includes it for
+   * engines that read it: the test's `momentum`, or `slow` on core's scroll
+   * steps. When an older client sends only `momentum`, the protocol fills in
+   * the matching `distance` and `durationMs`. It will be removed no earlier
+   * than April 1, 2027.
+   */
+  readonly momentum?: Momentum;
+}
 
 /** Every action kind; what an engine declares in `actions`. */
 export type LocatorActionKind = LocatorAction['kind'];
@@ -399,11 +450,7 @@ export type PointerAction =
   | { readonly kind: 'tap' | 'doubleTap' | 'secondaryTap' | 'hover' }
   | { readonly kind: 'longPress'; readonly durationMs?: number }
   | { readonly kind: 'dragTo'; readonly target: ViewportPoint }
-  | {
-      readonly kind: 'swipe';
-      readonly direction: ScrollDirection;
-      readonly momentum?: Momentum;
-    }
+  | SwipeAction
   | {
       readonly kind: 'swipeTo';
       readonly target: ViewportPoint;
