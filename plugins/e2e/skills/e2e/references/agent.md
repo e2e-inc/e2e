@@ -1,5 +1,9 @@
 # Agent steps
 
+A `docs/<path>.mdx` pointer names an e2e docs page: read
+`node_modules/e2e/docs/<path>.mdx` once e2e is installed, else
+https://e2e.com/docs/<path>.
+
 `agent` is a fixture like `screen` and the main way a test drives the app.
 Each call is one bounded invocation: fresh redacted observation, deadline,
 model-call budget, no shared transcript. No agent step, no model calls.

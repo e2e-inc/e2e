@@ -1,5 +1,9 @@
 # Exploring without a test
 
+A `docs/<path>.mdx` pointer names an e2e docs page: read
+`node_modules/e2e/docs/<path>.mdx` once e2e is installed, else
+https://e2e.com/docs/<path>.
+
 `e2e explore` runs the agent against the app with a goal instead of a test
 file: see what it can do with an app before tests exist, hunt for regressions
 on a branch, or find what is worth turning into a test. It needs a config with

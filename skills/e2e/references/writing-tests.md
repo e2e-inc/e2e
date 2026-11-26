@@ -1,5 +1,9 @@
 # Writing tests
 
+A `docs/<path>.mdx` pointer names an e2e docs page: read
+`node_modules/e2e/docs/<path>.mdx` once e2e is installed, else
+https://e2e.com/docs/<path>.
+
 ## Contents
 
 - A complete file
