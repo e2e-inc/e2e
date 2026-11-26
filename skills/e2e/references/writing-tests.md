@@ -327,8 +327,9 @@ sort copies before comparing the complete observed and expected lists.
   `isVisible()` reads `false`, and `isHidden()` reads `true`.
 - **Narrow** with `filter({ hasText })` (a case-insensitive substring),
   `filter({ has: locator })`, `filter({ hasNot })`, `filter({ hasNotText })`,
-  `{ visible: true }`, scoping under another locator, or `nth(i)` with a
-  comment. `a.or(b)` is still strict.
+  `{ visible: true }` on the query itself
+  (`getByText('Save', { visible: true })`), scoping under another locator,
+  or `nth(i)` with a comment. `a.or(b)` is still strict.
 - **Actions** wait for one actionable node (`actionTimeout`, 30 s): `tap()`,
   `fill()`, `press()`, `check()`, `selectOption()`, `hover()`, `dragTo()`,
   `setInputFiles()`, and more. `fill` sends no key events; when the app
@@ -348,8 +349,10 @@ docs/reference/screen.mdx.
 `expect(locator)` polls up to `assertionTimeout` (5 s) or `{ timeout }`;
 `.not` passes once the negation has held for 1 s. `expect(value)` is
 synchronous. `toHaveText` compares the whole normalized text,
-`toContainText` a substring or RegExp, and the list forms
-(`toHaveText(['Alpha', 'Beta'])`) check every match in order.
+`toContainText` a substring or RegExp. List forms:
+`toHaveText(['Alpha', 'Beta'])` needs exactly those matches in order;
+`toContainText(['Alpha', 'Beta'])` needs each entry in a distinct match, in
+order, extra matches allowed.
 
 ```ts
 await expect(screen.getByRole('dialog')).not.toBeVisible({ timeout: 10_000 });
@@ -501,7 +504,8 @@ background: `waitForPopup(() => trigger)` makes it active and returns it.
   handler calls exactly one of `fulfill`, `continue`, `fallback`, `abort`).
   `waitForResponse` and `waitForRequest` take a pattern or a predicate:
   start them before the triggering action, usually in `Promise.all`.
-  `setNetwork('offline')` cuts the network for the rest of the test.
+  `setNetwork('offline')` cuts the network until `setNetwork('online')`
+  restores it or the test ends.
 - **Page:** `evaluate(fn, arg?)` runs in the page (JSON in and out, no
   closures); `addInitScript` and `clock.install()` go before `app.open`;
   `frameLocator(css)` scopes a `Screen` to an iframe.

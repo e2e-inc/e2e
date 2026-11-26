@@ -86,8 +86,9 @@ configured secrets are redacted (topic `writing-tests`).
   they mean for `e2e run`. The exploration is one attempt, so a retry mode
   records nothing: pass `--trace on`.
 
-The replay cache is off and retries are zero for the exploration; per-step
-budgets come from `agents.<name>.maxSteps` and `maxModelCalls`.
+The replay cache is off and retries are zero for the exploration. Per-step
+action and model-call budgets default to 40 each; `agents.<name>.maxSteps`
+and `maxModelCalls` override them.
 Full reference: docs/explore.mdx, docs/reference/cli.mdx.
 
 ## Reading the result

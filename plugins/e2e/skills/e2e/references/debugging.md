@@ -72,7 +72,7 @@ Full reference: docs/debugging.mdx.
 | `MODEL_UNAVAILABLE` | The built-in agent's entry has no model; the run stops at the first `agent` fixture (a model-less custom executor fails only `waitFor` and `extract`) | Configure one (topic `agent`) |
 | `MODEL_PROVIDER_FAILED` | Network, 5xx, rate limit, or no key configured (`AI_GATEWAY_API_KEY is not set`); only steps that call the model fail | Set the variable the message names, or say no key is available; never rewrite tests to get around it |
 | `STEP_TIMEOUT`, `STEP_BUDGET_EXHAUSTED` | Goal too big or ambiguous | Split the goal, use on-screen wording; raise `maxSteps` or `maxModelCalls` |
-| `REPLAY_STALE` | `--strict-cache` and a committed recording no longer replays | Rerun read-write, commit the changed entry |
+| `REPLAY_STALE` | `--strict-cache` or `cache.strict`, and a committed recording no longer replays | Rerun read-write with the knob the message names off, commit the changed entry |
 | `APP_UNREACHABLE`, `APP_ALREADY_RUNNING` | The app failed readiness or its command exited; something already serves `url` (often an `e2e mcp` session's app) | Check `app.url`, the port, `app.command.log`; `close_session` first |
 | `SESSION_UNAVAILABLE`, `SESSION_CONTRACT` | `session: 'x'` with no setup saving `x`; a setup that skipped a declared name | Add or fix the `test.setup` |
 | `POLICY_DENIED` | A non-http(s) URL, a password into a non-password field, or reading a secure field's value | Assert the outcome, not the value |

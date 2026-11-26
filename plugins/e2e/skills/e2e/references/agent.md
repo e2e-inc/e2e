@@ -198,8 +198,11 @@ of sleeping.
 
 A redacted snapshot of the screen (roles, names, text, states), prior-step
 summaries, and your context; never raw HTML, cookies, headers, environment
-values, or a `Secret`'s value. Pixels arrive only through `vision` or the
-act loop's screenshot and point tools, with secure fields masked. A frame
+values, or a `Secret`'s value. Pixels arrive through `vision` on a judgment,
+and in `act` through its screenshot and point tools, an opening screenshot
+when the screen lists no interactive node, and a screenshot when the browser
+engine's tree capture times out (a judgment gets that one only with `vision`
+on), with secure fields masked. A frame
 from another site (a hosted card field) shows as an empty `iframe` node:
 script steps there with `browser.frameLocator`, and judge it with
 `vision`. Nothing the model returns runs as code or selectors.
@@ -241,7 +244,7 @@ takes over from the current screen when the app no longer matches.
   once the test passes.
 - With committed recordings, `--strict-cache` in CI fails a recording that
   no longer replays with `REPLAY_STALE`; re-record with a `read-write` run
-  without the flag, then commit.
+  without the flag and with `cache.strict` off, then commit.
 
 Full reference: docs/cache.mdx.
 
