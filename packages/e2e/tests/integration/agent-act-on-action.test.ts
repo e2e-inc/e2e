@@ -5,6 +5,8 @@
  * verification inside it never confirms the step it runs in.
  */
 
+import { EngineError, type SemanticNode } from 'e2e/engine';
+import { createFakeEngine } from '../helpers/fake-engine.ts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
 import { nodeIdFor } from '../helpers/fake-loop-model.ts';
@@ -23,6 +25,13 @@ test(${JSON.stringify(TITLE)}, async ({ app, agent, screen }) => {
     onAction: async (event) => {
       const { index, action, source, summary } = event;
       for (const field of ['point', 'from', 'to']) expect(event).not.toHaveProperty(field);
+      expect(event.target).toEqual({
+        source: 'observation', revision: expect.any(String),
+        bounds: await screen.getByRole('button', { name: 'Increment' }).boundingBox(),
+        viewport: { width: 1280, height: 720 },
+      });
+      Object.assign(event.target.bounds, { x: -999 });
+      Object.assign(event.target.viewport, { width: -999 });
       await app.screenshot(\`\${index} \${source} \${action}: \${summary}\`);
     },
   });
@@ -189,6 +198,10 @@ describe('agent.act onAction', () => {
       }
       expect(resultByTitle(replayed, TITLE).status).toBe('passed');
       expect(second.calls).toBe(0);
+      for (const action of readEntries(project)[0]!.entry.payload.actions) {
+        expect(action).not.toHaveProperty('viewport');
+        if (action.name === 'tap') expect(action.target).not.toHaveProperty('bounds');
+      }
       expect(screenshotLabels(replayed, TITLE)).toEqual([
         expect.stringMatching(/^1 replay tap: /),
         expect.stringMatching(/^2 replay tap: /),
@@ -218,6 +231,8 @@ test('captures point geometry', async ({ app, agent, screen }) => {
   const events = [];
   await agent.act('hover, tap the red pin, and drag it to the middle', {
     onAction: (event) => {
+      expect(event.viewport).toEqual({ width: 1280, height: 720 });
+      Object.assign(event.viewport, { width: -999 });
       events.push(structuredClone(event));
       for (const point of [event.point, event.from, event.to]) {
         if (point) Object.assign(point, { x: 50, y: 50 });
@@ -257,6 +272,80 @@ test('captures point geometry', async ({ app, agent, screen }) => {
       project.cleanup();
     }
   }, 240_000);
+
+  it('uses relocated pre-dispatch bounds', async () => {
+    const button: SemanticNode = {
+      ref: { id: 'button', revision: '' }, role: 'button', name: 'Continue',
+      rect: { x: 10, y: 10, width: 80, height: 30 },
+    };
+    let stale = true;
+    const tree = { ref: { id: 'root', revision: '' }, role: 'document', children: [button] };
+    const fake = createFakeEngine({
+      tree,
+      perform: () => {
+        if (stale) {
+          stale = false;
+          tree.children = [{ ...button, rect: { x: 10, y: 20, width: 80, height: 30 } }];
+          throw new EngineError('NODE_STALE', 'button moved', { retryable: true });
+        }
+        tree.children = [{ ref: button.ref, role: 'button', name: 'Continue' }];
+      },
+    });
+    const executor: StepExecutor = {
+      name: 'relocated-tap',
+      async runStep(context) {
+        await context.observe();
+        await context.actions.tap({ id: 'button' });
+        return { status: 'passed', summary: 'tapped Continue' };
+      },
+    };
+    const { project, outcome } = await runProject({ 'tests/target.e2e.ts': `
+import { test, expect } from 'e2e';
+test('captures the resolved observation', async ({ agent }) => {
+  const events = [];
+  await agent.act('tap Continue', { onAction: event => events.push(event) });
+  expect(events[0].target).toEqual({
+    source: 'observation', revision: expect.any(String),
+    bounds: { x: 10, y: 20, width: 80, height: 30 },
+    viewport: { width: 1280, height: 720 },
+  });
+  expect(events).toHaveLength(1);
+});` }, { config: {
+      targets: [{ name: 'fake', platform: 'fake', engine: fake.engine }],
+      agents: { default: { executor } },
+    } });
+    try {
+      const result = resultByTitle(outcome, 'captures the resolved observation');
+      expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('passed');
+    } finally {
+      project.cleanup();
+    }
+  });
+
+  it('omits bounds and pixels when the resolving observation reports neither', async () => {
+    const fake = createFakeEngine({
+      tree: { ref: { id: 'button', revision: '' }, role: 'button', name: 'Continue' },
+    });
+    const { project, outcome } = await runProject({ 'tests/no-bounds.e2e.ts': `
+import { test, expect } from 'e2e';
+test('reports no invented geometry', async ({ agent }) => {
+  await agent.act('tap Continue', { onAction: event => {
+    expect(event.target).toEqual({
+      source: 'observation', revision: expect.any(String),
+      viewport: { width: 1280, height: 720 },
+    });
+  } });
+});` }, { config: {
+      targets: [{ name: 'fake', platform: 'fake', engine: fake.engine }],
+      agents: { default: { executor: continueExecutor } },
+    } });
+    try {
+      const result = resultByTitle(outcome, 'reports no invented geometry');
+      expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('passed');
+    } finally {
+      project.cleanup();
+    }
+  });
 
   it('never confirms the step it runs in with a check of its own', async () => {
     const { project, recorded, replayed, second } = await recordThenReplay(app, IN_HOOK_CHECK_SUITE);

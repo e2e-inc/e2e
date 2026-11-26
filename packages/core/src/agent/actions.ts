@@ -28,7 +28,8 @@ import type { ActionDetails, ActionEvent, ScrollDirection } from '../types.ts';
 
 /** One committed grammar action, addressed by the node it actually ran against. */
 export type RecordableAction =
-  | ({ readonly name: NodeActionName; readonly node: RedactedNode; readonly modifiers?: readonly KeyModifier[] } & Placement)
+  | ({ readonly name: Exclude<NodeActionName, 'tap'>; readonly node: RedactedNode; readonly modifiers?: readonly KeyModifier[] } & Placement)
+  | ({ readonly name: 'tap'; readonly node: RedactedNode; readonly modifiers?: readonly KeyModifier[]; readonly target?: ActionDetails['tap']['target'] } & Placement)
   | ({ readonly name: 'type'; readonly node: RedactedNode; readonly value: string } & Placement)
   | ({ readonly name: 'typeSecret'; readonly node: RedactedNode; readonly secret: string } & Placement)
   | ({ readonly name: 'press'; readonly node: RedactedNode; readonly key: string } & Placement)
@@ -232,9 +233,10 @@ const DETAILED_EVENTS: {
     fields: ActionEventFields,
   ) => Extract<ActionEvent, { readonly action: A }>;
 } = {
-  tapAt: (action, fields) => ({ ...fields, action: action.name, point: { ...action.point } }),
-  hoverAt: (action, fields) => ({ ...fields, action: action.name, point: { ...action.point } }),
-  dragAt: (action, fields) => ({ ...fields, action: action.name, from: { ...action.from.point }, to: { ...action.to.point } }),
+  tap: (action, fields) => ({ ...fields, action: 'tap', ...(action.target === undefined ? {} : { target: structuredClone(action.target) }) }),
+  tapAt: (action, fields) => ({ ...fields, action: action.name, point: { ...action.point }, viewport: { ...action.viewport } }),
+  hoverAt: (action, fields) => ({ ...fields, action: action.name, point: { ...action.point }, viewport: { ...action.viewport } }),
+  dragAt: (action, fields) => ({ ...fields, action: action.name, from: { ...action.from.point }, to: { ...action.to.point }, viewport: { ...action.viewport } }),
 };
 
 /** Whether `onAction` reports `ActionDetails` for the action. */

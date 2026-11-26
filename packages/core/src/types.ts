@@ -254,12 +254,23 @@ export type ActionName = Exclude<RecordedAction['name'], 'tool'>;
  * rounded and clamped to the viewport.
  */
 export interface ActionDetails {
+  /** Reported geometry of the observation that resolved a node tap, not a physical click receipt. */
+  readonly tap: {
+    readonly target?: {
+      readonly source: 'observation';
+      readonly revision: string;
+      readonly bounds?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
+      readonly viewport?: { readonly width: number; readonly height: number };
+      /** Original cleared observation pixels, before model resizing; no image bytes. */
+      readonly pixels?: { readonly width: number; readonly height: number; readonly scale: number };
+    };
+  };
   /** The dispatched point. */
-  readonly tapAt: { readonly point: Point };
+  readonly tapAt: { readonly point: Point; readonly viewport: { readonly width: number; readonly height: number } };
   /** The dispatched point. Mobile engines have no `hoverAt`. */
-  readonly hoverAt: { readonly point: Point };
+  readonly hoverAt: { readonly point: Point; readonly viewport: { readonly width: number; readonly height: number } };
   /** The dispatched start and end. Mobile engines have no `dragAt`. */
-  readonly dragAt: { readonly from: Point; readonly to: Point };
+  readonly dragAt: { readonly from: Point; readonly to: Point; readonly viewport: { readonly width: number; readonly height: number } };
 }
 
 /** What every `onAction` event carries. */

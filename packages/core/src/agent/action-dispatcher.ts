@@ -941,8 +941,16 @@ export class ActionDispatcher {
     let { node, observation } = resolved;
     for (let relocations = 0; ; relocations += 1) {
       const placement = this.placementOf({ node, observation });
+      const target = {
+        source: 'observation' as const,
+        revision: observation.revision,
+        ...(node.rect === undefined ? {} : { bounds: { x: node.rect.x, y: node.rect.y, width: node.rect.width, height: node.rect.height } }),
+        viewport: { width: observation.viewport.width, height: observation.viewport.height },
+        ...(observation.pixels === undefined ? {} : { pixels: { width: observation.pixels.width, height: observation.pixels.height, scale: observation.pixels.scale } }),
+      };
       try {
-        return { ...(await perform(node, observation)), ...placement };
+        const action = await perform(node, observation);
+        return { ...action, ...placement, ...(action.name === 'tap' ? { target } : {}) };
       } catch (cause) {
         if (asEngineError(cause)?.code !== 'NODE_STALE') throw cause;
         const relocated = relocations < MAX_STALE_RELOCATIONS ? await this.feed.relocate(node) : undefined;

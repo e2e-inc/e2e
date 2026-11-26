@@ -945,14 +945,24 @@ await agent.act('tap and drag the pin', { onAction: event => {
     event.from.x = 1;
   }
   if (event.action === 'tap') {
-    // @ts-expect-error node-ID actions carry no coordinates
+    if (event.target) {
+      event.target.source satisfies 'observation';
+      event.target.revision satisfies string;
+      event.target.bounds?.width satisfies number | undefined;
+      event.target.pixels?.scale satisfies number | undefined;
+      // @ts-expect-error metadata never includes screenshot bytes
+      event.target.pixels?.data;
+      // @ts-expect-error target bounds are read-only
+      if (event.target.bounds) event.target.bounds.x = 1;
+    }
+    // @ts-expect-error reported bounds are not dispatched coordinates
     event.point;
   }
   if (event.action.startsWith('tool:')) event.summary satisfies string;
   // @ts-expect-error action names are the committed actions'
   if (event.action === 'tap_at') return;
 } });
-({ point: { x: 1, y: 2 } }) satisfies ActionDetails['tapAt'];
+({ point: { x: 1, y: 2 }, viewport: { width: 100, height: 100 } }) satisfies ActionDetails['tapAt'];
 'tapAt' satisfies ActionName;
 'tool:seed' satisfies ActionEvent['action'];
 // @ts-expect-error the observer is a function

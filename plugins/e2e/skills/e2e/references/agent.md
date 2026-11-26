@@ -265,7 +265,7 @@ and a failed action gets a capture but no `onAction`.
 Narrow `onAction`'s event on `action` for coordinates, replay included:
 `point` for `tapAt`/`hoverAt`, `from`/`to` for `dragAt`. They are in the
 same space as `screen.tapAt` and `boundingBox()`, rounded and clamped to the
-viewport. Mobile engines have no `hoverAt` or `dragAt`.
+viewport. Point events include their recorded `viewport`. Node `tap` events optionally include `target` observation metadata (`source`, `revision`, optional `bounds`, optional `viewport`, and optional `pixels` with original cleared pixel dimensions and scale). Bounds are reported geometry, not physical click coordinates; native bounds can be window-local. Hook screenshots need not match that revision. Replay resolves fresh metadata; no image bytes or node content are included. Mobile engines have no `hoverAt` or `dragAt`.
 
 `vision` on a judgment picks the evidence: `false` (default) the tree;
 `true` the tree plus a masked screenshot; `'only'` the screenshot alone, for
