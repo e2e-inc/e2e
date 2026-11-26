@@ -437,7 +437,7 @@ launch:
 | Throws | When |
 | --- | --- |
 | `INVALID_CONFIG` | In `app.permissions`: a permission name outside `DevicePermission` (naming the nearest one when it is a likely typo), or a state other than `grant`, `deny`, or `reset`. In `app.locale`: a tag with an extension (`-u-ca-japanese`) or a variant (`-valencia`), `AppleLanguages` or `AppleLocale` in the target's `launchArguments` on iOS, an Android `bundleId` that is not a package name, a target whose Android devices a provider leases, or one whose iOS devices come from a provider with `launchArguments: false`. Fails before any device command. |
-| `INVALID_ARGUMENT` | The same, in `device.openApp`. |
+| `INVALID_ARGUMENT` | The same, in `device.openApp`, except that a locale the provider's device cannot carry is `UNSUPPORTED_CAPABILITY` there. |
 
 #### Boot and prepare
 
@@ -914,7 +914,7 @@ await device.openApp('com.example.app', { relaunch: true, locale: 'fr-FR' });
 | --- | --- |
 | `POLICY_DENIED` | A `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, or `filesystem:` link. |
 | `INVALID_ARGUMENT` | Any other link, with a message pointing at `openLink`; an invalid permission name or state; `launchArguments` outside the declared shape, or one Android cannot carry; or a `locale` that is no language tag, or that sets the same Apple arguments as `launchArguments` (see [Launch arguments and permissions](#launch-arguments-and-permissions)). |
-| `UNSUPPORTED_CAPABILITY` | A `locale` on a provider's Android device, or on a device older than Android 13. |
+| `UNSUPPORTED_CAPABILITY` | A `locale` the device cannot carry: on a provider's Android device, on an Android device behind a remote daemon or older than Android 13, or on the iOS device of a provider with `launchArguments: false`. |
 | `ENGINE_FAILURE` | `adb` failed to set the Android app's locale, for example for a package that is not installed. |
 
 #### `openLink`

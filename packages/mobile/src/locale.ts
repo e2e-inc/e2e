@@ -2,7 +2,9 @@
  * The language and region an app is launched in: `app.locale` and
  * `device.openApp({ locale })`. iOS reads it from the launch's process
  * arguments, as `NSUserDefaults` does for `AppleLanguages` and `AppleLocale`,
- * so it holds for that launch only, on any device agent-device launches.
+ * so it holds for that launch only, wherever the launch carries arguments:
+ * an XCTest-driven phone refuses them, and a provider that declares
+ * `launchArguments: false` drops them, so its iOS devices are refused.
  * Android has no such argument: the engine sets the app's own locale
  * (Android 13's per-app language) through this machine's `adb` before the
  * launch, so it works on an emulator or phone this machine reaches, and a

@@ -147,7 +147,9 @@ await device.openApp('com.example.app', { relaunch: true, locale: 'ar-EG' });
   locale fails with `UNSUPPORTED_CAPABILITY` when agent-device drives the
   device through a remote daemon (`AGENT_DEVICE_DAEMON_BASE_URL`). It also fails on TestMu AI and
   BrowserStack iOS devices, which drop launch arguments. Set `language` and
-  `locale` on `testmu()` or `browserstack()` instead.
+  `locale` on `testmu()` or `browserstack()` instead. An `@e2e-dev/testmu`
+  older than 0.0.8 or an `@e2e-dev/browserstack` older than 0.1.2 does not
+  refuse it, and its iOS devices run the app in their own language.
 - The warm-up before the run opens the app without the locale. Start each
   test with `app.open()`.
 - The tag takes a language, a script, and a region only, with no extension
