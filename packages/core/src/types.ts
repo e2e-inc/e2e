@@ -466,8 +466,7 @@ export type Point = ViewportPoint;
 /**
  * CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`),
  * `'0%'` through `'100%'`. In a locator action's `position`, a percentage is
- * of the part of the node's box inside the viewport and every frame around
- * it instead.
+ * of the node's box cut to the viewport instead.
  */
 export type ScreenCoordinate = number | `${number}%`;
 
@@ -482,15 +481,18 @@ export interface ClickOptions extends ActionOptions {
   /**
    * Where to tap in the node. A pixel coordinate is measured from the node's
    * top-left corner, inside its border on a document platform. A percentage
-   * is a share of the part of the node's box inside the viewport and every
-   * frame around the node, in whole pixels. On a document platform that box
-   * includes the border, so `{ x: '0%', y: '0%' }` is the border's outer
-   * corner while `{ x: 0, y: 0 }` is inside the border.
-   * `{ x: '50%', y: '50%' }` is the center of that part, and `'100%'` its
-   * last pixel. A scrolling or `overflow: hidden` ancestor does not cut the
-   * box: in a 200px wide scroll container, `'50%'` of a 600px wide button is
-   * 300px into it, on whatever the page shows past the container's edge. Use
-   * a pixel position, or scroll the container, there. Without `position`
+   * is a share of the node's box as `boundingBox()` reports it, cut to the
+   * viewport, in whole pixels. On a document platform that box includes the
+   * border, so `{ x: '0%', y: '0%' }` is the border's outer corner while
+   * `{ x: 0, y: 0 }` is inside the border. `{ x: '50%', y: '50%' }` is the
+   * center of the part in the viewport, and `'100%'` its last pixel.
+   * Nothing else cuts the box: not a scrolling or `overflow: hidden`
+   * ancestor, and not an outer frame that a nested frame's content overflows.
+   * In a 200px wide scroll container, `'50%'` of a 600px wide button is 300px
+   * into it, on whatever the page shows past the container's edge. Use a
+   * pixel position, or scroll first, there. A CSS transform on a frame is not
+   * counted either, so in a scaled frame neither kind of position lands where
+   * the frame draws the node. Without `position`
    * the platform picks a point of the node, usually its center, behind its
    * own actionability checks; with it the pointer is dispatched at that
    * point once the node is in view and has a box. The engine needs the
