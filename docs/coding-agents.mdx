@@ -168,8 +168,9 @@ test('filters the shop to items under $20', { session: 'customer' }, async ({ ap
 - **Give each user a separate session.** A [setup test](/authentication)
   signs in with `credentials.user(name)` and saves the primary user's
   session. For a flow like chat, [open a second session](/core#open-a-host-inside-a-test)
-  and check the result in the recipient's session. Read passwords from
-  configuration or the environment.
+  and check the result in the recipient's session. Never write a password or
+  other secret in a test: declare runner credentials in configuration and pass
+  a second host's secrets through `launch({ secrets })`.
 
 While it iterates, the agent runs only the test it works on, by the line
 its `test(` opens on. With `--action-timeout 5000`, a wrong locator fails

@@ -12,7 +12,7 @@ const projectTest = test.extend<{ project: { id: string } }>({
     try {
       const created = await request.post(`${app.baseUrl}/api/projects`, { json: { name: `Project ${randomUUID()}` }, headers });
       const parsed = z.object({ id: z.string() }).safeParse(await created.json().catch(() => undefined));
-      if (parsed.success) projectId = parsed.data.id;
+      if (parsed.success && created.status >= 200 && created.status < 300) projectId = parsed.data.id;
       expect(created.status).toBe(201);
       if (!parsed.success) throw parsed.error;
       await use(parsed.data);

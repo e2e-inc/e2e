@@ -173,17 +173,20 @@ Write every test so a failing title names what broke.
   checks to the run-unique message (and history after reopen if promised).
 - **Each test owns its starting state and passes alone.**
   - **Client vs. server state:** browsers isolate contexts per test (restoring
-    `session` state without leaking earlier tests' client changes); on devices,
-    reset with `app.clearState()` (plus `device.clearKeychain()` on iOS
-    simulator when sign-in uses keychain).
+    `session` state without leaking earlier tests' client changes); on Android
+    and iOS simulators, reset with `app.clearState()` (plus
+    `device.clearKeychain()` on iOS simulator when sign-in uses keychain; on a
+    physical iPhone, `app.clearState()` is simulator-only, so reinstall with
+    `device.installApp(path, { reinstall: true })`).
   - **Fixture-owned server data:** create shared server records with a
     run-unique `randomUUID()` name in a `test.extend` fixture, capture the
-    returned id before asserting the create status, and delete it in `finally`
-    (`try`/`finally` around creation and `use()` cleans up partial setup once
-    the fixture obtains a usable id, as well as failed tests). Even when a
-    test deletes its record, keep fixture teardown and accept `404` so an
-    earlier failure never leaks. Without a test API, seed and delete through
-    the UI in the fixture; never clean up at the end of a test body.
+    returned id from a 2xx response before asserting the exact status, and
+    delete it in `finally` (`try`/`finally` around creation and `use()` cleans
+    up partial setup once the fixture obtains a usable id, as well as failed
+    tests). Even when a test deletes its record, keep fixture teardown and
+    accept `404` so an earlier failure never leaks. Without a test API, seed
+    and delete through the UI in the fixture; never clean up at the end of a
+    test body.
   - **No coupling or unwaited branching:** never chain tests across shared
     state, never use `serial: true` to hide coupling, and never branch or skip
     on `isVisible()`/`count()` (they do not wait). Every test must pass when
@@ -726,7 +729,7 @@ credentials: {
 
 Begin each test as close to its screen as the app allows:
 
-- Declare `session` for auth, open routes directly (`app.open('/projects/42/settings')`; on devices use `app.linkBase` or `device.openLink(...)`), and seed data via the app's API in a `test.extend` fixture (`browser.cookies(url)` returns only the cookies the browser sends to that URL; check create and delete statuses).
+- Declare `session` for auth on web (devices have no named sessions; sign in per test), open routes directly (`app.open('/projects/42/settings')`; on devices use `app.linkBase` or `device.openLink(...)`), and seed data via the app's API in a `test.extend` fixture (`browser.cookies(url)` returns only the cookies the browser sends to that URL; check create and delete statuses).
 
 ```ts
 import { randomUUID } from 'node:crypto';
@@ -743,7 +746,7 @@ const projectTest = test.extend<{ project: { id: string } }>({
     try {
       const created = await request.post(`${app.baseUrl}/api/projects`, { json: { name: `Project ${randomUUID()}` }, headers });
       const parsed = z.object({ id: z.string() }).safeParse(await created.json().catch(() => undefined));
-      if (parsed.success) projectId = parsed.data.id;
+      if (parsed.success && created.status >= 200 && created.status < 300) projectId = parsed.data.id;
       expect(created.status).toBe(201);
       if (!parsed.success) throw parsed.error;
       await use(parsed.data);
@@ -872,7 +875,7 @@ URL-matching them. A predicate function is `INVALID_ARGUMENT`.
 ## Habits
 
 - Prefer user-visible names (roles, labels, text) over `browser.locator` or `getByTestId` (last resort).
-- APIs live in the same suite: `request.get('/api/users')` (relative to `app.baseUrl`; pass `browser.cookies(url)` in `headers` when the API needs the session) plus value matchers on `response.status` and `await response.json()`.
+- APIs live in the same suite: `request.get('/api/users')` (relative to `app.baseUrl`; `request` sends no browser cookies, so serialize `browser.cookies(url)` into `headers.cookie` as `name=value` pairs joined by `; `, as in the fixture above) plus value matchers on `response.status` and `await response.json()`.
 - No sleeps or polling loops: wait for state via locators, `expect` `{ timeout }`, or `agent.waitFor(...)`.
 - `await` every step, `expect.poll`, and `toPass`, else `STEP_NOT_AWAITED`.
 - Assert required literal fragments with `toContain`, and semantic outcomes (where negation or phrasing can flip meaning) with `agent.assert`.

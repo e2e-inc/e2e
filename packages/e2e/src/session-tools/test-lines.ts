@@ -11,8 +11,8 @@
  * narrowed (to the nodes that render, under a container, or by position, in
  * that order), and otherwise the result says why there is no line. The
  * session keeps the lines in order, with the lines `run_code` passed
- * among them, and `test_lines` returns them as a draft test body; after a
- * test the session ran, as the lines that continue it. Only the session
+ * among them, and `test_lines` returns them as a draft test body, lines that
+ * continue a resumed test, or lines for a held test's pause point. Only the session
  * catalog wraps its grammar this way; the testing agent's model loop never
  * sees a line.
  */
@@ -218,7 +218,7 @@ export class SessionTestLines {
     };
   }
 
-  /** The recorded lines as a draft test body. */
+  /** The recorded lines with placement guidance for a fresh draft, a resumed test, or a held test's pause point. */
   draft(): string {
     if (this.entries.length === 0) {
       return 'No test lines yet. Each action (tap, type, select, check, and the rest) prints the line that repeats it in a test, run_code adds the lines that pass, and this tool returns them in order.';
