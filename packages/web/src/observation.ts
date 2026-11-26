@@ -341,13 +341,19 @@ function placeInFrame(node: SemanticNode, frame: Rect): SemanticNode {
 /**
  * A node box a child document measured against its own viewport, in the
  * top-level viewport's space: `rect` shifted by the frame's box and clipped
- * to it, empty when nothing of it is inside the frame. `origin` is shifted
- * but never clipped, and a clip that moves the box's corner keeps the
- * unclipped corner as `origin`, so an offset into the node lands where it
- * would at the top level.
+ * to `clip`, the frame's box unless the frames around it show less of it,
+ * empty when nothing of it is inside. `origin` is shifted but never clipped,
+ * and a clip that moves the box's corner keeps the unclipped corner as
+ * `origin`, so an offset into the node lands where it would at the top
+ * level.
  */
-export function placeBoxInFrame(rect: Rect, origin: ViewportPoint | undefined, frame: Rect): Pick<SemanticNode, 'rect' | 'origin'> {
-  const placed = clipRect(offsetRect(rect, frame), frame);
+export function placeBoxInFrame(
+  rect: Rect,
+  origin: ViewportPoint | undefined,
+  frame: Rect,
+  clip: Rect = frame,
+): Pick<SemanticNode, 'rect' | 'origin'> {
+  const placed = clipRect(offsetRect(rect, frame), clip);
   if (placed === undefined) return {};
   const corner = origin ?? rect;
   const shifted = { x: corner.x + frame.x, y: corner.y + frame.y };
@@ -358,7 +364,8 @@ function offsetRect(rect: Rect, by: Rect): Rect {
   return { x: rect.x + by.x, y: rect.y + by.y, width: rect.width, height: rect.height };
 }
 
-function clipRect(rect: Rect, bounds: Rect): Rect | undefined {
+/** The part of `rect` inside `bounds`, undefined when none of it is. */
+export function clipRect(rect: Rect, bounds: Rect): Rect | undefined {
   const x = Math.max(rect.x, bounds.x);
   const y = Math.max(rect.y, bounds.y);
   const width = Math.min(rect.x + rect.width, bounds.x + bounds.width) - x;

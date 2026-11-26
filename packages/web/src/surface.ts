@@ -59,7 +59,7 @@ import { DialogRouter } from './dialogs.ts';
 import { missingLibrariesMessage } from './host-libraries.ts';
 import { browserCheck, ensureBrowsersInstalled, missingBrowserLibraries } from './install.ts';
 import { applyPostSteps, frameSelectors, projectExpression } from './locators.ts';
-import { contentBox, frameContentInset, placeBoxInFrame, ROOT_NODE_ID, toSemanticNode } from './observation.ts';
+import { clipRect, contentBox, frameContentInset, placeBoxInFrame, ROOT_NODE_ID, toSemanticNode } from './observation.ts';
 import { captureObservation } from './observation-capture.ts';
 import { maskOptions, secureFieldMasks } from './observe.ts';
 import { SHOWN_SELECTOR } from './shown-selector.ts';
@@ -1352,15 +1352,17 @@ export class PlaywrightSurface {
    * the same chain; a frame-scoped `count` is 0 until that frame's document
    * has loaded, which is what makes `FRAME_NOT_FOUND` worth retrying. Returns
    * the innermost frame's content box in the top-level viewport, where its
-   * document's viewport starts (undefined for an expression in the main
-   * document, null for a frame with no box), and
+   * document's viewport starts, with the part of it every frame along the
+   * chain shows, the way the observation tree clips a nested document
+   * (undefined for an expression in the main document, null for a frame
+   * with no box or one the frames around it do not show), and
    * whether a frame along the chain is hidden: a frame element's own `hidden`
    * state, read in the document around it, so a cross-origin frame reads too.
    * Every node in a hidden frame is hidden, and so are the frames under it.
    */
-  private async frameOf(expression: LocatorExpression): Promise<{ box: Rect | null | undefined; hidden: boolean }> {
+  private async frameOf(expression: LocatorExpression): Promise<{ box: FrameBox | null | undefined; hidden: boolean }> {
     let scope: Page | FrameLocator = this.requirePage();
-    let element: Locator | undefined;
+    const elements: Locator[] = [];
     let hidden = false;
     for (const selector of frameSelectors(expression)) {
       let count: number;
@@ -1380,16 +1382,24 @@ export class PlaywrightSurface {
           retryable: false,
         });
       }
-      element = scope.locator(selector);
+      elements.push(scope.locator(selector));
       scope = scope.frameLocator(selector);
     }
-    if (element === undefined) return { box: undefined, hidden };
+    if (elements.length === 0) return { box: undefined, hidden };
+    let box: FrameBox | undefined;
     try {
-      const border = await element.boundingBox();
-      return { box: border === null ? null : contentBox(border, await element.evaluate(frameContentInset)), hidden };
+      for (const element of elements) {
+        const border = await element.boundingBox();
+        if (border === null) return { box: null, hidden };
+        const content = contentBox(border, await element.evaluate(frameContentInset));
+        const shown = box === undefined ? content : clipRect(content, box.shown);
+        if (shown === undefined) return { box: null, hidden };
+        box = { content, shown };
+      }
     } catch (cause) {
       throw translatePwError(cause, 'frame resolution');
     }
+    return { box, hidden };
   }
 
   // --- artifacts ---
@@ -1617,15 +1627,22 @@ function frameOf(request: Request): Frame | undefined {
 
 type Rect = NonNullable<SemanticNode['rect']>;
 
+/** A frame's content box in the top-level viewport, and the part of it the frames around it show. */
+type FrameBox = {
+  readonly content: Rect;
+  readonly shown: Rect;
+};
+
 /**
  * A located node in the top-level viewport's space, as the observation tree
- * reports it: its box shifted by the frame's and clipped to it, and dropped
- * when the frame has no box or the node lies outside it.
+ * reports it: its box shifted by the frame's and clipped to the part every
+ * frame shows, and dropped when the frame has no box or the node lies
+ * outside that part.
  */
-function inFrame(node: SemanticNode, frame: Rect | null | undefined): SemanticNode {
+function inFrame(node: SemanticNode, frame: FrameBox | null | undefined): SemanticNode {
   if (frame === undefined || node.rect === undefined) return node;
   const { rect, origin, ...rest } = node;
-  return frame === null ? rest : { ...rest, ...placeBoxInFrame(rect, origin, frame) };
+  return frame === null ? rest : { ...rest, ...placeBoxInFrame(rect, origin, frame.content, frame.shown) };
 }
 
 /**
