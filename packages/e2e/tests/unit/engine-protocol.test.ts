@@ -1044,6 +1044,47 @@ describe('engine protocol against a server written from the messages alone', () 
     rmSync(artifactsDir, { recursive: true, force: true });
   });
 
+  it('keeps a screenshot answered while its attempt is ending out of its directory, and writes the one of an attempt open beside it', async () => {
+    const methods = ['engine/observe', 'artifacts/screenshot', 'lifecycle/startAttempt', 'lifecycle/endAttempt'] as const;
+    const answers = new Map<string, () => void>();
+    let ended: (() => void) | undefined;
+    const { transport } = handWritten(methods, {
+      'lifecycle/endAttempt': async () => {
+        await new Promise<void>((resolve) => (ended = resolve));
+        return null;
+      },
+      'artifacts/screenshot': async (params) => {
+        const { attemptId } = (params as { operation: { attemptId: string } }).operation;
+        await new Promise<void>((resolve) => answers.set(attemptId, resolve));
+        return { data: Buffer.from('png bytes').toString('base64'), mediaType: 'image/png' };
+      },
+    });
+    const remote = connectEngine({ manifest: { name: 'hand', version: '1', spiVersion: 1, methods: [...methods] }, transport });
+    const dirs = { test: mkdtempSync(path.join(tmpdir(), 'e2e-protocol-')), actor: mkdtempSync(path.join(tmpdir(), 'e2e-protocol-')) };
+    const attempt = (attemptId: keyof typeof dirs): EngineAttemptContext => ({
+      attemptId, artifactsDir: dirs[attemptId], signal: new AbortController().signal, resolveSecret: async () => '', appLog: () => {}, navigation: () => {}, environment: () => {},
+    });
+    await remote.init!(initInfo());
+    await remote.startAttempt!(attempt('test'));
+    await remote.startAttempt!(attempt('actor'));
+    const shots = (['test', 'actor'] as const).map((attemptId) =>
+      remote.artifacts!.screenshot('shot', { ...operation(), attemptId }).then((file) => file, (cause: unknown) => cause));
+    await vi.waitFor(() => expect(answers.size).toBe(2));
+    // The harness names the attempt it ends: the test's stays open beside it.
+    const ending = remote.endAttempt!({ ...cleanup, attemptId: 'actor' });
+    await vi.waitFor(() => expect(ended).toBeDefined());
+    for (const answer of answers.values()) answer();
+    const [kept, refused] = await Promise.all(shots);
+    expect(kept).toBe(path.join('screenshots', '001-shot.png'));
+    expect(readdirSync(path.join(dirs.test, 'screenshots'))).toEqual(['001-shot.png']);
+    expect(refused).toMatchObject({ code: 'INVALID_STATE' });
+    expect(readdirSync(dirs.actor)).toEqual([]);
+    ended?.();
+    await ending;
+    await remote.dispose!(cleanup);
+    for (const dir of Object.values(dirs)) rmSync(dir, { recursive: true, force: true });
+  });
+
   it('refuses a screenshot path outside the attempt directory', async () => {
     const local = defineEngine(toy({ artifacts: { screenshot: async () => '../../elsewhere.png' }, startAttempt: async () => {} }));
     const remote = connectEngine({ manifest: describeEngine(local), transport: loopbackTransport(local) });
