@@ -749,6 +749,12 @@ fn open_menu(button: &Element, deadline: Instant) -> Option<Element> {
     menu
 }
 
+/// The longest wait for the app to take a typed key before the next one goes.
+const KEY_SETTLE: Duration = Duration::from_millis(250);
+
+/// The wait after a typed key when the field's length cannot be read, so its effect cannot be seen.
+const KEY_SETTLE_UNREAD: Duration = Duration::from_millis(30);
+
 /// How long each way of closing a menu nothing was chosen from waits for it, past the action's deadline too: an open
 /// menu covers the window.
 const MENU_CLOSE_WAIT: Duration = Duration::from_millis(500);
@@ -1021,7 +1027,26 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
     if Element::application(entry.pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element) {
         return Err(after_focus(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed")));
     }
+    // What the field holds, in characters, as the app answers it: a change says the app took the key sent last.
+    let length = || match entry.element.attribute("AXNumberOfCharacters") {
+        Ok(Value::Number(count)) => Some(count),
+        _ => None,
+    };
+    let field_focused = || Element::application(entry.pid).element("AXFocusedUIElement").as_ref() == Some(&entry.element);
+    // The field's length when the last key went; unset before the first.
+    let sent_at: std::cell::Cell<Option<Option<f64>>> = std::cell::Cell::new(None);
     let still = || -> Outcome<()> {
+        // A key posted to the app is in its queue, not yet handled: wait until the field shows it, or focus moved, so a
+        // window the key opened (a handler on the text, a Return) holds the keyboard by the time the check below reads it.
+        if let Some(before) = sent_at.get() {
+            let settle = deadline.min(Instant::now() + KEY_SETTLE);
+            match before {
+                Some(count) => {
+                    until(settle, || length() != Some(count) || !field_focused());
+                }
+                None => sleep(KEY_SETTLE_UNREAD.min(settle.saturating_duration_since(Instant::now()))),
+            }
+        }
         let app = Element::application(entry.pid);
         let focused = app.element("AXFocusedWindow");
         let held = match &typing_in {
@@ -1030,6 +1055,7 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
         };
         let forward = !physical || app.boolean("AXFrontmost") == Some(true);
         if held && forward {
+            sent_at.set(Some(length()));
             Ok(())
         } else {
             Err(Failure::refused(codes::ACTION_FAILED, "typing stopped: the field's window lost the keyboard to another window or app"))
