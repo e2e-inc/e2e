@@ -938,8 +938,10 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       assertNoAppleLocaleArguments(label, launchArguments, 'INVALID_ARGUMENT');
     }
     if (locale !== undefined && this.options.platform === 'android') assertAndroidPackage('device.openApp({ locale })', app, 'INVALID_ARGUMENT');
-    if (permissions !== undefined) await this.presetPermissions(app, permissions, signal);
+    // The locale goes first: it is the step a device can refuse (an Android
+    // older than 13), and a refusal must leave the permissions untouched.
     if (this.options.platform === 'android') await this.presetAndroidLocale(app, locale, relaunch, signal);
+    if (permissions !== undefined) await this.presetPermissions(app, permissions, signal);
     await this.open(app, relaunch, launchArguments, signal, locale);
   }
 

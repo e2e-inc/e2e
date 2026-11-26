@@ -3761,7 +3761,8 @@ describe('device fixture', () => {
     const device = fixture(h);
     h.respondAdb((args) => ({ stdout: args.includes('getprop') ? '32\n' : '', stderr: '', exitCode: 0 }));
     const before = h.fake.calls.length;
-    await expect(device.openApp(ANDROID_APP_PACKAGE, { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({
+    // The permissions are not touched: the locale's refusal comes first.
+    await expect(device.openApp(ANDROID_APP_PACKAGE, { relaunch: true, locale: 'fr-FR', permissions: { camera: 'grant' } })).rejects.toMatchObject({
       code: 'UNSUPPORTED_CAPABILITY',
       message: expect.stringContaining('needs Android 13 (API 33) or newer, and emulator-5554 runs API 32'),
     });
