@@ -456,10 +456,14 @@ describe('createEngineSession', () => {
     });
     const source = { id: 'n1', revision: 'b1' };
     const target = { id: 'n2', revision: 'b1' };
-    for (const options of [{ sourcePosition: { x: 1, y: 2 } }, { targetPosition: { x: 3, y: 4 } }, { steps: 5 }]) {
+    for (const [options, fields] of [
+      [{ sourcePosition: { x: 1, y: 2 } }, 'sourcePosition'],
+      [{ targetPosition: { x: 3, y: 4 }, steps: 5 }, 'targetPosition and steps'],
+      [{ sourcePosition: { x: 1, y: 2 }, targetPosition: { x: 3, y: 4 }, steps: 5 }, 'sourcePosition, targetPosition, and steps'],
+    ] as const) {
       await expect(session.perform(source, { kind: 'dragTo', target, ...options }, OP)).rejects.toMatchObject({
         code: 'UNSUPPORTED_CAPABILITY',
-        message: expect.stringContaining('no engine capability for sourcePosition, targetPosition, and steps on the "dragTo" action'),
+        message: expect.stringContaining(`no engine capability for ${fields} on the "dragTo" action`),
       });
     }
     expect(calls).toEqual([]);

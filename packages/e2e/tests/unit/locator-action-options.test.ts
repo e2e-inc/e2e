@@ -445,14 +445,15 @@ describe('locator action options', () => {
     });
 
     it.each([
-      { sourcePosition: { x: 1, y: 2 } },
-      { targetPosition: { x: 3, y: 4 } },
-      { steps: 1 },
-    ])('refuses %j on an engine without dragOptions before resolving either node', async (options) => {
+      [{ sourcePosition: { x: 1, y: 2 } }, 'sourcePosition on the "dragTo" action is not available'],
+      [{ targetPosition: { x: 3, y: 4 } }, 'targetPosition on the "dragTo" action is not available'],
+      [{ steps: 1 }, 'steps on the "dragTo" action is not available'],
+      [{ sourcePosition: { x: 1, y: 2 }, steps: 1 }, 'sourcePosition and steps on the "dragTo" action are not available'],
+    ])('refuses %j on an engine without dragOptions before resolving either node, naming only those fields', async (options, refusal) => {
       const { screen, received, locate } = tapScreen();
       await expect(screen.getByLabel('Missing').dragTo(bin(screen), options)).rejects.toMatchObject({
         code: 'UNSUPPORTED_CAPABILITY',
-        message: expect.stringContaining('its engine does not declare dragOptions'),
+        message: expect.stringContaining(`${refusal} on this target: its engine does not declare dragOptions`),
       });
       expect(locate).not.toHaveBeenCalled();
       expect(received).toEqual([]);

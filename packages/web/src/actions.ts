@@ -46,13 +46,6 @@ function clickCount(count: number): number {
   return count;
 }
 
-/**
- * Max pointer moves per drag. `mouse.move` takes no timeout, so a drag the
- * engine drives with the mouse would keep moving, button held, past the
- * action's deadline.
- */
-const MAX_DRAG_STEPS = 1000;
-
 /** Playwright's words for an element handle whose element left the DOM. */
 const DETACHED_PATTERN = /element (is |was )?(detached|not attached)/i;
 
@@ -405,12 +398,6 @@ export async function dispatchLocatorAction(
       return;
     }
     case 'dragTo': {
-      if (action.steps !== undefined && action.steps > MAX_DRAG_STEPS) {
-        throw new EngineError('UNSUPPORTED_CAPABILITY', `the browser engine drags in at most ${MAX_DRAG_STEPS} steps, got ${action.steps}`, {
-          retryable: false,
-        });
-      }
-
       const other = await lookup(action.target);
       operation.signal.throwIfAborted();
       // Playwright's own drag when both sides are locators: it waits for
@@ -421,7 +408,7 @@ export async function dispatchLocatorAction(
       if (target.kind === 'locator' && other.kind === 'locator') {
         await target.locator.dragTo(other.locator, { timeout, ...drag });
       } else {
-        await performPointerDrag(target, other, drag, timeout);
+        await performPointerDrag(target, other, drag, operation);
       }
       return;
     }

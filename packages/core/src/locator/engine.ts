@@ -245,15 +245,14 @@ export class LocatorEngine {
         `the ${action.button} button on the "${action.kind}" action is not available on this target: its engine does not declare tapButtons`,
       );
     }
-    if (
-      action.kind === 'dragTo' &&
-      !this.session.dragOptions &&
-      (action.sourcePosition !== undefined || action.targetPosition !== undefined || action.steps !== undefined)
-    ) {
-      throw new ConfigurationError(
-        'UNSUPPORTED_CAPABILITY',
-        'sourcePosition, targetPosition, and steps on the "dragTo" action are not available on this target: its engine does not declare dragOptions',
-      );
+    if (action.kind === 'dragTo' && !this.session.dragOptions) {
+      const given = (['sourcePosition', 'targetPosition', 'steps'] as const).filter((field) => action[field] !== undefined);
+      if (given.length > 0) {
+        throw new ConfigurationError(
+          'UNSUPPORTED_CAPABILITY',
+          `${new Intl.ListFormat('en').format(given)} on the "dragTo" action ${given.length === 1 ? 'is' : 'are'} not available on this target: its engine does not declare dragOptions`,
+        );
+      }
     }
     if (action.kind === 'press') requireKey(action.key);
   }

@@ -485,12 +485,9 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       if ('button' in action && action.button !== undefined && !tapButtons) {
         unsupported(`the ${action.button} button on the "${action.kind}" action`);
       }
-      if (
-        action.kind === 'dragTo' &&
-        !dragOptions &&
-        (action.sourcePosition !== undefined || action.targetPosition !== undefined || action.steps !== undefined)
-      ) {
-        unsupported('sourcePosition, targetPosition, and steps on the "dragTo" action');
+      if (action.kind === 'dragTo' && !dragOptions) {
+        const given = (['sourcePosition', 'targetPosition', 'steps'] as const).filter((field) => action[field] !== undefined);
+        if (given.length > 0) unsupported(`${new Intl.ListFormat('en').format(given)} on the "dragTo" action`);
       }
       if (action.kind === 'press') requireKey(action.key);
       rejectSupersededLocate(ref);

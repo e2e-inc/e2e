@@ -995,10 +995,21 @@ The options are [`DragOptions`](#types), the same as Playwright's
 - `targetPosition`: where to release, measured on the target node the same
   way.
 - `steps`: how many pointer moves carry the drag to the release point, a
-  positive safe integer. Unset, the browser engine moves in 1 step, as
-  Playwright does. It moves in 2 when it drives the mouse itself, for a node
-  Playwright's `dragTo` can't take. The browser engine takes at most 1000
-  steps.
+  positive safe integer. When set, both web paths below send exactly that
+  many moves.
+
+The browser engine drags in one of two ways:
+
+| Nodes | Drag | Moves without `steps` |
+| --- | --- | --- |
+| Any other pair of locator matches | Playwright's `dragTo` | 1 |
+| Either one a `getByLabel` match by a string, a `getByDisplayValue` match, or a node the agent observed | The engine drives the mouse | 3: 2 steps, then one more at the release point for HTML5 drag-and-drop |
+
+Both paths scroll the release point into view, refuse a drop the point
+would land outside the target node, or on something that covers it, and
+stop moving when the step times out. Playwright's `dragTo` waits until the
+point is clear, up to the timeout; the mouse path fails at once and
+releases the button.
 
 Only the browser engine supports the options. A plain `dragTo` works on
 every engine that lists the `dragTo` action.
@@ -1008,7 +1019,7 @@ every engine that lists the `dragTo` action.
 | `INVALID_ARGUMENT` | A position that is not a point of finite, non-negative numbers, or a `steps` that is not a positive safe integer. |
 | `INVALID_LOCATOR` | `target` is not a runner locator, or was made by another target's screen. |
 | `UNSUPPORTED_CAPABILITY` | `sourcePosition`, `targetPosition`, or `steps` on an engine without `dragOptions` (such as mobile). Thrown before either node is looked up. |
-| `UNSUPPORTED_CAPABILITY` | `steps` above 1000 on the browser engine; thrown before it acts. |
+| `ACTION_FAILED` | On the browser engine, the release point lands outside the target node or on another element. |
 
 #### `scrollIntoView`
 

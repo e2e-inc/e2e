@@ -1136,7 +1136,7 @@ test('takes evidence', async ({ app }) => {
         ],
       },
       action: { kind: 'dragTo', target: expect.objectContaining({ id: 'bin' }), targetPosition: { x: 2, y: 3 }, steps: 4 },
-      refusal: 'sourcePosition, targetPosition, and steps on the "dragTo" action',
+      refusal: 'targetPosition and steps on the "dragTo" action',
     },
   ])(
     'hands $call only to an engine that declares $flag, and refuses it before perform otherwise',

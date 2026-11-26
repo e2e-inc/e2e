@@ -10,6 +10,7 @@
  */
 
 import { createServer, type Server } from 'node:http';
+import { setTimeout as sleep } from 'node:timers/promises';
 import type { AddressInfo } from 'node:net';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -17,6 +18,7 @@ import type { LocatorAction, SemanticNode } from '@e2e-dev/core/engine';
 import { classifyActionError, dispatchLocatorAction, dispatchPointerAction } from '../../src/actions.ts';
 import { ElementList } from '../../src/element-list.ts';
 import { captureDocument } from '../../src/observation.ts';
+import type { ConnectionBudget } from '../../src/operation-budget.ts';
 import type { ActionTarget } from '../../src/support.ts';
 import { Published } from '../helpers/published.ts';
 
@@ -611,68 +613,205 @@ describe('a mouse button at a point', () => {
 });
 
 /**
- * A bordered card and drop zone that log the drag as `down <x>,<y>` on the
- * card, `move <x>,<y>` in the viewport, and `up <x>,<y>` on the zone, each
- * offset measured from the node's padding box.
+ * Logs a drag as `down <x>,<y>` on the card, `move <x>,<y>` in the viewport,
+ * and `up <id> <x>,<y>` on the element released over, the offsets measured
+ * from the padding box of the card and of the zone. The block keeps its
+ * bindings off the global scope, which a second `setContent` in the same
+ * page keeps, so the script runs again there.
  */
-const DRAG_PAGE = `<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px; border: 4px solid"></div>
-<div id="zone" style="position: absolute; left: 300px; top: 200px; width: 200px; height: 100px; border: 6px solid"></div>
-<script>
+const DRAG_LOG = `<script>
   window.dragged = [];
-  const inside = (id, event) => {
-    const node = document.getElementById(id);
-    const box = node.getBoundingClientRect();
-    return Math.round(event.clientX - box.left - node.clientLeft) + ',' + Math.round(event.clientY - box.top - node.clientTop);
-  };
-  let down = false;
-  document.addEventListener('mousedown', (event) => {
-    down = true;
-    window.dragged.push('down ' + inside('card', event));
-  });
-  document.addEventListener('mousemove', (event) => {
-    if (down) window.dragged.push('move ' + event.clientX + ',' + event.clientY);
-  });
-  document.addEventListener('mouseup', (event) => {
-    down = false;
-    window.dragged.push('up ' + inside('zone', event));
-  });
+  {
+    const inside = (id, event) => {
+      const node = document.getElementById(id);
+      const box = node.getBoundingClientRect();
+      return Math.round(event.clientX - box.left - node.clientLeft) + ',' + Math.round(event.clientY - box.top - node.clientTop);
+    };
+    let down = false;
+    document.addEventListener('mousedown', (event) => {
+      down = true;
+      window.dragged.push('down ' + inside('card', event));
+    });
+    document.addEventListener('mousemove', (event) => {
+      if (down) window.dragged.push('move ' + event.clientX + ',' + event.clientY);
+    });
+    document.addEventListener('mouseup', (event) => {
+      down = false;
+      window.dragged.push('up ' + event.target.id + ' ' + inside('zone', event));
+    });
+  }
 </script>`;
 
-/** Drags the card onto the zone through the given target kind and returns what the page logged. */
-async function drag(kind: (typeof KINDS)[number], options: Omit<Extract<LocatorAction, { kind: 'dragTo' }>, 'kind' | 'target'>): Promise<string[]> {
-  await page.setContent(DRAG_PAGE);
-  const zone = await targetOf(kind, '#zone');
+/** A bordered card and drop zone. */
+const DRAG_PAGE = `<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px; border: 4px solid"></div>
+<div id="zone" style="position: absolute; left: 300px; top: 200px; width: 200px; height: 100px; border: 6px solid"></div>
+${DRAG_LOG}`;
+
+const NO_DEADLINE: ConnectionBudget = { timeoutMs: 2000, signal: new AbortController().signal };
+
+/** Drags the card onto the zone through the given target kind. */
+async function drag(
+  kind: (typeof KINDS)[number],
+  options: Omit<Extract<LocatorAction, { kind: 'dragTo' }>, 'kind' | 'target'>,
+  operation = NO_DEADLINE,
+  zone?: ActionTarget,
+): Promise<void> {
+  const destination = zone ?? await targetOf(kind, '#zone');
   await dispatchLocatorAction(
     await targetOf(kind, '#card'),
     { kind: 'dragTo', target: { id: 'zone', revision: '' }, ...options },
-    { timeoutMs: 2000, signal: new AbortController().signal },
-    async () => zone,
+    operation,
+    async () => destination,
   );
+}
+
+/** What the page logged of the drag. */
+function dragged(): Promise<string[]> {
   return page.evaluate(() => (window as unknown as { dragged: string[] }).dragged);
 }
 
-describe.each(KINDS)('a drag through the %s target', (kind) => {
-  it('presses and releases at the positions from each padding box, moving through the given steps', async () => {
-    const events = await drag(kind, { sourcePosition: { x: 10, y: 5 }, targetPosition: { x: 30, y: 20 }, steps: 4 });
-    expect(events[0]).toBe('down 10,5');
-    expect(events.at(-1)).toBe('up 30,20');
-    // The pointer path adds one more move at the drop point, which carries it nowhere.
-    const moves = new Set(events.filter((event) => event.startsWith('move')));
-    expect(moves.size).toBe(4);
-    expect([...moves].at(-1)).toBe('move 336,226');
-  });
+/** The moves the page logged while the button was down. */
+async function moves(): Promise<string[]> {
+  return (await dragged()).filter((event) => event.startsWith('move'));
+}
 
-  it('refuses more than 1000 steps before it sends any input', async () => {
-    await expect(drag(kind, { steps: 1001 })).rejects.toMatchObject({
-      code: 'UNSUPPORTED_CAPABILITY',
-      message: expect.stringContaining('the browser engine drags in at most 1000 steps, got 1001'),
-    });
-    expect(await page.evaluate(() => (window as unknown as { dragged: string[] }).dragged)).toEqual([]);
+describe.each(KINDS)('a drag through the %s target', (kind) => {
+  it('presses and releases at the positions from each padding box, moving exactly the given steps', async () => {
+    await page.setContent(DRAG_PAGE);
+    await drag(kind, { sourcePosition: { x: 10, y: 5 }, targetPosition: { x: 30, y: 20 }, steps: 4 });
+    const events = await dragged();
+    expect(events[0]).toBe('down 10,5');
+    expect(events.at(-1)).toBe('up zone 30,20');
+    expect(await moves()).toEqual(['move 109,78', 'move 185,127', 'move 260,176', 'move 336,226']);
   });
 
   it('presses and releases at the centres without options', async () => {
-    const events = await drag(kind, {});
+    await page.setContent(DRAG_PAGE);
+    await drag(kind, {});
+    const events = await dragged();
     expect(events[0]).toBe('down 50,20');
-    expect(events.at(-1)).toBe('up 100,50');
+    expect(events.at(-1)).toBe('up zone 100,50');
+  });
+
+  it('stops moving once the operation times out', async () => {
+    await page.setContent(DRAG_PAGE);
+    await expect(drag(kind, { steps: 1000 }, { timeoutMs: 300, signal: AbortSignal.timeout(300) })).rejects.toThrow();
+    // A move Playwright sent before its timeout may still land after the rejection.
+    await sleep(100);
+    const sent = (await moves()).length;
+    await sleep(300);
+    expect((await moves()).length).toBe(sent);
+  });
+
+  it('scrolls a drop point below the fold of a target taller than the viewport into view', async () => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
+<div id="zone" style="position: absolute; left: 300px; top: 100px; width: 200px; height: 3000px"></div>
+${DRAG_LOG}`);
+    await drag(kind, { targetPosition: { x: 10, y: 2500 } });
+    expect((await dragged()).at(-1)).toBe('up zone 10,2500');
+  });
+
+  it('scrolls a drop point at the far end of a wide track into view in its scroller', async () => {
+    await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
+<div style="position: absolute; left: 20px; top: 100px; width: 400px; overflow-x: auto">
+  <div id="zone" style="width: 2000px; height: 50px"></div>
+</div>
+${DRAG_LOG}`);
+    await drag(kind, { targetPosition: { x: 1900, y: 10 } });
+    expect((await dragged()).at(-1)).toBe('up zone 1900,10');
+  });
+});
+
+describe('a drag with options left unset', () => {
+  it('moves once through Playwright, and twice and once more at the drop point through the pointer', async () => {
+    const sent: Record<string, number> = {};
+    for (const kind of KINDS) {
+      await page.setContent(DRAG_PAGE);
+      await drag(kind, {});
+      sent[kind] = (await moves()).length;
+    }
+    expect(sent).toEqual({ locator: 1, element: 3 });
+  });
+});
+
+describe('a drag between zoomed, bordered nodes', () => {
+  it('presses and releases on the pixels Playwright drag does', async () => {
+    const content = `<div id="card" style="zoom: 1.25; position: absolute; left: 7px; top: 7px; width: 100px; height: 40px; border: 2px solid"></div>
+<div id="zone" style="zoom: 1.25; position: absolute; left: 107px; top: 107px; width: 100px; height: 60px; border: 2px solid"></div>
+<script>
+  window.dragged = [];
+  for (const type of ['mousedown', 'mouseup']) {
+    document.addEventListener(type, (event) => window.dragged.push(type + ' ' + event.clientX + ',' + event.clientY));
+  }
+</script>`;
+    const events: Record<string, string[]> = {};
+    for (const kind of KINDS) {
+      await page.setContent(content);
+      await drag(kind, { sourcePosition: { x: 1, y: 1 }, targetPosition: { x: 3, y: 3 }, steps: 1 });
+      events[kind] = await dragged();
+    }
+    expect(events.element).toEqual(events.locator);
+    expect(events.element).toEqual(['mousedown 10,10', 'mouseup 137,137']);
+  });
+});
+
+describe('a drag with the pointer, through element handles', () => {
+  it('releases the button once the operation times out', async () => {
+    await page.setContent(DRAG_PAGE);
+    await expect(drag('element', { steps: 1000 }, { timeoutMs: 300, signal: AbortSignal.timeout(300) })).rejects.toThrow();
+    expect((await dragged()).at(-1)).toMatch(/^up /);
+  });
+
+  it('refuses a drop position outside the destination that lands on the control beside it', async () => {
+    await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
+<div id="zone" style="position: absolute; left: 300px; top: 200px; width: 80px; height: 40px"></div>
+<button id="beside" style="position: absolute; left: 380px; top: 200px; width: 80px; height: 40px">Beside</button>
+${DRAG_LOG}`);
+    await expect(drag('element', { targetPosition: { x: 100, y: 5 } })).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: 'the drag cannot drop on its destination: its position (100, 5) is outside its 80x40 box',
+    });
+    expect(await moves()).toEqual([]);
+    expect(await dragged()).not.toContainEqual(expect.stringMatching(/^up beside/));
+  });
+
+  it('refuses a drop point inside the destination that another element covers', async () => {
+    await page.setContent(`${DRAG_PAGE}
+<div id="cover" style="position: absolute; left: 300px; top: 200px; width: 100px; height: 100px"></div>`);
+    await expect(drag('element', { targetPosition: { x: 10, y: 10 } })).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: 'the drag cannot drop on its destination: the drop point is on <div id="cover">, which is not inside it',
+    });
+    expect(await moves()).toEqual([]);
+  });
+
+  it('drops on a destination inside a closed shadow root', async () => {
+    await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
+<div id="host" style="position: absolute; left: 300px; top: 200px"></div>
+<script>
+  window.zone = document.getElementById('host').attachShadow({ mode: 'closed' });
+  window.zone.innerHTML = '<div style="width: 200px; height: 100px; border: 6px solid"></div>';
+  window.zone = window.zone.firstElementChild;
+  window.dragged = [];
+  document.addEventListener('mouseup', (event) => window.dragged.push('up ' + event.target.id + ' ' + event.clientX + ',' + event.clientY));
+</script>`);
+    const zone = (await page.evaluateHandle(() => (window as unknown as { zone: Element }).zone)).asElement();
+    if (zone === null) throw new Error('the zone is not an element');
+    await drag('element', { targetPosition: { x: 30, y: 20 } }, NO_DEADLINE, { kind: 'element', element: zone });
+    expect(await dragged()).toEqual(['up host 336,226']);
+  });
+
+  it('drops on a destination inside a frame below the fold', async () => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    const frame = `<div id="zone" style="width: 200px; height: 100px; border: 6px solid"></div>
+<script>document.addEventListener('mouseup', (event) => parent.dragged.push('up frame ' + event.target.id + ' ' + event.offsetX + ',' + event.offsetY));</script>`;
+    await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
+<iframe style="position: absolute; left: 20px; top: 1500px; border: 0" srcdoc="${frame.replaceAll('"', '&quot;')}"></iframe>
+<script>window.dragged = [];</script>`);
+    const zone = await page.frameLocator('iframe').locator('#zone').elementHandle();
+    if (zone === null) throw new Error('the zone has no element');
+    await drag('element', { targetPosition: { x: 30, y: 20 } }, NO_DEADLINE, { kind: 'element', element: zone });
+    expect(await dragged()).toEqual(['up frame zone 30,20']);
   });
 });
