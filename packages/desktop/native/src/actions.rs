@@ -87,15 +87,22 @@ fn until(deadline: Instant, mut check: impl FnMut() -> bool) -> bool {
     }
 }
 
-/// Performs an AX action. An app that does not answer in time is handling it (a menu or a modal it opened runs inside the action): that is delivered.
+/// Performs an AX action. An action that opens a menu or a modal runs inside the app's handler and answers only once it
+/// closes, so the call times out: the action is running if the app still answers another request meanwhile, which it
+/// does only from inside that handler's own event loop. An app that answers nothing may never have taken the action.
 fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
     element.set_timeout(BLOCKING_ACTION_SECONDS);
     let result = element.perform(action);
-    element.set_timeout(0.0);
-    match result {
-        Ok(()) | Err(ax::AX_CANNOT_COMPLETE) => Ok(()),
+    let outcome = match result {
+        Ok(()) => Ok(()),
+        Err(ax::AX_CANNOT_COMPLETE) if element.attribute("AXRole").is_ok() => Ok(()),
+        Err(ax::AX_CANNOT_COMPLETE) => {
+            Err(Failure::unconfirmed(codes::APP_UNRESPONSIVE, format!("{what}: the app did not answer the action, or anything after it")))
+        }
         Err(error) => Err(refused(error, what)),
-    }
+    };
+    element.set_timeout(0.0);
+    outcome
 }
 
 fn raw_role(element: &Element) -> (String, &'static str) {
