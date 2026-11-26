@@ -180,7 +180,7 @@ describe('findDetours on an entry recorded without locations', () => {
   it('reads a tap, looking around, then back as a detour', () => {
     const detours = findDetours(flow([tap('Notifications'), scroll(), scroll(), back(), tap('Privacy')]));
     expect(detours).toEqual([{ from: 0, to: 4, evidence: 'actions' }]);
-    expect(describeDetour(detours[0]!)).toBe('actions 1-4 left a screen, only looked around, and went back');
+    expect(describeDetour(detours[0]!)).toBe('actions 1-4 left a screen, only looked around, and went back (recorded without locations: a hint only)');
   });
 
   it('reads a point tap on a link as leaving, and one on a switch as setting it', () => {

@@ -274,11 +274,13 @@ export function settledDetour(detour: string, ledger: { readonly redact: (text: 
  * One detour as a line names it, actions numbered from 1 as the report
  * numbers them: `actions 2-4 left /settings for /settings/privacy and came
  * back with nothing typed, chosen, or set`. That is all the rule can show:
- * a plain button tap on the way may still have saved something.
+ * a plain button tap on the way may still have saved something. A detour
+ * read from an entry's actions alone says it is a hint wherever it is
+ * printed, the step's report included, as `e2e cache check` reads it.
  */
 export function describeDetour(detour: TraceDetour): string {
   // Every detour spans two actions at least: one that left, one that came back.
   const span = `actions ${String(detour.from + 1)}-${String(detour.to)}`;
-  if (detour.evidence === 'actions') return `${span} left a screen, only looked around, and went back`;
+  if (detour.evidence === 'actions') return `${span} left a screen, only looked around, and went back (recorded without locations: a hint only)`;
   return `${span} left ${detour.at ?? 'a screen'} for ${detour.via ?? 'another'} and came back with nothing typed, chosen, or set`;
 }
