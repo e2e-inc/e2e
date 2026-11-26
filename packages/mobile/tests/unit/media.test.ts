@@ -169,10 +169,10 @@ describe('device.addMedia', () => {
     const failing = await setup({ platform: 'android', kind: 'emulator', id: 'emulator-5554' }, async () => {
       throw Object.assign(new Error('Command failed'), { code: 1, stderr: "adb: error: failed to get feature set: device 'emulator-5554' not found" });
     });
-    await expect(failing.device.addMedia(['a.jpg', 'b.jpg'])).rejects.toMatchObject({
-      code: 'ENGINE_FAILURE',
-      message: expect.stringContaining("device 'emulator-5554' not found"),
-    });
+    const error: unknown = await failing.device.addMedia(['a.jpg', 'b.jpg']).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining("device 'emulator-5554' not found") });
+    // The child-process error keeps the command line and stderr in fields the runner does not redact, so it is not the cause.
+    expect((error as Error).cause).toBeUndefined();
     expect(failing.ran).toHaveLength(1);
 
     const missing = await setup({ platform: 'ios', kind: 'simulator', id: 'B7A6E3D8-94CA-41E2-A2A4-47BA79FDABA0' }, async () => {

@@ -153,14 +153,15 @@ export async function findAdb(env: Readonly<Record<string, string | undefined>>,
 export function hostCommandError(error: unknown, command: HostCommand, stop: { readonly cancelled: boolean; readonly timedOutAfterMs?: number | undefined }): EngineError {
   const shown = `${path.basename(command.file)} ${command.args.slice(0, 3).join(' ')}`;
   if (stop.cancelled) return cancelled(`device.addMedia was cancelled while ${shown} ran`);
+  // No `cause`: the child-process error carries the command line and stderr in fields the runner does not redact.
   if (stop.timedOutAfterMs !== undefined) {
-    return new EngineError('OPERATION_TIMEOUT', `device.addMedia stopped ${shown} after ${stop.timedOutAfterMs}ms, the action timeout`, { retryable: false, cause: error });
+    return new EngineError('OPERATION_TIMEOUT', `device.addMedia stopped ${shown} after ${stop.timedOutAfterMs}ms, the action timeout`, { retryable: false });
   }
   const { code, stderr } = (error ?? {}) as { code?: unknown; stderr?: unknown };
   if (code === 'ENOENT') {
     const hint = command.file === 'xcrun' ? 'install Xcode and its command-line tools' : 'install the Android SDK platform-tools, or set ANDROID_HOME';
-    return new EngineError('ENGINE_FAILURE', `device.addMedia could not run ${command.file}: ${hint}`, { retryable: false, cause: error });
+    return new EngineError('ENGINE_FAILURE', `device.addMedia could not run ${command.file}: ${hint}`, { retryable: false });
   }
   const detail = typeof stderr === 'string' && stderr !== '' ? stderr : error instanceof Error ? error.message : String(error);
-  return new EngineError('ENGINE_FAILURE', `device.addMedia: ${shown} failed: ${detail}`, { retryable: false, cause: error });
+  return new EngineError('ENGINE_FAILURE', `device.addMedia: ${shown} failed: ${detail}`, { retryable: false });
 }
