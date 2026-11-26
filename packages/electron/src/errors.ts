@@ -18,8 +18,8 @@ export function unsupported(message: string): EngineError {
   return new EngineError('UNSUPPORTED_CAPABILITY', message, { retryable: false });
 }
 
-export function lostFocus(backendNodeId: number): EngineError {
-  return notActionable(`node ${backendNodeId} did not keep keyboard focus (the app moved it), so the input would reach another element`);
+export function lostFocus(): EngineError {
+  return notActionable('the element did not keep keyboard focus (the app moved it), so the input would reach another element');
 }
 
 /** Protocol and Playwright failures that mean the node, or the document it was in, is gone. */

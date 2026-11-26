@@ -80,12 +80,40 @@ describe('nodeOp', () => {
     expect(await page.inputValue('#date')).toBe('2026-03-04');
   });
 
+  it('fills a range past its default bounds and an input of an unknown type, trimmed and in the case the input keeps', async () => {
+    await page.setContent(`<input id="range" type="range" min="0" max="1000" step="50" value="100"><input id="odd" type="unknownkind"><input id="tint" type="color">`);
+    expect(await run(await element('#range'), 'setValue', '750')).toEqual({ ok: true });
+    expect(await page.inputValue('#range')).toBe('750');
+    expect(await run(await element('#odd'), 'checkEditable')).toEqual({ ok: true });
+    expect(await run(await element('#tint'), 'setValue', ' #FF8800 ')).toEqual({ ok: true });
+    expect(await page.inputValue('#tint')).toBe('#ff8800');
+  });
+
+  it('fails a check on a node the document dropped, so the harness locates it again', async () => {
+    await page.setContent(`<button id="gone">Gone</button>`);
+    const gone = await element('#gone');
+    await gone.evaluate((node) => node.parentNode?.removeChild(node));
+    await expect(run(gone, 'checkEnabled', true)).rejects.toThrow(/Node is detached/);
+  });
+
+  it('says whether a file input takes several files, empties one, and tells a radio', async () => {
+    await page.setContent(`<input id="one" type="file"><input id="many" type="file" multiple><input id="radio" type="radio"><div id="aria" role="radio"></div><input id="box" type="checkbox">`);
+    expect(await run(await element('#one'), 'takesFiles', 2)).toEqual({ ok: false, reason: 'the file input takes one file, not 2: it has no multiple attribute' });
+    expect(await run(await element('#many'), 'takesFiles', 2)).toEqual({ ok: true });
+    await run(await element('#one'), 'clearFiles');
+    expect(await run(await element('#radio'), 'isRadio')).toBe(true);
+    expect(await run(await element('#aria'), 'isRadio')).toBe(true);
+    expect(await run(await element('#box'), 'isRadio')).toBe(false);
+  });
+
   it('reads a checked state from the input or the aria attributes, and null for none', async () => {
-    await page.setContent(`<input id="box" type="checkbox" checked><div id="switch" role="switch" aria-checked="false"></div><button id="toggle" aria-pressed="true">T</button><div id="none"></div>`);
+    await page.setContent(`<input id="box" type="checkbox" checked><div id="switch" role="switch" aria-checked="false"></div><button id="toggle" aria-pressed="true">T</button><div id="none"></div><div id="mixed" role="checkbox" aria-checked="mixed"></div>`);
     expect(await run(await element('#box'), 'readChecked')).toBe(true);
     expect(await run(await element('#switch'), 'readChecked')).toBe(false);
     expect(await run(await element('#toggle'), 'readChecked')).toBe(true);
     expect(await run(await element('#none'), 'readChecked')).toBeNull();
+    // A mixed checkbox is not checked, so check() clicks it.
+    expect(await run(await element('#mixed'), 'readChecked')).toBe(false);
   });
 
   it('finds an option by label, then text, value, or index, and refuses a missing or disabled one', async () => {

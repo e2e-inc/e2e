@@ -5,7 +5,8 @@
  */
 
 import type { CDPSession, Page } from 'playwright-core';
-import { unsupported, stale } from './errors.ts';
+import { TestError } from '@e2e-dev/core/engine';
+import { stale } from './errors.ts';
 import { nodeOp, queryAll, type NodeOps } from './in-page/node-ops.ts';
 import type { SnapshotDocument } from './tree.ts';
 
@@ -150,7 +151,7 @@ export class DevTools {
     try {
       if (exceptionDetails !== undefined) {
         const reason = (exceptionDetails.exception?.description ?? exceptionDetails.text).split('\n')[0];
-        throw unsupported(`${JSON.stringify(selector)} is not a CSS selector this window can match: ${reason}`);
+        throw new TestError('INVALID_LOCATOR', `${JSON.stringify(selector)} is not a CSS selector: ${reason}`);
       }
       if (result.objectId === undefined) return new Set();
       const { result: entries } = await session.send('Runtime.getProperties', { objectId: result.objectId, ownProperties: true });

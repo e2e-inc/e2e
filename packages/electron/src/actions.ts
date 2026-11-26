@@ -131,12 +131,22 @@ async function longPress(step: Step, action: ActionOf<'longPress'>): Promise<voi
 
 async function focus(step: Step): Promise<void> {
   // pressSequentially focuses, then types into whatever holds focus: the node must be the one that does.
-  if (!(await step.commit(() => step.devtools.callOn(step.window.page, step.backendNodeId, 'focus')))) throw lostFocus(step.backendNodeId);
+  if (!(await step.commit(() => step.devtools.callOn(step.window.page, step.backendNodeId, 'focus')))) throw lostFocus();
 }
 
+/** Scrolls the element into view, waiting until it has a box to scroll to: an element that is not rendered cannot be. */
 async function scrollIntoView(step: Step): Promise<void> {
   const session = await step.devtools.session(step.window.page);
-  await session.send('DOM.scrollIntoViewIfNeeded', { backendNodeId: step.backendNodeId }).catch(() => step.devtools.callOn(step.window.page, step.backendNodeId, 'scrollIntoView'));
+  await pollCondition({
+    deadline: step.deadline,
+    signal: step.operation.signal,
+    negated: false,
+    evaluate: async () => {
+      await session.send('DOM.scrollIntoViewIfNeeded', { backendNodeId: step.backendNodeId }).catch(() => step.devtools.callOn(step.window.page, step.backendNodeId, 'scrollIntoView'));
+      return (await contentBox(step)) !== undefined;
+    },
+    onTimeout: () => notActionable('the element cannot be scrolled into view: it has no box on screen (hidden, or empty)'),
+  });
 }
 
 async function fill(step: Step, value: string): Promise<void> {
@@ -149,7 +159,7 @@ async function fill(step: Step, value: string): Promise<void> {
     return;
   }
   // The app's focus handler can hand focus on; text goes only to the node that still holds it.
-  if (!(await step.commit(() => devtools.callOn(window.page, backendNodeId, 'selectContents')))) throw lostFocus(backendNodeId);
+  if (!(await step.commit(() => devtools.callOn(window.page, backendNodeId, 'selectContents')))) throw lostFocus();
   // Both edit the selection as typing would, with input events and no key events, as fill promises.
   if (value === '') await step.commit(() => devtools.callOn(window.page, backendNodeId, 'deleteSelection'));
   else await step.commit(() => window.page.keyboard.insertText(value));
@@ -159,8 +169,10 @@ async function setChecked(step: Step, want: boolean): Promise<void> {
   const { devtools, window, backendNodeId } = step;
   const kind = want ? 'check' : 'uncheck';
   const now = await devtools.callOn(window.page, backendNodeId, 'readChecked');
-  if (now === null) throw unsupported(`node ${backendNodeId} has no checked state to ${kind}`);
+  if (now === null) throw unsupported(`the element has no checked state to ${kind}`);
   if (now === want) return;
+  // A click on a checked radio leaves it checked: only another radio of its group clears it.
+  if (!want && (await devtools.callOn(window.page, backendNodeId, 'isRadio'))) throw notActionable('uncheck cannot clear a radio button; select another radio in its group');
   const point = await actionablePoint(step, true);
   await step.commit(() => window.page.mouse.click(point.x, point.y));
   // A custom widget can set its state in a later task: the state is polled until the deadline, as the checks before the click are.
@@ -169,7 +181,7 @@ async function setChecked(step: Step, want: boolean): Promise<void> {
     signal: step.operation.signal,
     negated: false,
     evaluate: async () => (await devtools.callOn(window.page, backendNodeId, 'readChecked')) === want,
-    onTimeout: () => notActionable(`clicking node ${backendNodeId} did not ${kind} it`),
+    onTimeout: () => notActionable(`clicking the element did not ${kind} it`),
   });
 }
 
@@ -196,6 +208,13 @@ async function setInputFiles(step: Step, action: ActionOf<'setInputFiles'>): Pro
   const missing = files.find((file) => !existsSync(file));
   if (missing !== undefined) throw new TestError('INVALID_ARGUMENT', `setInputFiles: no file at ${missing}`);
   await waitReady(step, 'checkFileInput');
+  const takes = await step.devtools.callOn(step.window.page, step.backendNodeId, 'takesFiles', files.length);
+  if (!takes.ok) throw new TestError('INVALID_ARGUMENT', `setInputFiles: ${takes.reason}`);
+  // The DevTools call leaves the input as it was for an empty list; `[]` clears it.
+  if (files.length === 0) {
+    await step.commit(() => step.devtools.callOn(step.window.page, step.backendNodeId, 'clearFiles'));
+    return;
+  }
   const session = await step.devtools.session(step.window.page);
   await step.commit(() => session.send('DOM.setFileInputFiles', { files, backendNodeId: step.backendNodeId }));
 }
@@ -211,7 +230,7 @@ async function dragTo(step: Step, action: ActionOf<'dragTo'>): Promise<void> {
     // The target is waited for as the source was: in view, and the topmost element at the point the drop lands on.
     const to = await actionablePoint({ ...step, backendNodeId: target.backendNodeId }, false).catch((cause: unknown) => {
       if (cause instanceof EngineError && cause.code === 'NOT_ACTIONABLE') {
-        throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `the drop target ${cause.message.replace(/^node \d+ /, '')}, and the source was already pressed`, { retryable: false, cause });
+        throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `the drop target ${cause.message.replace(/^the element /, '')}, and the source was already pressed`, { retryable: false, cause });
       }
       throw cause;
     });
@@ -227,7 +246,7 @@ async function swipeNode(step: Step, action: ActionOf<'swipe'>): Promise<void> {
   const point = await actionablePoint(step, false);
   // The layout can change after the wait for actionability read the box.
   const box = await contentBox(step);
-  if (box === undefined) throw notActionable(`node ${step.backendNodeId} has no box on screen to swipe`);
+  if (box === undefined) throw notActionable('the element has no box on screen to swipe');
   await step.commit(() => step.window.page.mouse.move(point.x, point.y));
   await step.commit(() => wheel(step.devtools, step.window, action.direction, action.momentum ?? 'none', box));
 }

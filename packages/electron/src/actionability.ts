@@ -42,7 +42,7 @@ export async function waitReady<K extends ReadinessCheck>(target: WaitTarget, ch
       reason = state.reason;
       return false;
     },
-    onTimeout: () => notActionable(`node ${target.backendNodeId} cannot take the action: ${reason}`),
+    onTimeout: () => notActionable(`the element cannot take the action: ${reason}`),
   });
 }
 
@@ -57,10 +57,13 @@ export async function actionablePoint(target: WaitTarget, enabled: boolean): Pro
   const session = await devtools.session(window.page);
   let reason = 'it never became actionable';
   let point: ViewportPoint | undefined;
+  let covered = false;
   const probe = async (): Promise<ViewportPoint | string> => {
     const state = await devtools.callOn(window.page, backendNodeId, 'checkEnabled', enabled);
     if (!state.ok) return state.reason;
-    await session.send('DOM.scrollIntoViewIfNeeded', { backendNodeId }).catch(() => devtools.callOn(window.page, backendNodeId, 'scrollIntoView'));
+    // After a read where something covered the element, it is scrolled to the window's centre, clear of sticky chrome at an edge.
+    if (covered) await devtools.callOn(window.page, backendNodeId, 'scrollIntoView');
+    else await session.send('DOM.scrollIntoViewIfNeeded', { backendNodeId }).catch(() => devtools.callOn(window.page, backendNodeId, 'scrollIntoView'));
     const box = await contentBox(target);
     if (box === undefined) return 'it has no box on screen (hidden, or empty)';
     // A node wider or taller than the window is clicked in the middle of the part the window shows.
@@ -69,6 +72,7 @@ export async function actionablePoint(target: WaitTarget, enabled: boolean): Pro
     if (shown === undefined) return 'it is outside the window';
     const centre = whole({ x: shown.x + shown.width / 2, y: shown.y + shown.height / 2 });
     const hit = await devtools.callOn(window.page, backendNodeId, 'hitTest', centre.x, centre.y);
+    covered = !hit.ok;
     return hit.ok ? centre : hit.reason;
   };
   await pollCondition({
@@ -84,9 +88,9 @@ export async function actionablePoint(target: WaitTarget, enabled: boolean): Pro
       point = found;
       return true;
     },
-    onTimeout: () => notActionable(`node ${backendNodeId} cannot take the action: ${reason}`),
+    onTimeout: () => notActionable(`the element cannot take the action: ${reason}`),
   });
-  if (point === undefined) throw notActionable(`node ${backendNodeId} cannot take the action: ${reason}`);
+  if (point === undefined) throw notActionable(`the element cannot take the action: ${reason}`);
   return point;
 }
 
