@@ -1356,8 +1356,8 @@ On iOS only an `Other` carries one, and the state words after the role set
 
 On Android, React Native's `role="link"`, which expo-router's `Link` sets, is
 a `link`, and a `Text` link matches once. Before React Native 0.84, Android
-names a `Text` link by its text, also when an `accessibilityLabel` names it on
-iOS.
+names a `Text` link by its text, even when an `accessibilityLabel` gives it a
+different name on iOS.
 
 `StaticText` and `Text` on iOS and `TextView` on Android are `text`, and an
 Android `WebView` is `document`. Neither is a `getByRole` role: find text
