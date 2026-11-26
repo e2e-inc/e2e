@@ -389,7 +389,9 @@ const MAX_STEPS: usize = 500;
 
 /// Whether two stepper values are the same number: a step of 0.1 sums to 0.30000000000000004, not 0.3.
 fn same(a: f64, b: f64) -> bool {
-    (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1.0)
+    // A few hundred float epsilons of the larger value: the error of summing steps, never a whole step of a stepper
+    // whose values run into the billions (a Unix time in seconds steps by 1 at 1.8e9).
+    (a - b).abs() <= f64::EPSILON * 256.0 * a.abs().max(b.abs()).max(1.0)
 }
 
 /// Steps a value toward `target`, one increment or decrement at a time, until it shows it. It stops when the value
@@ -1029,6 +1031,25 @@ mod tests {
             || Some(value.get()),
         );
         assert!(reached.unwrap());
+    }
+
+    #[test]
+    fn tells_a_large_value_from_the_next_step_after_it() {
+        assert!(!super::same(1_800_000_000.0, 1_800_000_001.0));
+        assert!(super::same(0.1 + 0.1 + 0.1, 0.3));
+        let value = Cell::new(1_800_000_000.0);
+        let reached = step_to(
+            1_800_000_001.0,
+            Some(value.get()),
+            later(),
+            |up| {
+                value.set(value.get() + if up { 1.0 } else { -1.0 });
+                Ok(())
+            },
+            || Some(value.get()),
+        );
+        assert!(reached.unwrap());
+        assert_eq!(value.get(), 1_800_000_001.0);
     }
 
     /// A failure that answered after the input was sent.
