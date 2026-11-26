@@ -1226,9 +1226,10 @@ fn point_lands(aim: Result<Aim, AXError>, content: bool) -> Outcome<()> {
     match aim {
         Ok(Aim::Target) => Ok(()),
         Ok(Aim::Control) if !content => Ok(()),
-        Ok(Aim::Control) => {
-            Err(Failure::refused(codes::ACTION_FAILED, "a control is under the pointer now, over the node the point was taken on, so no click was sent"))
-        }
+        Ok(Aim::Control) => Err(Failure::refused(
+            codes::ACTION_FAILED,
+            "a control is under the pointer at the node the point was taken on (over it, or one it is in), so no click was sent",
+        )),
         Ok(Aim::Other) => Err(Failure::refused(codes::ACTION_FAILED, "another window or app is on top at the point, so no click was sent")),
         Err(error) => Err(unread(error, "find the element under the pointer")),
     }
