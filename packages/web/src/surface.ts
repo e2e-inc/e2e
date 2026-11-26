@@ -762,6 +762,11 @@ export class PlaywrightSurface {
     return `browser provider "${this.leases.name}" serves no downloads, so a browser on another machine keeps the file on its own disk (BrowserProvider.downloads)`;
   }
 
+  /** Settles once every tab change queued so far, such as a closed popup handing back its opener, has finished. */
+  tabsSettled(): Promise<void> {
+    return this.requireSession().tabsSettled();
+  }
+
   /** Creates the active page through the attempt's sole binding owner. */
   ensurePage(): Promise<Page> {
     return this.requireSession().ensurePage();

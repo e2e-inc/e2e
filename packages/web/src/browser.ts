@@ -455,7 +455,12 @@ async function collectDownloads(
       if (remote !== undefined) await saveDownloadsTo(surface.requirePage(), remote.dir, currentOperation.signal);
       requireOpen();
       // Raced so a hook that settles quietly on cancellation cannot let a cancelled wait run its trigger.
-      const before = remote === undefined ? undefined : await raceAbort(() => remote.before(currentOperation.signal), currentOperation.signal, 'download');
+      let before: unknown;
+      if (remote !== undefined) {
+        before = await raceAbort(() => remote.before(currentOperation.signal), currentOperation.signal, 'download');
+        // A tab that closed while the hook ran switches the active page only once its queued change runs.
+        await raceAbort(() => surface.tabsSettled(), currentOperation.signal, 'download');
+      }
       requireOpen();
       // A cancellation after the race settled but before this resumed would otherwise still run the trigger.
       if (currentOperation.signal.aborted) {

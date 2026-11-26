@@ -319,10 +319,9 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
       downloads: {
         dir: path.join(remoteDisk, 'downloads'),
         read: async (_lease, file) => readFile(file),
-        // Closes the popup, then outlasts the tab switch, as a listing request still in flight would.
+        // Resolves as soon as the popup has closed, before the session has switched back to the opener.
         before: async () => {
           await popup?.close();
-          await new Promise((resolve) => setTimeout(resolve, 100));
           return [];
         },
       },
