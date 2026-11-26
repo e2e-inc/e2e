@@ -13,20 +13,20 @@ screen
                 web-view
                   other "Checkout coupon"
                     other "Checkout coupon"
-                      other "Checkout coupon" value="1" [focused]
-                        text "Checkout coupon" value="Checkout coupon" [focused]
-                      other "Your coupon code is" [focused]
-                        text "Your coupon code is" value="Your coupon code is" [focused]
-                        text "TA-BENCH-50" value="TA-BENCH-50" [focused]
-                        text "." value="." [focused]
-                      other "Coupon code" [focused]
-                        text "Coupon code" value="Coupon code" [focused]
-                      textbox "Coupon code" [focused]
-                      other "I accept the terms" [focused]
-                        switch "I accept the terms" value="0" [focused]
-                        other "I accept the terms" [focused]
-                          text "I accept the terms" value="I accept the terms" [focused]
-                      button "Apply coupon" [focused]
-                      other "alert" [focused]
+                      other "Checkout coupon" value="1"
+                        text "Checkout coupon" value="Checkout coupon"
+                      other "Your coupon code is"
+                        text "Your coupon code is" value="Your coupon code is"
+                        text "TA-BENCH-50" value="TA-BENCH-50"
+                        text "." value="."
+                      other "Coupon code"
+                        text "Coupon code" value="Coupon code"
+                      textbox "Coupon code"
+                      other "I accept the terms"
+                        switch "I accept the terms" value="0"
+                        other "I accept the terms"
+                          text "I accept the terms" value="I accept the terms"
+                      button "Apply coupon"
+                      other "alert"
                 other value="0%"
                 other "Horizontal scroll bar, 1 page" value="0%"
