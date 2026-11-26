@@ -40,13 +40,35 @@ fn procargs(pid: i32) -> Option<(Vec<String>, Option<Vec<String>>)> {
         return None;
     }
     buffer.truncate(size);
-    let argc = i32::from_ne_bytes(buffer[0..4].try_into().ok()?) as usize;
-    let mut strings = buffer[4..].split(|byte| *byte == 0).filter(|part| !part.is_empty());
-    // The executable path, then argv (its first entry the executable again), then the environment.
-    strings.next()?;
-    let mut rest: Vec<String> = strings.map(|part| String::from_utf8_lossy(part).into_owned()).collect();
-    let environment = rest.split_off(argc.min(rest.len()));
-    let arguments = rest.into_iter().skip(1).collect();
+    parse_procargs(&buffer)
+}
+
+/// Reads a `KERN_PROCARGS2` buffer: `argc`, the executable path, the NUL padding after it, exactly `argc` argument
+/// strings (an empty argument included), then the environment up to the first empty string.
+fn parse_procargs(buffer: &[u8]) -> Option<(Vec<String>, Option<Vec<String>>)> {
+    let argc = i32::from_ne_bytes(buffer.get(0..4)?.try_into().ok()?).max(0) as usize;
+    let mut at = 4;
+    // The executable path, then its padding.
+    at += buffer.get(at..)?.iter().position(|byte| *byte == 0)?;
+    while buffer.get(at) == Some(&0) {
+        at += 1;
+    }
+    let mut next = || -> Option<String> {
+        let rest = buffer.get(at..).filter(|rest| !rest.is_empty())?;
+        let length = rest.iter().position(|byte| *byte == 0).unwrap_or(rest.len());
+        at += length + 1;
+        Some(String::from_utf8_lossy(&rest[..length]).into_owned())
+    };
+    let mut argv = Vec::with_capacity(argc);
+    for _ in 0..argc {
+        argv.push(next()?);
+    }
+    let mut environment = Vec::new();
+    while let Some(entry) = next().filter(|entry| !entry.is_empty()) {
+        environment.push(entry);
+    }
+    // argv[0] names the program again.
+    let arguments = argv.into_iter().skip(1).collect();
     // A restricted process shows its arguments alone: no variable a real environment always has.
     let shown = environment.iter().any(|entry| entry.starts_with("HOME=") || entry.starts_with("PATH=") || entry.starts_with("USER="));
     Some((arguments, shown.then_some(environment)))
@@ -81,4 +103,45 @@ pub fn carrying(marker: &str) -> Option<Vec<i32>> {
     pids.truncate(filled as usize);
     let own = std::process::id() as i32;
     Some(pids.into_iter().filter(|pid| *pid > 0 && *pid != own && carries(*pid, marker) == Some(true)).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_procargs;
+
+    /// A `KERN_PROCARGS2` buffer as the kernel lays it out.
+    fn buffer(path: &str, argv: &[&str], environment: &[&str]) -> Vec<u8> {
+        let mut out = (argv.len() as i32).to_ne_bytes().to_vec();
+        out.extend_from_slice(path.as_bytes());
+        out.extend_from_slice(&[0, 0, 0, 0]);
+        for entry in argv.iter().chain(environment) {
+            out.extend_from_slice(entry.as_bytes());
+            out.push(0);
+        }
+        out.extend_from_slice(&[0, 0]);
+        out
+    }
+
+    #[test]
+    fn keeps_an_empty_argument_and_the_environment_after_it() {
+        let parsed = parse_procargs(&buffer("/bin/app", &["/bin/app", "-Greeting", "", "x"], &["E2E_DESKTOP_LAUNCH=tok", "HOME=/u"]));
+        let (arguments, environment) = parsed.unwrap();
+        assert_eq!(arguments, ["-Greeting", "", "x"]);
+        assert_eq!(environment.unwrap(), ["E2E_DESKTOP_LAUNCH=tok", "HOME=/u"]);
+    }
+
+    #[test]
+    fn reads_a_hidden_environment_as_none_and_keeps_the_arguments() {
+        let (arguments, environment) = parse_procargs(&buffer("/System/App", &["/System/App", "-E2EDesktopLaunch", "tok"], &[])).unwrap();
+        assert_eq!(arguments, ["-E2EDesktopLaunch", "tok"]);
+        assert!(environment.is_none());
+    }
+
+    #[test]
+    fn refuses_a_buffer_cut_short() {
+        assert!(parse_procargs(&[1, 0]).is_none());
+        let mut cut = buffer("/bin/app", &["/bin/app", "a", "b"], &[]);
+        cut.truncate(14);
+        assert!(parse_procargs(&cut).is_none());
+    }
 }
