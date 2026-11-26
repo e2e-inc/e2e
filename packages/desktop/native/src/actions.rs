@@ -1044,16 +1044,23 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
         // moved, so a window the key opened (a handler on the text, a Return) holds the keyboard by the time the check
         // below reads it.
         let last = sent_to.borrow().clone();
-        if let Some((target, before)) = last {
+        if let Some((target, before)) = &last {
             let settle = deadline.min(Instant::now() + if quiet.get() { KEY_SETTLE_UNREAD } else { KEY_SETTLE });
-            match (target, before) {
+            match (target, *before) {
                 (Some(target), Some(count)) => {
-                    if !until(settle, || length(&target) != Some(count) || focused_element().as_ref() != Some(&target)) {
+                    if !until(settle, || length(target) != Some(count) || focused_element().as_ref() != Some(target)) {
                         quiet.set(true);
                     }
                 }
                 _ => sleep(KEY_SETTLE_UNREAD.min(settle.saturating_duration_since(Instant::now()))),
             }
+        }
+        // The element the key will reach, read before the checks below, so nothing reads the app between them and the
+        // key: focus that moves while they run is caught by them, not followed. The first key goes only to the field.
+        let target = focused_element();
+        let count = target.as_ref().and_then(&length);
+        if last.is_none() && target.as_ref() != Some(&entry.element) {
+            return Err(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed"));
         }
         let app = Element::application(entry.pid);
         let focused = app.element("AXFocusedWindow");
@@ -1063,8 +1070,6 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
         };
         let forward = !physical || app.boolean("AXFrontmost") == Some(true);
         if held && forward {
-            let target = focused_element();
-            let count = target.as_ref().and_then(&length);
             sent_to.replace(Some((target, count)));
             Ok(())
         } else {
