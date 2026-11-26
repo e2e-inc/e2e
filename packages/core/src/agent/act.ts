@@ -523,7 +523,7 @@ class ActDispatch {
     const feed = this.feed;
     return {
       get traceEligible() { return feed.traceEligible; },
-      observe: async (mode, firstLook) => screenOf(await this.feed.probe(mode, firstLook), this.runtime.app.base?.origin),
+      observe: async (mode) => screenOf(await this.feed.probe(mode), this.runtime.app.base?.origin),
       actions: this.bindings.actions,
       signal: this.accounting.signal,
       remainingMs: () => this.accounting.remainingMs(),

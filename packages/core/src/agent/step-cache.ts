@@ -46,12 +46,6 @@ import { bound } from '../internal/text.ts';
  */
 export interface StepCacheHost extends ReplayHost {
   /**
-   * `ReplayHost.observe`. A capture before any action serves the executor's
-   * first look unless `firstLook` is false: the raw start-path read of a miss
-   * is no look the executor would have taken.
-   */
-  observe(mode: SettleMode, firstLook?: boolean): Promise<ObservedScreen>;
-  /**
    * Tells the step's live progress the cache has the step (`true`) or has
    * handed it to the model (`false`), so a reporter can show the cache at
    * work instead of a model turn.
@@ -102,16 +96,6 @@ type EntryRead =
       /** The store's read rejected: nothing says a recording exists, so `cache.strict` runs the step live. */
       readonly unavailable?: true;
     };
-
-/**
- * What the start capture is for, which decides how far it settles. The path
- * alone reads the screen as it is. A baseline (the end anchors are the delta
- * from it) and a replay start (the first relocation reads it) must be a
- * settled screen. A hit the decision then refuses has paid that settle for
- * nothing in read-only mode, a rarer case than the replay it saves a
- * capture on.
- */
-type StartPurpose = 'path-only' | 'baseline' | 'replay-start';
 
 /**
  * What staging a passed step's recording came to: `staged` for attempt-end
@@ -248,9 +232,9 @@ export class StepTraceSession {
   }
 
   /**
-   * Opens the step: reads the cache entry, captures the write-side
-   * preconditions — the start path and, when this step may write, the
-   * baseline screen — then attempts a zero-turn replay of a hit. Returns the
+   * Opens the step: reads the cache entry, captures the start screen when
+   * this step may write or has a hit to replay, then attempts a zero-turn
+   * replay of a hit. Returns the
    * self-finalized verdict on a full replay whose postcondition holds;
    * undefined dispatches the executor — after a miss from the top, after a
    * divergence mid-step with `replayedPrefix` set. Every failure to replay is
@@ -265,7 +249,10 @@ export class StepTraceSession {
       ? await this.readEntry()
       : { status: 'miss', reason: 'retry' };
     if (read.status === 'miss') {
-      await this.captureStart(this.recorder === undefined ? 'path-only' : 'baseline');
+      // A miss that records nothing reads nothing from the start screen, so it
+      // captures none: the executor's own first look is the step's only one,
+      // as with the cache off.
+      if (this.recorder !== undefined) await this.captureStart();
       this.info = this.missed(read.reason, 0);
       if (read.unavailable !== true) this.failIfStale();
       if (read.reason === 'no-entry') await this.failIfRekeyed();
@@ -409,12 +396,16 @@ export class StepTraceSession {
   }
 
   /**
-   * The write-side preconditions, captured before any action: the start path,
-   * doubling as the replay decision's current path, and the baseline screen
-   * when this step may write. Settled as far as the capture's purpose asks.
+   * The start screen, captured before any action: its path is the replay
+   * decision's current path, and when this step may write it is the baseline
+   * (the end anchors are the delta from it). Held still, since a baseline and
+   * a replay's first relocation both need a settled screen, and it serves the
+   * executor's first look. A hit the decision then refuses has paid that
+   * settle for nothing in read-only mode, a rarer case than the replay it
+   * saves a capture on.
    */
-  private async captureStart(purpose: StartPurpose): Promise<ObservedScreen | undefined> {
-    const observation = await probeScreen(this.host, purpose === 'path-only' ? 'raw' : 'held-still', { firstLook: purpose !== 'path-only' });
+  private async captureStart(): Promise<ObservedScreen | undefined> {
+    const observation = await probeScreen(this.host, 'held-still', true);
     this.startPath = observation?.path;
     if (this.recorder !== undefined && observation?.kind === 'semantic') this.startNodes = observation.nodes;
     return observation;
@@ -430,7 +421,7 @@ export class StepTraceSession {
    * capturing the same screen again.
    */
   private async replayEntry(entry: TraceEntry): Promise<StepVerdict | undefined> {
-    const start = await this.captureStart('replay-start');
+    const start = await this.captureStart();
     const trace = entry.payload;
     this.recordedBy = trace.recordedBy;
     if (!this.host.traceEligible) {
@@ -787,11 +778,11 @@ function baselineScreen(screens: readonly ObservedScreen[], endPath: string | un
  * first look reads the same screen under the same policy, and would spend
  * another operation budget to be denied again.
  */
-async function probeScreen(host: StepCacheHost, mode: SettleMode, opening?: { readonly firstLook: boolean }): Promise<ObservedScreen | undefined> {
+async function probeScreen(host: StepCacheHost, mode: SettleMode, opening = false): Promise<ObservedScreen | undefined> {
   try {
-    return await host.observe(mode, opening?.firstLook);
+    return await host.observe(mode);
   } catch (cause) {
-    if (isRuntimeHardStop(cause) || (opening !== undefined && isAgentError(cause) && cause.code === 'POLICY_DENIED')) throw cause;
+    if (isRuntimeHardStop(cause) || (opening && isAgentError(cause) && cause.code === 'POLICY_DENIED')) throw cause;
     return undefined;
   }
 }

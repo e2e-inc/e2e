@@ -65,21 +65,21 @@ describe('semantic fallback handoff', () => {
     }
   });
 
-  it('settles the first look after a read-only miss, whose start-path probe is raw', async () => {
+  it('takes no cache capture on a read-only miss, and the first look settles', async () => {
     let captures = 0;
     const engine = defineEngine({
       name: 'loading-fixture', version: '1', spiVersion: 1, platform: 'fixture',
       observe: async () => {
         captures += 1;
-        // The previous step's page is still loading on the first capture.
-        const name = captures === 1 ? 'Loading' : 'Save';
+        // The previous step's page changes on each of its first three captures, then holds still.
+        const name = captures <= 3 ? `Loading ${captures}` : 'Save';
         return { root: { ref: { id: 'root', revision: '' }, children: [{ ref: { id: 'n', revision: '' }, role: 'button', name }] }, viewport: VIEWPORT };
       },
     });
     const executor: StepExecutor = {
       name: 'first-look-executor',
       async runStep(context) {
-        expect(captures).toBe(1);
+        expect(captures).toBe(0);
         const observation = await context.observe();
         expect(observation.text).toContain('Save');
         expect(observation.text).not.toContain('Loading');

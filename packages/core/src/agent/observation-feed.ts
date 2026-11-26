@@ -156,13 +156,13 @@ export class ObservationFeed {
   /**
    * Captures cache evidence in queue order, settled as far as `mode` asks.
    * Before any action, its completed capture can serve the executor's first
-   * look once, unless `firstLook` is false. Every later capture clears that
-   * handoff before starting, even when the later capture fails.
+   * look once. Every later capture clears that handoff before starting, even
+   * when the later capture fails.
    */
-  probe(mode: SettleMode, firstLook = true): Promise<AgentObservation> {
+  probe(mode: SettleMode): Promise<AgentObservation> {
     return this.queue.run(async () => {
       const observation = await this.observeNow(mode, false);
-      if (firstLook && this.accounting.metrics.actionSteps === 0) this.opening = observation;
+      if (this.accounting.metrics.actionSteps === 0) this.opening = observation;
       return observation;
     });
   }
