@@ -78,7 +78,7 @@ it.each(['caller abort', 'input deadline', 'device fixture abort'] as const)('ca
   }
 });
 
-it('cancels a hardware button press still pending at the action timeout, so a late power press never lands', async () => {
+it('cancels a hardware button press still pending when the input budget runs out', async () => {
   const stateDir = mkdtempSync(path.join(tmpdir(), 'e2e-input-cancel-'));
   let releaseRequest!: () => void;
   let markStarted!: () => void;
@@ -113,7 +113,7 @@ it('cancels a hardware button press still pending at the action timeout, so a la
     const rejected = expect(device.pressButton('power')).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
     await started;
     await rejected;
-    // The external request resumes after the action timed out.
+    // The external request resumes after the input budget ran out.
     releaseRequest();
     await finished;
     expect(delivered).toBe(0);

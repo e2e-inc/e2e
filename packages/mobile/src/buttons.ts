@@ -29,9 +29,9 @@ const HARDWARE_BUTTON_NAMES = Object.keys(HARDWARE_BUTTONS) as [HardwareButton, 
 
 /**
  * Presses one hardware button on the selected device. The press takes the
- * input budget's signal, so a press still pending at the action timeout is
- * cancelled rather than landing after the test moved on (a late `power`
- * turns the screen off).
+ * input budget's signal, so when the budget runs out it cancels a request
+ * the daemon has not sent yet, instead of letting a late `power` turn the
+ * screen off.
  */
 export function pressButton(client: AgentDeviceClient, button: HardwareButton, selection: DeviceSelection, signal: AbortSignal): Promise<unknown> {
   return client.command.hardwareButton({ ...selection, button: HARDWARE_BUTTONS[button], signal });
