@@ -73,6 +73,7 @@ import { mobileDoctor } from './doctor.ts';
 import { deviceLabel, deviceSelection, pinnedApp, type DeviceSelection, type SlotBinding } from './bindings.ts';
 import { assertAppId } from './links.ts';
 import { bootRequest, DevicePool } from './pool.ts';
+import { androidIndexQuery, assertMediaFiles, findAdb, hostCommandError, mediaCommands, mediaFiles, mediaRefusal, runHostCommand, unindexedFiles, type DeviceKind, type HostCommand, type HostRunner } from './media.ts';
 import { recordLease, travelledLease, type DeviceLease, type RecordingDeviceProvider } from './provider.ts';
 import {
   installedIdentity,
@@ -344,6 +345,9 @@ function depthBelow(entry: ProjectedNode, ancestor: ProjectedNode): number {
   return hops;
 }
 
+/** How often `addMedia` asks an Android device's media index for the files it pushed. */
+const MEDIA_INDEX_POLL_MS = 250;
+
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(done, ms);
@@ -526,6 +530,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   private where: string | undefined;
   /** The agent-device session this worker drives and the device `init` booted under it. */
   private bound: BoundDevice | undefined;
+  /** What agent-device booted that device as: a simulator, an emulator, or a physical device; set in init. */
+  private boundKind: DeviceKind | undefined;
   /** How this worker's device records through its provider: set in init when the pool's provider records and the slot rides one of its leases. */
   private leaseRecorder: LeaseRecorder | undefined;
   /**
@@ -566,6 +572,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   constructor(
     readonly options: MobileOptions<Platform>,
     private readonly createClient: ClientFactory,
+    private readonly runHost: HostRunner = runHostCommand,
   ) {
     rejectUnknownKeys('mobile()', options, MOBILE_OPTION_KEYS);
     this.pool = new DevicePool(options, createClient);
@@ -691,6 +698,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
         : { provider, lease, runId: info.runId, targetName: info.targetName, env: info.env };
     const booted = await this.command('boot', (client) => client.devices.boot(bootRequest(this.selection())), info.signal);
     this.bound = { session, deviceId: booted.id, deviceName: booted.device };
+    this.boundKind = booted.kind;
     // Nothing is installed here: a device provider that installed the build
     // from `appPath` says so on the binding, and otherwise the suite installs
     // it where it wants to, with `device.installApp()`.
@@ -1943,6 +1951,44 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    */
   async fold(pose: FoldPose, signal: AbortSignal): Promise<void> {
     await this.screenCommand('device.fold', (client) => client.command.fold({ ...this.selection(), pose }), signal);
+  }
+
+  /**
+   * Adds photos or videos, resolved against the project root, to the
+   * library of the session's device with the platform's own tool on this
+   * machine (see `media.ts`). Refuses a device this machine cannot reach,
+   * and a path that is not a readable file, before anything runs. The
+   * `timeoutMs` budget starts with the call: a program still running at it
+   * is killed, and none starts after it, so nothing runs on into the next
+   * step. The programs get this process's environment, the one the
+   * agent-device client and the daemon it starts read, so they reach the
+   * same adb server and simulator set. Nothing on screen changes, so the
+   * screen this surface read stays.
+   */
+  async addMedia(files: unknown, signal: AbortSignal, timeoutMs: number): Promise<void> {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const stop = AbortSignal.any([signal, timeout]);
+    const resolved = mediaFiles(files).map((file) => path.resolve(this.projectRoot, file));
+    const { platform } = this.options;
+    const env = process.env;
+    const refusal = mediaRefusal(platform, this.boundKind, this.device, env);
+    if (refusal !== undefined) throw unsupported(refusal);
+    const { deviceId } = this.boundDevice;
+    const sizes = await assertMediaFiles(platform, resolved);
+    const run = async (command: HostCommand): Promise<string> => {
+      try {
+        if (stop.aborted) throw stop.reason;
+        return await this.track(this.runHost(command, { env, signal: stop }));
+      } catch (error) {
+        throw hostCommandError(error, command, { cancelled: signal.aborted, timedOutAfterMs: timeout.aborted ? timeoutMs : undefined });
+      }
+    };
+    const adb = platform === 'android' ? await findAdb(env) : 'adb';
+    for (const command of mediaCommands(platform, deviceId, resolved, adb, env)) await run(command);
+    if (platform !== 'android') return;
+    // The scan runs after the broadcast returns: wait, within the same budget, until the index lists every file.
+    const query = androidIndexQuery(deviceId, adb);
+    while (unindexedFiles(await run(query), resolved, sizes).length > 0) await sleep(MEDIA_INDEX_POLL_MS, stop);
   }
 
   /**

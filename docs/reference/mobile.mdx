@@ -510,6 +510,7 @@ test('offline banner', { platforms: ['android'] }, async ({ app, device, screen 
 | [`openApp`](#openapp) | `Promise<void>` |
 | [`openLink`](#openlink) | `Promise<void>` |
 | [`closeApp`](#closeapp) | `Promise<void>` |
+| [`addMedia`](#addmedia) | `Promise<void>` |
 | [`clearKeychain`](#clearkeychain) | `Promise<void>` |
 | [`foregroundApp`](#foregroundapp) | `Promise<ForegroundApp>` |
 | [`viewport`](#viewport) | `Promise<ViewportSize>` |
@@ -940,6 +941,48 @@ await device.openApp('com.example.app'); // launches fresh, on its first screen
 ```
 
 - A screen query before the next `openApp` is `APP_NOT_OPEN` too.
+
+#### `addMedia`
+
+```ts
+/**
+ * Adds photos or videos (paths resolved against the project root) to the
+ * device's library, for a test of the system photo picker. It runs on this
+ * machine: `xcrun simctl addmedia` on an iOS simulator, which adds a copy
+ * on every call, and on Android `adb push` to `/sdcard/Pictures` under the
+ * file's own name, which replaces an earlier file of that name, then a
+ * media scan, and it returns once the media index lists the file; there, two names in a call that differ at most in case, and
+ * a name starting with a dot (hidden from the library), are
+ * `INVALID_ARGUMENT`. A physical iPhone, a device a provider leased, and a device
+ * behind a remote agent-device daemon are `UNSUPPORTED_CAPABILITY`; a path
+ * that is not a readable file is `INVALID_ARGUMENT`. The library sorts by
+ * the capture date in a photo's metadata, not the day it was added. Call
+ * it before `app.open()`: an app that is already showing the library may
+ * not see the new item until it reloads.
+ */
+addMedia(files: string | readonly string[]): Promise<void>;
+```
+
+```ts
+await device.addMedia(['tests/fixtures/receipt.jpg', 'tests/fixtures/clip.mov']);
+await app.open();
+```
+
+- The step label shows the file names, not their directories.
+- `xcrun` and `adb` run with the runner process's environment, the one
+  agent-device reads, so they reach its adb server and, through
+  `AGENT_DEVICE_IOS_SIMULATOR_DEVICE_SET`, its simulator set.
+- adb is the one under `ANDROID_SDK_ROOT`, `ANDROID_HOME`, or the default
+  SDK location, else `adb` on `PATH`, the same one agent-device runs.
+- See "Photos for a picker test" under [The device fixture](/mobile#the-device-fixture)
+  for a full test.
+
+| Throws | When |
+| --- | --- |
+| `UNSUPPORTED_CAPABILITY` | A physical iPhone, a device a provider leased, or a device behind another agent-device daemon (`AGENT_DEVICE_DAEMON_BASE_URL` included), before anything runs. |
+| `INVALID_ARGUMENT` | No paths, an empty path, a path that is not a readable file, or on Android two file names that differ at most in case, or one that starts with a dot. |
+| `ACTION_FAILED` | `config.actionTimeout` passes, counted from the call; a running `xcrun` or `adb` is stopped, and none starts after it. On Android this includes the wait for the media index to list each pushed file, so a timeout can follow pushes that succeeded. |
+| `ENGINE_FAILURE` | `xcrun` or `adb` is missing, or fails; the message carries what it wrote to stderr, left out when longer than 2,000 characters. |
 
 #### `clearKeychain`
 

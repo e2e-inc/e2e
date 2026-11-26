@@ -109,6 +109,7 @@ Calls on `device` run only on a device, so a test that uses it declares
 | `permissions: { all: allow }` | `app.permissions: 'all'` |
 | `stopApp`, `killApp` | `device.closeApp()`, a force stop; `app.restart()` to stop the app and launch it again |
 | `clearKeychain`, `openLink`, `setLocation`, `setAirplaneMode`, `setOrientation`, `setClipboard` | the same on `device`, such as `device.openLink(url)`. `clearKeychain` is iOS simulator only, `setAirplaneMode(true)` Android 11 or newer. For `travel`, loop `device.setLocation` |
+| `addMedia` | `device.addMedia(path)` before `app.open()`, on a simulator, emulator, or Android phone this machine drives, see [`addMedia`](/reference/mobile#addmedia) |
 | `back`, `pressKey: Home`, `hideKeyboard`, `setDarkMode` | `app.back()`, `device.home()`, `device.dismissKeyboard()`, `device.setAppearance('dark')` |
 | `pressKey: Remote Dpad Up`, `Down`, `Left`, `Right`, `Remote Dpad Center` | `device.pressRemote('up')`, `'down'`, `'left'`, `'right'`, `'select'` |
 | `pressKey: Remote Media Play Pause`, `Remote Media Stop`, `Remote Media Next`, `Remote Media Previous`, `Remote Media Rewind`, `Remote Media Fast Forward`, `Remote Menu` | `device.pressRemote('play-pause')`, `'stop'`, `'next'`, `'previous'`, `'rewind'`, `'fast-forward'`, `'menu'`; the [remote keys](/reference/engine#keys) list the rest |
@@ -172,7 +173,6 @@ on purpose.
 | --- | --- |
 | The grant-all default, names such as `bluetooth` and `storage` | `app.permissions: 'all'`, which on Android grants every runtime permission the app declares, or accept the prompt with `device.alert('accept')` |
 | `inputText` and `pressKey: Enter` with no field, `eraseText: N`, `pressKey: backspace`, `tab` | `fill` or `press` on the field's locator; `fill` a shortened `inputValue()` to erase; tap the next field for Tab |
-| `addMedia` | On an iOS simulator, `xcrun simctl addmedia` before `app.open()`; Android is unchecked. See "Photos for a picker test" under [The device fixture](/mobile#the-device-fixture) |
 | `label` on a command | `-`. The call names each step |
 | `scrollUntilVisible: { centerElement, visibilityPercentage }` | No exact match. After it resolves, read `boundingBox()`, then `screen.swipe({ direction, momentum: 'slow' })` if the node is off center |
 | Device logs and crash reports beside a failure | `adb logcat` or `xcrun simctl spawn <udid> log stream`, collected in a fixture |

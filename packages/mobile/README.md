@@ -139,7 +139,7 @@ test('shows the version in dark mode', async ({ agent, device, screen }) => {
 Methods: `setNetwork`, `setAirplaneMode`, `setPermission`, `setLocation`,
 `clearLocation`, `setAppearance`, `setOrientation`, `fold`, `setBiometrics`,
 `enrollBiometrics`, `installApp`, `uninstallApp`, `isAppInstalled`,
-`openApp`, `openLink`, `closeApp`, `clearKeychain`, `foregroundApp`, `home`,
+`openApp`, `openLink`, `closeApp`, `addMedia`, `clearKeychain`, `foregroundApp`, `home`,
 `back`, `shake`, `alert`, `dismissKeyboard`, `isKeyboardShown`, `clipboard`,
 `setClipboard`, and the `locator` accessor.
 

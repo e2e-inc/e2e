@@ -146,6 +146,7 @@ opens on its own, so each test starts with `app.open()`.
 | `act` step | `agent.act('...')`, or a locator call when the step opens a known route or acts on one named control |
 | `assert` step | `agent.assert('...')`, then a locator assertion when a label or test id names the end state |
 | `login` step | a `test.setup` that signs in and calls `session.save()`, and `{ session }` on each test, see [Authentication](/authentication) |
+| `files` step on mobile (photo library) | `device.addMedia('tests/fixtures/receipt.jpg')` before `app.open()`, then pick the photo in the system picker, see "Photos for a picker test" under [The device fixture](/mobile#the-device-fixture) |
 | `files` step, `@receipt.jpg` in a step, on web | the file's repository path in the goal: `agent.act('attach tests/fixtures/receipt.jpg')`, or `locator.setInputFiles()` |
 | `screenshot` step | `app.screenshot('label')` |
 | `javascript` step | `browser.evaluate()`. It fails only when the code throws, so check a `{ success: false }` return with `expect` |
@@ -171,7 +172,6 @@ purpose. Use the workaround, or keep the test in TesterArmy.
 | TesterArmy | Use today |
 | --- | --- |
 | `inbox` credential, `login` with `temporaryEmail` | Call your own test inbox from a [fixture](/fixtures) |
-| `files` step on mobile (photo library) | On an iOS simulator, `xcrun simctl addmedia` before `app.open()`, then pick the photo in the system picker; Android is unchecked. See "Photos for a picker test" under [The device fixture](/mobile#the-device-fixture) |
 | `accessibilityAuditEnabled` | - |
 
 ### Not yet
