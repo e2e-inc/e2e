@@ -277,8 +277,7 @@ fn physical(entry: &Entry, action: Pointer) -> Outcome<()> {
         return Err(Failure::refused(codes::ACTION_FAILED, "another element covers the center of this one, so the pointer would land there"));
     }
     // Raising the window and the hit test can take a second on a slow app: the caller may have given up meanwhile.
-    go("pointer")?;
-    input::pointer(x, y, action).map_err(Failure::delivered)
+    input::pointer(x, y, action, &|| go("pointer"))
 }
 
 /// Waits a moment for a menu an action opened to show, so the next read finds it; an action that opens none waits it out and is still done.
@@ -844,8 +843,9 @@ pub fn focus_window(pid: i32, window: u32) -> Outcome<()> {
     raise(pid, &element)
 }
 
-/// Physical pointer input at a point on screen.
-pub fn pointer_at(x: f64, y: f64, kind: &str) -> Outcome<()> {
+/// Physical pointer input at a point on screen, sent only while `input_id` is not cancelled and `deadline` has not
+/// passed.
+pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
     let action = match kind {
         "hover" => Pointer::Move,
         "tap" => Pointer::Click { right: false, count: 1 },
@@ -853,7 +853,7 @@ pub fn pointer_at(x: f64, y: f64, kind: &str) -> Outcome<()> {
         "secondaryTap" => Pointer::Click { right: true, count: 1 },
         other => return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("no pointer action {other}"))),
     };
-    input::pointer(x, y, action).map_err(Failure::delivered)
+    guarded(input_id, deadline, || input::pointer(x, y, action, &|| go("pointer")))
 }
 
 #[cfg(test)]

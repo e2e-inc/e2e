@@ -245,11 +245,14 @@ pub async fn focus_window(pid: i32, window_id_text: String) -> Value {
     .await
 }
 
-/// Physical pointer input at a point on screen: `tap`, `doubleTap`, `secondaryTap`, or `hover`.
+/// Physical pointer input at a point on screen: `tap`, `doubleTap`, `secondaryTap`, or `hover`. `inputId` names it, so
+/// `cancelInput` stops what it has yet to send.
 #[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
-pub async fn pointer(x: f64, y: f64, kind: String) -> Value {
+pub async fn pointer(x: f64, y: f64, kind: String, input_id: Option<u32>, timeout_ms: Option<f64>) -> Value {
+    // No budget given: the call sends at once, as before `timeoutMs` was passed.
+    let deadline = deadline(timeout_ms.unwrap_or(60_000.0));
     blocking(move || {
-        actions::pointer_at(x, y, &kind)?;
+        actions::pointer_at(x, y, &kind, input_id, deadline)?;
         Ok(serde_json::json!({}))
     })
     .await

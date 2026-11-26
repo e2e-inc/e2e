@@ -346,14 +346,17 @@ pub enum Pointer {
     Click { right: bool, count: i64 },
 }
 
-/// Moves the real pointer to a point on screen, and clicks there.
-pub fn pointer(x: f64, y: f64, action: Pointer) -> Outcome<()> {
+/// Moves the real pointer to a point on screen, and clicks there. `proceed` is asked before the move and before each
+/// click, so nothing more is sent once the caller gave up; a failure after the move may have reached the app.
+pub fn pointer(x: f64, y: f64, action: Pointer, proceed: &dyn Fn() -> Outcome<()>) -> Outcome<()> {
     let source = source()?;
     let point = CGPoint::new(x, y);
     let make = |kind: CGEventType, button: CGMouseButton| {
         CGEvent::new_mouse_event(source.clone(), kind, point, button).map_err(|_| Failure::refused(codes::INTERNAL, "could not create a pointer event"))
     };
-    make(CGEventType::MouseMoved, CGMouseButton::Left)?.post(CGEventTapLocation::HID);
+    let moved = make(CGEventType::MouseMoved, CGMouseButton::Left)?;
+    proceed()?;
+    moved.post(CGEventTapLocation::HID);
     sleep(Duration::from_millis(30));
     let Pointer::Click { right, count } = action else { return Ok(()) };
     let (down, up, button) = if right {
@@ -362,8 +365,11 @@ pub fn pointer(x: f64, y: f64, action: Pointer) -> Outcome<()> {
         (CGEventType::LeftMouseDown, CGEventType::LeftMouseUp, CGMouseButton::Left)
     };
     for click in 1..=count {
-        for kind in [down, up] {
-            let event = make(kind, button)?;
+        let events = [make(down, button), make(up, button)];
+        let [Ok(pressed), Ok(released)] = events else { return Err(Failure::unconfirmed(codes::INTERNAL, "could not create a pointer event")) };
+        // Each click checks the caller still wants it; a button pressed is always released.
+        proceed().map_err(Failure::delivered)?;
+        for event in [pressed, released] {
             event.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, click);
             event.post(CGEventTapLocation::HID);
             sleep(Duration::from_millis(15));
