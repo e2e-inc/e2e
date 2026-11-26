@@ -57,7 +57,7 @@ export interface SnapshotDocument {
   readonly layout: {
     readonly nodeIndex: readonly number[];
     readonly bounds: readonly (readonly number[])[];
-    /** Per layout node, the computed styles the read asked for, as string indexes: `visibility` alone. */
+    /** Per layout node, the computed styles the read asked for, as string indexes: `visibility`, `overflow-x`, `overflow-y`. */
     readonly styles?: readonly (readonly number[])[];
   };
 }
@@ -100,7 +100,7 @@ export interface ProjectionOptions {
 
 export interface Projection {
   readonly root: SemanticNode;
-  /** Nodes were left out: past the node cap, or a nested document the read does not enter. */
+  /** Nodes were left out past the node cap. A nested document is never entered; its frame is a node of its own. */
   readonly truncated: boolean;
 }
 
@@ -141,6 +141,15 @@ const HIDING_REASONS = new Set(['ariaHiddenElement', 'ariaHiddenSubtree', 'notRe
 
 /** Roles whose value is what a person typed or picked. */
 const VALUE_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'spinbutton', 'slider']);
+
+/** ARIA range roles: an element's value is its `aria-valuetext`, else its `aria-valuenow`, as written, as the web reads it. */
+const RANGE_ROLES = new Set(['slider', 'spinbutton', 'progressbar', 'meter', 'scrollbar']);
+
+/** Roles whose read-only state is their `aria-readonly`, as the web reads it. */
+const ARIA_READONLY_ROLES = new Set(['checkbox', 'combobox', 'grid', 'gridcell', 'listbox', 'radiogroup', 'slider', 'spinbutton', 'textbox', 'searchbox', 'columnheader', 'rowheader', 'switch', 'treegrid']);
+
+/** Roles whose level is their `aria-level`, as the web reads it; a heading element's comes from its tag. */
+const LEVEL_ROLES = new Set(['heading', 'listitem', 'row', 'treeitem']);
 
 const DEFAULT_MAX_NODES = 5000;
 
@@ -261,6 +270,8 @@ interface Draft {
   level?: number;
   attributes?: Record<string, string>;
   rect?: { x: number; y: number; width: number; height: number };
+  /** The box before any scroll container clips it, which line breaks between text runs are read from. */
+  layout?: { x: number; y: number; width: number; height: number };
   children: Draft[];
   /** A text run: its text folds into the parent when it is the parent's only content. */
   isText: boolean;
@@ -299,7 +310,8 @@ function originAndPath(value: string, base: string | undefined): string {
       return inner === null || inner.origin === 'null' ? 'blob:…' : `blob:${inner.origin}${inner.pathname}${elided(url.search !== '', url.hash !== '')}`;
     }
     if (url.origin !== 'null') return `${url.origin}${rest}`;
-    if (url.protocol === 'mailto:' || url.protocol === 'tel:') return `${url.protocol}${rest}`;
+    // A local page's links are files beside it: the path says where one goes, as the web shows it.
+    if (url.protocol === 'mailto:' || url.protocol === 'tel:' || url.protocol === 'file:') return `${url.protocol}${url.protocol === 'file:' ? '//' : ''}${rest}`;
     return `${url.protocol}…`;
   } catch {
     const [beforeFragment = '', ...fragment] = value.split('#');
@@ -315,8 +327,8 @@ function collapse(text: string): string {
 
 /** Whether `next` starts below `previous`, which with no white space between them means a block boundary, not inline markup. */
 function startsNewLine(previous: Draft, next: Draft): boolean {
-  const { rect: above } = previous;
-  const { rect: below } = next;
+  const { layout: above } = previous;
+  const { layout: below } = next;
   return above !== undefined && below !== undefined && below.y >= above.y + above.height - 0.5;
 }
 
@@ -380,11 +392,39 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
   });
   const cellOf = (order: number): number => cells[order] ?? -1;
 
+  const toCss = (box: readonly number[]): NonNullable<Draft['rect']> => {
+    const [x = 0, y = 0, width = 0, height = 0] = box;
+    return { x: x / geometry.scale - geometry.scrollX, y: y / geometry.scale - geometry.scrollY, width: width / geometry.scale, height: height / geometry.scale };
+  };
   const rectOf = (facts: DomFacts | undefined): Draft['rect'] => {
     const box = facts?.bounds;
+    return box === undefined || box.length < 4 ? undefined : toCss(box);
+  };
+  // What each node's scroll containers show of it: a list item scrolled out of its list is not under any point of the
+  // window, though its box says it is. A parent precedes its children, so one pass carries each container's box down.
+  const layoutBoxes = new Map<number, readonly number[]>();
+  const clipping = new Set<number>();
+  document.layout.nodeIndex.forEach((node, at) => {
+    if (layoutBoxes.has(node)) return;
+    layoutBoxes.set(node, document.layout.bounds[at]!);
+    const style = document.layout.styles?.[at];
+    const overflows = [style?.[1], style?.[2]].map((index) => strings[index ?? -1]);
+    if (overflows.some((value) => value !== undefined && value !== 'visible')) clipping.add(node);
+  });
+  const clipFor: (readonly number[] | undefined)[] = [];
+  const clipBelow: (readonly number[] | undefined)[] = [];
+  parentIndexes.forEach((parent, index) => {
+    const inherited = clipBelow[parent] ?? undefined;
+    clipFor.push(inherited);
+    const box = layoutBoxes.get(index);
+    clipBelow.push(clipping.has(index) && box !== undefined ? intersect(inherited, box) : inherited);
+  });
+  /** The part of the node's box its scroll containers show, empty at the container's edge when none of it is. */
+  const shownRect = (facts: DomFacts | undefined, index: number): Draft['rect'] => {
+    const box = facts?.bounds;
     if (box === undefined || box.length < 4) return undefined;
-    const [x, y, width, height] = box as [number, number, number, number];
-    return { x: x / geometry.scale - geometry.scrollX, y: y / geometry.scale - geometry.scrollY, width: width / geometry.scale, height: height / geometry.scale };
+    const clip = clipFor[index];
+    return toCss(clip === undefined ? box : intersect(clip, box));
   };
 
   /**
@@ -413,9 +453,10 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
       }
       kept += 1;
       const rect = rectOf(facts);
+      const shown = shownRect(facts, domIndex.get(backend) ?? -1);
       // The white space comes from the text node's own source: Chromium's name for a run trims what the next element's run follows.
       const spacing = source ?? stringOf(node.name) ?? '';
-      const run: Draft = { id: options.idOf(backend), text: bound(text, OBSERVED_TEXT_LIMIT, mode), states: rect === undefined || rect.width === 0 || rect.height === 0 ? { hidden: true } : {}, ...(rect === undefined ? {} : { rect }), children: [], isText: true, spaceBefore: /^\s/.test(spacing), spaceAfter: /\s$/.test(spacing), order: domIndex.get(backend) ?? -1 };
+      const run: Draft = { id: options.idOf(backend), text: bound(text, OBSERVED_TEXT_LIMIT, mode), states: rect === undefined || rect.width === 0 || rect.height === 0 ? { hidden: true } : {}, ...(shown === undefined ? {} : { rect: shown }), ...(rect === undefined ? {} : { layout: rect }), children: [], isText: true, spaceBefore: /^\s/.test(spacing), spaceAfter: /\s$/.test(spacing), order: domIndex.get(backend) ?? -1 };
       drafted.set(backend, run);
       return [run];
     }
@@ -429,9 +470,11 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
     // a name, or a locator's selector makes it addressable.
     const silent = node.ignored || (role !== 'textbox' && (GENERIC_ROLES.has(chromium) || role === 'generic'));
     const selected = backend !== undefined && options.keep?.has(backend) === true;
-    if (silent && testId === undefined && !selected && (node.ignored || name === '')) return children();
+    // A focusable element with no role (a span with a tabindex) is a control of the app's own: it keeps a node, so an
+    // action reaches it rather than the container its text would fold into.
+    const focusable = !node.ignored && node.properties?.some((property) => property.name === 'focusable' && property.value.value === true) === true;
+    if (silent && testId === undefined && !selected && !focusable && (node.ignored || name === '')) return children();
     if (backend === undefined) return children();
-    if (role === 'iframe') truncated = true;
     if (kept >= maxNodes) {
       truncated = true;
       return [];
@@ -462,15 +505,19 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
         case 'readonly':
           draft.states[property.name] = value === true || value === 'true';
           break;
-        case 'level':
-          if (role === 'heading' && typeof value === 'number') draft.level = value;
-          break;
       }
     }
+    // A heading element's level is its tag's; an ARIA role's is its aria-level, as the web reads them (Chromium computes
+    // one for every treeitem, and a default for a role="heading" with none).
+    const tagLevel = /^H([1-6])$/.exec(facts?.nodeName ?? '')?.[1];
+    const ariaLevel = Number.parseInt(facts?.attributes['aria-level'] ?? '', 10);
+    if (role === 'heading' && tagLevel !== undefined && Number.isNaN(ariaLevel)) draft.level = Number(tagLevel);
+    else if (LEVEL_ROLES.has(role) && ariaLevel >= 1) draft.level = ariaLevel;
     // An editing host, and an element inside one, takes text; Chromium marks it `editable` and gives no read-only state.
     if (draft.states['readonly'] === undefined && node.properties?.some((property) => property.name === 'editable') === true) draft.states['readonly'] = false;
     // A native field has a read-only state whatever Chromium reports for it (none for a select): its readonly attribute.
     if (facts?.nodeName === 'INPUT' || facts?.nodeName === 'TEXTAREA' || facts?.nodeName === 'SELECT') draft.states['readonly'] = 'readonly' in attributes;
+    else if (draft.states['readonly'] === undefined && ARIA_READONLY_ROLES.has(role)) draft.states['readonly'] = attributes['aria-readonly']?.toLowerCase() === 'true';
     const checkable = facts?.nodeName === 'INPUT' && ['checkbox', 'radio'].includes(attributes['type']?.toLowerCase() ?? '');
     if (facts?.nodeName === 'SELECT') {
       // A select's value is what its chosen option submits, as `select.value` reads it; its options name the labels.
@@ -481,8 +528,12 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
     } else if (!secure && (facts?.nodeName === 'INPUT' || facts?.nodeName === 'TEXTAREA')) {
       // A field's value is the element's own, whatever role Chromium gives it (a date input is no textbox).
       draft.value = bound((facts.nodeName === 'INPUT' ? facts.inputValue : facts.textValue) ?? '', OBSERVED_TEXT_LIMIT, mode);
-    } else if (!secure && VALUE_ROLES.has(role)) {
-      // An editing host or an ARIA widget has no DOM value: its value is the one Chromium computes.
+    } else if (!secure && RANGE_ROLES.has(role)) {
+      // As written, as the web reads it: Chromium clamps aria-valuenow, drops aria-valuetext, and makes up a midpoint.
+      draft.value = bound(attributes['aria-valuetext'] ?? attributes['aria-valuenow'] ?? '', OBSERVED_TEXT_LIMIT, mode);
+    } else if (!secure && VALUE_ROLES.has(role) && (role !== 'combobox' || editingHost)) {
+      // An editing host or an ARIA widget has no DOM value: its value is the one Chromium computes. A combobox that only
+      // shows its choice (a div) has none, as on the web; Chromium would echo its text.
       draft.value = bound(stringOf(node.value) ?? '', OBSERVED_TEXT_LIMIT, mode);
     }
     const shown: Record<string, string> = {};
@@ -495,7 +546,9 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
     }
     if (Object.keys(shown).length > 0) draft.attributes = shown;
     const rect = rectOf(facts);
-    if (rect !== undefined) draft.rect = rect;
+    const visibleRect = shownRect(facts, draft.order);
+    if (visibleRect !== undefined) draft.rect = visibleRect;
+    if (rect !== undefined) draft.layout = rect;
     const option = facts?.nodeName === 'OPTION' || facts?.nodeName === 'OPTGROUP' || chromium === 'MenuListPopup';
     if (option && selectHidden !== undefined) {
       if (selectHidden) draft.states['hidden'] = true;
@@ -563,7 +616,9 @@ export function projectTree(axNodes: readonly AXNode[], document: SnapshotDocume
       ...(Object.keys(attributes).length === 0 ? {} : { attributes }),
     };
     const rect = rectOf(facts);
-    if (rect !== undefined) node.rect = rect;
+    const shown = shownRect(facts, order);
+    if (shown !== undefined) node.rect = shown;
+    if (rect !== undefined) node.layout = rect;
     // The text runs the tree already holds for this element move under it, so its text is not read twice; with none
     // (nothing rendered), the text comes from the DOM.
     if (!secure && !field) {
@@ -635,6 +690,18 @@ export function unmaskableCount(document: SnapshotDocument, strings: readonly st
     }
   });
   return count;
+}
+
+/** The overlap of two device-pixel boxes `[x, y, width, height]`, empty at the edge of `clip` when they do not meet; `box` when there is no clip. */
+function intersect(clip: readonly number[] | undefined, box: readonly number[]): readonly number[] {
+  if (clip === undefined) return box;
+  const [cx = 0, cy = 0, cw = 0, ch = 0] = clip;
+  const [bx = 0, by = 0, bw = 0, bh = 0] = box;
+  const left = Math.min(Math.max(bx, cx), cx + cw);
+  const top = Math.min(Math.max(by, cy), cy + ch);
+  const right = Math.max(Math.min(bx + bw, cx + cw), left);
+  const bottom = Math.max(Math.min(by + bh, cy + ch), top);
+  return [left, top, right - left, bottom - top];
 }
 
 /** The nearest DOM ancestor of the node at `index` that has a draft, or undefined when none does (the node sits under the root). */
