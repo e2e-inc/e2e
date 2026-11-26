@@ -6,9 +6,10 @@
  */
 
 import type { AgentDeviceClient as DeviceSessionClient } from 'agent-device';
-import type { EngineFixtureContext, Locator, ViewportSize } from '@e2e-dev/core/engine';
+import { TestError, type EngineFixtureContext, type Locator, type ViewportSize } from '@e2e-dev/core/engine';
 import { appLabel, linkLabel, linkTarget } from './links.ts';
 import { pressRemote, requireRemoteKey, type RemoteKey } from './remote.ts';
+import { pressButton, requireHardwareButton, type HardwareButton } from './buttons.ts';
 import type { DevicePermission, MobilePlatform, PermissionState } from './options.ts';
 import type { DeviceSelection } from './bindings.ts';
 import { unsupported } from './support.ts';
@@ -90,7 +91,12 @@ export interface Device {
    * on Android, so it goes before the `app.open()` a test starts with.
    */
   setPermission(permission: DevicePermission, state: PermissionState): Promise<void>;
-  /** Sets the simulated location, switching location services on first on Android. */
+  /**
+   * Sets the simulated location, switching location services on first on
+   * Android. A latitude outside -90 to 90, a longitude outside -180 to 180,
+   * or either one not a finite number is `INVALID_ARGUMENT`, before any
+   * device command.
+   */
   setLocation(coordinates: { latitude: number; longitude: number }): Promise<void>;
   /** Turns simulated location off; on Android that is location services off, until the next `setLocation`. */
   clearLocation(): Promise<void>;
@@ -203,6 +209,16 @@ export interface Device {
    */
   pressRemote(key: RemoteKey): Promise<void>;
   /**
+   * Presses one hardware button: `'volume-up'`, `'volume-down'`, or
+   * `'power'`. An Android emulator or phone takes all three, and a physical
+   * iPhone or iPad the volume buttons; an iOS simulator, an Android TV, and
+   * any other device or button is `UNSUPPORTED_CAPABILITY`. A name outside
+   * the list is `INVALID_ARGUMENT`.
+   * It resolves once the press is sent, with no volume level or screen state,
+   * so assert on what the screen shows next.
+   */
+  pressButton(button: HardwareButton): Promise<void>;
+  /**
    * Shakes the device once: the simulator's shake gesture on an iPhone or
    * iPad simulator, a swing of the accelerometer on an Android phone or
    * tablet emulator. `UNSUPPORTED_CAPABILITY` on a physical device and on a
@@ -254,6 +270,24 @@ export interface Device {
   setClipboard(text: string): Promise<void>;
 }
 
+/**
+ * The coordinates `device.setLocation` was given, or `INVALID_ARGUMENT`
+ * naming the one out of range. agent-device refuses the same values, but as
+ * a device failure.
+ */
+function requireCoordinates(coordinates: unknown): { latitude: number; longitude: number } {
+  const given = typeof coordinates === 'object' && coordinates !== null ? (coordinates as Record<string, unknown>) : {};
+  return { latitude: coordinate(given, 'latitude', 90), longitude: coordinate(given, 'longitude', 180) };
+}
+
+/** One coordinate within ±`limit`, or `INVALID_ARGUMENT` showing what was given. */
+function coordinate(given: Record<string, unknown>, name: 'latitude' | 'longitude', limit: number): number {
+  const value = given[name];
+  if (typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= limit) return value;
+  const shown = typeof value === 'string' ? JSON.stringify(value) : typeof value === 'object' && value !== null ? `type ${typeof value}` : String(value);
+  throw new TestError('INVALID_ARGUMENT', `device.setLocation: ${name} must be a finite number from -${limit} to ${limit}, got ${shown}`);
+}
+
 /** The raw driver session a surface is bound to: `device.unstable_raw`, and what `unstable_deviceSession()` hands a custom tool. */
 export function rawSession(surface: AgentDeviceSurface): DeviceSession {
   const { session, deviceId, deviceName } = surface.boundDevice;
@@ -301,7 +335,8 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async setPermission(permission, state) {
       await surface.setPermission(permission, state, context.signal);
     },
-    async setLocation({ latitude, longitude }) {
+    async setLocation(coordinates) {
+      const { latitude, longitude } = requireCoordinates(coordinates);
       // Android reads a fix only while location services are on, and
       // `clearLocation` switched them off for good on the emulator (the
       // setting outlives the app); iOS has no such switch.
@@ -399,6 +434,11 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
       const input = surface.inputBudget('device.pressRemote', { timeoutMs: context.timeouts.action, signal: context.signal });
       await surface.screenCommand('device.pressRemote', (client) => input.send(() => pressRemote(client, key, surface.selection())), context.signal);
     },
+    async pressButton(button) {
+      requireHardwareButton(button);
+      const input = surface.inputBudget('device.pressButton', { timeoutMs: context.timeouts.action, signal: context.signal });
+      await surface.screenCommand('device.pressButton', (client) => input.send((signal) => pressButton(client, button, surface.selection(), signal)), context.signal);
+    },
     async shake() {
       await surface.screenCommand('device.shake', (client) => client.command.shake(surface.selection()), context.signal);
     },
@@ -447,6 +487,8 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     home: action,
     back: action,
     pressRemote: { ...action, label: (key) => key },
+    // A JavaScript caller can pass a key code; the label must still be text, so the step records the refusal.
+    pressButton: { ...action, label: (button) => String(button) },
     shake: action,
     alert: { ...action, label: (value) => value },
     dismissKeyboard: action,

@@ -25,6 +25,13 @@ import { ANDROID_APP_PACKAGE, ANDROID_ID_SNAPSHOT, createFakeClient, SETTINGS_NO
 import { boot, harness, poolVariableIn, PROJECT_ROOT, type Harness } from '../helpers/harness.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
+// The harness's project root, `/project`, is not on disk: a build under it
+// counts as present, so `installApp` reaches the fake client.
+vi.mock('node:fs', async (original) => {
+  const fs = await original<typeof import('node:fs')>();
+  return { ...fs, existsSync: (file: import('node:fs').PathLike) => String(file).startsWith('/project/') || fs.existsSync(file) };
+});
+
 /** An agent's operation: the agent reads the screen right after acting, so its actions settle. */
 function operation(signal = new AbortController().signal): OperationContext {
   return { signal, timeoutMs: 30_000, runId: 'run-1', attemptId: 'a1', origin: 'agent' };
@@ -2385,6 +2392,36 @@ describe('device fixture', () => {
     expect(h.fake.methods()).toContain('command.tvRemote');
   });
 
+  it.each(['volume-up', 'volume-down', 'power'] as const)('device.pressButton(%j) presses that agent-device hardware button on the selected device', async (button) => {
+    const h = harness({ platform: 'android', device: 'emulator-5554', bundleId: 'com.example.app' });
+    await openAttempt(h);
+    const before = h.fake.calls.length;
+    await expect(fixture(h).pressButton(button)).resolves.toBeUndefined();
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([['command.hardwareButton', { platform: 'android', serial: 'emulator-5554', button }]]);
+  });
+
+  it.each(['VolumeUp', 'volume up', 'mute', 'sleep', 'media-play-pause', 'toString', '', 3])('device.pressButton refuses %j, a name outside the list, before any device call', async (button) => {
+    const h = harness();
+    await openAttempt(h);
+    const before = h.fake.calls.length;
+    await expect(fixture(h).pressButton(button as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('not a hardware button; press one of volume-up, volume-down, power') });
+    expect(h.fake.calls).toHaveLength(before);
+    // The recorder labels the step before the method runs, and redacts the label as text.
+    expect(declared?.pressButton?.label?.(button as never)).toBe(String(button));
+  });
+
+  it('maps agent-device\'s refusal of a simulator\'s hardware button to UNSUPPORTED_CAPABILITY with its hint', async () => {
+    const h = harness();
+    await openAttempt(h);
+    // agent-device 0.21.42's own refusal on an iOS simulator, as an iPhone 18 Pro simulator returned it.
+    const hint = 'hardware-button volume is supported on physical iPhone and iPad; iOS Simulators refuse because XCUIDevice exposes no volume press there.';
+    h.fake.respond('command.hardwareButton', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'hardware-button is not supported on this device', { reason: 'unsupported-device-kind', hint });
+    });
+    await expect(fixture(h).pressButton('volume-up')).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', message: expect.stringContaining(hint) });
+    expect(h.fake.methods()).toContain('command.hardwareButton');
+  });
+
   describe('viewport', () => {
     it.each(['ios', 'android'] as const)('reads the %s viewport as a recorded resource without capturing pixels', async (platform) => {
       const h = harness({ platform });
@@ -3126,7 +3163,7 @@ describe('device fixture', () => {
     expect(h.fake.lastArgs('interactions.scroll')).toEqual({ direction: 'down', postGestureStabilization: false });
   });
 
-  it('counts a back, home, remote press, shake, alert, keyboard, rotation, or fold as an action, so a control that arrives with it waits out the transition budget', async () => {
+  it('counts a back, home, remote or hardware button press, shake, alert, keyboard, rotation, or fold as an action, so a control that arrives with it waits out the transition budget', async () => {
     autoAdvanceTimers();
     const h = harness({ transition: 120 });
     await openAttempt(h);
@@ -3137,6 +3174,7 @@ describe('device fixture', () => {
       () => device.home(),
       () => device.pressRemote('menu'),
       () => remoteTool(h, 'select'),
+      () => device.pressButton('volume-up'),
       () => device.shake(),
       () => device.alert('accept'),
       () => device.dismissKeyboard(),
@@ -3198,18 +3236,34 @@ describe('device fixture', () => {
     const device = fixture(h);
     const before = h.fake.calls.length;
     expect(await device.installApp('./b/App.app')).toEqual({ app: 'com.example.app', bundleId: 'com.example.app' });
-    expect(await device.installApp('/b/App.app', { reinstall: true })).toEqual({ app: 'Settings' });
-    expect(await device.installApp('/b/App.app', { app: 'com.other', reinstall: true })).toEqual({ app: 'com.other' });
+    expect(await device.installApp('/project/b/App.app', { reinstall: true })).toEqual({ app: 'Settings' });
+    expect(await device.installApp('/project/b/App.app', { app: 'com.other', reinstall: true })).toEqual({ app: 'com.other' });
     expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
       ['apps.install', { platform: 'ios', appPath: '/project/b/App.app' }],
-      ['apps.reinstall', { platform: 'ios', app: 'Settings', appPath: '/b/App.app' }],
-      ['apps.reinstall', { platform: 'ios', app: 'com.other', appPath: '/b/App.app' }],
+      ['apps.reinstall', { platform: 'ios', app: 'Settings', appPath: '/project/b/App.app' }],
+      ['apps.reinstall', { platform: 'ios', app: 'com.other', appPath: '/project/b/App.app' }],
     ]);
 
     const free = harness({}, false);
     await openAttempt(free);
-    await expect(fixture(free).installApp('/b/App.app', { reinstall: true })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+    await expect(fixture(free).installApp('/project/b/App.app', { reinstall: true })).rejects.toMatchObject({ code: 'INVALID_STATE' });
     expect(free.fake.methods()).toEqual(['devices.boot']);
+  });
+
+  it('refuses a build path with nothing at it as INVALID_ARGUMENT before any device command', async () => {
+    const h = harness({ appPath: '../elsewhere/Missing.app' });
+    await openAttempt(h);
+    const device = fixture(h);
+    const before = h.fake.calls.length;
+    for (const missing of ['../missing/App.app', '/missing/App.app']) {
+      await expect(device.installApp(missing)).rejects.toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: `device.installApp(${JSON.stringify(missing)}): no build at /missing/App.app; the path resolves against the project root`,
+      });
+      await expect(device.installApp(missing, { reinstall: true })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    }
+    await expect(device.installApp('')).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(h.fake.calls.slice(before)).toEqual([]);
   });
 
   it('uninstalls and looks up apps by id or listed name, the pinned app by default', async () => {
@@ -3373,6 +3427,34 @@ describe('device fixture', () => {
     ]);
   });
 
+  it('refuses coordinates out of range or not finite as INVALID_ARGUMENT before any device command', async () => {
+    const h = harness({ platform: 'android', bundleId: 'com.android.settings' });
+    await openAttempt(h);
+    const device = fixture(h);
+    const before = h.fake.calls.length;
+    const refused: [unknown, string][] = [
+      [{ latitude: 152.5, longitude: 21.01 }, 'latitude must be a finite number from -90 to 90, got 152.5'],
+      [{ latitude: -90.5, longitude: 21.01 }, 'latitude must be a finite number from -90 to 90, got -90.5'],
+      [{ latitude: Number.NaN, longitude: 21.01 }, 'latitude must be a finite number from -90 to 90, got NaN'],
+      [{ latitude: 52.23, longitude: 181 }, 'longitude must be a finite number from -180 to 180, got 181'],
+      [{ latitude: 52.23, longitude: Number.POSITIVE_INFINITY }, 'longitude must be a finite number from -180 to 180, got Infinity'],
+      [{ latitude: '52.23', longitude: 21.01 }, 'latitude must be a finite number from -90 to 90, got "52.23"'],
+      [{ latitude: {}, longitude: 21.01 }, 'latitude must be a finite number from -90 to 90, got type object'],
+      [{ latitude: 52.23 }, 'longitude must be a finite number from -180 to 180, got undefined'],
+      [undefined, 'latitude must be a finite number from -90 to 90, got undefined'],
+    ];
+    for (const [coordinates, message] of refused) {
+      await expect(device.setLocation(coordinates as { latitude: number; longitude: number })).rejects.toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: `device.setLocation: ${message}`,
+      });
+    }
+    expect(h.fake.calls.slice(before)).toEqual([]);
+    // The edges themselves are valid.
+    await device.setLocation({ latitude: -90, longitude: 180 });
+    expect(h.fake.lastArgs('settings.update')).toEqual({ platform: 'android', setting: 'location', state: 'set', latitude: -90, longitude: 180 });
+  });
+
   it('opens a link into the pinned app or a named one, and the location follows the app it landed in', async () => {
     const h = harness();
     await openAttempt(h);
@@ -3478,6 +3560,7 @@ describe('device fixture', () => {
       // A remote reaches the launcher, so a test presses it with no app open.
       () => selected.pressRemote('home'),
       () => remoteTool(h, 'home'),
+      () => selected.pressButton('volume-up'),
       // iOS refuses going offline before any command, so the radios are Android's.
       ...(platform === 'ios' ? [
         () => selected.enrollBiometrics('touchid', true),
