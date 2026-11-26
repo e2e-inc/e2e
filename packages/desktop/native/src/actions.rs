@@ -376,6 +376,11 @@ fn step_to(
     Ok(now == target)
 }
 
+/// The number a text names, when it names a finite one: `NaN` or `inf` is no value a control can take.
+fn finite(text: &str) -> Result<f64, ()> {
+    text.trim().parse::<f64>().ok().filter(|number| number.is_finite()).ok_or(())
+}
+
 fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     let (ax_role, role) = raw_role(element);
     let secure = ax_role == "AXSecureTextField" || element.text("AXSubrole").as_deref() == Some("AXSecureTextField");
@@ -383,7 +388,7 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
         // A stepper whose value cannot be written still steps toward a number.
         let names = action_names(element, "set value")?;
         let steps = names.iter().any(|name| name == "AXIncrement" || name == "AXDecrement");
-        if let (true, Ok(Value::Number(_)), Ok(target)) = (steps, element.attribute("AXValue"), text.trim().parse::<f64>()) {
+        if let (true, Ok(Value::Number(_)), Ok(target)) = (steps, element.attribute("AXValue"), finite(text)) {
             let number = || match element.attribute("AXValue") {
                 Ok(Value::Number(number)) => Some(number),
                 _ => None,
@@ -413,7 +418,7 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
         && element.boolean("AXFocused") != Some(true)
         && element.set_bool("AXFocused", true).is_ok();
     let numeric = matches!(element.attribute("AXValue"), Ok(Value::Number(_)));
-    let written = match (numeric, text.trim().parse::<f64>()) {
+    let written = match (numeric, finite(text)) {
         (true, Ok(number)) => element.set_number("AXValue", number),
         _ => element.set_text("AXValue", text),
     };
@@ -421,7 +426,7 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     if secure {
         return Ok(());
     }
-    let expected = if numeric { text.trim().parse::<f64>().map(ax::format_number).unwrap_or_else(|_| text.to_owned()) } else { text.to_owned() };
+    let expected = if numeric { finite(text).map(ax::format_number).unwrap_or_else(|_| text.to_owned()) } else { text.to_owned() };
     if until(deadline, || value_text(element).as_deref() == Some(expected.as_str())) {
         Ok(())
     } else {
@@ -819,6 +824,14 @@ mod tests {
         set(2_000_003, later());
         assert!(super::go("press").is_ok());
         super::CURRENT.with(|current| current.borrow_mut().take());
+    }
+
+    #[test]
+    fn takes_only_a_finite_number() {
+        assert_eq!(super::finite(" 3 "), Ok(3.0));
+        for text in ["NaN", "inf", "-infinity", "three"] {
+            assert!(super::finite(text).is_err(), "{text}");
+        }
     }
 
     #[test]
