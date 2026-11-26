@@ -216,6 +216,13 @@ pub async fn act(options: ActOptions) -> Value {
     .await
 }
 
+/// A fresh id for one call's input (`act`, `press`, `pointer`, `launch`), unique in the process: every Node worker
+/// thread shares the addon, and with it the ids `cancelInput` reaches.
+#[napi]
+pub fn input_id() -> u32 {
+    crate::input::next_input_id()
+}
+
 /// Stops the call (`act`, `press`, `pointer`, `launch`) that was given `inputId`: it sends no input from then on, though what it sent stays sent.
 #[napi]
 pub fn cancel_input(input_id: u32) {

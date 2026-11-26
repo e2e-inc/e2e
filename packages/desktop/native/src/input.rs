@@ -16,8 +16,22 @@ use std::time::Duration;
 /// How far behind the newest run a leftover cancel mark is dropped.
 const STALE_IDS: u32 = 4096;
 
-/// The typing runs by the id their caller gave (one counter for the process), each marked once it is cancelled.
+/// The typing runs by the id their caller gave (from `next_input_id`), each marked once it is cancelled.
 static TYPING: Mutex<Option<HashMap<u32, bool>>> = Mutex::new(None);
+
+/// The last input id handed out: one counter for the process, which every Node worker thread that loads the addon shares,
+/// as it shares the registry below.
+static LAST_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// A fresh input id, never 0, wrapping past `u32::MAX`.
+pub fn next_input_id() -> u32 {
+    loop {
+        let id = LAST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed).wrapping_add(1);
+        if id != 0 {
+            return id;
+        }
+    }
+}
 
 /// Marks the input run `id` cancelled: it sends nothing more. A cancel that comes before the run starts holds too.
 pub fn cancel_input(id: u32) {
@@ -396,6 +410,17 @@ pub fn pointer(x: f64, y: f64, action: Pointer, proceed: &dyn Fn(i64) -> Outcome
 mod tests {
     use super::{Piece, TypingRun, cancel_input, parse_combo, pieces};
     use core_graphics::event::CGEventFlags;
+
+    #[test]
+    fn hands_out_input_ids_no_two_threads_share() {
+        let threads: Vec<_> = (0..4).map(|_| std::thread::spawn(|| (0..1000).map(|_| super::next_input_id()).collect::<Vec<_>>())).collect();
+        let mut ids: Vec<u32> = threads.into_iter().flat_map(|thread| thread.join().expect("the thread ran")).collect();
+        let count = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), count);
+        assert!(!ids.contains(&0));
+    }
 
     fn text(units: &Piece) -> String {
         match units {
