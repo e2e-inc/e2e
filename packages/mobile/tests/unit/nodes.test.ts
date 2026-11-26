@@ -385,6 +385,8 @@ describe('snapshot projection', () => {
       // A span echoes only a Text described as a Link, so a disabled plain Text keeps its state to itself.
       { ref: 'e22', index: 21, parentIndex: 0, depth: 1, type: 'android.widget.TextView', label: 'Terms', enabled: false },
       { ref: 'e23', index: 22, parentIndex: 21, depth: 2, type: 'android.widget.Button', label: 'Terms', roleDescription: 'Link', enabled: true },
+      // Another link span in the disabled Text link doesn't echo it, so it keeps its own state.
+      { ref: 'e24', index: 23, parentIndex: 19, depth: 2, type: 'android.widget.Button', label: 'Edit', roleDescription: 'Link', enabled: true },
     ]);
     const nodes = projected.index.slice(1).map((entry) => `${entry.node.role} ${entry.node.name ?? ''}`.trim());
     expect(nodes).toEqual([
@@ -408,11 +410,12 @@ describe('snapshot projection', () => {
       'link Home',
       'group Profile',
       'link Profile',
+      'link Edit',
       'text Terms',
       'link Terms',
     ]);
     const disabled = (ref: string) => projected.index.find((entry) => entry.ref === ref)?.node.states?.disabled === true;
-    expect(['e7', 'e8', 'e21', 'e22', 'e23'].map(disabled)).toEqual([true, false, true, true, false]);
+    expect(['e7', 'e8', 'e21', 'e24', 'e22', 'e23'].map(disabled)).toEqual([true, false, true, false, true, false]);
   });
 
   it('reads the role and state React Native spells into an iOS accessibility value, and reports the rest as the value', () => {
