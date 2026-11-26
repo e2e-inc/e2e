@@ -300,17 +300,19 @@ fn presses(ax_role: &str) -> bool {
 /// The most steps a walk up from the element under the pointer takes: deeper than any window a snapshot reads.
 const MAX_WALK: usize = 256;
 
-/// Whether an element under the pointer takes a click of its own: by its role, or, for an image, which may be decoration
-/// or a button, by the press it offers.
+/// Whether an element under the pointer takes a click of its own: by its role, or, for a role that may be decoration or
+/// a control (an image, a group), by the press it offers.
 fn takes_click(ax_role: &str, actions: impl FnOnce() -> Result<Vec<String>, AXError>) -> Result<bool, AXError> {
     if presses(ax_role) {
         return Ok(true);
     }
-    if ax_role != "AXImage" {
+    // A role that never takes input (text, a separator) is content. Any other one (an image, a group a custom control
+    // draws itself in) is a control of its own when it offers a press, as the snapshot gives it a ref for one.
+    if roles::inert(roles::role(ax_role, None)) {
         return Ok(false);
     }
     match actions() {
-        Ok(names) => Ok(names.iter().any(|name| name == "AXPress")),
+        Ok(names) => Ok(names.iter().any(|name| matches!(name.as_str(), "AXPress" | "AXOpen" | "AXConfirm"))),
         Err(ax::AX_CANNOT_COMPLETE) => Err(ax::AX_CANNOT_COMPLETE),
         Err(_) => Ok(false),
     }
@@ -1498,6 +1500,9 @@ mod tests {
         assert_eq!(image(Err(crate::ax::AX_ACTION_UNSUPPORTED)), Ok(false));
         assert_eq!(image(Err(crate::ax::AX_CANNOT_COMPLETE)), Err(crate::ax::AX_CANNOT_COMPLETE));
         assert_eq!(super::takes_click("AXStaticText", || panic!("no action read for a role that tells")), Ok(false));
+        // A custom control drawn in a group, which offers a press, is a control of its own too.
+        assert_eq!(super::takes_click("AXGroup", || Ok(vec!["AXPress".into()])), Ok(true));
+        assert_eq!(super::takes_click("AXGroup", || Ok(vec!["AXScrollToVisible".into()])), Ok(false));
         // An inline editor of a row takes a double-click of its own.
         for editor in ["AXTextField", "AXComboBox", "AXTextArea"] {
             assert_eq!(walk(vec![Ok((false, editor)), Ok((false, "AXCell")), Ok((true, ""))]), Ok(Aim::Control), "{editor}");
