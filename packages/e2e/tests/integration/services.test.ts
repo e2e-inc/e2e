@@ -1793,6 +1793,45 @@ test('reads a service', async ({ services }) => {
       expect(eventLines(project)).toContain('alpha record from run_code');
     });
 
+    it('lets a service read credentials and secrets while it starts and while it stops', async () => {
+      const project = createProject({ 'server.cjs': SERVER });
+
+      projects.push(project);
+
+      const reads: string[] = [];
+
+      const config: E2EConfig = {
+        credentials: { admin: { username: 'ada', password: 'admin-password-1' } },
+        secrets: { apiKey: 'api-key-value-1' },
+        services: {
+          inbox: defineService({
+            async *start() {
+              reads.push(`start ${credentials.user('admin').username} ${secrets.get('apiKey').name}`);
+              yield {};
+              reads.push(`stop ${credentials.user('admin').username} ${secrets.get('apiKey').name}`);
+            },
+          }),
+        },
+        targets: [{ name: 'fake', platform: 'fake', engine: createFakeEngine().engine, app: FAKE_APP }],
+      };
+
+      const host = new SessionHost({
+        locateConfig: () => path.join(project.dir, 'e2e.config.ts'),
+        loadConfig: async (configPath) => ({ ...resolveConfig(config, { projectRoot: project.dir, env: {}, configPath }), configPath }),
+        loadEngineConfig: async () => {
+          throw new Error('no engine sessions here');
+        },
+        env: {},
+        headed: false,
+        log: () => undefined,
+        maxSessions: 1,
+      });
+
+      await host.close('done', sessionId(await host.open({})));
+
+      expect(reads).toEqual(['start ada apiKey', 'stop ada apiKey']);
+    });
+
     it('starts the services again for a session that opens after the last one closed', async () => {
       const port = await freePort();
       const { project, host } = mcpProject(port);
