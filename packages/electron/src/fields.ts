@@ -131,6 +131,11 @@ export function isTextField(facts: DomFacts | undefined): boolean {
   return facts?.nodeName === 'INPUT' || facts?.nodeName === 'TEXTAREA';
 }
 
+/** An input drawn as a button: the value it shows is its text, as the web reads it. */
+export function isButtonInput(facts: DomFacts | undefined): boolean {
+  return facts?.nodeName === 'INPUT' && ['submit', 'button'].includes(facts.attributes['type']?.toLowerCase() ?? '');
+}
+
 export function isSecure(facts: DomFacts | undefined): boolean {
   return facts !== undefined && isSecureField(facts.nodeName, facts.attributes);
 }

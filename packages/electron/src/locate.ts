@@ -93,6 +93,8 @@ export async function locateIn(devtools: DevTools, raw: RawRead, expression: Loc
   const domOrder = new Map([...keep].map((backendNodeId) => [nodeId(window, backendNodeId), raw.dom.element(backendNodeId)?.index]));
   const position = (node: SemanticNode): number => domOrder.get(node.ref.id) ?? Number.MAX_SAFE_INTEGER;
   return resolveExpression(expression, [root], {
+    // The tree carries every element's text, so a text query reads it alone, as web() does.
+    textQuery: 'text',
     selector: (selector, candidates) => {
       const ids = new Set([...(selected.get(selector) ?? [])].map((backendNodeId) => nodeId(window, backendNodeId)));
       return candidates.filter((node) => ids.has(node.ref.id)).toSorted((a, b) => position(a) - position(b));

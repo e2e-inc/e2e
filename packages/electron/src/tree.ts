@@ -12,7 +12,7 @@
  */
 
 import { OBSERVED_NAME_LIMIT, OBSERVED_TEXT_LIMIT, type SemanticNode } from '@e2e-dev/core/engine';
-import { elementFields, isFocusable, isHiddenSubtree, isSecure, isTextField, roleOf, stringOf, type AXNode, type FieldContext, type ProjectionPolicy } from './fields.ts';
+import { elementFields, isButtonInput, isFocusable, isHiddenSubtree, isSecure, isTextField, roleOf, stringOf, type AXNode, type FieldContext, type ProjectionPolicy } from './fields.ts';
 import { collapse, type DomFacts, type DomSnapshot } from './snapshot.ts';
 
 /** How the window's layout maps the snapshot's device pixels to the viewport's CSS pixels. */
@@ -213,8 +213,13 @@ class TreeProjector {
     const chromium = stringOf(node.role) ?? '';
     if (isHiddenSubtree(node) || DROPPED_ROLES.has(chromium)) return [];
     const backend = node.backendDOMNodeId;
-    if (chromium === 'StaticText') return backend === undefined ? [] : this.textRun(node, backend);
     const facts = backend === undefined ? undefined : this.snapshot.element(backend);
+    // The text as rendered, `text-transform` applied, as the web's innerText reads it.
+    if (chromium === 'StaticText') return backend === undefined ? [] : this.textRun(backend, facts, stringOf(node.name) ?? '');
+    // Chromium leaves the text of a label out once the label names a checkbox or radio, though it is on screen: such
+    // a text node reads from the DOM, so the label has text to find and to tap.
+    const unnamed = node.ignored && facts?.bounds !== undefined ? this.snapshot.sourceText(facts.index) : undefined;
+    if (backend !== undefined && unnamed !== undefined) return this.textRun(backend, facts, unnamed);
     const { role, silent } = roleOf(node, facts, this.policy);
     const name = collapse(stringOf(node.name) ?? '');
     // A container Chromium leaves out, or one that says nothing, gives its place to its children: unless a test id,
@@ -234,6 +239,7 @@ class TreeProjector {
     // (contenteditable) keeps its content, which is its text.
     if (!isTextField(facts)) draft.children = this.children(node);
     this.foldText(draft);
+    if (isButtonInput(facts) && draft.value !== undefined && draft.value !== '') draft.text = draft.value;
     // A closed select's option has no text run: its text is its label, which Chromium names it by.
     if (draft.text === undefined && facts?.nodeName === 'OPTION' && name !== '') draft.text = cut(name, this.policy.textLimit);
     return [draft];
@@ -249,14 +255,12 @@ class TreeProjector {
     return true;
   }
 
-  private textRun(node: AXNode, backend: number): Draft[] {
-    // The text as rendered, `text-transform` applied, as the web's innerText reads it.
-    const text = collapse(stringOf(node.name) ?? '');
+  private textRun(backend: number, facts: DomFacts | undefined, rendered: string): Draft[] {
+    const text = collapse(rendered);
     if (text === '' || !this.take()) return [];
-    const facts = this.snapshot.element(backend);
     const rect = this.rectOf(facts);
     // The white space comes from the text node's own source: Chromium's name for a run trims what the next element's run follows.
-    const source = (facts === undefined ? undefined : this.snapshot.sourceText(facts.index)) ?? stringOf(node.name) ?? '';
+    const source = (facts === undefined ? undefined : this.snapshot.sourceText(facts.index)) ?? rendered;
     const run: Draft = {
       id: this.options.idOf(backend),
       text: cut(text, this.policy.textLimit),

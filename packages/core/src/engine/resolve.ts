@@ -24,6 +24,14 @@ export interface ResolveExpressionOptions {
    * language of its own.
    */
   readonly selector?: (selector: string, candidates: readonly SemanticNode[]) => readonly SemanticNode[];
+  /**
+   * What a `text` query reads. `'nameOrText'`, the default, matches a node's
+   * name as well as its text, for a tree that keeps what a node says in its
+   * name (a device's). `'text'` matches the text alone, as a browser's text
+   * query does, for a tree that carries every element's text: a field named
+   * by its label is then no second match for the label's words.
+   */
+  readonly textQuery?: 'nameOrText' | 'text';
 }
 
 /**
@@ -147,7 +155,7 @@ function resolve(
         expression.scope === undefined
           ? [within]
           : descendantRanges(resolve(expression.scope, within, tree, options), within, tree);
-      const matchesQuery = compileQueryMatcher(expression.query);
+      const matchesQuery = compileQueryMatcher(expression.query, options.textQuery ?? 'nameOrText');
       for (const { start, end } of pool) {
         for (let index = start; index < end; index += 1) {
           const node = tree.all[index]!;
@@ -289,12 +297,12 @@ const STATE_KEYS = ['checked', 'disabled', 'selected', 'expanded', 'pressed'] as
  * leave visibility to the action or assertion, unless the query says
  * `visible`, which drops hidden nodes for every kind.
  */
-function compileQueryMatcher(query: SemanticQuery): (node: SemanticNode) => boolean {
-  const matches = compileKindMatcher(query);
+function compileQueryMatcher(query: SemanticQuery, textQuery: NonNullable<ResolveExpressionOptions['textQuery']>): (node: SemanticNode) => boolean {
+  const matches = compileKindMatcher(query, textQuery);
   return query.visible === true ? (node) => node.states?.hidden !== true && matches(node) : matches;
 }
 
-function compileKindMatcher(query: SemanticQuery): (node: SemanticNode) => boolean {
+function compileKindMatcher(query: SemanticQuery, textQuery: NonNullable<ResolveExpressionOptions['textQuery']>): (node: SemanticNode) => boolean {
   switch (query.kind) {
     case 'role': {
       const role = query.value;
@@ -331,7 +339,7 @@ function compileKindMatcher(query: SemanticQuery): (node: SemanticNode) => boole
     }
     case 'text': {
       const matches = compileTextMatcher(query.value);
-      return (node) => (node.name !== undefined && matches(node.name)) || (node.text !== undefined && matches(node.text));
+      return (node) => (textQuery === 'nameOrText' && node.name !== undefined && matches(node.name)) || (node.text !== undefined && matches(node.text));
     }
     case 'displayValue': {
       const matches = compileTextMatcher(query.value);

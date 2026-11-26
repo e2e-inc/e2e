@@ -98,7 +98,7 @@ describe('projectTree', () => {
     expect(signIn.children).toBeUndefined();
     const form = find(root, (node) => node.role === 'form');
     expect(form.text).toBeUndefined();
-    expect(form.children?.filter((child) => child.role === undefined).map((child) => child.text)).toEqual(['Username', 'Password', 'Plan']);
+    expect(form.children?.filter((child) => child.role === undefined).map((child) => child.text)).toEqual(['Username', 'Password', 'Remember me', 'Plan']);
   });
 
   it('gives a locator the text of a node with its descendants', () => {
@@ -174,6 +174,13 @@ describe('projectTree', () => {
     const kept = find(project('node', { keep: new Set([label.backendDOMNodeId!]) }).root, (node) => node.ref.id === id);
     expect(kept).toMatchObject({ role: 'generic', text: 'Username' });
     expect(kept.children?.map((child) => child.testId ?? child.text)).toEqual(['Username', 'username']);
+  });
+
+  it('reads the text of a label that names a checkbox, which Chromium leaves out of its tree', () => {
+    expect(captured.ax.some((node) => node.role?.value === 'StaticText' && node.name?.value === 'Remember me')).toBe(false);
+    const run = find(project('tree').root, (node) => node.text === 'Remember me');
+    expect(run.states?.hidden).toBeUndefined();
+    expect(run.rect?.width).toBeGreaterThan(0);
   });
 
   it('reads an element the tree leaves out by the rules every element reads by', () => {

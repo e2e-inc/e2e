@@ -124,6 +124,12 @@ describe('resolveExpression', () => {
     expect(ids(query('label', 'Save'), nodes)).toEqual(['named']);
   });
 
+  it('reads text from the visible text alone when the engine asks, as a browser does', () => {
+    const nodes = [node('label', { text: 'Email' }), node('field', { role: 'textbox', name: 'Email' }), node('button', { role: 'button', name: 'Email', text: 'Email' })];
+    expect(resolveExpression(query('text', 'Email'), nodes, { textQuery: 'text' }).map((found) => found.ref.id)).toEqual(['label', 'button']);
+    expect(resolveExpression(query('label', 'Email'), nodes, { textQuery: 'text' }).map((found) => found.ref.id)).toEqual(['field', 'button']);
+  });
+
   it('scopes, filters, and indexes', () => {
     const inBar: LocatorExpression = {
       kind: 'query',
