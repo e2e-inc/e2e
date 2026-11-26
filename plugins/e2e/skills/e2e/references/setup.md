@@ -163,9 +163,7 @@ The target declares the app; the engine only drives it (`web({ url })` and
 `mobile({ app })` are unknown keys). The target's `app` takes `url` (required
 on a `web()` target), `bundleId` or `appPath` (a device target needs one),
 `command` and `readyUrl` to start and probe the app, and `launchArguments`,
-`permissions`, `environment`, `identity`. There is no `services` key: start
-dependency processes before the run, or have `app.command` start a script
-that brings them up and serves the app.
+`permissions`, `environment`, `identity`.
 
 `web()` takes `browser` (`'chromium'` by default, `'firefox'`, `'webkit'`, or
 a hosted `BrowserProvider`), `viewport` (default 1280x720), `headers`,
@@ -238,6 +236,36 @@ opened on `127.0.0.1` or `[::1]` unless that host is in `allowedDevOrigins`;
 the App Router's empty `role="alert"` route announcer means
 `getByRole('alert')` needs a text filter. Full reference:
 docs/frameworks/nextjs.mdx.
+
+### Start the app's dependencies as services
+
+Put dependencies the app needs (an email API, an OAuth provider, a database)
+in `services`. Each is a `defineService({ async *start({ signal }) { ... } })`
+that starts the dependency, yields a plain object of data and functions one
+time, and stops it after the `yield`.
+
+- `e2e run` and `e2e explore` start services in key order before the app
+  commands and stop them in reverse order afterward. `e2e mcp` starts them
+  with the first session on a config file and stops them when the last one
+  closes. `openHost` starts them when the host opens and stops them in
+  `host.close()`.
+- Pass the service's address to the app from an `env` function,
+  `env: ({ services }) => ({ EMAIL_URL: services.email.url })`, so the service
+  can listen on port 0. Write the config with `defineConfig` so `services` is
+  typed there. With `reuseExisting`, an app that's already running doesn't
+  get the variables, and a notice is printed, so give its services fixed
+  ports.
+- Pass `signal` to anything the service starts. Set `startupTimeout` (60 s by
+  default) or `shutdownTimeout` (10 s by default) on a slow service.
+- Tests read the values through the `services` fixture. Each yielded function
+  becomes async and runs in the process that started the services
+  (`await services.email.createInbox()`). Yielding a class instance fails
+  with `INVALID_SERVICE_VALUE`.
+- In `e2e run`, all workers share one instance, and each `openHost` host
+  starts its own. Filter for data the test created, such as emails sent to a
+  unique inbox.
+
+Full reference: docs/services.mdx (online: https://e2e.com/docs/services).
 
 ## Environment variables the runner reads
 

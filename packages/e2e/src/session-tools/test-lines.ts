@@ -210,7 +210,7 @@ export class SessionTestLines {
           : 'Split the draft into tests, one behavior each. Arrange the starting state, act, then check the outcome at the end. A check of a screen the flow later leaves belongs to its own test. Name a locator a test repeats.';
     return {
       description:
-        "Every test line this session's actions printed so far, in order: the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the lines run_code passed. " +
+        "The test lines this session's actions printed so far, in order, as a draft test body. They are the screen.* and app.* calls that repeat each action, with a comment where an action has none, and the lines run_code passed. " +
         guidance +
         ' See topic writing-tests, Structure.',
       inputSchema: z.object({}).strict(),
@@ -706,9 +706,9 @@ const IMPORTED: ReadonlySet<string> = new Set(['expect', 'credentials', 'secrets
 /** The fixtures a draft's lines start from, `app` and `screen` first, so the test body asks for each one. */
 function fixturesIn(body: readonly string[], engine: readonly string[]): readonly string[] {
   const declared = new Set(body.flatMap((line) => /^const ([A-Za-z_$][\w$]*) = /.exec(line)?.[1] ?? []));
-  const named = body.flatMap((line) => /^(?:const [A-Za-z_$][\w$]* = )?await (?:expect\()?([A-Za-z_$][\w$]*)[.(]/.exec(line)?.[1] ?? []);
+  const named = body.flatMap((line) => /^(?:const [A-Za-z_$][\w$]* = )?await (?:expect\()?([A-Za-z_$][\w$]*)[.([]/.exec(line)?.[1] ?? []);
   // `expect` and the secret handles are imports, not fixtures.
-  // An engine's fixture may be an argument, as in `expect(browser)`, where no line starts from it.
-  const passed = engine.filter((name) => body.some((line) => new RegExp(`(?<![.\\w$'"\`])${name.replaceAll('$', '\\$')}(?=[.(),\\s])`).test(line)));
+  // An engine's fixture or `services` may be an argument, as in `expect(browser)`, where no line starts from it.
+  const passed = [...engine, 'services'].filter((name) => body.some((line) => new RegExp(`(?<![.\\w$'"\`])${name.replaceAll('$', '\\$')}(?=[.(),\\s])`).test(line)));
   return [...new Set(['app', 'screen', ...[...named, ...passed].filter((name) => !declared.has(name) && !IMPORTED.has(name))])];
 }
