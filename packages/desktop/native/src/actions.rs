@@ -281,8 +281,16 @@ fn physical(entry: &Entry, action: Pointer) -> Outcome<()> {
     if !hits(entry.pid, &entry.element, x, y) {
         return Err(Failure::refused(codes::ACTION_FAILED, "another element covers the center of this one, so the pointer would land there"));
     }
-    // Raising the window and the hit test can take a second on a slow app: the caller may have given up meanwhile.
-    input::pointer(x, y, action, &|| go("pointer"))
+    // Raising the window and the hit test can take a second on a slow app: the caller may have given up meanwhile. The
+    // pointer's move can reveal a control over the element (a row's inline button): each click checks the point again.
+    input::pointer(x, y, action, &|| {
+        go("pointer")?;
+        if hits(entry.pid, &entry.element, x, y) {
+            Ok(())
+        } else {
+            Err(Failure::refused(codes::ACTION_FAILED, "another element is under the pointer now, so no click was sent there"))
+        }
+    })
 }
 
 /// Waits a moment for a menu an action opened to show, so the next read finds it; an action that opens none waits it out and is still done.
