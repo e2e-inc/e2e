@@ -124,9 +124,11 @@ struct Walk {
     refs: Vec<(String, Entry)>,
 }
 
-/// Whether a failed read says the element is gone or has no such value, rather than that the app did not answer.
-fn absent(error: ax::AXError) -> bool {
-    matches!(error, ax::AX_INVALID_ELEMENT | ax::AX_NO_VALUE | ax::AX_ATTRIBUTE_UNSUPPORTED)
+/// Whether a failed read leaves a hole: the app did not answer in time (it stalled), so an element that is there was
+/// not read. Any other error is the element's own answer (gone, no such value, a SwiftUI element that answers
+/// `kAXErrorFailure`), which a read of it again would give too, so it is left out as before.
+fn missed(error: ax::AXError) -> bool {
+    error == ax::AX_CANNOT_COMPLETE
 }
 
 fn label(value: Option<String>) -> Option<String> {
@@ -312,7 +314,7 @@ impl Walk {
             let count = match element.count("AXChildren") {
                 Ok(count) => count,
                 Err(error) => {
-                    if !absent(error) {
+                    if missed(error) {
                         self.lose();
                     }
                     0
@@ -322,7 +324,7 @@ impl Walk {
                 Vec::new()
             } else {
                 element.elements("AXChildren", MAX_CHILDREN).unwrap_or_else(|error| {
-                    if !absent(error) {
+                    if missed(error) {
                         self.lose();
                     }
                     Vec::new()
@@ -334,7 +336,7 @@ impl Walk {
             Ok(Value::Array(items)) => {
                 items.into_iter().filter_map(|item| if let Value::Element(element) = item { Some(element) } else { None }).collect::<Vec<_>>()
             }
-            Err(error) if !absent(error) => {
+            Err(error) if missed(error) => {
                 self.lose();
                 Vec::new()
             }
@@ -354,13 +356,13 @@ impl Walk {
         self.nodes += 1;
         let read = match read(element) {
             Ok(read) => read,
-            // Gone since its parent listed it: nothing to miss.
-            Err(ax::AX_INVALID_ELEMENT) if !root => return None,
             // Still there, but the app did not answer: the read has a hole.
-            Err(_) if !root => {
+            Err(error) if !root && missed(error) => {
                 self.lose();
                 return None;
             }
+            // Gone since its parent listed it, or an element that refuses reads: nothing a later read would find.
+            Err(_) if !root => return None,
             Err(_) => Read {
                 role: "window",
                 ax_role: "AXWindow".into(),
@@ -567,7 +569,8 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::outside;
+    use super::{missed, outside};
+    use crate::ax;
     use crate::windows::Rect;
 
     const WINDOW: Rect = Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
@@ -576,6 +579,14 @@ mod tests {
     fn reads_a_node_past_the_clip_as_outside() {
         assert!(outside(Rect { x: 0.0, y: 700.0, width: 100.0, height: 20.0 }, WINDOW));
         assert!(!outside(Rect { x: 10.0, y: 10.0, width: 100.0, height: 20.0 }, WINDOW));
+    }
+
+    #[test]
+    fn counts_only_a_stall_as_a_hole_in_the_read() {
+        assert!(missed(ax::AX_CANNOT_COMPLETE));
+        for error in [ax::AX_INVALID_ELEMENT, ax::AX_NO_VALUE, ax::AX_ATTRIBUTE_UNSUPPORTED, ax::AX_FAILURE, ax::AX_NOT_IMPLEMENTED] {
+            assert!(!missed(error), "{error}");
+        }
     }
 
     #[test]
