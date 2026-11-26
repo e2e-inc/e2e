@@ -1174,8 +1174,11 @@ test('signs out', async ({ app, platform, device }) => {
 - With `platforms` on a test, its fixtures are typed for the targets that
   run it. With `platforms: ['ios']`, `device` is typed as `Device`. On a
   `describe`, `platforms` doesn't change the types.
-- With a type annotation such as `const config: E2EConfig`, the engine types
-  are lost. To keep them, use `as const satisfies E2EConfig` or `defineConfig` instead.
+- With a type annotation such as `const config: E2EConfig`, `typeof config` is
+  plain `E2EConfig`. Then in `test.extend<{}, {}, typeof config>()`, the
+  config's engine fixtures aren't added, and `platform` is typed as `string`.
+  Use `as const satisfies E2EConfig` or `defineConfig` instead to keep the
+  config's inferred type.
 
 #### Extending a fixture
 
