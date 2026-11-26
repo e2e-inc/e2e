@@ -426,7 +426,8 @@ mod tests {
 
     #[test]
     fn types_the_shifted_character_of_a_shift_combo() {
-        for (combo, typed) in [("shift+a", Some('A')), ("A", Some('A')), ("shift+1", Some('!')), ("a", Some('a')), ("cmd+a", Some('a'))] {
+        // No Command, Control, or Option combo: those read the machine's keyboard layout, which a test cannot count on.
+        for (combo, typed) in [("shift+a", Some('A')), ("A", Some('A')), ("shift+1", Some('!')), ("a", Some('a'))] {
             let parsed = parse_combo(combo).unwrap_or_else(|_| panic!("{combo} parses"));
             assert_eq!(parsed.key.character, typed, "{combo}");
         }
