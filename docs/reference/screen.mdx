@@ -716,15 +716,23 @@ The options are [`TapOptions`](#types):
   engines both do. With `position`, 2 taps need the `doubleTap` pointer
   action and 3 or more need `multiTap`.
 - `modifiers`: the browser engine holds them.
-- `position`: an offset from the node's top-left corner, inside its border,
-  in CSS pixels. The engine scrolls the node into view when it lists
-  `scrollIntoView`. Then it reads the node's box and dispatches the pointer at
-  the point. No node is behind the gesture, so the platform's other
-  actionability checks (enabled, not covered) do not run.
+- `position`: a point in the node, as a [`ScreenPoint`](#types). A pixel
+  coordinate is measured from the node's top-left corner, inside its border.
+  A percentage from `'0%'` through `'100%'` is a share of the node's box,
+  rounded to the nearest pixel (`'100%'` is its last one). In a frame, the
+  box is the part the frame shows. They may mix:
+  `{ x: '50%', y: 4 }`. `doubleTap`, `dblclick`, `secondaryTap`, and `hover`
+  take it with the same rules.
+
+With `position`, the engine scrolls the node into view when it lists
+`scrollIntoView`. Then it reads the node's box and dispatches the pointer at
+the point. No node is behind the gesture, so the platform's other
+actionability checks (enabled, not covered) do not run.
 
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | An unknown or repeated modifier, `modifiers` beside `position`, or a `count` that is not a positive safe integer. |
+| `INVALID_ARGUMENT` | A `position` coordinate that is negative, not finite, or a string that is not a percentage from `'0%'` through `'100%'`. |
 | `INVALID_ARGUMENT` | A `button` other than `left`, `middle`, or `right`. |
 | `UNSUPPORTED_CAPABILITY` | `modifiers` on an engine that does not declare `tapModifiers`, the mobile engine among them; thrown before it acts. |
 | `UNSUPPORTED_CAPABILITY` | A `count` of 3 or more on an engine without the `multiTap` action, or above the engine's limit (200 on the browser and mobile engines); thrown before it acts. |
@@ -737,7 +745,7 @@ The options are [`TapOptions`](#types):
 #### `doubleTap`
 
 ```ts
-/** Double-taps exactly one matching actionable node. */
+/** Double-taps exactly one matching actionable node; with `position`, that point of its box, as `tap` does. */
 doubleTap(options?: ClickOptions): Promise<void>;
 /** Alias of doubleTap. */
 dblclick(options?: ClickOptions): Promise<void>;
@@ -745,24 +753,29 @@ dblclick(options?: ClickOptions): Promise<void>;
 
 ```ts
 await screen.getByRole('cell', 'Q3 budget').doubleTap();
+await screen.getByRole('image', 'Chart').dblclick({ position: { x: '50%', y: '50%' } });
 ```
 
-Takes `timeout` and `modifiers`, with the same rules and errors as
-[`tap`](#tap).
+Takes `timeout`, `modifiers`, and `position`, with the same rules and errors
+as [`tap`](#tap). With `position`, the engine needs the `doubleTap` pointer
+action.
 
 #### `secondaryTap`
 
 ```ts
-/** Secondary-taps exactly one matching actionable node: a right click, a two-finger tap. */
+/** Secondary-taps exactly one matching actionable node: a right click, a two-finger tap; with `position`, at that point of its box, as `tap` does. */
 secondaryTap(options?: ClickOptions): Promise<void>;
 ```
 
 ```ts
 await screen.getByRole('row', /Invoice 42/).secondaryTap();
+await screen.getByRole('row', /Invoice 42/).secondaryTap({ position: { x: 12, y: '50%' } });
 ```
 
-Takes `timeout` and `modifiers`, with the same rules and errors as
-[`tap`](#tap).
+Takes `timeout`, `modifiers`, and `position`, with the same rules and errors
+as [`tap`](#tap). With `position`, the engine needs the `secondaryTap`
+pointer action. The browser and the headed desktop engines list it, the
+mobile engine does not.
 
 #### `longPress`
 
@@ -943,13 +956,25 @@ await screen.getByLabel('Email').blur();
 #### `hover`
 
 ```ts
-/** Hovers over exactly one matching actionable node. */
-hover(options?: ActionOptions): Promise<void>;
+/** Hovers over exactly one matching actionable node; with `position`, moves the pointer to that point of its box once it is in view, with no other actionability check. */
+hover(options?: HoverOptions): Promise<void>;
 ```
 
 ```ts
 await screen.getByRole('button', 'Account').hover();
+await screen.getByRole('slider', 'Volume').hover({ position: { x: '75%', y: '50%' } });
 ```
+
+- `position`: a point in the node, with the same rules as
+  [`tap`](#tap)'s. The engine needs the `hover` pointer action. The browser
+  and the headed desktop engines list it, the mobile engine does not.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | A `position` coordinate that is negative, not finite, or a string that is not a percentage from `'0%'` through `'100%'`. |
+| `UNSUPPORTED_CAPABILITY` | `position` on an engine without the `hover` pointer action, such as mobile. Thrown before the node is resolved. |
+| `ACTION_FAILED` | `position` on a node the browser engine cannot bring into view. |
+| `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout. |
 
 #### `setInputFiles`
 
@@ -1506,24 +1531,39 @@ export interface SwipePathOptions {
 }
 
 /**
- * A point in CSS pixels. For `tap({ position })` the origin is the node's own
- * top-left corner, inside its border on a document platform. A `Point` is
- * also a `ScreenPoint`, whose origin is the viewport's top-left corner, the
- * space `boundingBox()` reports in.
+ * A point in CSS pixels. A `Point` is also a `ScreenPoint`, whose origin is
+ * the viewport's top-left corner, the space `boundingBox()` reports in.
  */
 export type Point = ViewportPoint; // { x: number; y: number }
 
-/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. */
+/**
+ * CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`),
+ * `'0%'` through `'100%'`. In a locator action's `position`, a percentage is
+ * of the node's box instead.
+ */
 export type ScreenCoordinate = number | `${number}%`;
 
-/** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */
+/** A point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. In the viewport, or in a node's box for a locator action's `position`. */
 export interface ScreenPoint {
   readonly x: ScreenCoordinate;
   readonly y: ScreenCoordinate;
 }
 
-/** `tap`, `click`, `doubleTap`, `dblclick`, and `secondaryTap` options: the action timeout and the keys held for the click. */
+/** `tap`, `click`, `doubleTap`, `dblclick`, and `secondaryTap` options: the action timeout, the point of the node, and the keys held for the click. */
 export interface ClickOptions extends ActionOptions {
+  /**
+   * Where to tap in the node. A pixel coordinate is measured from the node's
+   * top-left corner, inside its border on a document platform. A percentage
+   * is a share of the node's box as the screen shows it, the part inside its
+   * frame when a frame clips it, so `{ x: '50%', y: '50%' }` is its center
+   * and `'100%'` stays on its last pixel. Without it the platform picks a
+   * point of the node, usually its center, behind its own actionability
+   * checks; with it the pointer is dispatched at that point once the node is
+   * in view and has a box. The engine needs the matching pointer action:
+   * `tap`, `secondaryTap` for a single right tap, `doubleTap` for 2 taps, or
+   * `multiTap` for 3 or more.
+   */
+  position?: ScreenPoint;
   /**
    * Keys held while the pointer clicks, as a Shift-click extends a selection:
    * `Shift`, `Control`, `Alt`, `Meta`, or `ControlOrMeta` (Control on Windows
@@ -1538,16 +1578,6 @@ export type KeyModifier = 'Shift' | 'Control' | 'Alt' | 'Meta' | 'ControlOrMeta'
 
 /** `tap` and `click` options. */
 export interface TapOptions extends ClickOptions {
-  /**
-   * Where to tap, relative to the node's top-left corner, inside its border
-   * on a document platform. Without it the platform picks a point of the
-   * node, usually its center, behind its own actionability checks; with it
-   * the pointer is dispatched at that point once the node is in view and has
-   * a box. The engine needs the matching pointer action: `tap`,
-   * `secondaryTap` for a single right tap, `doubleTap` for 2 taps, or
-   * `multiTap` for 3 or more.
-   */
-  position?: Point;
   /**
    * How many taps in a row, a positive safe integer, default 1. `2` is the
    * same as `doubleTap()`; 3 or more needs an engine that declares the
@@ -1564,6 +1594,17 @@ export interface TapOptions extends ClickOptions {
    * `tapButtons`, and fails with `UNSUPPORTED_CAPABILITY` otherwise.
    */
   button?: 'left' | 'middle' | 'right';
+}
+
+/** `hover` options. */
+export interface HoverOptions extends ActionOptions {
+  /**
+   * Where to hover in the node, measured as a tap's `position` is. With it
+   * the pointer moves to that point once the node is in view and has a box,
+   * with no other actionability check. The engine needs the `hover` pointer
+   * action, `UNSUPPORTED_CAPABILITY` otherwise.
+   */
+  position?: ScreenPoint;
 }
 
 /** One option of a select: its label (a bare string too), its `value` attribute, or its zero-based index. */

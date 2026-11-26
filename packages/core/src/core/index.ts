@@ -16,6 +16,7 @@ export type {
   ClickOptions,
   Expectable,
   FilePayload,
+  HoverOptions,
   JsonPrimitive,
   JsonValue,
   KeyModifier,

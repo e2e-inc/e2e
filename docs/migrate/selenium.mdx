@@ -85,6 +85,7 @@ test('signs in', async ({ app, screen, browser }) => {
 | `By.linkText`, `By.partialLinkText` | `screen.getByRole('link', { name })`, `name: /part/` |
 | `findElements(...).size()`, `.get(n)` | `await locator.count()`, `locator.nth(n)` |
 | `.click()`, `.clear()`, `Actions.moveToElement`, `Actions.dragAndDrop` | `.tap()`, `.clear()`, `.hover()`, `.dragTo(target)` |
+| `Actions.moveToElement(el, x, y)`, then `.click()`, `.doubleClick()`, or `.contextClick()` | `.hover({ position })`, `.tap({ position })`, `.doubleTap({ position })`, `.secondaryTap({ position })`. Selenium 4 measures the offset from the element's center, e2e from its top-left corner inside the border. `{ x: '50%', y: '50%' }` is the center. For an offset, use pixels: half the width from `boundingBox()` plus `x`, less the border width, and the same for `y`. A position left of or above the corner is `INVALID_ARGUMENT` |
 | `.sendKeys('text')` | `.fill('text')` replaces the content, `.pressSequentially('text')` appends |
 | `.sendKeys(Keys.ENTER)`, `Actions.keyDown(CONTROL).sendKeys('a')` | `.press('Enter')`, `.press('ControlOrMeta+a')` |
 | `.sendKeys(path)` on a file input, `new Select(el).selectByVisibleText` | `.setInputFiles(path)`, `.selectOption({ label })` |

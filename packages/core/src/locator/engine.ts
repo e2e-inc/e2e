@@ -604,16 +604,18 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
   }
 
   /**
-   * Performs one pointer action at an offset from the origin of exactly one
-   * match (`SemanticNode.origin`, else its box's top-left corner): the node
-   * is scrolled into view when the engine can, then its box is read and the
-   * pointer dispatched at the point, with no node behind the gesture. The node has to be visible with a box within
+   * Performs one pointer action at an offset into exactly one match: a pixel
+   * coordinate is measured from the node's origin (`SemanticNode.origin`,
+   * else its box's top-left corner), a percentage is that share of its box
+   * from the box's top-left corner. The node is scrolled into view when the
+   * engine can, then its box is read and the pointer dispatched at the
+   * point, with no node behind the gesture. The node has to be visible with a box within
    * the deadline; one that never is fails as LOCATOR_NOT_FOUND, as `waitFor`
    * does.
    */
   async performWithin(
     expression: LocatorExpression,
-    offset: ViewportPoint,
+    offset: ScreenPoint,
     action: PointerAction,
     timeoutMs?: number,
   ): Promise<void> {
@@ -622,7 +624,7 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     if (this.session.actions.has('scrollIntoView')) {
       await this.performUntil(expression, { kind: 'scrollIntoView' }, deadline);
     }
-    let origin: ViewportPoint | undefined;
+    let point: ViewportPoint | undefined;
     await pollReads({
       deadline,
       signal: this.signal,
@@ -633,7 +635,12 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
         if (deadline.expired()) return false;
         const { node } = await this.tryRead(expression, reads);
         if (!isNodeVisible(node) || node.rect === undefined) return false;
-        origin = node.origin ?? node.rect;
+        const origin = node.origin ?? node.rect;
+        const into = resolveScreenPoint(offset, node.rect);
+        point = {
+          x: (typeof offset.x === 'number' ? origin.x : node.rect.x) + into.x,
+          y: (typeof offset.y === 'number' ? origin.y : node.rect.y) + into.y,
+        };
         return true;
       },
       onTimeout: (cause) =>
@@ -642,9 +649,8 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
           ...(cause === undefined ? {} : { cause }),
         }),
     });
-    // pollReads returns only once `evaluate` answered true, which set `origin`.
-    const at = origin!;
-    await this.dispatchAt({ x: at.x + offset.x, y: at.y + offset.y }, action, deadline);
+    // pollReads returns only once `evaluate` answered true, which set `point`.
+    await this.dispatchAt(point!, action, deadline);
   }
 
   /** The failure of an action that was not sent: its phase was cancelled, or its deadline passed first. */

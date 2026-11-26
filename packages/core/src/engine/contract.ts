@@ -223,7 +223,7 @@ export interface SemanticNode {
    * The point an offset into the node is measured from, in `rect`'s space,
    * when it is not `rect`'s top-left corner: a document element's padding
    * box, inside its border, or the corner of a box a frame clipped `rect`
-   * from. `tap({ position })` adds the offset to it.
+   * from. A pixel `position` of a tap or a hover is added to it.
    */
   readonly origin?: ViewportPoint;
   /**

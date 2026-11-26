@@ -61,7 +61,7 @@ export function clampToViewport(
 /** Digits with an optional fraction, then `%`: no sign, exponent, or space. */
 const PERCENTAGE = /^\d+(?:\.\d+)?%$/;
 
-/** Whether a coordinate is a percentage of the viewport from `'0%'` through `'100%'`. */
+/** Whether a coordinate is a percentage, of the viewport or a node's box, from `'0%'` through `'100%'`. */
 export function isPercentage(value: unknown): value is `${number}%` {
   return typeof value === 'string' && PERCENTAGE.test(value) && Number.parseFloat(value) <= 100;
 }
@@ -73,14 +73,15 @@ export function isPixelPoint(point: ScreenPoint): point is ViewportPoint {
 
 /**
  * Resolves a point a test names to CSS pixels: a percentage is that share of
- * the viewport's width (x) or height (y), rounded to a whole pixel and kept on
- * the last one, so `'100%'` stays inside the viewport. Pixels pass through.
+ * the width (x) or height (y) of `area`, the viewport or a node's box, rounded
+ * to a whole pixel and kept on the last one, so `'100%'` stays inside it.
+ * Pixels pass through.
  */
-export function resolveScreenPoint(point: ScreenPoint, viewport: ViewportSize): ViewportPoint {
-  return { x: resolveCoordinate(point.x, viewport.width), y: resolveCoordinate(point.y, viewport.height) };
+export function resolveScreenPoint(point: ScreenPoint, area: ViewportSize): ViewportPoint {
+  return { x: resolveCoordinate(point.x, area.width), y: resolveCoordinate(point.y, area.height) };
 }
 
-/** One coordinate of `resolveScreenPoint` along a viewport side of `size` CSS pixels. */
+/** One coordinate of `resolveScreenPoint` along a side of `size` CSS pixels. */
 function resolveCoordinate(value: ScreenCoordinate, size: number): number {
   if (typeof value === 'number') return value;
   return clamp(Math.round((Number.parseFloat(value) / 100) * size), 0, Math.max(0, size - 1));

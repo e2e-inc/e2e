@@ -922,8 +922,22 @@ const screenPoint: import('../../src/index.ts').ScreenPoint = point;
 void screen.tapAt(screenPoint);
 // @ts-expect-error a percentage carries its % sign.
 void screen.tapAt({ x: '50', y: 1 });
-// @ts-expect-error a position is relative to the node, so it stays in pixels.
+// A position takes pixels from the node's corner or percentages of its box, on every tap verb and hover.
 void screen.getByRole('image').tap({ position: { x: '50%', y: 0 } });
+void screen.getByRole('image').doubleTap({ position: { x: '50%', y: '50%' }, timeout: 1_000 });
+void screen.getByRole('image').dblclick({ position: point });
+void screen.getByRole('row').secondaryTap({ position: { x: 4, y: '100%' } });
+void (screen.getByRole('menuitem').hover({ position: { x: '90%', y: 4 }, timeout: 1_000 }) satisfies Promise<void>);
+const hoverOptions: import('../../src/index.ts').HoverOptions = { position: screenPoint };
+void screen.getByRole('menuitem').hover(hoverOptions);
+// @ts-expect-error a position percentage carries its % sign.
+void screen.getByRole('image').dblclick({ position: { x: '50', y: 0 } });
+// @ts-expect-error a hover position has both coordinates.
+void screen.getByRole('menuitem').hover({ position: { x: 1 } });
+// @ts-expect-error a hover holds no keys.
+void screen.getByRole('menuitem').hover({ modifiers: ['Shift'] });
+// @ts-expect-error a secondary tap is one right click; count and button ride tap and click only.
+void screen.getByRole('row').secondaryTap({ count: 2, position: point });
 // @ts-expect-error the executor's point verbs aim at screenshot pixels, never percentages.
 void executorContext.actions.tapAt({ x: '50%', y: 0 });
 // @ts-expect-error a locator swipe is directional; the path form is screen.swipe.

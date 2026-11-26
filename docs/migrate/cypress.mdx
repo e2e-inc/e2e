@@ -97,6 +97,8 @@ describe('todos', () => {
 | `cy.contains('text')`, `cy.contains('li', 'text')` | `screen.getByText('text', { exact: false })`, `screen.getByRole('listitem').filter({ hasText: 'text' })` |
 | `.click()`, `.dblclick()`, `.clear()`, `.check()`, `.uncheck()`, `.focus()`, `.blur()`, `.first()`, `.last()`, `.scrollIntoView()` | The same |
 | `.rightclick()`, `.eq(n)`, `.selectFile(path)` | `.secondaryTap()`, `.nth(n)`, `.setInputFiles(path)` |
+| `.click(x, y)`, `.dblclick(x, y)`, `.rightclick(x, y)` | `.tap({ position: { x, y } })`, `.doubleTap({ position })`, `.secondaryTap({ position })`. Cypress measures from the outer edge of the border, e2e from inside it, so the two match on an element without a border |
+| `.click('topLeft')` and the other position names | A percentage `position` of the box: `topLeft` is `{ x: '0%', y: '0%' }`, `top` is `{ x: '50%', y: '0%' }`, `center` is `{ x: '50%', y: '50%' }`, `bottomRight` is `{ x: '100%', y: '100%' }`, and so on |
 | `.type('text')`, `.type('{enter}')`, `.clear().type('text')` | `.pressSequentially('text')` appends with key events, `.press('Enter')`, `.fill('text')` |
 | `.select('Pro')` | `.selectOption('Pro')` matches the label; a value needs `{ value: 'pro' }`, an index `{ index: 1 }` |
 | `.should('be.visible')`, `be.checked`, `be.disabled`, `be.focused`, `exist` | `await expect(locator).toBeVisible()`, `toBeChecked()`, `toBeDisabled()`, `toBeFocused()`, `toBeAttached()` |

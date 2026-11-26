@@ -330,6 +330,36 @@ test('taps use the requested mouse button, count, and position', async ({ app, s
   expect(await pressed({ count: 3, position: { x: 9, y: 5 } })).toEqual(['click b0 d1 x9', 'click b0 d2 x9', 'click b0 d3 x9']);
 });
 
+test('double taps, secondary taps, and hovers land at the position they name', async ({ app, screen, browser }) => {
+  await app.open();
+  await browser.evaluate(() => {
+    document.body.innerHTML =
+      '<div role="button" aria-label="Pad" style="position: absolute; left: 20px; top: 30px; width: 200px; height: 100px; border: 4px solid black"></div>';
+    const pad = document.querySelector('div')!;
+    const last: Record<string, string> = {};
+    (window as unknown as { last: Record<string, string> }).last = last;
+    for (const type of ['dblclick', 'contextmenu', 'mousemove']) {
+      pad.addEventListener(type, (event) => {
+        event.preventDefault();
+        const mouse = event as MouseEvent;
+        const box = pad.getBoundingClientRect();
+        last[type] = [mouse.clientX - box.left, mouse.clientY - box.top, 'b' + mouse.button].join(' ');
+      });
+    }
+    return null;
+  });
+  const pad = screen.getByRole('button', { name: 'Pad' });
+  const last = () => browser.evaluate(() => (window as unknown as { last: Record<string, string> }).last);
+  await pad.dblclick({ position: { x: '50%', y: '50%' } });
+  expect((await last()).dblclick).toBe('104 54 b0');
+  await pad.secondaryTap({ position: { x: 7, y: 9 } });
+  expect((await last()).contextmenu).toBe('11 13 b2');
+  await pad.doubleTap({ position: { x: 0, y: '100%' } });
+  expect((await last()).dblclick).toBe('4 107 b0');
+  await pad.hover({ position: { x: '100%', y: '0%' } });
+  expect((await last()).mousemove).toBe('207 0 b0');
+});
+
 test('a trigger that starts no download times out saying so', async ({ app, browser }) => {
   await app.open('/downloads');
   await browser.waitForDownload(() => new Promise((resolve) => setTimeout(resolve, 200)), { timeout: 500 });
@@ -645,6 +675,7 @@ describe('web platform integration', () => {
     'downloads are captured as artifacts',
     'clicks hold the modifiers they name',
     'taps use the requested mouse button, count, and position',
+    'double taps, secondary taps, and hovers land at the position they name',
     'a viewport set before the first navigation holds through app.open',
     'an empty class attribute is an empty class list',
     'reads wait for a node that arrives late',
