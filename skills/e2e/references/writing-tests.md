@@ -322,8 +322,9 @@ sort copies before comparing the complete observed and expected lists.
   with `LOCATOR_AMBIGUOUS`; at zero, actions and reads end in
   `LOCATOR_NOT_FOUND` and assertions in `ASSERTION_FAILED`. Any number is
   fine for `toHaveCount`, list-form `toHaveText` and `toContainText`,
-  `count()`, `all()`, and `allTextContents()`; at zero, `isVisible()` reads
-  `false` and `isHidden()` reads `true`.
+  `count()`, `all()`, and `allTextContents()`. At zero, `toBeHidden()` and
+  negated `toBeVisible`, `toBeAttached`, and `toBeInViewport` pass,
+  `isVisible()` reads `false`, and `isHidden()` reads `true`.
 - **Narrow** with `filter({ hasText })` (a case-insensitive substring),
   `filter({ has: locator })`, `filter({ hasNot })`, `filter({ hasNotText })`,
   `{ visible: true }`, scoping under another locator, or `nth(i)` with a

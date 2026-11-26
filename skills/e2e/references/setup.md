@@ -89,11 +89,12 @@ Gateway, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` (Claude Max or Team plans
 use a Console API key, there is no `e2e login`), each read by its provider
 package. Use API keys in CI.
 
-- There is no implicit default model. Without one, the built-in agent's
-  first `agent` step stops the run with one `MODEL_UNAVAILABLE` (exit 2); a
+- There is no implicit default model. Without one, the first test that
+  takes the built-in agent's `agent` fixture stops the run with one `MODEL_UNAVAILABLE` (exit 2); a
   model-less custom executor fails only `waitFor` and `extract` this way; tests with no `agent.*`
   steps need no model.
-- A model a subscription plan does not serve (common on Copilot Free, which
+- A model GitHub Copilot does not serve to the account (common on Copilot
+  Free, which
   serves models only through auto selection) also stops the run with
   `MODEL_UNAVAILABLE` naming it: pick another id or an API provider.
 
@@ -182,7 +183,8 @@ export default {
 ```
 
 Full reference: docs/reference/config.mdx ("The app under test"),
-docs/reference/web.mdx, docs/integrations/index.mdx for hosted browsers.
+docs/reference/web.mdx, and for hosted browsers docs/integrations/index.mdx
+(online: https://e2e.com/docs/integrations).
 
 ### Let the runner start the app
 
@@ -303,7 +305,7 @@ export default {
 
 Full reference (Expo dev builds, iOS languages, timing, providers, the raw
 driver): docs/mobile.mdx, docs/reference/mobile.mdx,
-docs/integrations/index.mdx.
+docs/integrations/index.mdx (online: https://e2e.com/docs/integrations).
 
 ## Done when
 

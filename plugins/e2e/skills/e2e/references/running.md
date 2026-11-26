@@ -47,7 +47,8 @@ CI=1 npx e2e run            # the CI defaults, locally
 - `--retries 0` while fixing: outside strict mode a retry never replays the
   cache. `--action-timeout 5000` makes a wrong locator fail in 5 s; keep it
   above the slowest screen load and drop it once green.
-- `--step` holds each step for a key; without a terminal (an agent's shell)
+- `--step` holds each step for a key; without a terminal (an agent's shell;
+  if it has one, add `< /dev/null`, or `< NUL` in Windows `cmd`)
   each command returns at the next held step, then `e2e run --step next`,
   `rest`, or `stop` from the same directory (topic `debugging`, "Tools").
 - `list` takes the same selection flags, prints `file › title [target]
@@ -84,7 +85,7 @@ go to `rerun-<n>/`).
 - The default `list` reporter ends with a `Failed` section, one entry per
   failed test with its file and line, the error's first line, and its trace
   page, so `| tail` keeps it.
-- With the default `--trace retain-on-failure`, a failed, timed-out,
+- With the default `trace` mode, `retain-on-failure`, a failed, timed-out,
   interrupted, or flaky test gets `results/<test>/trace.md` (`--trace off`
   writes none): every step, the cache's decisions, the app's
   log, the last model turns, and the screen at failure. Read it first (topic
@@ -111,6 +112,7 @@ Full reference: docs/reference/reporters.mdx.
 
 The highest code present wins. Exit 2 is deterministic: never retry it.
 Only exit 3 is worth a job-level retry.
+Full reference: docs/reference/cli.mdx.
 
 ## Continuous integration
 
