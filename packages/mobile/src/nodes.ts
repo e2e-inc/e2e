@@ -687,8 +687,14 @@ export function projectSnapshot(
     index.push(entry);
     const childNodes = kids.filter((child) => child !== folded?.child).map((child) => build(child, entry, onKeyboard));
     const covered = !onKeyboard && source.focused !== true && underKeyboard(source.rect, options.keyboard) && childNodes.every((child) => child.states?.hidden === true);
+    // A link span takes the disabled state of the `Text` it echoes, which
+    // React Native sets on the `Text` alone.
+    const textOf = parents[position];
+    const disabled =
+      source.enabled === false ||
+      (textOf !== undefined && echoed.has(textOf) && describesLink(source) && (raw[textOf] as RawNode).enabled === false);
     const states = {
-      ...(source.enabled === false ? { disabled: true } : {}),
+      ...(disabled ? { disabled: true } : {}),
       ...(source.selected === true ? { selected: true } : {}),
       ...(source.focused === true ? { focused: true } : {}),
       ...(source.visibleToUser === false || covered ? { hidden: true } : {}),

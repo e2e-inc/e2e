@@ -378,6 +378,9 @@ describe('snapshot projection', () => {
       // An accessibilityLabel names the Text apart from its span, which still echoes the text's own words.
       { ref: 'e18', index: 17, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Home', contentDescription: 'Go to home', roleDescription: 'Link' },
       { ref: 'e19', index: 18, parentIndex: 17, depth: 2, type: 'android.widget.Button', label: 'Home', roleDescription: 'Link' },
+      // A disabled Text link: React Native disables the Text, and the span it echoes is the link.
+      { ref: 'e20', index: 19, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Profile', roleDescription: 'Link', enabled: false },
+      { ref: 'e21', index: 20, parentIndex: 19, depth: 2, type: 'android.widget.Button', label: 'Profile', roleDescription: 'Link', enabled: true },
     ]);
     const nodes = projected.index.slice(1).map((entry) => `${entry.node.role} ${entry.node.name ?? ''}`.trim());
     expect(nodes).toEqual([
@@ -399,7 +402,11 @@ describe('snapshot projection', () => {
       'button Share',
       'group Go to home',
       'link Home',
+      'group Profile',
+      'link Profile',
     ]);
+    const profile = projected.index.find((entry) => entry.ref === 'e21');
+    expect(profile?.node.states?.disabled).toBe(true);
   });
 
   it('reads the role and state React Native spells into an iOS accessibility value, and reports the rest as the value', () => {
