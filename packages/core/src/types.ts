@@ -1443,7 +1443,7 @@ export type SoftValueExpectation<T> = Omit<ValueExpectation<T>, 'toMatchSchema' 
 };
 
 export interface PollOptions {
-  /** Deadline in milliseconds. Default 5000. */
+  /** Deadline in milliseconds. Default `config.assertionTimeout` in an e2e test, suite hook, or `openHost()` session, else 5000. */
   timeout?: number;
   /**
    * Pause between reads in milliseconds.
@@ -1457,9 +1457,17 @@ export interface PollOptions {
 }
 
 export type PassOptions = {
-  /** Timeout in milliseconds. By default, only the phase deadline applies. */
+  /**
+   * Timeout in milliseconds. In `config.toPass` it defaults to 0: only the test, hook, or session deadline applies.
+   * On a call it defaults to the configured value when an e2e test, suite hook, or `openHost()` session
+   * supplies it, else 0. With none of them active, 0 is `INVALID_CONFIG`.
+   */
   timeout?: number;
-  /** Pauses between tries in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  /**
+   * Pauses between tries in milliseconds. The last pause is repeated. In `config.toPass` they default to
+   * [100, 250, 500, 1000]. On a call they default to the configured value when an e2e test, suite hook,
+   * or `openHost()` session supplies it, else [100, 250, 500, 1000].
+   */
   intervals?: readonly number[];
 };
 
