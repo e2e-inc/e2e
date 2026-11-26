@@ -1002,18 +1002,21 @@ The browser engine drags in one of two ways:
 
 | Nodes | Drag | Moves without `steps` |
 | --- | --- | --- |
-| Any other pair of locator matches | Playwright's `dragTo` | 1 |
 | Either one a `getByLabel` match by a string without `{ exact: false }`, a `getByDisplayValue` match, or a node the agent observed | The engine drives the mouse | 3: 2 steps, then one more at the release point for HTML5 drag-and-drop |
+| Any other pair of locator matches | Playwright's `dragTo` | 1 |
 
 Playwright's `dragTo` scrolls each point into view and waits until nothing
 covers it, up to the timeout.
 
 The mouse path checks a position against its node's box, not against what
 is on top of it. It scrolls the target node into view, not the release
-point. A point still outside the viewport fails before the button goes
-down: use a smaller offset, or locators that take Playwright's `dragTo`.
-When the step times out during the moves, the mouse path releases the
-button wherever the pointer is.
+point. With a position, it checks both points before any input and again
+just before the button goes down, so a node that changes on the hover fails
+before the press. A release point still outside the viewport fails: use a
+smaller offset, or locators that take Playwright's `dragTo`. So does a
+source that the scroll to the target pushes out of view. When the step
+times out during the moves, the mouse path releases the button wherever
+the pointer is.
 
 Only the browser engine supports the options. A plain `dragTo` works on
 every engine that lists the `dragTo` action.

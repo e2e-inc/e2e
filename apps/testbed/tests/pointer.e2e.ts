@@ -61,6 +61,15 @@ test('locator.dragTo presses and releases at the positions it names', { platform
   await expect(screen.getByLabel('Pad state')).toHaveText('swiped from 10,20 to 250,150');
 });
 
+test('locator.dragTo between label matches presses and releases at the positions it names', { platforms: ['web'] }, async ({ app, screen }) => {
+  await app.open('/pointer');
+  const pad = screen.getByLabel('Pointer pad');
+
+  await pad.dragTo(pad, { sourcePosition: { x: 30, y: 40 }, targetPosition: { x: 200, y: 120 }, steps: 5 });
+
+  await expect(screen.getByLabel('Pad state')).toHaveText('swiped from 30,40 to 200,120');
+});
+
 test('a path swipe drags and drops on the board', async ({ app, screen }) => {
   await app.open('/board');
 

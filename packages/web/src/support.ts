@@ -105,8 +105,11 @@ async function scrollIntoViewNearest(target: ActionTarget): Promise<void> {
   else await target.element.evaluate(scroll);
 }
 
-/** Where a drag presses or releases on one node: its centre, or `position` inside the node's `border`. */
-type DragAim = { readonly position: Point; readonly border: Point } | null;
+/** The page a drag runs in, and the viewport points it presses and releases at. */
+type DragEnds = { readonly page: Page; readonly start: Point; readonly end: Point };
+
+const SOURCE_REFUSED = 'the drag cannot press on its source';
+const DESTINATION_REFUSED = 'the drag cannot drop on its destination';
 
 /**
  * Drags one target onto another with the pointer.
@@ -130,70 +133,10 @@ export async function performPointerDrag(
   const deadline = new Deadline(operation.timeoutMs);
   const remaining = (): number => Math.max(1, deadline.remaining());
 
-  // A position outside its node is refused before any input: hovering there
-  // would wait for another element to stop covering the point.
-  const sourceAim = await aimAt(source, drag.sourcePosition, 'the drag cannot press on its source', remaining());
-  const targetAim = await aimAt(destination, drag.targetPosition, 'the drag cannot drop on its destination', remaining());
-
-  // Hover the source first: it auto-waits for actionability and scrolls the
-  // source into view, and the gesture starts there, so its position is the one
-  // that has to hold.
-  await asActionable(source).hover({ timeout: remaining(), ...obj({ position: drag.sourcePosition }) });
-  const page = await targetPage(source);
-  const viewport = await currentViewport(page);
-  let from = await targetBoundingBox(source, remaining());
-  let to = await targetBoundingBox(destination, remaining());
-
-  // A pointer can only be put at a viewport coordinate, so a destination below
-  // the fold has to be brought into view — `Locator.dragTo` scrolls both sides,
-  // and a pointer sequence that skips it aims where no element is and drops
-  // nothing.
-  //
-  // Neither obvious tool fits. `scrollIntoViewIfNeeded` centres the destination,
-  // which pushes the source out and costs the position hovering just
-  // established. `mouse.wheel` does not wait for the scroll it causes, so the
-  // boxes read after it are a race. `scrollIntoView({ block: 'nearest' })`
-  // scrolls the smallest amount that reveals the element, synchronously, which
-  // keeps both endpoints on screen whenever they can be.
-  if (to !== null && !withinViewport(pointOf(to, targetAim), viewport)) {
-    await scrollIntoViewNearest(destination);
-    from = await targetBoundingBox(source, remaining());
-    to = await targetBoundingBox(destination, remaining());
-  }
-
-  if (from === null || to === null) {
-    throw new EngineError('NOT_ACTIONABLE', 'a drag endpoint has no visible bounding box', {
-      retryable: false,
-    });
-  }
-  const start = pointOf(from, sourceAim);
-  const end = pointOf(to, targetAim);
-  // Endpoints that cannot be on screen together are reported rather than dragged
-  // between: a pointer sequence aimed off-screen looks like a drag that ran and
-  // leaves the page untouched, which surfaces later as a confusing assertion
-  // instead of the drag failure it is.
-  for (const [label, point, option, aim] of [
-    ['source', start, 'sourcePosition', sourceAim],
-    ['destination', end, 'targetPosition', targetAim],
-  ] as const) {
-    if (withinViewport(point, viewport)) continue;
-
-    const at = `(${Math.round(point.x)}, ${Math.round(point.y)}) of ${viewport.width}x${viewport.height}`;
-    if (aim !== null) {
-      throw new EngineError(
-        'NOT_ACTIONABLE',
-        `the drag ${label} position (${aim.position.x}, ${aim.position.y}) is outside the viewport at ${at}: ` +
-          `this drag scrolls only the node into view, so use a smaller ${option}, or locators that take Playwright's dragTo`,
-        { retryable: false },
-      );
-    }
-
-    throw new EngineError(
-      'NOT_ACTIONABLE',
-      `the drag ${label} is outside the viewport at ${at}: the two endpoints cannot be reached in one gesture`,
-      { retryable: false },
-    );
-  }
+  const { page, start, end } =
+    drag.sourcePosition === undefined && drag.targetPosition === undefined
+      ? await reachCentres(source, destination, remaining)
+      : await reachPositions(source, destination, drag, operation, remaining);
 
   operation.signal.throwIfAborted();
   await page.mouse.move(start.x, start.y);
@@ -233,19 +176,163 @@ export async function performPointerDrag(
   }
 }
 
-/**
- * Reads where a drag aims on one node when `position` is set, and refuses a
- * position outside the node's box, prefixing the refusal with `refused`.
- * Playwright's `dragTo` reads the border with `parseInt`, so both web paths
- * land on the same pixel under a zoom that makes a border fractional.
- */
-async function aimAt(target: ActionTarget, position: ViewportPoint | undefined, refused: string, timeout: number): Promise<DragAim> {
-  if (position === undefined) return null;
+/** Hovers the source of a drag without positions and finds the centres of both nodes in the viewport. */
+async function reachCentres(source: ActionTarget, destination: ActionTarget, remaining: () => number): Promise<DragEnds> {
+  // Hover the source first: it auto-waits for actionability and scrolls the
+  // source into view, and the gesture starts there, so its position is the one
+  // that has to hold.
+  await asActionable(source).hover({ timeout: remaining() });
+  const page = await targetPage(source);
+  const viewport = await currentViewport(page);
+  let from = await targetBoundingBox(source, remaining());
+  let to = await targetBoundingBox(destination, remaining());
 
+  // A pointer can only be put at a viewport coordinate, so a destination below
+  // the fold has to be brought into view — `Locator.dragTo` scrolls both sides,
+  // and a pointer sequence that skips it aims where no element is and drops
+  // nothing.
+  //
+  // Neither obvious tool fits. `scrollIntoViewIfNeeded` centres the destination,
+  // which pushes the source out and costs the position hovering just
+  // established. `mouse.wheel` does not wait for the scroll it causes, so the
+  // boxes read after it are a race. `scrollIntoView({ block: 'nearest' })`
+  // scrolls the smallest amount that reveals the element, synchronously, which
+  // keeps both endpoints on screen whenever they can be.
+  if (to !== null && !withinViewport(centreOf(to), viewport)) {
+    await scrollIntoViewNearest(destination);
+    from = await targetBoundingBox(source, remaining());
+    to = await targetBoundingBox(destination, remaining());
+  }
+
+  if (from === null || to === null) {
+    throw new EngineError('NOT_ACTIONABLE', 'a drag endpoint has no visible bounding box', {
+      retryable: false,
+    });
+  }
+  const start = centreOf(from);
+  const end = centreOf(to);
+  // Endpoints that cannot be on screen together are reported rather than dragged
+  // between: a pointer sequence aimed off-screen looks like a drag that ran and
+  // leaves the page untouched, which surfaces later as a confusing assertion
+  // instead of the drag failure it is.
+  for (const [label, point] of [
+    ['source', start],
+    ['destination', end],
+  ] as const) {
+    if (!withinViewport(point, viewport)) {
+      throw new EngineError(
+        'NOT_ACTIONABLE',
+        `the drag ${label} is outside the viewport at (${Math.round(point.x)}, ${Math.round(point.y)}) ` +
+          `of ${viewport.width}x${viewport.height}: the two endpoints cannot be reached in one gesture`,
+        { retryable: false },
+      );
+    }
+  }
+
+  return { page, start, end };
+}
+
+/**
+ * Finds the press and release points of a drag with a position, scrolls both
+ * into view, and hovers the press point. Every check that can refuse the drag
+ * runs before the hover, and again after it, so a refusal sends no input or
+ * comes before the button goes down.
+ */
+async function reachPositions(
+  source: ActionTarget,
+  destination: ActionTarget,
+  drag: DragFields,
+  operation: ConnectionBudget,
+  remaining: () => number,
+): Promise<DragEnds> {
+  // The source's box is read before the hover, so wait for it as the hover
+  // would: a source hidden for a moment is waited for, and a handle whose
+  // node was replaced fails as stale, which the runner locates again.
+  if (source.kind === 'locator') await source.locator.waitFor({ state: 'visible', timeout: remaining() });
+  else await source.element.waitForElementState('visible', { timeout: remaining() });
+
+  // A position outside its node is refused before any input: hovering there
+  // would wait for another element to stop covering the point.
+  await endpoint(source, drag.sourcePosition, SOURCE_REFUSED, remaining());
+  await endpoint(destination, drag.targetPosition, DESTINATION_REFUSED, remaining());
+
+  // A trial hover waits for the source and scrolls the press point into view
+  // as the hover does, without moving the pointer. The destination scroll
+  // then happens before any input too, as in `reachCentres`.
+  await asActionable(source).hover({ trial: true, timeout: remaining(), ...obj({ position: drag.sourcePosition }) });
+  const page = await targetPage(source);
+  const viewport = await currentViewport(page);
+  if (!withinViewport(await endpoint(destination, drag.targetPosition, DESTINATION_REFUSED, remaining()), viewport)) {
+    await scrollIntoViewNearest(destination);
+  }
+  await positionedEnds(source, destination, drag, viewport, remaining);
+
+  operation.signal.throwIfAborted();
+  await asActionable(source).hover({ timeout: remaining(), ...obj({ position: drag.sourcePosition }) });
+
+  // The page can change under the hover, such as a destination that shrinks
+  // on the source's `mouseenter`, so both points are checked again on the
+  // boxes the press and the release use.
+  return { page, ...(await positionedEnds(source, destination, drag, viewport, remaining)) };
+}
+
+/** The press and release points of a drag with a position, refused when either is outside its box or the viewport. */
+async function positionedEnds(
+  source: ActionTarget,
+  destination: ActionTarget,
+  drag: DragFields,
+  viewport: ViewportSize,
+  remaining: () => number,
+): Promise<{ start: Point; end: Point }> {
+  const start = await endpoint(source, drag.sourcePosition, SOURCE_REFUSED, remaining());
+  const end = await endpoint(destination, drag.targetPosition, DESTINATION_REFUSED, remaining());
+  const at = (point: Point): string => `(${Math.round(point.x)}, ${Math.round(point.y)}) of ${viewport.width}x${viewport.height}`;
+
+  // The hover scrolls the press point into view, so it is off screen only
+  // when the scroll to the destination pushed it out, and no smaller
+  // sourcePosition helps.
+  if (!withinViewport(start, viewport)) {
+    throw new EngineError(
+      'NOT_ACTIONABLE',
+      `the drag source is outside the viewport at ${at(start)}: the two endpoints cannot be reached in one gesture, ` +
+        `so use locators that take Playwright's dragTo`,
+      { retryable: false },
+    );
+  }
+
+  if (withinViewport(end, viewport)) return { start, end };
+
+  if (drag.targetPosition !== undefined) {
+    throw new EngineError(
+      'NOT_ACTIONABLE',
+      `the drag destination position (${drag.targetPosition.x}, ${drag.targetPosition.y}) is outside the viewport at ${at(end)}: ` +
+        `this drag scrolls only the node into view, so use a smaller targetPosition, or locators that take Playwright's dragTo`,
+      { retryable: false },
+    );
+  }
+
+  throw new EngineError(
+    'NOT_ACTIONABLE',
+    `the drag destination is outside the viewport at ${at(end)}: the two endpoints cannot be reached in one gesture, ` +
+      `so use locators that take Playwright's dragTo`,
+    { retryable: false },
+  );
+}
+
+/**
+ * The viewport point a drag aims at on one node: its centre, or `position`
+ * inside its border, truncated to hundredths as Playwright's `dragTo` rounds
+ * a position. A position outside the node's box is refused, prefixed with
+ * `refused`. Playwright's `dragTo` reads the border with `parseInt`, so both
+ * web paths land on the same pixel under a zoom that makes a border fractional.
+ */
+async function endpoint(target: ActionTarget, position: ViewportPoint | undefined, refused: string, timeout: number): Promise<Point> {
   const box = await targetBoundingBox(target, timeout);
   if (box === null) {
     throw new EngineError('NOT_ACTIONABLE', 'a drag endpoint has no visible bounding box', { retryable: false });
   }
+
+  if (position === undefined) return centreOf(box);
 
   const read = (el: Element): Point => {
     const style = getComputedStyle(el);
@@ -261,16 +348,9 @@ async function aimAt(target: ActionTarget, position: ViewportPoint | undefined, 
     );
   }
 
-  return { position, border };
-}
-
-/** The viewport point a drag aims at in `box`, truncated to hundredths as Playwright's `dragTo` rounds a position. */
-function pointOf(box: Rect, aim: DragAim): Point {
-  if (aim === null) return centreOf(box);
-
   return {
-    x: Math.trunc((box.x + aim.border.x + aim.position.x) * 100) / 100,
-    y: Math.trunc((box.y + aim.border.y + aim.position.y) * 100) / 100,
+    x: Math.trunc((box.x + border.x + position.x) * 100) / 100,
+    y: Math.trunc((box.y + border.y + position.y) * 100) / 100,
   };
 }
 

@@ -615,12 +615,13 @@ describe('a mouse button at a point', () => {
 /**
  * Logs a drag as `down <x>,<y>` on the card, `move <x>,<y>` in the viewport,
  * and `up <id> <x>,<y>` on the element released over, the offsets measured
- * from the padding box of the card and of the zone. The block keeps its
- * bindings off the global scope, which a second `setContent` in the same
- * page keeps, so the script runs again there.
+ * from the padding box of the card and of the zone. Moves with the button up
+ * go to `hovered`. The block keeps its bindings off the global scope, which a
+ * second `setContent` in the same page keeps, so the script runs again there.
  */
 const DRAG_LOG = `<script>
   window.dragged = [];
+  window.hovered = [];
   {
     const inside = (id, event) => {
       const node = document.getElementById(id);
@@ -634,6 +635,7 @@ const DRAG_LOG = `<script>
     });
     document.addEventListener('mousemove', (event) => {
       if (down) window.dragged.push('move ' + event.clientX + ',' + event.clientY);
+      else window.hovered.push('move ' + event.clientX + ',' + event.clientY);
     });
     document.addEventListener('mouseup', (event) => {
       down = false;
@@ -668,6 +670,11 @@ async function drag(
 /** What the page logged of the drag. */
 function dragged(): Promise<string[]> {
   return page.evaluate(() => (window as unknown as { dragged: string[] }).dragged);
+}
+
+/** The moves the page logged while the button was up. */
+function hovered(): Promise<string[]> {
+  return page.evaluate(() => (window as unknown as { hovered: string[] }).hovered);
 }
 
 /** The moves the page logged while the button was down. */
@@ -758,6 +765,7 @@ describe('a drop point below the fold of a target taller than the viewport', () 
       message: expect.stringMatching(/^the drag destination position \(10, 1500\) is outside the viewport at \(310, \d+\) of 800x600: /),
     });
     expect(await dragged()).toEqual([]);
+    expect(await hovered()).toEqual([]);
   });
 });
 
@@ -777,6 +785,88 @@ ${DRAG_LOG}`);
       code: 'NOT_ACTIONABLE',
       message: 'the drag cannot drop on its destination: its position (100, 5) is outside its 80x40 box',
     });
+    expect(await dragged()).toEqual([]);
+    expect(await hovered()).toEqual([]);
+  });
+
+  it('refuses a press position outside the source before any input', async () => {
+    await page.setContent(DRAG_PAGE);
+    await expect(drag('element', { sourcePosition: { x: 104, y: 5 } })).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: 'the drag cannot press on its source: its position (104, 5) is outside its 108x48 box',
+    });
+    expect(await dragged()).toEqual([]);
+    expect(await hovered()).toEqual([]);
+  });
+
+  it('refuses a drop position the destination no longer holds after the hover, before the press', async () => {
+    await page.setContent(`<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
+<div id="zone" style="position: absolute; left: 300px; top: 200px; width: 200px; height: 40px"></div>
+${DRAG_LOG}
+<script>
+  document.getElementById('card').addEventListener('mouseenter', () => {
+    document.getElementById('zone').style.width = '40px';
+  });
+</script>`);
+    await expect(drag('element', { targetPosition: { x: 100, y: 5 } })).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: 'the drag cannot drop on its destination: its position (100, 5) is outside its 40x40 box',
+    });
+    expect(await dragged()).toEqual([]);
+  });
+
+  it('refuses a source the scroll to the destination pushed out of the viewport, before any input', async () => {
+    await page.setViewportSize({ width: 800, height: 600 });
+    await page.setContent(`<div style="height: 3000px"></div>
+<div id="card" style="position: absolute; left: 20px; top: 20px; width: 100px; height: 40px"></div>
+<div id="zone" style="position: absolute; left: 300px; top: 1500px; width: 200px; height: 100px"></div>
+${DRAG_LOG}`);
+    await expect(drag('element', { sourcePosition: { x: 10, y: 5 } })).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: expect.stringMatching(
+        /^the drag source is outside the viewport at \(30, -?\d+\) of 800x600: the two endpoints cannot be reached in one gesture, so use locators that take Playwright's dragTo$/,
+      ),
+    });
+    expect(await dragged()).toEqual([]);
+    expect(await hovered()).toEqual([]);
+  });
+
+  it('stops before the press when the operation is cancelled during the hover', async () => {
+    const controller = new AbortController();
+    await page.exposeFunction('entered', () => controller.abort(new Error('cancelled during the hover')));
+    await page.setContent(`${DRAG_PAGE}
+<script>document.getElementById('card').addEventListener('mouseenter', () => window.entered());</script>`);
+    await expect(drag('element', { sourcePosition: { x: 10, y: 5 } }, { timeoutMs: 2000, signal: controller.signal })).rejects.toThrow(
+      'cancelled during the hover',
+    );
+    expect(await dragged()).toEqual([]);
+  });
+
+  it('waits for a hidden source to show before it reads the press position', async () => {
+    await page.setContent(`${DRAG_PAGE}
+<script>
+  const card = document.getElementById('card');
+  card.style.display = 'none';
+  setTimeout(() => { card.style.display = ''; }, 300);
+</script>`);
+    await drag('element', { sourcePosition: { x: 10, y: 5 } });
+    expect((await dragged())[0]).toBe('down 10,5');
+  });
+
+  it('reports a source replaced after it was found as stale, for the runner to find again', async () => {
+    await page.setContent(DRAG_PAGE);
+    const action: LocatorAction = { kind: 'dragTo', target: { id: 'zone', revision: '' }, sourcePosition: { x: 10, y: 5 } };
+    const card = await targetOf('element', '#card');
+    const zone = await targetOf('element', '#zone');
+    await page.evaluate(() => {
+      const node = document.getElementById('card');
+      node?.replaceWith(node.cloneNode(true));
+    });
+    const failure = await dispatchLocatorAction(card, action, NO_DEADLINE, async () => zone).then(
+      () => undefined,
+      (cause: unknown) => classifyActionError(cause, action),
+    );
+    expect(failure).toMatchObject({ code: 'NODE_STALE', retryable: true });
     expect(await dragged()).toEqual([]);
   });
 
