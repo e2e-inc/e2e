@@ -2,11 +2,14 @@
  * A config keeps its inferred type in a project without
  * `exactOptionalPropertyTypes`, the compiler default and what `e2e init`
  * leaves a project with. There TypeScript types `ci ? { token } : {}` as
- * `{ token: string } | { token?: undefined }`, so a `secrets`, `credentials`,
- * or `services` value must accept `undefined`, or `defineConfig` falls back
- * to `E2EConfig` and `test.extend` rejects `typeof config`. The repository's
- * own tsconfig turns the option on, so `tests/types/sdk-types.ts` can't see
- * this: the probe is compiled as a separate project.
+ * `{ token: string } | { token?: undefined }`, so `secrets`, `credentials`,
+ * `services`, `agents`, an agent's `tools` and `providerOptions`, and a
+ * target's `app.permissions` accept an `undefined` value. Otherwise
+ * `defineConfig` falls back to `E2EConfig` and `test.extend` rejects
+ * `typeof config`. `app.command.env` is the one record left out of this. The
+ * repository's own tsconfig turns the option on, so
+ * `tests/types/sdk-types.ts` can't see this: the probe is compiled as a
+ * separate project.
  */
 
 import { execFile } from 'node:child_process';
@@ -22,10 +25,12 @@ const PACKAGE_ROOT = realpathSync(fileURLToPath(new URL('../../', import.meta.ur
 const TSC = path.join(PACKAGE_ROOT, 'node_modules', 'typescript', 'bin', 'tsc');
 
 const PROBE = `import { defineConfig, defineService, test, type E2EConfig } from 'e2e';
+import { defineTool } from 'e2e/agent';
 import { openHost } from 'e2e/runner';
 import { web } from '@e2e-dev/web';
 
 declare const ci: boolean;
+declare const lookup: ReturnType<typeof defineTool>;
 
 const email = defineService({
   async *start() {
@@ -37,11 +42,13 @@ const config = defineConfig({
   secrets: ci ? { token: 'secret-token' } : {},
   credentials: ci ? { admin: { username: 'admin', password: 'password1' } } : {},
   services: ci ? { email } : {},
+  agents: { default: { tools: ci ? { lookup } : {}, providerOptions: ci ? { openai: { reasoningEffort: 'low' } } : {} } },
   targets: [
     {
       engine: web(),
       app: {
         url: 'http://localhost:3000',
+        permissions: ci ? { geolocation: 'grant' } : {},
         command: { executable: 'node', args: ['server.mjs'], env: ({ services }) => ({ EMAIL_URL: services.email?.url ?? '' }) },
       },
     },
@@ -58,6 +65,13 @@ extended('types the fixtures', async ({ browser, services }) => {
   void browser;
 });
 
+const agentsConfig = defineConfig({
+  agents: ci ? { buyer: { system: 'buy' } } : {},
+  targets: [{ engine: web() }],
+});
+void openHost({ config: agentsConfig });
+test.extend<{}, {}, typeof agentsConfig>()('types the fixtures', async ({ browser }) => void browser);
+
 defineConfig({
   // @ts-expect-error a secret is a string or a provider
   secrets: ci ? { token: 1 } : {},
@@ -68,6 +82,11 @@ defineConfig({
   // @ts-expect-error a service comes from defineService
   services: { email, db: 42 },
   targets: [{ engine: web() }],
+});
+
+defineConfig({
+  // @ts-expect-error a permission state is grant, deny, or reset
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000', permissions: ci ? { geolocation: 'granted' } : {} } }],
 });
 `;
 
@@ -113,7 +132,7 @@ describe('a config in a project without exactOptionalPropertyTypes', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('keeps its inferred type when secrets, credentials, or services are written as ci ? { ... } : {}', () => {
+  it('keeps its inferred type when a record in it is written as ci ? { ... } : {}', () => {
     expect(diagnostics).toEqual([]);
   });
 });

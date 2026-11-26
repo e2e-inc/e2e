@@ -1001,6 +1001,10 @@ function resolveAgents(
   }
   const agents = new Map<string, ResolvedAgentConfig>();
   for (const [name, value] of Object.entries(raw ?? {})) {
+    if (value === undefined) {
+      continue;
+    }
+
     if (!AGENT_NAME_PATTERN.test(name)) {
       throw new ConfigurationError(
         'INVALID_CONFIG',
@@ -1100,31 +1104,34 @@ function computeConfigDigest(
 
 /**
  * The agents as the digest records them. Each entry passed `resolveAgents`,
- * so it is a plain options object: its plain options are cloned, its tools
- * named, and its executor reduced to what identifies it.
+ * so it is a plain options object, or `undefined`, which is left out like an
+ * `undefined` tool. Its plain options are cloned, its tools named, and its
+ * executor reduced to what identifies it.
  */
 function digestAgents(agents: NonNullable<ProjectConfig['agents']>): unknown {
   return Object.fromEntries(
-    Object.entries(agents).map(([name, entry]) => {
-      const { tools, executor, ...options } = entry ?? {};
-      return [
-        name,
-        {
-          ...(structuredCloneJsonSafe(options) as Record<string, unknown>),
-          ...(tools === undefined ? {} : { tools: Object.keys(tools).toSorted() }),
-          ...(executor === undefined
-            ? {}
-            : {
-                executor: {
-                  name: executor.name,
-                  ...(executor.version === undefined ? {} : { version: executor.version }),
-                  ...(executor.cache === undefined ? {} : { cache: executor.cache }),
-                  ...(executor.model === undefined ? {} : { model: modelIdentity(executor.model) }),
-                  ...(executor.judge === undefined ? {} : { judge: modelIdentity(executor.judge) }),
-                },
-              }),
-        },
-      ];
+    Object.entries(agents).flatMap(([name, entry]) => {
+      if (entry === undefined) {
+        return [];
+      }
+
+      const { tools, executor, ...options } = entry;
+      const digest = {
+        ...(structuredCloneJsonSafe(options) as Record<string, unknown>),
+        ...(tools === undefined ? {} : { tools: Object.keys(tools).filter((tool) => tools[tool] !== undefined).toSorted() }),
+        ...(executor === undefined
+          ? {}
+          : {
+              executor: {
+                name: executor.name,
+                ...(executor.version === undefined ? {} : { version: executor.version }),
+                ...(executor.cache === undefined ? {} : { cache: executor.cache }),
+                ...(executor.model === undefined ? {} : { model: modelIdentity(executor.model) }),
+                ...(executor.judge === undefined ? {} : { judge: modelIdentity(executor.judge) }),
+              },
+            }),
+      };
+      return [[name, digest]];
     }),
   );
 }

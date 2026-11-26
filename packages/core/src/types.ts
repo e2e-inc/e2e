@@ -1714,9 +1714,10 @@ export interface TargetApp<Services = Readonly<Record<string, unknown>>> {
    * `grant` only and holds it on every page of the attempt; what it leaves
    * out is the browser's default, which headless Chromium refuses. The
    * engine checks the names its platform knows. `'all'` grants every
-   * permission the engine can grant on its platform.
+   * permission the engine can grant on its platform. An `undefined` value is
+   * the permission left out.
    */
-  permissions?: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
+  permissions?: Readonly<Record<string, AppPermissionState | undefined>> | 'all' | undefined;
   /**
    * Process the runner starts before the first test and stops at the end of
    * the run (a dev server, Metro for a debug build). Structured, never
@@ -1960,9 +1961,10 @@ export interface AgentOptions {
   /**
    * Provider options every model call carries, e.g. a reasoning effort.
    * OpenAI and Azure OpenAI Responses calls also carry `store: false` and a
-   * prompt cache key unless set here.
+   * prompt cache key unless set here. An `undefined` entry is the provider
+   * left out.
    */
-  providerOptions?: ProviderOptions;
+  providerOptions?: Readonly<Record<string, ProviderOptions[string] | undefined>>;
   /** Never set: an entry is not itself a `StepExecutor`; a custom brain goes under `executor`. */
   runStep?: never;
 }
@@ -1984,8 +1986,8 @@ export type AgentConfig = AgentOptions &
          * verdict.
          */
         system?: string;
-        /** Project tools from `defineTool`, offered beside the built-in toolset. */
-        tools?: Readonly<Record<string, AgentTool>>;
+        /** Project tools from `defineTool`, offered beside the built-in toolset. An `undefined` entry is the tool left out. */
+        tools?: Readonly<Record<string, AgentTool | undefined>>;
       }
     | {
         /**
@@ -2078,9 +2080,10 @@ export interface ProjectConfig<Services = Readonly<Record<string, unknown>>> {
    * with; `e2e run --agent <name>` runs them with another. Every agent starts
    * from the built-in defaults: none inherits another's values. Agents never
    * cross a process boundary: workers re-resolve the config module and
-   * construct their own, exactly like model instances.
+   * construct their own, exactly like model instances. An `undefined` entry
+   * is the agent left out.
    */
-  agents?: Readonly<Record<string, AgentConfig>>;
+  agents?: Readonly<Record<string, AgentConfig | undefined>>;
   /**
    * The adaptive replay cache. Opt-out: unset means
    * `read-write`, and `'off'` disables it, as does the `--no-cache` flag,

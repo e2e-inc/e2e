@@ -46,6 +46,20 @@ describe('agent config defaults', () => {
     expect(resolve({ agents: { default: { providerOptions } } }).agent.providerOptions).toEqual(providerOptions);
   });
 
+  it('leaves out an agent, a tool, and a provider set to undefined', () => {
+    const lookup = readOnlyTool();
+    const config = resolve({
+      agents: {
+        buyer: undefined,
+        default: { tools: { lookup, other: undefined }, providerOptions: { openai: { reasoningEffort: 'low' }, google: undefined } },
+      },
+    });
+    expect([...config.agents.keys()]).toEqual(['default']);
+    expect(config.agent.tools).toStrictEqual({ lookup });
+    expect(config.agent.providerOptions).toStrictEqual({ openai: { reasoningEffort: 'low' } });
+    expect(config.configDigest).toBe(resolve({ agents: { default: { tools: { lookup }, providerOptions: { openai: { reasoningEffort: 'low' } } } } }).configDigest);
+  });
+
   it('rejects agent.providerOptions that is not a record of provider records', () => {
     expect(() => resolve({ agents: { default: { providerOptions: 'low' } } } as never)).toThrow(
       /agents\.default\.providerOptions must be an object/,

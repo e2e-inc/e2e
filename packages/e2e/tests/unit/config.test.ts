@@ -602,6 +602,9 @@ describe('resolveConfig', () => {
       launchArguments: ['-e2e'],
       permissions: { camera: 'grant' },
     });
+    expect(resolveApp({ bundleId: 'dev.shop.app', permissions: { camera: 'grant', microphone: undefined } }).permissions).toStrictEqual({ camera: 'grant' });
+    // A name that is the prototype's accessor still reaches the engine, which rejects a name it doesn't know.
+    expect(Object.keys(resolveApp({ bundleId: 'dev.shop.app', permissions: { ['__proto__']: 'grant' } }).permissions ?? {})).toEqual(['__proto__']);
   });
 
   it("takes 'all' only on an engine that declares grantsAllPermissions, which receives it as allPermissions", () => {

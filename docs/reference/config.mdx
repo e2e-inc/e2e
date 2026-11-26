@@ -91,7 +91,7 @@ export function defineConfig<
 | [`artifacts`](#artifacts) | `ArtifactsConfig` | local only |
 | [`trace`](#trace) | `RecordingMode` | `'retain-on-failure'` |
 | [`video`](#video) | `RecordingMode` | `'off'` |
-| [`agents`](#agents) | `Record<string, AgentConfig>` | `default`, no model |
+| [`agents`](#agents) | `Record<string, AgentConfig \| undefined>` | `default`, no model |
 | [`filters`](#filters) | `TestFilter[]` | - |
 | [`services`](#services) | `Record<string, Service \| undefined>` | - |
 | [`cache`](#cache) | `CacheMode \| CacheConfig` | `'read-write'`, `'read-only'` in CI |
@@ -449,7 +449,7 @@ targets: [
 | [`identity`](#identity) | `string` | derived from the app |
 | [`environment`](#environment) | `'test' \| 'staging' \| 'production'` | `'test'` or `'production'` |
 | [`launchArguments`](#launcharguments) | `string[] \| Record<string, LaunchArgumentValue>` | - |
-| [`permissions`](#permissions) | `Record<string, AppPermissionState> \| 'all'` | - |
+| [`permissions`](#permissions) | `Record<string, AppPermissionState \| undefined> \| 'all'` | - |
 | [`command`](#command) | `CommandConfig` | - |
 | [`readyUrl`](#readyurl) | `string` | `url` |
 
@@ -620,8 +620,9 @@ Permissions the app holds, by name.
 permissions: { camera: 'grant' },
 ```
 
-Each is `'grant'`, `'deny'`, or `'reset'`. `permissions: 'all'` grants
-every permission the target's engine can grant.
+Each is `'grant'`, `'deny'`, or `'reset'`. An `undefined` value is the
+permission left out. `permissions: 'all'` grants every permission the
+target's engine can grant.
 
 - A `mobile()` target sets each one before every fresh launch. See
   [permissions](/reference/mobile#engine).
@@ -1101,14 +1102,14 @@ export default {
 | [`judge`](#judge) | `ModelInstance` | `model` |
 | [`context`](#context) | `string` | - |
 | [`system`](#system) | `string` | - |
-| [`tools`](#tools) | `Record<string, AgentTool>` | - |
+| [`tools`](#tools) | `Record<string, AgentTool \| undefined>` | - |
 | [`executor`](#executor) | `StepExecutor` | the built-in agent |
 | [`maxSteps`](#maxsteps) | `number` | `25` |
 | [`maxModelCalls`](#maxmodelcalls) | `number` | `25` |
 | [`judgmentTimeout`](#judgmenttimeout) | `number` | `30000` |
 | [`maxObservationBytes`](#maxobservationbytes) | `number` | `262144` |
 | [`maxInputTokens`](#maxinputtokens) | `number` | `64000` |
-| [`providerOptions`](#provideroptions) | `ProviderOptions` | - |
+| [`providerOptions`](#provideroptions) | `Record<string, ProviderOptions[string] \| undefined>` | - |
 
 - Tests use the `default` agent unless you select another: with
   `e2e run --agent <name>`, a test or group option, or an `agent.*` call. A
@@ -1117,6 +1118,7 @@ export default {
 - Every entry starts from the built-in defaults. Agents do not inherit from
   each other: `ux` above gets no `context` from `default`. A key left out of
   an entry is the default value, never another entry's.
+- An entry set to `undefined` is the agent left out.
 - Each worker constructs its own agents from this config module.
 - Names may contain ASCII letters, numbers, `_`, `-`, or `.`, and are never
   only dots: a name is an artifact path segment.
@@ -1205,7 +1207,8 @@ toolset.
 tools: { lookupOrder },
 ```
 
-With `executor` it is `INVALID_CONFIG`: the executor brings its own tools.
+`tools` beside `executor` is `INVALID_CONFIG`: the executor brings its own
+tools. An entry set to `undefined` is the tool left out.
 
 #### `executor`
 
@@ -1284,7 +1287,8 @@ providerOptions: { openai: { reasoningEffort: 'low' } },
 ```
 
 OpenAI and Azure OpenAI Responses calls also carry `store: false` and a prompt
-cache key unless set here.
+cache key unless set here. An entry set to `undefined` is the provider left
+out.
 
 #### Removed options
 
@@ -1840,7 +1844,7 @@ export interface E2EConfig<Services = Readonly<Record<string, unknown>>> {
   /** Output renderers and reporter objects; default `['list']`. */
   reporters?: readonly (BuiltinReporter | Reporter)[];
   /** Named agents: the built-in agent's options, or `{ executor }` for a custom brain. */
-  agents?: Readonly<Record<string, AgentConfig>>;
+  agents?: Readonly<Record<string, AgentConfig | undefined>>;
   /** Test filters, in order, run with `--changed-since`: each judges the tests the one before it kept. */
   filters?: readonly TestFilter[];
   /** Dependencies of the app under test, keyed by name and defined with `defineService`, started before the app commands. */
@@ -2052,7 +2056,7 @@ export interface AgentOptions {
   /** Input tokens per model request, 1 through 1000000; default 64000. */
   maxInputTokens?: number;
   /** Provider options every model call carries, such as a reasoning effort. */
-  providerOptions?: ProviderOptions;
+  providerOptions?: Readonly<Record<string, ProviderOptions[string] | undefined>>;
 }
 
 /** One entry of `agents`: the built-in agent with its options, or a custom brain under `executor`. */
@@ -2062,7 +2066,7 @@ export type AgentConfig = AgentOptions &
         /** How the acting agent should work, appended to the built-in rules. */
         system?: string;
         /** Project tools from `defineTool`, offered beside the built-in toolset. */
-        tools?: Readonly<Record<string, AgentTool>>;
+        tools?: Readonly<Record<string, AgentTool | undefined>>;
       }
     | {
         /** A custom brain `agent.act()` dispatches to instead of the built-in agent. */

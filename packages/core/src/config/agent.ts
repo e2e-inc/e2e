@@ -318,7 +318,8 @@ function resolveTools(value: unknown, label: string): Readonly<Record<string, Ag
       `${label}.tools must be an object of tools by name, each from defineTool`,
     );
   }
-  for (const [name, defined] of Object.entries(value)) {
+  const tools = definedEntries(value);
+  for (const [name, defined] of Object.entries(tools)) {
     const key = `${label}.tools.${name}`;
     if (!isDefinedTool(defined)) {
       throw new ConfigurationError(
@@ -337,7 +338,7 @@ function resolveTools(value: unknown, label: string): Readonly<Record<string, Ag
       throw new ConfigurationError('INVALID_CONFIG', `${key} has no execute function`);
     }
   }
-  return value as Readonly<Record<string, AgentTool>>;
+  return tools as Readonly<Record<string, AgentTool>>;
 }
 
 /**
@@ -353,7 +354,8 @@ function resolveProviderOptions(value: unknown, label: string): ProviderOptions 
       `${label}.providerOptions must be an object keyed by provider name`,
     );
   }
-  for (const [provider, options] of Object.entries(value)) {
+  const providers = definedEntries(value);
+  for (const [provider, options] of Object.entries(providers)) {
     if (!isPlainObject(options)) {
       throw new ConfigurationError(
         'INVALID_CONFIG',
@@ -361,7 +363,12 @@ function resolveProviderOptions(value: unknown, label: string): ProviderOptions 
       );
     }
   }
-  return value as ProviderOptions;
+  return providers as ProviderOptions;
+}
+
+/** `record` without its `undefined` entries, which a config writes for an entry it leaves out. */
+function definedEntries(record: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(record).filter(([, entry]) => entry !== undefined));
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
