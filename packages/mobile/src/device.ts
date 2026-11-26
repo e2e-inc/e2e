@@ -463,7 +463,8 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     home: action,
     back: action,
     pressRemote: { ...action, label: (key) => key },
-    pressButton: { ...action, label: (button) => button },
+    // A JavaScript caller can pass a key code; the label must still be text, so the step records the refusal.
+    pressButton: { ...action, label: (button) => String(button) },
     shake: action,
     alert: { ...action, label: (value) => value },
     dismissKeyboard: action,

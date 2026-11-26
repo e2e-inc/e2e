@@ -2399,6 +2399,8 @@ describe('device fixture', () => {
     const before = h.fake.calls.length;
     await expect(fixture(h).pressButton(button as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('not a hardware button; press one of volume-up, volume-down, power') });
     expect(h.fake.calls).toHaveLength(before);
+    // The recorder labels the step before the method runs, and redacts the label as text.
+    expect(declared?.pressButton?.label?.(button as never)).toBe(String(button));
   });
 
   it('maps agent-device\'s refusal of a simulator\'s hardware button to UNSUPPORTED_CAPABILITY with its hint', async () => {
