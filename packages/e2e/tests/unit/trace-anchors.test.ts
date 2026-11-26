@@ -512,6 +512,16 @@ describe('deltaMismatch', () => {
     }
   });
 
+  it('reads a numeric or CJK date or time in an alert as a placeholder, across a year change too', () => {
+    const due = (id: string, text: string) => node(id, { role: 'alert', text });
+    expect(holds([{ role: 'alert', text: 'Due 15.11.2026' }], [due('a', 'Due 02.01.2027')])).toBe(true);
+    expect(holds([{ role: 'alert', text: 'Due 2026/11/15' }], [due('a', 'Due 2027/1/2')])).toBe(true);
+    expect(holds([{ role: 'alert', text: '2026年11月15日に期限切れ' }], [due('a', '2027年1月2日に期限切れ')])).toBe(true);
+    expect(holds([{ role: 'alert', text: '2026년 12월 31일 만료' }], [due('a', '2027년 1월 1일 만료')])).toBe(true);
+    expect(holds([{ role: 'alert', text: '12時30分に終了' }], [due('a', '9時05分に終了')])).toBe(true);
+    expect(holds([{ role: 'alert', text: '2026年11月15日に期限切れ' }], [due('a', '期限切れ')])).toBe(false);
+  });
+
   it('skips a date with an ordinal suffix as volatile when the step has a stable result', () => {
     const before = nodes([heading]);
     const after = nodes([heading, node('s', { role: 'status', text: 'Task created' }), node('d', { text: 'Due October 26th' })]);
@@ -523,7 +533,7 @@ describe('deltaMismatch', () => {
     const numeric = { year: 'numeric', month: 'numeric', day: 'numeric', timeZone: 'UTC' } as const;
     const long = { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' } as const;
     const dates = [
-      ...['ja-JP', 'zh-CN', 'ko-KR', 'de-DE', 'en-US'].map((locale) => new Intl.DateTimeFormat(locale, numeric).format(day)),
+      ...['ja-JP', 'zh-CN', 'ko-KR', 'de-DE', 'nl-NL', 'en-US'].map((locale) => new Intl.DateTimeFormat(locale, numeric).format(day)),
       ...['ja-JP', 'zh-CN', 'ko-KR'].map((locale) => new Intl.DateTimeFormat(locale, long).format(day)),
       '11月15日',
       '12時30分',
