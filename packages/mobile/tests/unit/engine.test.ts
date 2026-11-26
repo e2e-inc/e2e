@@ -3790,6 +3790,17 @@ describe('device fixture', () => {
     const newer = harness({ platform: 'android', bundleId: ANDROID_APP_PACKAGE });
     newer.fake.respond('devices.boot', () => ({ id: 'emulator-5554', device: 'Pixel 9' }));
     await openAttempt(newer);
+    // Through a remote daemon the booted serial is another machine's: the local adb could reach a different device.
+    vi.stubEnv('AGENT_DEVICE_DAEMON_BASE_URL', 'https://daemon.example');
+    try {
+      await expect(fixture(newer).openApp(ANDROID_APP_PACKAGE, { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({
+        code: 'UNSUPPORTED_CAPABILITY',
+        message: expect.stringContaining('through a remote daemon (AGENT_DEVICE_DAEMON_BASE_URL)'),
+      });
+      expect(newer.adbCalls).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
     // A display name is refused before adb, which takes a package only and splits a name with spaces.
     const opens = newer.fake.calls.length;
     await expect(fixture(newer).openApp('My App', { relaunch: true, locale: 'fr-FR' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });

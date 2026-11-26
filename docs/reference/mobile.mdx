@@ -427,7 +427,9 @@ launch:
   do `device.closeApp()` and the worker's end, before its session closes. A
   worker that is killed leaves the locale set.
 - A provider's Android devices are not on this machine's `adb`, so
-  `app.locale` fails at config load there. Set `language` and `locale` on
+  `app.locale` fails at config load there. Neither is a device behind a
+  remote agent-device daemon (`AGENT_DEVICE_DAEMON_BASE_URL`): a launch with a
+  locale fails there with `UNSUPPORTED_CAPABILITY`. Set `language` and `locale` on
   `browserstack()` or `testmu()` instead.
 
 | Throws | When |

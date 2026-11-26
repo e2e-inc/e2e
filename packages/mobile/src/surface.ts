@@ -953,6 +953,12 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   private async presetAndroidLocale(app: string, locale: string | undefined, relaunch: boolean, signal: AbortSignal): Promise<void> {
     if (locale === undefined && this.androidLocales === undefined) return;
     if (this.androidLocales === undefined) {
+      // The client reads the same variable: the serial it booted is then another machine's.
+      if ((process.env['AGENT_DEVICE_DAEMON_BASE_URL'] ?? '').trim() !== '') {
+        throw unsupported(
+          "an Android app locale is set with this machine's adb, and agent-device drives this device through a remote daemon (AGENT_DEVICE_DAEMON_BASE_URL), whose devices that adb does not reach: set the device's language on that machine",
+        );
+      }
       const serial = this.boundDevice.deviceId;
       if (serial === undefined || serial === '') throw invalidState('setting an Android app locale needs the serial of the booted device, and agent-device reported none');
       this.androidLocales = new AndroidAppLocales(serial, this.env, this.runAdb);
