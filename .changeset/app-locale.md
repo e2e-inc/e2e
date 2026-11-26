@@ -2,6 +2,8 @@
 "e2e": patch
 "@e2e-dev/core": patch
 "@e2e-dev/mobile": patch
+"@e2e-dev/web": patch
+"@e2e-dev/desktop": patch
 "@e2e-dev/testmu": patch
 "@e2e-dev/browserstack": patch
 ---
