@@ -144,6 +144,8 @@ await device.openApp('com.example.app', { relaunch: true, locale: 'ar-EG' });
   this machine's `adb` doesn't reach. It also fails on TestMu AI and
   BrowserStack iOS devices, which drop launch arguments. Set `language` and
   `locale` on `testmu()` or `browserstack()` instead.
+- The warm-up before the run opens the app without the locale. Start each
+  test with `app.open()`.
 - The tag takes a language, a script, and a region only, with no extension
   such as `-u-ca-japanese`.
 - The app must ship the language. If it doesn't, the OS shows its

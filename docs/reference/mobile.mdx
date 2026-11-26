@@ -402,7 +402,8 @@ export default {
 - The permissions are set on the app by name before it starts, with no open
   first, since iOS terminates a running app whose permission changed and
   Android one whose permission was revoked.
-- The warm-up passes no launch argument and touches no permission.
+- The warm-up passes no launch argument, touches no permission, and sets no
+  locale.
 - [`device.openApp(app, { relaunch: true, launchArguments, permissions, locale })`](#openapp)
   does the same for one launch of any app.
 
