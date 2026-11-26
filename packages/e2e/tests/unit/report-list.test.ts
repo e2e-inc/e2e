@@ -1412,6 +1412,35 @@ describe('ListReporter', () => {
       expect(shown()).not.toContain('agent.act');
     });
 
+    it('keeps a retry shown when the timed-out attempt starts a step after it began', () => {
+      const { chunks, output } = liveCapture();
+      const reporter = plainReporter(output, true);
+      reporter.handle(runStarted());
+      reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 1 }]));
+      reporter.handle(testStarted('t1', 'pays', 'chromium'));
+      const step = (attemptId: string, stepIndex: number, progress: object) =>
+        reporter.handle({
+          type: 'step',
+          testId: 't1',
+          agent: 'default',
+          repeat: 0,
+          target: 'chromium',
+          progress: { ...progress, identity: { attemptId, attemptIndex: Number(attemptId.slice(1)), stepId: `${attemptId}:${stepIndex}`, stepIndex } },
+        } as never);
+      const shown = () => chunks.at(-1)!.replace(ANSI_PATTERN, '');
+      step('a0', 0, { phase: 'start', kind: 'agent', api: 'agent.act', label: 'old pay' });
+      step('a1', 0, { phase: 'start', kind: 'agent', api: 'agent.act', label: 'pay' });
+      step('a1', 0, { phase: 'activity', api: 'agent.act', activity: 'observe' });
+      // The timed-out act's onAction hook still runs and takes a screenshot.
+      step('a0', 1, { phase: 'start', kind: 'screen', api: 'screen.screenshot', label: 'after tap' });
+      expect(shown()).not.toContain('screen.screenshot');
+      step('a0', 1, { phase: 'end', kind: 'screen', api: 'screen.screenshot', label: 'after tap', status: 'passed', durationMs: 5, modelCalls: 0 });
+      step('a1', 0, { phase: 'activity', api: 'agent.act', activity: 'action' });
+      expect(shown()).toContain('agent.act "pay"');
+      expect(shown()).toContain('Acting');
+      expect(shown()).not.toContain('old pay');
+    });
+
     it('shows the --step prompt under its paused test, after every step that ran, and takes it down', () => {
       const restore = withTerminalSize({ columns: 120, rows: 40 });
       try {

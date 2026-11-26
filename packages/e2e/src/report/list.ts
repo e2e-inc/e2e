@@ -780,6 +780,7 @@ export class ListReporter {
       executing: true,
       open: new Map(),
       attemptId: undefined,
+      attemptIndex: undefined,
       steps: this.pairs.get(key)?.steps ?? [],
       ran: this.stepping ? (this.pairs.get(key)?.ran ?? []) : undefined,
     });
@@ -805,9 +806,12 @@ export class ListReporter {
       case 'start': {
         const { api, label, kind } = progress;
         const attemptId = progress.identity?.attemptId;
+        const attemptIndex = progress.identity?.attemptIndex;
+        if (attemptIndex !== undefined && running.attemptIndex !== undefined && attemptIndex < running.attemptIndex) break;
         if (attemptId !== running.attemptId) {
           running.open.clear();
           running.attemptId = attemptId;
+          running.attemptIndex = attemptIndex;
         }
         running.open.delete(stepId);
         running.open.set(stepId, { api, label, kind, actor: progress.identity?.actor, events: [], replaying: false, activity: undefined });

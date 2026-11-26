@@ -89,6 +89,12 @@ export interface RunningTest {
    */
   attemptId: string | undefined;
   /**
+   * That attempt's index. The body of a timed-out attempt keeps running, so
+   * it can start a step after the retry began; a step of an older attempt is
+   * not shown.
+   */
+  attemptIndex: number | undefined;
+  /**
    * Finished agent steps across every attempt, oldest first. Shown under the
    * test in the live window while it runs, nested under its line in the file
    * block once it is done.
