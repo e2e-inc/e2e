@@ -74,8 +74,10 @@ configured secrets are redacted (topic `writing-tests`).
   `--timeout <ms>` (default 600000; the last minute is for the assessment).
 - `--changed-since <ref>` explores what the branch changed since the merge
   base: only a defect the change can cause is an `issue`, one elsewhere is a
-  `warning`, and a change no user can see (docs, tests) ends `skipped` and
-  passes. In CI it needs the base in the checkout (`fetch-depth: 0`).
+  `warning`. With no goal, the planner may skip a change no user can see
+  (docs or tests only); that run ends `skipped` and passes. In CI it needs
+  the base in the checkout (`fetch-depth: 0`), and a clean working tree for
+  the skip.
 - `--headed`, `--video`, `--trace`, `--debug`, and `--ai-trace` mean what
   they mean for `e2e run`. The exploration is one attempt, so a retry mode
   records nothing: pass `--trace on`.
@@ -87,10 +89,11 @@ Full reference: docs/explore.mdx, docs/reference/cli.mdx.
 ## Reading the result
 
 - Exit code `0`: steps ran, no `issue` was reported, and not every charter
-  was blocked; warnings are allowed. `1`: at least one `issue`, or no step
-  ran. A run whose charters were all blocked is `blocked` and exits with
-  the first blocker's code, as for `run` (1 for an automation limit, 2 for a missing model,
-  credentials, or setup; 3 for an unavailable environment).
+  was blocked; warnings are allowed. With `--changed-since`, a change the
+  planner skipped before the first step is also `0`. `1`: at least one
+  `issue`, or no step ran and nothing was found. A run whose charters were all blocked is `blocked` and exits with
+  the first blocker's code, as for `run` (1 for an automation limit, 2 for a
+  missing model, credentials, or setup; 3 for an unavailable environment).
 - The terminal lists each finding as it is reported, then a `Findings`
   section (issues first, most severe first) with where it was seen, its
   screenshot path, expected against actual, and the steps that reach it,

@@ -257,9 +257,10 @@ from the spec's directory. Run that spec after adding or moving it and
 confirm the runner collects and executes the intended test.
 
 - **Destructure the first parameter.** A test body, a hook, and a fixture
-  function name what they use as `async ({ app, screen }) => {}`;
-  `async (fixtures) => {}`, `async (_, use)`, and a rest property are
-  `COLLECTION_ERROR`. A fixture that needs nothing takes `({}, use)`.
+  function name what they use as `async ({ app, screen }) => {}` (a
+  `test.each` or `test.for` body takes its row first and the fixtures in
+  the parameter after it); `async (fixtures) => {}`, `async (_, use)`, and
+  a rest property are `COLLECTION_ERROR`. A fixture that needs nothing takes `({}, use)`.
 - **Fixtures run on demand.** A test sets up the fixtures it, its hooks,
   and those fixtures name. One that exists for its side effect takes
   `[fn, { auto: true }]`. Naming a fixture no target provides fails at
@@ -315,8 +316,10 @@ sort copies before comparing the complete observed and expected lists.
   makes a negated assertion pass, so check it positively.
 - **Exactly one match** per action, read, or assertion. Two fail at once
   with `LOCATOR_AMBIGUOUS`; at zero, actions and reads end in
-  `LOCATOR_NOT_FOUND` and assertions in `ASSERTION_FAILED`. `toHaveCount`,
-  `count()`, and `all()` accept any number.
+  `LOCATOR_NOT_FOUND` and assertions in `ASSERTION_FAILED`. Any number is
+  fine for `toHaveCount`, list-form `toHaveText` and `toContainText`,
+  `count()`, `all()`, and `allTextContents()`; at zero, `isVisible()` reads
+  `false` and `isHidden()` reads `true`.
 - **Narrow** with `filter({ hasText })` (a case-insensitive substring),
   `filter({ has: locator })`, `filter({ hasNot })`, `filter({ hasNotText })`,
   `{ visible: true }`, scoping under another locator, or `nth(i)` with a
@@ -502,7 +505,8 @@ background: `waitForPopup(() => trigger)` makes it active and returns it.
 - **Dialogs and downloads:** register `onDialog('accept' | 'dismiss' |
   handler)` before the tap that opens the dialog (an unanswered dialog
   fails the next step with `INVALID_STATE`); `waitForDownload(() =>
-  trigger)` returns the saved file's path.
+  trigger)` returns `{ path, absolutePath, suggestedFilename }`: read the
+  saved file through `absolutePath`.
 - `locator(css)` and `keyboard`/`mouse` are last resorts: prefer a
   `screen` locator.
 

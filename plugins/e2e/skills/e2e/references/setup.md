@@ -85,8 +85,9 @@ Gateway, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` (Claude Max or Team plans
 use a Console API key, there is no `e2e login`), each read by its provider
 package. Use API keys in CI.
 
-- There is no implicit default model. Without one, the first `agent` step
-  stops the run with one `MODEL_UNAVAILABLE` (exit 2); tests with no `agent.*`
+- There is no implicit default model. Without one, the built-in agent's
+  first `agent` step stops the run with one `MODEL_UNAVAILABLE` (exit 2); a
+  model-less custom executor fails only `waitFor` and `extract` this way; tests with no `agent.*`
   steps need no model.
 - A model a subscription plan does not serve (common on Copilot Free, which
   serves models only through auto selection) also stops the run with
@@ -128,8 +129,10 @@ export default {
 } satisfies E2EConfig;
 ```
 
-- `targets` is required and each target names its engine (`web()`,
-  `mobile()`, `desktop()`); there is no default engine.
+- `targets` is required and each UI target names its engine (`web()`,
+  `mobile()`, `desktop()`); there is no default engine. A tools-only target
+  (agent tools and `request` calls to absolute URLs) may omit `engine` and
+  must set `platform`.
 - A string `password` or secret is checked at load (6+ code points): set
   `ADMIN_PASSWORD` or `E2E_USER_ADMIN_PASSWORD` first, or defer to fill time
   with `() => process.env.ADMIN_PASSWORD ?? ''`. Other sensitive values go
@@ -222,8 +225,9 @@ For an app started elsewhere, point `app.url` at it, literally or via
 `APP_URL` and loads no `.env`, so put `process.loadEnvFile('.env')` atop
 `e2e.config.ts` (workers re-import it).
 
-Next.js: `e2e init` writes the target (`next dev` locally, `next start` with
-a `next build` step in CI). A Next.js 16 dev server never hydrates a page
+Next.js: `e2e init` writes the target (`next dev` locally; `next start`
+with a `next build` step in CI only when `build` and `start` scripts exist
+on the same port, else `next dev` in CI too). A Next.js 16 dev server never hydrates a page
 opened on `127.0.0.1` or `[::1]` unless that host is in `allowedDevOrigins`;
 the App Router's empty `role="alert"` route announcer means
 `getByRole('alert')` needs a text filter. Full reference:

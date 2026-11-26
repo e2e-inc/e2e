@@ -65,7 +65,7 @@ Full reference: docs/debugging.mdx.
 | `STEP_NOT_AWAITED` | A step, `expect.poll`, or `toPass` without `await` | `await` the call the code frame names |
 | `COLLECTION_ERROR` | `async` describe body, `test.setup` inside `describe`, a fixture that does not destructure its first parameter, an option forbidden in a serial group | Restructure per `writing-tests` |
 | `NO_TESTS` | The glob, a file argument, or a tag matched nothing | Check the config `tests`, the `.e2e.ts` suffix, the tag names |
-| `MODEL_UNAVAILABLE` | The agent entry has no model; the run stops at the first `agent` fixture | Configure one (topic `agent`) |
+| `MODEL_UNAVAILABLE` | The built-in agent's entry has no model; the run stops at the first `agent` fixture (a model-less custom executor fails only `waitFor` and `extract`) | Configure one (topic `agent`) |
 | `MODEL_PROVIDER_FAILED` | Network, 5xx, rate limit, or no key configured (`AI_GATEWAY_API_KEY is not set`); only steps that call the model fail | Set the variable the message names, or say no key is available; never rewrite tests to get around it |
 | `STEP_TIMEOUT`, `STEP_BUDGET_EXHAUSTED` | Goal too big or ambiguous | Split the goal, use on-screen wording; raise `maxSteps` or `maxModelCalls` |
 | `REPLAY_STALE` | `--strict-cache` and a committed recording no longer replays | Rerun read-write, commit the changed entry |
@@ -88,7 +88,7 @@ Full reference: docs/reference/errors.mdx.
 | `--step`, then `e2e run --step next` | An agent steps through the test: each command returns at the next held step with its screen; `stop` ends the run |
 | `await screen.pause()` in the test | Pause at that line with the app open; resume with `e2e run --step next` from the same directory |
 | `--workers 1 --retries 0` | Take parallelism and retries out of the picture |
-| `--no-cache` | Rule out a stale `agent.act` replay, for one run: a failed run already deletes the replay that failed, so rerun with the cache on first |
+| `--no-cache` | Rule out a stale `agent.act` replay, for one run: a failed run already deletes the replay that failed, so rerun with the cache on first. When the failure repeats after a replay the trace page shows as kept and the `--no-cache` run passes, tighten the next check or wait after that goal: the stale replay then fails it and is deleted |
 | `--debug` | Each agent step's duration, model calls, cost, transcript |
 | `--ai-trace`, then `npx unbox-ai runs .e2e/ai-trace.json` | What the model saw and called |
 | `--video=retain-on-failure` | Watch the failed attempt |

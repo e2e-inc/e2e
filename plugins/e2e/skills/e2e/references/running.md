@@ -53,14 +53,16 @@ CI=1 npx e2e run            # the CI defaults, locally
   --headed` or `pnpm exec e2e run --headed`; with npm, `npm exec -- e2e run
   --headed`.
 - `run`, `list`, and `explore` are also functions on `e2e/runner`. Await each
-  run before the next; overlapping runs reject with `RUNNER_BUSY`.
+  run before the next and close every host first; overlaps reject with
+  `RUNNER_BUSY` (docs/reference/runner.mdx).
 
 Full reference: docs/reference/cli.mdx.
 
 ## The replay cache
 
-Entries live under `.e2e/cache/`, one file per key. `e2e cache ls` lists
-them, `stats` sums them, `clear` deletes them. `--no-cache` turns the cache
+Entries live under `.e2e/cache/` by default, one file per key. `e2e cache
+ls` lists them, `stats` sums them, `clear` deletes them; with a custom
+`cache.store` these file-store commands refuse (exit 2). `--no-cache` turns the cache
 off for one run; `--strict-cache` fails a step whose committed recording no
 longer replays (`REPLAY_STALE`) instead of calling the model.
 
@@ -72,13 +74,15 @@ Full reference: docs/cache.mdx.
 `report.json` and `results/<test>/`, one directory per test with its
 `trace.md` and an `attempt-<n>/` per attempt (screenshots, videos,
 downloads, `--debug` transcripts). `results/` is cleared when a run's tests
-start.
+start, except that a `--last-failed` rerun keeps the files (fresh attempts
+go to `rerun-<n>/`).
 
 - The default `list` reporter ends with a `Failed` section, one entry per
   failed test with its file and line, the error's first line, and its trace
   page, so `| tail` keeps it.
-- A failed, timed-out, interrupted, or flaky test gets
-  `results/<test>/trace.md`: every step, the cache's decisions, the app's
+- With the default `--trace retain-on-failure`, a failed, timed-out,
+  interrupted, or flaky test gets `results/<test>/trace.md` (`--trace off`
+  writes none): every step, the cache's decisions, the app's
   log, the last model turns, and the screen at failure. Read it first (topic
   `debugging`).
 - `report.json` is for scripts (`jq`), not for reading: every result,

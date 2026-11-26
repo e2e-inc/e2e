@@ -77,8 +77,8 @@ resolves with `summary`, `modelCalls`, `actions`, and `cache`. A failure
 throws an `AgentError` whose `code` says why: `ACTION_FAILED` (the product
 failed), `STEP_BUDGET_EXHAUSTED` / `STEP_TIMEOUT` / `CONTEXT_OVERFLOW` (out
 of room), `POLICY_DENIED` and the `AUTH_*` / `*_UNAVAILABLE` codes (blocked
-from outside), `MODEL_OUTPUT_INVALID` / `MODEL_REFUSED` (the model). Full
-list: topic `debugging`.
+from outside), `MODEL_OUTPUT_INVALID` / `MODEL_REFUSED` (the model).
+Full reference: docs/reference/errors.mdx.
 
 - `params`: values the instruction names as `{placeholders}`. The runner
   fills a `Secret`. Wrap a run-unique value in `unique()` so the replay
