@@ -132,6 +132,8 @@ pub fn ax_windows(app: &Element) -> Outcome<Vec<(Element, Option<u32>)>> {
             Err(Failure::refused(codes::APP_UNRESPONSIVE, "the app did not answer its window list in time")
                 .with_details(serde_json::json!({ "retryable": true })))
         }
+        // An app that has no accessibility for its windows will not have it on a later read: say so, do not wait.
+        Err(ax::AX_NOT_IMPLEMENTED) => Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "the app does not expose its windows to accessibility")),
         Err(error) => Err(Failure::refused(codes::APP_UNRESPONSIVE, format!("reading the app's windows failed: {}", ax::describe(error)))
             .with_details(serde_json::json!({ "retryable": true }))),
     }
