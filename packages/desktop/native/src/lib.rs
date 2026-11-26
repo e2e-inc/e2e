@@ -262,11 +262,12 @@ pub async fn press(options: PressOptions) -> Value {
     .await
 }
 
-/// Brings a window and its app forward.
+/// Brings a window and its app forward. `inputId` names it, so `cancelInput` stops it before it changes the focus.
 #[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
-pub async fn focus_window(pid: i32, window_id_text: String) -> Value {
+pub async fn focus_window(pid: i32, window_id_text: String, input_id: Option<u32>, timeout_ms: Option<f64>) -> Value {
+    let deadline = deadline(timeout_ms.unwrap_or(60_000.0));
     blocking(move || {
-        actions::focus_window(pid, window_id(&window_id_text)?)?;
+        actions::focus_window(pid, window_id(&window_id_text)?, input_id, deadline)?;
         Ok(serde_json::json!({}))
     })
     .await

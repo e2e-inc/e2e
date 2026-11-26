@@ -252,8 +252,12 @@ fn center(element: &Element) -> Outcome<(f64, f64)> {
 /// Brings the window forward and the app with it, for physical input. A sheet or an alert on it may take focus.
 pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
     let app = Element::application(pid);
+    // Each write moves the focus: none goes once the caller gave up.
+    go("bring the window forward")?;
     let _ = app.set_bool("AXFrontmost", true);
+    go("bring the window forward")?;
     let _ = window.perform("AXRaise");
+    go("bring the window forward")?;
     let _ = window.set_bool("AXMain", true);
     let deadline = Instant::now() + Duration::from_millis(1_500);
     let forward = until(deadline, || {
@@ -1106,10 +1110,13 @@ fn key_window(pid: i32, window: &Element) -> Outcome<()> {
         .with_details(serde_json::json!({ "cause": "exact_window_focus_unconfirmed" })))
 }
 
-/// Brings a window of `pid` forward.
-pub fn focus_window(pid: i32, window: u32) -> Outcome<()> {
-    let element = windows::find(pid, window)?;
-    raise(pid, &element)
+/// Brings a window of `pid` forward, only while `input_id` is not cancelled and `deadline` has not passed: finding the
+/// window can wait on the app, and the caller may have moved on by then.
+pub fn focus_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
+    guarded(input_id, deadline, || {
+        let element = windows::find(pid, window)?;
+        raise(pid, &element)
+    })
 }
 
 /// Whether a click at a point taken in a window may go: the app is frontmost, the window holds its focus, and no sheet
