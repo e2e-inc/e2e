@@ -760,7 +760,7 @@ await button.tap({ position: { x: 20, y: '50%' } });
 | `UNSUPPORTED_CAPABILITY` | A single right tap on an engine that doesn't list `secondaryTap`. A `secondaryTap()` call fails the same way. |
 | `UNSUPPORTED_CAPABILITY` | `position` on an engine without the pointer action for the tap: `tap`, `doubleTap` for a `count` of 2, `multiTap` for 3 or more, or `secondaryTap` for a single right tap. |
 | `ACTION_FAILED` | `position` on a node the browser engine cannot bring into view; its scroll waits for visibility. Other engines fail as they report it. |
-| `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout, or for a percentage, never shows a pixel of it inside the viewport. |
+| `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout, or for a percentage, never shows a pixel of it inside the viewport. When the screen read for the viewport kept failing until the timeout, the message says so and the error's `cause` is the last failure. |
 
 #### `doubleTap`
 
@@ -994,7 +994,7 @@ await screen.getByRole('slider', 'Volume').hover({ position: { x: '75%', y: '50%
 | `INVALID_ARGUMENT` | A `position` coordinate that is negative, not finite, or a string that is not a percentage from `'0%'` through `'100%'`. |
 | `UNSUPPORTED_CAPABILITY` | `position` on an engine without the `hover` pointer action, such as mobile. Thrown before the node is resolved. |
 | `ACTION_FAILED` | `position` on a node the browser engine cannot bring into view. |
-| `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout, or for a percentage, never shows a pixel of it inside the viewport. |
+| `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout, or for a percentage, never shows a pixel of it inside the viewport. When the screen read for the viewport kept failing until the timeout, the message says so and the error's `cause` is the last failure. |
 
 #### `setInputFiles`
 
