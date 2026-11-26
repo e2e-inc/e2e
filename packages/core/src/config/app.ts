@@ -212,11 +212,14 @@ function checkLocale(value: unknown, engine: EngineHandle | undefined, where: st
   return value;
 }
 
-/** True when `tag` parses as a Unicode locale whose language is known, so not `und`. */
+/**
+ * True when `tag` parses as a Unicode locale whose language is known: not
+ * `und`, which the ICU of Node 22 and 24 reports as no language at all.
+ */
 function isLanguageTag(tag: string): boolean {
   try {
     const { language } = new Intl.Locale(tag);
-    return language !== 'und';
+    return language !== undefined && language !== 'und';
   } catch {
     return false;
   }

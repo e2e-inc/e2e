@@ -49,7 +49,8 @@ export function checkLocale(label: string, value: unknown, code: Code): string {
   } catch {
     locale = undefined;
   }
-  if (locale === undefined || locale.language === 'und') {
+  // Node 22 and 24 report `und` as no language at all; Node 26 as `und`.
+  if (locale === undefined || locale.language === undefined || locale.language === 'und') {
     fail(code, `${label} must be a BCP 47 language tag such as "fr-FR", got ${JSON.stringify(value)}`);
   }
   if (locale.toString() !== locale.baseName) {
