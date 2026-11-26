@@ -294,7 +294,9 @@ fn pieces(text: &str) -> Vec<Piece> {
 /// Types text as keystrokes that carry their characters, whatever the keyboard layout (`pieces`).
 /// Before each event it checks `run` and `deadline`: a cancelled run, or one out of time, sends nothing more, so keys never
 /// keep going after the caller gave up, when another app may have taken the keyboard.
-pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time::Instant) -> Outcome<()> {
+/// `still` is asked before each key too: a Return can open another window or app, and the keys after it must not follow
+/// the keyboard there.
+pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time::Instant, still: &dyn Fn() -> Outcome<()>) -> Outcome<()> {
     let source = source()?;
     for piece in pieces(text) {
         if run.cancelled() {
@@ -303,6 +305,7 @@ pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time:
         if std::time::Instant::now() >= deadline {
             return Err(Failure::unconfirmed(codes::TIMEOUT, "typing ran out of time; the text sent before then stays sent"));
         }
+        still().map_err(|failure| Failure { message: format!("{}; the text sent before then stays sent", failure.message), ..failure }.delivered())?;
         let units = match piece {
             Piece::Return | Piece::Tab => {
                 let code = if piece == Piece::Tab { 48 } else { 36 };

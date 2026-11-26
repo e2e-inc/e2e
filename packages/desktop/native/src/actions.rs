@@ -781,9 +781,21 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
     } else {
         Route::Process(entry.pid)
     };
+    // Each key goes only while the field's window still has the keyboard: a Return that opened another window or app must not
+    // take the rest of the text with it.
+    let still = || -> Outcome<()> {
+        let app = Element::application(entry.pid);
+        let held = app.element("AXFocusedWindow").is_some_and(|focused| windows::holds_focus(&focused, &window));
+        let forward = !physical || app.boolean("AXFrontmost") == Some(true);
+        if held && forward {
+            Ok(())
+        } else {
+            Err(Failure::refused(codes::ACTION_FAILED, "typing stopped: the field's window lost the keyboard to another window or app"))
+        }
+    };
     CURRENT
         .with(|current| match current.borrow().as_ref() {
-            Some((run, _)) => input::type_text(text, route, run, deadline),
+            Some((run, _)) => input::type_text(text, route, run, deadline, &still),
             None => Err(Failure::refused(codes::INTERNAL, "type ran outside an action")),
         })
         .map_err(Failure::delivered)
