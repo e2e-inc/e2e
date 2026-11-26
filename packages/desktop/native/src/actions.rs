@@ -414,8 +414,9 @@ fn press_to_state(target: u8, shown: Option<u8>, mut press: impl FnMut() -> Outc
 /// The most presses a stepper gets to reach a value.
 const MAX_STEPS: usize = 500;
 
-/// Whether two stepper values are the same number: a step of 0.1 sums to 0.30000000000000004, not 0.3.
-fn same(a: f64, b: f64) -> bool {
+/// Whether two stepper values are the same number: a step of 0.1 sums to 0.30000000000000004, not 0.3. `step`, once
+/// a press showed it, bounds the tolerance to half a step, so no rounding allowance hides a whole step.
+fn same(a: f64, b: f64, step: Option<f64>) -> bool {
     // Whole numbers a float holds exactly compare exactly: a step of 1 apart is a step, however large the value (a Unix
     // time in microseconds). Others compare up to a few hundred float epsilons of the larger, the error of summing
     // fractional steps such as 0.1.
@@ -423,7 +424,8 @@ fn same(a: f64, b: f64) -> bool {
     if a.fract() == 0.0 && b.fract() == 0.0 && a.abs() <= EXACT && b.abs() <= EXACT {
         return a == b;
     }
-    (a - b).abs() <= f64::EPSILON * 256.0 * a.abs().max(b.abs()).max(1.0)
+    let rounding = f64::EPSILON * 256.0 * a.abs().max(b.abs()).max(1.0);
+    (a - b).abs() <= step.map_or(rounding, |step| rounding.min(step.abs() / 2.0))
 }
 
 /// Steps a value toward `target`, one increment or decrement at a time, until it shows it. It stops when the value
@@ -431,6 +433,9 @@ fn same(a: f64, b: f64) -> bool {
 /// it steps back to the value it started from, so a value the stepper cannot take leaves it as it was. It never steps past `deadline`: the steps
 /// sent by then stay sent, delivered but unverified. A failed first step sent nothing; a failed later one follows steps
 /// that landed. A step that answered with an error but may have landed is judged by the value it led to.
+///
+/// A start within rounding of the target, but not equal to it, may be the target summed by earlier steps or a value a
+/// small step away from it: one step tells which, and when it was the target, a step back puts it as it was.
 fn step_to(
     target: f64,
     shown: Option<f64>,
@@ -439,9 +444,14 @@ fn step_to(
     mut settle: impl FnMut() -> Option<f64>,
 ) -> Outcome<bool> {
     let Some(start) = shown else { return Ok(false) };
+    if start == target {
+        return Ok(true);
+    }
+    let probing = same(start, target, None);
+    let mut size = None;
     let mut now = start;
     for attempt in 0..MAX_STEPS {
-        if same(now, target) {
+        if !(probing && attempt == 0) && same(now, target, size) {
             return Ok(true);
         }
         if Instant::now() >= deadline {
@@ -456,7 +466,8 @@ fn step_to(
             return stepped.map(|()| false);
         }
         let Some(next) = settle() else { return stepped.map(|()| false) };
-        if same(next, now) {
+        // A press that changed nothing leaves the very number it found: any difference is a step, however small.
+        if next == now {
             return stepped.map(|()| false);
         }
         // A step that went the other way wrapped around the stepper's range: stepping on would only cycle through it.
@@ -466,21 +477,33 @@ fn step_to(
                 format!("the stepper went from {now} to {next} on a step toward {target}: it wraps, and cannot reach the value"),
             ));
         }
-        if !same(next, target) && ((up && next > target) || (!up && next < target)) {
+        size = Some((next - now).abs());
+        let start_was_target = probing && attempt == 0 && same(start, target, size);
+        if start_was_target || (!same(next, target, size) && ((up && next > target) || (!up && next < target))) {
             // Put back the value it had before the fill, a step at a time: a fill the stepper cannot take must not leave
             // it changed. As many steps back as went forward, and none more once a step changes nothing.
             let mut value = next;
             for _ in 0..=attempt {
-                if same(value, start) || step(!up).is_err() {
+                if same(value, start, size) || step(!up).is_err() {
                     break;
                 }
                 match settle() {
-                    Some(back) if !same(back, value) => value = back,
+                    Some(back) if !same(back, value, size) => value = back,
                     _ => break,
                 }
             }
+            if start_was_target {
+                return if same(value, start, size) {
+                    Ok(true)
+                } else {
+                    Err(Failure::unconfirmed(
+                        codes::ACTION_FAILED,
+                        format!("the stepper already showed {start}; a step to tell it from {target} left it at {value}"),
+                    ))
+                };
+            }
             let failure = Failure::unconfirmed(codes::ACTION_FAILED, format!("the stepper steps from {now} to {next}, past {target}"));
-            return Err(if same(value, start) {
+            return Err(if same(value, start, size) {
                 Failure { message: format!("{}; it was stepped back to {start}", failure.message), ..failure }
             } else {
                 Failure { message: format!("{}, and could not be stepped back to {start}", failure.message), ..failure }
@@ -488,7 +511,7 @@ fn step_to(
         }
         now = next;
     }
-    Ok(same(now, target))
+    Ok(same(now, target, size))
 }
 
 /// The number a text names, when it names a finite one: `NaN` or `inf` is no value a control can take.
@@ -1181,10 +1204,13 @@ mod tests {
 
     #[test]
     fn tells_a_large_value_from_the_next_step_after_it() {
-        assert!(!super::same(1_800_000_000.0, 1_800_000_001.0));
+        assert!(!super::same(1_800_000_000.0, 1_800_000_001.0, None));
         // Whole numbers past the reach of a relative tolerance (a Unix time in microseconds) still differ by one.
-        assert!(!super::same(1_800_000_000_000_000.0, 1_800_000_000_000_001.0));
-        assert!(super::same(0.1 + 0.1 + 0.1, 0.3));
+        assert!(!super::same(1_800_000_000_000_000.0, 1_800_000_000_000_001.0, None));
+        assert!(super::same(0.1 + 0.1 + 0.1, 0.3, None));
+        // A step smaller than the rounding allowance of a large value is still a step, once a press showed its size.
+        assert!(super::same(1_800_000_000.0, 1_800_000_000.000_01, None));
+        assert!(!super::same(1_800_000_000.0, 1_800_000_000.000_01, Some(0.000_01)));
         let value = Cell::new(1_800_000_000.0);
         let reached = step_to(
             1_800_000_001.0,
@@ -1198,6 +1224,51 @@ mod tests {
         );
         assert!(reached.unwrap());
         assert_eq!(value.get(), 1_800_000_001.0);
+    }
+
+    #[test]
+    fn steps_a_large_value_by_a_step_smaller_than_its_rounding_allowance() {
+        let small = 0.000_01;
+        let value = Cell::new(1_800_000_000.0);
+        let target = 1_800_000_000.0 + small;
+        let presses = Cell::new(0);
+        let reached = step_to(
+            target,
+            Some(value.get()),
+            later(),
+            |up| {
+                presses.set(presses.get() + 1);
+                value.set(value.get() + if up { small } else { -small });
+                Ok(())
+            },
+            || Some(value.get()),
+        );
+        assert!(reached.unwrap());
+        assert_eq!((value.get(), presses.get()), (target, 1));
+    }
+
+    #[test]
+    fn leaves_a_value_that_differs_from_the_target_only_by_rounding_as_it_was() {
+        let summed = 0.1 + 0.1 + 0.1;
+        let value = Cell::new(summed);
+        let presses = Cell::new(0);
+        let reached = step_to(
+            0.3,
+            Some(value.get()),
+            later(),
+            |up| {
+                presses.set(presses.get() + 1);
+                value.set(value.get() + if up { 0.1 } else { -0.1 });
+                Ok(())
+            },
+            || Some(value.get()),
+        );
+        assert!(reached.unwrap());
+        // One step to learn the step's size, one back.
+        assert_eq!(presses.get(), 2);
+        assert!(super::same(value.get(), summed, Some(0.1)));
+        // A stepper already at the exact value gets no press.
+        assert!(step_to(0.3, Some(0.3), later(), |_| panic!("no press"), || Some(0.3)).unwrap());
     }
 
     /// A failure that answered after the input was sent.
