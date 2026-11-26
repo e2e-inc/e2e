@@ -40,7 +40,7 @@ import { cookieUrlsLabel, resolveCookieUrl, resolveCookieUrls, validateCookies }
 import type { AttemptTab } from './attempt-session.ts';
 import type { DialogHandler } from './dialogs.ts';
 import { saveDownloadsTo, saveFromBrowser, saveLocally } from './downloads.ts';
-import { isTestErrorCode, message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
+import { cancelled, isClassified, isTestErrorCode, message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
 import { compileEvaluation, decodeEvaluation, pageFunctionSource } from './evaluation.ts';
 import { initScriptLabel, testInitScriptSource } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaLabel, mediaProblem, type WebMedia } from './media.ts';
@@ -458,6 +458,11 @@ async function collectDownloads(
       // Raced so a hook that settles quietly on cancellation cannot let a cancelled wait run its trigger.
       const before = remote === undefined ? undefined : await raceAbort(() => remote.before(currentOperation.signal), currentOperation.signal, 'download');
       requireOpen();
+      // A cancellation after the race settled but before this resumed would otherwise still run the trigger.
+      if (currentOperation.signal.aborted) {
+        const reason: unknown = currentOperation.signal.reason;
+        throw isClassified(reason) ? reason : cancelled('download cancelled');
+      }
       let allStarted!: () => void;
       const received = new Promise<void>((resolve) => { allStarted = resolve; });
       const onDownload = (download: Download): void => {

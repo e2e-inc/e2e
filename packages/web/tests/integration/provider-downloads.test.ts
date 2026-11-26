@@ -259,4 +259,50 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
     expect(error).toMatchObject({ code: 'CANCELLED' });
     expect(triggers).toBe(0);
   });
+
+  it('never runs the trigger of a wait cancelled just after its before hook resolved', async () => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-cancel-'));
+    remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-cancel-'));
+    chrome = await launchRemoteChrome();
+    let cancel = new AbortController();
+    let delay = 0;
+    const provider: BrowserProvider = {
+      name: 'late-cancel', scope,
+      acquire: async () => ({ id: 'cancel-lease', cdpEndpoint: chrome!.endpoint }),
+      release: async () => undefined,
+      downloads: {
+        dir: path.join(remoteDisk, 'downloads'),
+        read: async (_lease, file) => readFile(file),
+        // Cancels `delay` microtasks after resolving; one of the delays lands between the race settling and the wait resuming.
+        before: () => {
+          const controller = cancel;
+          let remaining = delay;
+          const tick = (): void => {
+            if (remaining-- <= 0) controller.abort();
+            else queueMicrotask(tick);
+          };
+          queueMicrotask(tick);
+          return Promise.resolve([]);
+        },
+      },
+    };
+    engine = webEngine({ browser: provider });
+    const prepared = await engine.prepare!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, slots: 1, env: {}, signal: signal(), headed: false, log: () => undefined });
+    await engine.init!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, env: { ...prepared?.env }, headed: false, workerSlot: 0, signal: signal(), log: () => undefined });
+    await engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: signal(), resolveSecret: noSecrets, ...ignoreTrace });
+    await engine.session!.open!(app.url, operation());
+    const browser = engine.fixtures!['browser']!({
+      operation: () => ({ ...operation(), signal: cancel.signal }),
+      app: { resolveUrl: (url: string) => new URL(url, app.url).href },
+      expectable: (target: object) => target, fixture: (_name: string, target: object) => target,
+      attachArtifact: () => undefined,
+    } as unknown as EngineFixtureContext) as Browser;
+    const cancelledTriggers: number[] = [];
+    for (delay = 0; delay < 12; delay += 1) {
+      cancel = new AbortController();
+      const controller = cancel;
+      await browser.waitForDownload(async () => { if (controller.signal.aborted) cancelledTriggers.push(delay); }).catch(() => undefined);
+    }
+    expect(cancelledTriggers).toEqual([]);
+  });
 });
