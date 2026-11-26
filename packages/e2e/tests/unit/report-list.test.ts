@@ -1358,6 +1358,36 @@ describe('ListReporter', () => {
       expect(shown()).not.toContain('Acting');
     });
 
+    it('keeps the newer of two concurrent steps shown when the older one ends first', () => {
+      const { chunks, output } = liveCapture();
+      const reporter = plainReporter(output, true);
+      reporter.handle(runStarted());
+      reporter.handle(plan([{ file: 'tests/case.e2e.ts', tests: 1 }]));
+      reporter.handle(testStarted('t1', 'pays', 'chromium'));
+      const step = (stepId: string, progress: object) =>
+        reporter.handle({
+          type: 'step',
+          testId: 't1',
+          agent: 'default',
+          repeat: 0,
+          target: 'chromium',
+          progress: { ...progress, identity: { attemptId: 'a1', attemptIndex: 0, stepId, stepIndex: Number(stepId.slice(1)) } },
+        } as never);
+      const shown = () => chunks.at(-1)!.replace(ANSI_PATTERN, '');
+      // Promise.all: an assertion polls while an act runs beside it, and the assertion settles first.
+      step('s0', { phase: 'start', kind: 'assertion', api: 'expect.toBeVisible', label: 'locator("p")' });
+      step('s1', { phase: 'start', kind: 'agent', api: 'agent.act', label: 'pay' });
+      step('s1', { phase: 'replay', api: 'agent.act', active: true });
+      step('s0', { phase: 'end', kind: 'assertion', api: 'expect.toBeVisible', label: 'locator("p")', status: 'passed', durationMs: 5, modelCalls: 0 });
+      expect(shown()).toContain('agent.act "pay"');
+      expect(shown()).toContain('Replaying');
+      expect(shown()).not.toContain('expect.toBeVisible');
+      step('s1', { phase: 'activity', api: 'agent.act', activity: 'action' });
+      step('s1', { phase: 'replay', api: 'agent.act', active: false });
+      expect(shown()).toContain('agent.act "pay"');
+      expect(shown()).toContain('Acting');
+    });
+
     it('drops a step an earlier attempt left open once a retry starts its own', () => {
       const { chunks, output } = liveCapture();
       const reporter = plainReporter(output, true);
