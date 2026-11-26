@@ -360,7 +360,8 @@ describe('runHostCommand', () => {
     const pidFile = path.join(dir, 'pid');
     const ignoresTerm: HostCommand = {
       file: process.execPath,
-      args: ['-e', `process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 30_000)`],
+      // The pid file goes in as an argument (process.argv[1] under `-e`), never into the code.
+      args: ['-e', "process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setTimeout(() => {}, 30_000)", pidFile],
     };
     const controller = new AbortController();
     const running = runHostCommand(ignoresTerm, { env: process.env, signal: controller.signal });
