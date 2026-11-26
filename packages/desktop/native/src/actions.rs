@@ -256,20 +256,75 @@ pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
     if forward { Ok(()) } else { Err(Failure::refused(codes::ACTION_FAILED, "the window could not be brought forward")) }
 }
 
-/// Whether the element at a point on screen is `element` or inside it.
-fn hits(pid: i32, element: &Element, x: f64, y: f64) -> bool {
-    let app = Element::application(pid);
-    let Some(mut hit) = app.element_at(x, y) else { return false };
+/// What the pointer lands on at a point.
+#[derive(Debug, PartialEq)]
+enum Aim {
+    /// The element, or content inside it that takes no press of its own.
+    Target,
+    /// A control inside the element (a row's inline button): a click there presses it, not the element.
+    Control,
+    /// Something outside the element.
+    Other,
+}
+
+/// Roles whose element takes a click of its own.
+fn presses(ax_role: &str) -> bool {
+    matches!(
+        ax_role,
+        "AXButton" | "AXCheckBox" | "AXRadioButton" | "AXPopUpButton" | "AXMenuButton" | "AXLink" | "AXDisclosureTriangle" | "AXIncrementor" | "AXSlider"
+    )
+}
+
+/// Folds the walk up from the element under the pointer: each step says whether it is the element, and else its
+/// accessibility role. The walk ends (`None`) at the top or after 32 steps without reaching the element.
+fn aim_along(mut walk: impl FnMut() -> Option<Result<(bool, String), AXError>>) -> Result<Aim, AXError> {
+    let mut control = false;
     for _ in 0..32 {
-        if &hit == element {
-            return true;
-        }
-        match hit.element("AXParent") {
-            Some(parent) => hit = parent,
-            None => return false,
+        match walk() {
+            Some(Ok((true, _))) => return Ok(if control { Aim::Control } else { Aim::Target }),
+            Some(Ok((false, ax_role))) => control = control || presses(&ax_role),
+            Some(Err(error)) => return Err(error),
+            None => return Ok(Aim::Other),
         }
     }
-    false
+    Ok(Aim::Other)
+}
+
+/// What the pointer lands on at a point on screen, relative to `element`. `Err` when the app did not answer.
+fn aim_at(pid: i32, element: &Element, x: f64, y: f64) -> Result<Aim, AXError> {
+    let app = Element::application(pid);
+    let mut next = app.element_at(x, y)?;
+    aim_along(|| {
+        let hit = next.take()?;
+        if &hit == element {
+            return Some(Ok((true, String::new())));
+        }
+        let ax_role = match hit.attribute("AXRole") {
+            Ok(value) => value.text().unwrap_or_default().to_owned(),
+            Err(ax::AX_CANNOT_COMPLETE) => return Some(Err(ax::AX_CANNOT_COMPLETE)),
+            Err(_) => String::new(),
+        };
+        next = match hit.attribute("AXParent") {
+            Ok(Value::Element(parent)) => Some(parent),
+            Err(ax::AX_CANNOT_COMPLETE) => return Some(Err(ax::AX_CANNOT_COMPLETE)),
+            _ => None,
+        };
+        Some(Ok((false, ax_role)))
+    })
+}
+
+/// Whether the pointer may go where `aim` says it lands: `clicks` refuses a control inside the element, which a hover
+/// does not press. A hit test the app did not answer is a stall, never a covering element.
+fn aimed(aim: Result<Aim, AXError>, clicks: bool, when: &str) -> Outcome<()> {
+    match aim {
+        Ok(Aim::Target) => Ok(()),
+        Ok(Aim::Control) if !clicks => Ok(()),
+        Ok(Aim::Control) => {
+            Err(Failure::refused(codes::ACTION_FAILED, format!("{when}, a control inside this element is under the pointer, so the click would press it")))
+        }
+        Ok(Aim::Other) => Err(Failure::refused(codes::ACTION_FAILED, format!("{when}, another element is under the pointer, so no click was sent there"))),
+        Err(error) => Err(unread(error, "find the element under the pointer")),
+    }
 }
 
 /// Physical pointer input at the element's center, once its window is forward and nothing covers it.
@@ -278,22 +333,19 @@ fn physical(entry: &Entry, action: Pointer) -> Outcome<()> {
     go("pointer")?;
     raise(entry.pid, &window)?;
     let (x, y) = center(&entry.element)?;
-    if !hits(entry.pid, &entry.element, x, y) {
-        return Err(Failure::refused(codes::ACTION_FAILED, "another element covers the center of this one, so the pointer would land there"));
-    }
+    let clicks = matches!(action, Pointer::Click { .. });
+    aimed(aim_at(entry.pid, &entry.element, x, y), clicks, "before the move")?;
     // Raising the window and the hit test can take a second on a slow app: the caller may have given up meanwhile. The
-    // pointer's move can reveal a control over the element (a row's inline button): each click checks the point again,
-    // and the caller once more after that check, which waits on the app too.
-    input::pointer(x, y, action, &|| still_aimed(|| hits(entry.pid, &entry.element, x, y)))
+    // pointer's move can reveal a control over the element (a row's inline button): the first click checks the point
+    // again. A double-click's second click follows at once, as part of the same gesture.
+    input::pointer(x, y, action, &|click| if click == 1 { still_aimed(|| aim_at(entry.pid, &entry.element, x, y)) } else { go("pointer") })
 }
 
-/// Whether a pointer event may go: the caller still wants it, the point still hits the element, and the caller still
+/// Whether a click may go: the caller still wants it, the point still lands on the element, and the caller still
 /// wants it after that check, which waits on the app.
-fn still_aimed(hit: impl FnOnce() -> bool) -> Outcome<()> {
+fn still_aimed(aim: impl FnOnce() -> Result<Aim, AXError>) -> Outcome<()> {
     go("pointer")?;
-    if !hit() {
-        return Err(Failure::refused(codes::ACTION_FAILED, "another element is under the pointer now, so no click was sent there"));
-    }
+    aimed(aim(), true, "after the move")?;
     go("pointer")
 }
 
@@ -992,7 +1044,7 @@ pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: I
         "secondaryTap" => Pointer::Click { right: true, count: 1 },
         other => return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("no pointer action {other}"))),
     };
-    guarded(input_id, deadline, || input::pointer(x, y, action, &|| go("pointer")))
+    guarded(input_id, deadline, || input::pointer(x, y, action, &|_| go("pointer")))
 }
 
 #[cfg(test)]
@@ -1140,17 +1192,38 @@ mod tests {
 
     #[test]
     fn sends_no_click_when_the_action_is_cancelled_during_the_hit_test() {
+        use super::Aim;
         let outcome = super::guarded(Some(1_000_034), later(), || {
             super::still_aimed(|| {
                 crate::input::cancel_input(1_000_034);
-                true
+                Ok(Aim::Target)
             })
         });
         let failure = outcome.expect_err("cancelled while the hit test waited on the app");
         assert_eq!((failure.code, failure.delivery), (crate::failure::codes::TIMEOUT, crate::failure::Delivery::NotDelivered));
-        let missed = super::guarded(Some(1_000_035), later(), || super::still_aimed(|| false)).expect_err("the point hits another element");
+        let missed = super::guarded(Some(1_000_035), later(), || super::still_aimed(|| Ok(Aim::Other))).expect_err("the point hits another element");
         assert_eq!(missed.code, crate::failure::codes::ACTION_FAILED);
-        assert!(super::guarded(Some(1_000_036), later(), || super::still_aimed(|| true)).is_ok());
+        assert!(super::guarded(Some(1_000_036), later(), || super::still_aimed(|| Ok(Aim::Target))).is_ok());
+    }
+
+    #[test]
+    fn tells_a_stalled_hit_test_and_a_control_inside_the_element_from_a_covering_element() {
+        use super::{Aim, aim_along, aimed};
+        use crate::failure::codes;
+        let walk = |steps: Vec<Result<(bool, &str), crate::ax::AXError>>| {
+            let mut steps = steps.into_iter();
+            aim_along(move || steps.next().map(|step| step.map(|(target, role)| (target, role.to_owned()))))
+        };
+        // A row's text cell is content of the row; its inline button is a control of its own.
+        assert_eq!(walk(vec![Ok((false, "AXStaticText")), Ok((false, "AXCell")), Ok((true, ""))]), Ok(Aim::Target));
+        assert_eq!(walk(vec![Ok((false, "AXStaticText")), Ok((false, "AXButton")), Ok((true, ""))]), Ok(Aim::Control));
+        assert_eq!(walk(vec![Ok((false, "AXButton")), Ok((false, "AXWindow"))]), Ok(Aim::Other));
+        assert_eq!(walk(vec![Ok((false, "AXStaticText")), Err(crate::ax::AX_CANNOT_COMPLETE)]), Err(crate::ax::AX_CANNOT_COMPLETE));
+        // A click refuses the control, a hover does not; a stall is a retryable stall, not a covering element.
+        assert_eq!(aimed(Ok(Aim::Control), true, "after the move").expect_err("the click would press the button").code, codes::ACTION_FAILED);
+        assert!(aimed(Ok(Aim::Control), false, "before the move").is_ok());
+        let stall = aimed(Err(crate::ax::AX_CANNOT_COMPLETE), true, "after the move").expect_err("the app did not answer");
+        assert_eq!((stall.code, stall.delivery), (codes::APP_UNRESPONSIVE, crate::failure::Delivery::NotDelivered));
     }
 
     #[test]

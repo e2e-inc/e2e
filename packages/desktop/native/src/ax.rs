@@ -427,11 +427,15 @@ impl Element {
         if error == AX_SUCCESS && id != 0 { Some(id) } else { None }
     }
 
-    /// The element of this app at a point on screen.
-    pub fn element_at(&self, x: f64, y: f64) -> Option<Element> {
+    /// The element of this app at a point on screen: `None` when none is there, `Err` when the app did not answer.
+    pub fn element_at(&self, x: f64, y: f64) -> Result<Option<Element>, AXError> {
         let mut element: CFTypeRef = std::ptr::null();
         let error = unsafe { AXUIElementCopyElementAtPosition(self.0, x as f32, y as f32, &mut element) };
-        if error == AX_SUCCESS && !element.is_null() { Some(Element(element)) } else { None }
+        match error {
+            AX_SUCCESS if !element.is_null() => Ok(Some(Element(element))),
+            AX_SUCCESS | AX_NO_VALUE => Ok(None),
+            error => Err(error),
+        }
     }
 }
 
