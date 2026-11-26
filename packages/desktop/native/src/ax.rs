@@ -244,6 +244,10 @@ impl Element {
         if error != AX_SUCCESS {
             return Err(error);
         }
+        // Success with no value out: nothing to decode or release.
+        if value.is_null() {
+            return Err(AX_NO_VALUE);
+        }
         let decoded = decode(value);
         unsafe { CFRelease(value) };
         decoded
@@ -258,6 +262,9 @@ impl Element {
         let error = unsafe { AXUIElementCopyMultipleAttributeValues(self.0, array.as_concrete_TypeRef(), 0, &mut values) };
         if error != AX_SUCCESS {
             return Err(error);
+        }
+        if values.is_null() {
+            return Ok(vec![None; names.len()]);
         }
         let mut out = Vec::with_capacity(names.len());
         let count = unsafe { CFArrayGetCount(values) };
@@ -294,6 +301,9 @@ impl Element {
         let error = unsafe { AXUIElementCopyAttributeValues(self.0, key.as_concrete_TypeRef(), 0, max as CFIndex, &mut values) };
         if error != AX_SUCCESS {
             return Err(error);
+        }
+        if values.is_null() {
+            return Ok(Vec::new());
         }
         let decoded = decode(values as CFTypeRef);
         unsafe { CFRelease(values as CFTypeRef) };
@@ -369,6 +379,9 @@ impl Element {
         let error = unsafe { AXUIElementCopyActionNames(self.0, &mut names) };
         if error != AX_SUCCESS {
             return Err(error);
+        }
+        if names.is_null() {
+            return Ok(Vec::new());
         }
         let decoded = decode(names as CFTypeRef);
         unsafe { CFRelease(names as CFTypeRef) };
