@@ -66,8 +66,10 @@ test('signs in', async ({ app, screen }) => {
 - A password field reports no value, and screenshots paint password fields
   and nested documents over. One inside a closed shadow root, which no mask
   reaches, withholds the screenshot.
-- Not supported yet: video, session save and restore, `toBeInViewport`,
-  computed-style checks, and content inside an `iframe` or `webview`.
+- Not supported yet: video, routes, cookies, waiting for a download,
+  in-memory uploads, `app.back()`, `prompt()`, session save and restore,
+  `toBeInViewport`, computed-style reads, and content inside an `iframe` or
+  `webview`. `docs/electron.mdx` lists every difference from the web.
 
 ## License
 
