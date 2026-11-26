@@ -195,12 +195,14 @@ describe('manifest', () => {
     const android = harness({ platform: 'android' }).engine.validateApp!;
     for (const validateApp of [ios, android]) {
       expect(() => validateApp({ bundleId: 'com.example.app', locale: 'zh-Hans-CN' }, info)).not.toThrow();
-      expect(() => validateApp({ bundleId: 'com.example.app', locale: 'ja-JP-u-ca-japanese' }, info)).toThrowError(
-        expect.objectContaining({
-          code: 'INVALID_CONFIG',
-          message: 'target "phone" app.locale takes a language, script, and region only, such as "fr-FR" or "zh-Hans-CN", got "ja-JP-u-ca-japanese"',
-        }),
-      );
+      for (const refused of ['ja-JP-u-ca-japanese', 'ca-ES-valencia']) {
+        expect(() => validateApp({ bundleId: 'com.example.app', locale: refused }, info)).toThrowError(
+          expect.objectContaining({
+            code: 'INVALID_CONFIG',
+            message: `target "phone" app.locale takes a language, script, and region only, such as "fr-FR" or "zh-Hans-CN", got "${refused}"`,
+          }),
+        );
+      }
     }
     expect(() => ios({ bundleId: 'com.example.app', locale: 'fr-FR', launchArgumentValues: { AppleLocale: 'fr_FR' } }, info)).toThrowError(
       expect.objectContaining({

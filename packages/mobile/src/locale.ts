@@ -53,10 +53,13 @@ export function checkLocale(label: string, value: unknown, code: Code): string {
   if (locale === undefined || locale.language === undefined || locale.language === 'und') {
     fail(code, `${label} must be a BCP 47 language tag such as "fr-FR", got ${JSON.stringify(value)}`);
   }
-  if (locale.toString() !== locale.baseName) {
+  // `baseName` keeps a variant (`ca-ES-valencia`), which `AppleLocale` has no place for.
+  const { language, script, region } = locale;
+  const tag = [language, script, region].filter((part) => part !== undefined).join('-');
+  if (locale.toString() !== tag) {
     fail(code, `${label} takes a language, script, and region only, such as "fr-FR" or "zh-Hans-CN", got ${JSON.stringify(value)}`);
   }
-  return locale.baseName;
+  return tag;
 }
 
 /**
