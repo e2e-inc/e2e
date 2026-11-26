@@ -10,6 +10,7 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import type { Page } from 'playwright-core';
 import path from 'node:path';
 import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
 import type { EngineFixtureContext, EngineHandle, OperationContext } from '@e2e-dev/core/engine';
@@ -56,7 +57,8 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
     artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-downloads-'));
     remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-disk-'));
     chrome = await launchRemoteChrome();
-    const reads: { lease: string; file: string; suggestedFilename: string | undefined }[] = [];
+    const reads: { lease: string; file: string; suggestedFilename: string | undefined; before: unknown }[] = [];
+    const events: string[] = [];
     const provider: BrowserProvider = {
       name: 'toy-remote',
       scope,
@@ -64,9 +66,13 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
       release: async () => undefined,
       downloads: {
         dir: path.join(remoteDisk, 'downloads'),
-        async read(lease, file, { suggestedFilename }) {
-          reads.push({ lease: lease.id, file, suggestedFilename });
+        async read(lease, file, { suggestedFilename, before }) {
+          reads.push({ lease: lease.id, file, suggestedFilename, before });
           return readFile(file);
+        },
+        async before(lease) {
+          events.push(`before ${lease.id}`);
+          return ['token'];
         },
       },
     };
@@ -102,12 +108,15 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
     let triggers = 0;
     const trigger = async (): Promise<void> => {
       triggers += 1;
+      events.push('trigger');
       for (let index = 0; index < count; index += 1) await page.locator(`#download-${index}`).click();
     };
     const files = count === 1
       ? [await browser.waitForDownload(trigger)]
       : await browser.waitForDownloads(trigger, { count });
     expect(triggers).toBe(1);
+    expect(events).toEqual(['before lease-1', 'trigger']);
+    expect(reads.every(read => JSON.stringify(read.before) === '["token"]')).toBe(true);
     expect(files).toHaveLength(count);
     for (const [index, file] of files.entries()) {
       expect(file.suggestedFilename).toBe(`report-${index}.txt`);
@@ -181,5 +190,213 @@ describe.each<BrowserProviderScope>(['worker', 'attempt'])('downloads through a 
       expect(readSignal?.aborted).toBe(true);
       expect(attached).toEqual([]);
     } finally { clearTimeout(watchdog); }
+  });
+
+  it.each(['waitForDownload', 'waitForDownloads'] as const)('%s bounds a before hook that never settles, without running the trigger', async (method) => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-stalled-before-'));
+    remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-stalled-before-'));
+    chrome = await launchRemoteChrome();
+    let hookSignal: AbortSignal | undefined;
+    const provider: BrowserProvider = {
+      name: 'stalled-before', scope,
+      acquire: async () => ({ id: 'stalled-lease', cdpEndpoint: chrome!.endpoint }),
+      release: async () => undefined,
+      downloads: {
+        dir: path.join(remoteDisk, 'downloads'),
+        read: async (_lease, file) => readFile(file),
+        before: async (_lease, { signal: hookCancellation }) => {
+          hookSignal = hookCancellation;
+          return new Promise<unknown>(() => undefined);
+        },
+      },
+    };
+    engine = webEngine({ browser: provider });
+    const prepared = await engine.prepare!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, slots: 1, env: {}, signal: signal(), headed: false, log: () => undefined });
+    await engine.init!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, env: { ...prepared?.env }, headed: false, workerSlot: 0, signal: signal(), log: () => undefined });
+    await engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: signal(), resolveSecret: noSecrets, ...ignoreTrace });
+    await engine.session!.open!(app.url, operation());
+    const browser = engine.fixtures!['browser']!({
+      operation: (timeout?: number) => ({ ...operation(), timeoutMs: timeout ?? 15000 }),
+      app: { resolveUrl: (url: string) => new URL(url, app.url).href },
+      expectable: (target: object) => target, fixture: (_name: string, target: object) => target,
+      attachArtifact: () => undefined,
+    } as unknown as EngineFixtureContext) as Browser;
+    let triggers = 0;
+    const trigger = async (): Promise<void> => { triggers += 1; };
+    const work = method === 'waitForDownload'
+      ? browser.waitForDownload(trigger, { timeout: 500 })
+      : browser.waitForDownloads(trigger, { count: 1, timeout: 500 });
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        work.then(() => ({ code: 'completed', message: '' }), (error: { code: string; message: string }) => error),
+        new Promise<{ code: string; message: string }>((resolve) => { watchdog = setTimeout(() => resolve({ code: 'still pending', message: '' }), 1500); }),
+      ]);
+      expect(result).toMatchObject({ code: 'ACTION_FAILED', message: expect.stringContaining('exceeded its timeout') });
+      expect(triggers).toBe(0);
+      expect(hookSignal?.aborted).toBe(true);
+    } finally { clearTimeout(watchdog); }
+  });
+
+  it('fails the wait with ENGINE_FAILURE naming the provider when its before hook throws, without running the trigger', async () => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-before-'));
+    remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-before-'));
+    chrome = await launchRemoteChrome();
+    const provider: BrowserProvider = {
+      name: 'failing-before', scope,
+      acquire: async () => ({ id: 'before-lease', cdpEndpoint: chrome!.endpoint }),
+      release: async () => undefined,
+      downloads: {
+        dir: path.join(remoteDisk, 'downloads'),
+        read: async (_lease, file) => readFile(file),
+        before: async () => { throw new Error('file listing unavailable'); },
+      },
+    };
+    engine = webEngine({ browser: provider });
+    const prepared = await engine.prepare!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, slots: 1, env: {}, signal: signal(), headed: false, log: () => undefined });
+    await engine.init!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, env: { ...prepared?.env }, headed: false, workerSlot: 0, signal: signal(), log: () => undefined });
+    await engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: signal(), resolveSecret: noSecrets, ...ignoreTrace });
+    await engine.session!.open!(app.url, operation());
+    const browser = engine.fixtures!['browser']!({
+      operation: (timeout?: number) => ({ ...operation(), timeoutMs: timeout ?? 15000 }),
+      app: { resolveUrl: (url: string) => new URL(url, app.url).href },
+      expectable: (target: object) => target, fixture: (_name: string, target: object) => target,
+      attachArtifact: () => undefined,
+    } as unknown as EngineFixtureContext) as Browser;
+    let triggers = 0;
+    const error = await browser.waitForDownload(async () => { triggers += 1; }).then(() => undefined, (cause: { code: string; message: string }) => cause);
+    expect(error).toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('browser provider "failing-before" could not prepare a download wait on browser before-lease: file listing unavailable') });
+    expect(triggers).toBe(0);
+  });
+
+  it('fails a wait cancelled while its before hook runs with CANCELLED, without running the trigger, when the hook resolves on the abort', async () => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-cancel-'));
+    remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-cancel-'));
+    chrome = await launchRemoteChrome();
+    const cancel = new AbortController();
+    const provider: BrowserProvider = {
+      name: 'deaf-before', scope,
+      acquire: async () => ({ id: 'cancel-lease', cdpEndpoint: chrome!.endpoint }),
+      release: async () => undefined,
+      downloads: {
+        dir: path.join(remoteDisk, 'downloads'),
+        read: async (_lease, file) => readFile(file),
+        // A hook that settles quietly when cancelled, as one that catches its listing's abort would.
+        before: async (_lease, { signal: hookSignal }) => {
+          const settled = new Promise<unknown>((resolve) => { hookSignal.addEventListener('abort', () => resolve([]), { once: true }); });
+          cancel.abort();
+          return settled;
+        },
+      },
+    };
+    engine = webEngine({ browser: provider });
+    const prepared = await engine.prepare!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, slots: 1, env: {}, signal: signal(), headed: false, log: () => undefined });
+    await engine.init!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, env: { ...prepared?.env }, headed: false, workerSlot: 0, signal: signal(), log: () => undefined });
+    await engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: signal(), resolveSecret: noSecrets, ...ignoreTrace });
+    await engine.session!.open!(app.url, operation());
+    const browser = engine.fixtures!['browser']!({
+      operation: () => ({ ...operation(), signal: cancel.signal }),
+      app: { resolveUrl: (url: string) => new URL(url, app.url).href },
+      expectable: (target: object) => target, fixture: (_name: string, target: object) => target,
+      attachArtifact: () => undefined,
+    } as unknown as EngineFixtureContext) as Browser;
+    let triggers = 0;
+    const error = await browser.waitForDownload(async () => { triggers += 1; }).then(() => undefined, (cause: { code: string }) => cause);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(error).toMatchObject({ code: 'CANCELLED' });
+    expect(triggers).toBe(0);
+  });
+
+  it('never runs the trigger of a wait cancelled just after its before hook resolved', async () => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-cancel-'));
+    remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-cancel-'));
+    chrome = await launchRemoteChrome();
+    let cancel = new AbortController();
+    let delay = 0;
+    const provider: BrowserProvider = {
+      name: 'late-cancel', scope,
+      acquire: async () => ({ id: 'cancel-lease', cdpEndpoint: chrome!.endpoint }),
+      release: async () => undefined,
+      downloads: {
+        dir: path.join(remoteDisk, 'downloads'),
+        read: async (_lease, file) => readFile(file),
+        // Cancels `delay` microtasks after resolving; one of the delays lands between the race settling and the wait resuming.
+        before: () => {
+          const controller = cancel;
+          let remaining = delay;
+          const tick = (): void => {
+            if (remaining-- <= 0) controller.abort();
+            else queueMicrotask(tick);
+          };
+          queueMicrotask(tick);
+          return Promise.resolve([]);
+        },
+      },
+    };
+    engine = webEngine({ browser: provider });
+    const prepared = await engine.prepare!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, slots: 1, env: {}, signal: signal(), headed: false, log: () => undefined });
+    await engine.init!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, env: { ...prepared?.env }, headed: false, workerSlot: 0, signal: signal(), log: () => undefined });
+    await engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: signal(), resolveSecret: noSecrets, ...ignoreTrace });
+    await engine.session!.open!(app.url, operation());
+    const browser = engine.fixtures!['browser']!({
+      operation: () => ({ ...operation(), signal: cancel.signal }),
+      app: { resolveUrl: (url: string) => new URL(url, app.url).href },
+      expectable: (target: object) => target, fixture: (_name: string, target: object) => target,
+      attachArtifact: () => undefined,
+    } as unknown as EngineFixtureContext) as Browser;
+    const cancelledTriggers: number[] = [];
+    for (delay = 0; delay < 12; delay += 1) {
+      cancel = new AbortController();
+      const controller = cancel;
+      await browser.waitForDownload(async () => { if (controller.signal.aborted) cancelledTriggers.push(delay); }).catch(() => undefined);
+    }
+    expect(cancelledTriggers).toEqual([]);
+  });
+
+  it('listens on the opener when the active popup closes while the before hook runs', async () => {
+    artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-provider-popup-'));
+    remoteDisk = mkdtempSync(path.join(tmpdir(), 'e2e-browser-popup-'));
+    chrome = await launchRemoteChrome();
+    let popup: Page | undefined;
+    const provider: BrowserProvider = {
+      name: 'popup-closer', scope,
+      acquire: async () => ({ id: 'popup-lease', cdpEndpoint: chrome!.endpoint }),
+      release: async () => undefined,
+      downloads: {
+        dir: path.join(remoteDisk, 'downloads'),
+        read: async (_lease, file) => readFile(file),
+        // Resolves as soon as the popup has closed, before the session has switched back to the opener.
+        before: async () => {
+          await popup?.close();
+          return [];
+        },
+      },
+    };
+    engine = webEngine({ browser: provider });
+    const prepared = await engine.prepare!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, slots: 1, env: {}, signal: signal(), headed: false, log: () => undefined });
+    await engine.init!({ runId: 'run-downloads', targetName: 'web', projectRoot: process.cwd(), app: { site: new URL(app.url).hostname }, env: { ...prepared?.env }, headed: false, workerSlot: 0, signal: signal(), log: () => undefined });
+    await engine.startAttempt!({ attemptId: 'a1', artifactsDir, signal: signal(), resolveSecret: noSecrets, ...ignoreTrace });
+    await engine.session!.open!(app.url, operation());
+    const browser = engine.fixtures!['browser']!({
+      operation,
+      app: { resolveUrl: (url: string) => new URL(url, app.url).href },
+      expectable: (target: object) => target, fixture: (_name: string, target: object) => target,
+      attachArtifact: () => undefined,
+    } as unknown as EngineFixtureContext) as Browser;
+    const surface = surfaceOf(engine)!;
+    const opener = surface.page();
+    await opener.evaluate(() => {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob(['from the opener']));
+      link.download = 'opener.txt';
+      link.id = 'download';
+      document.body.append(link);
+    });
+    await browser.waitForPopup(() => opener.evaluate((url) => { window.open(url); }, app.url));
+    popup = surface.page();
+    expect(popup).not.toBe(opener);
+    const file = await browser.waitForDownload(async () => { await browser.evaluate(() => { document.querySelector<HTMLAnchorElement>('#download')!.click(); return null; }); });
+    expect(file.suggestedFilename).toBe('opener.txt');
+    expect(readFileSync(file.absolutePath, 'utf8')).toBe('from the opener');
   });
 });

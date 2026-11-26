@@ -51,7 +51,7 @@ import { cookieUrlsLabel, resolveCookieUrl, resolveCookieUrls, validateCookies }
 import type { AttemptTab } from './attempt-session.ts';
 import type { DialogHandler } from './dialogs.ts';
 import { saveDownloadsTo, saveFromBrowser, saveLocally } from './downloads.ts';
-import { isTestErrorCode, message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
+import { cancelled, isClassified, isTestErrorCode, message as causeMessage, pageScriptFailure, translatePwError } from './support.ts';
 import { compileEvaluation, decodeEvaluation, pageFunctionSource } from './evaluation.ts';
 import { initScriptLabel, testInitScriptSource } from './init-scripts.ts';
 import { MEDIA_KEYS, mediaLabel, mediaProblem, type WebMedia } from './media.ts';
@@ -572,10 +572,24 @@ async function collectDownloads(
   try {
     return await withTimeout(surface.guard({ ...operation, signal }, 'download', async (currentOperation) => {
       requireOpen();
-      const page = surface.requirePage();
       const remote = surface.remoteDownloads();
-      if (remote !== undefined) await saveDownloadsTo(page, remote.dir, currentOperation.signal);
+      if (remote !== undefined) await saveDownloadsTo(surface.requirePage(), remote.dir, currentOperation.signal);
       requireOpen();
+      // Raced so a hook that settles quietly on cancellation cannot let a cancelled wait run its trigger.
+      let before: unknown;
+      if (remote !== undefined) {
+        before = await raceAbort(() => remote.before(currentOperation.signal), currentOperation.signal, 'download');
+        // A tab that closed while the hook ran switches the active page only once its queued change runs.
+        await raceAbort(() => surface.tabsSettled(), currentOperation.signal, 'download');
+      }
+      requireOpen();
+      // A cancellation after the race settled but before this resumed would otherwise still run the trigger.
+      if (currentOperation.signal.aborted) {
+        const reason: unknown = currentOperation.signal.reason;
+        throw isClassified(reason) ? reason : cancelled('download cancelled');
+      }
+      // Read after the awaits above: a popup that closed meanwhile handed the active tab back to its opener.
+      const page = surface.requirePage();
       let allStarted!: () => void;
       const received = new Promise<void>((resolve) => { allStarted = resolve; });
       const onDownload = (download: Download): void => {
@@ -599,7 +613,7 @@ async function collectDownloads(
         const suggestedFilename = download.suggestedFilename();
         const { relative, absolute } = surface.artifactPath('downloads', suggestedFilename, '');
         if (remote === undefined) await saveLocally(download, absolute, surface.unservedDownloads());
-        else await saveFromBrowser(download, remote, absolute, currentOperation.signal);
+        else await saveFromBrowser(download, remote, absolute, currentOperation.signal, before);
         if (currentOperation.signal.aborted) throw timedOut();
         context.attachArtifact('download', relative);
         files.push({ path: relative, absolutePath: absolute, suggestedFilename });

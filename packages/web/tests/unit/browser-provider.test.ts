@@ -181,6 +181,13 @@ describe('web({ browser: provider })', () => {
     expect(() => web({ browser: { ...provider().impl, downloads: { dir: 'C:\\Users\\kernel\\Downloads', read } } })).not.toThrow();
   });
 
+  it.each([null, false, {}])('rejects a downloads.before that is not a function: %j', (before) => {
+    const read = async () => new Uint8Array();
+    expect(() => web({ browser: { ...provider().impl, downloads: { dir: '/downloads', read, before } } as unknown as BrowserProvider })).toThrow(
+      /provider "toy-cloud" has a downloads.before that is not a function/,
+    );
+  });
+
   it.each([null, 'Authorization', {}])('rejects non-function cdpHeaders: %j', (cdpHeaders) => {
     expect(() => web({ browser: { ...provider().impl, cdpHeaders } as unknown as BrowserProvider })).toThrow(
       /provider "toy-cloud" has a cdpHeaders that is not a function/,

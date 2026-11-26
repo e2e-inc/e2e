@@ -282,6 +282,14 @@ describe('notte()', () => {
       expect(await text(provider.downloads!.read(lease, '/tmp/session-downloads/guid', downloadContext('report.pdf')))).toBe('wanted');
     });
 
+    it('passes over a same-name file that was stored before the wait began', async () => {
+      const provider = notte();
+      sdk.state.files.set('s1', [file('f1', 'report.csv', '2026-11-12T10:00:01Z', 'stray')]);
+      const before = await provider.downloads!.before!(lease, { runId, targetName: 'web', env, signal: new AbortController().signal });
+      sdk.state.files.set('s1', [file('f1', 'report.csv', '2026-11-12T10:00:01Z', 'stray'), file('f2', 'report.csv', '2026-11-12T10:00:09Z', 'wanted')]);
+      expect(await text(provider.downloads!.read(lease, '/tmp/session-downloads/guid-2', { ...downloadContext('report.csv'), before }))).toBe('wanted');
+    });
+
     it('reads two files of one name that share a time in reverse of Notte\'s newest-first listing', async () => {
       const provider = notte();
       // Notte lists newest first.

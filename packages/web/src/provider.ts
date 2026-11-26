@@ -104,6 +104,12 @@ export interface BrowserDownloadContext {
    * a service that stores downloads by name rather than under `file`.
    */
   readonly suggestedFilename: string;
+  /**
+   * What `downloads.before` returned for this wait, taken before its trigger
+   * ran: for a service that cannot tell two same-name files apart, the files
+   * that were already there. Undefined when the provider has no `before`.
+   */
+  readonly before?: unknown;
 }
 
 /**
@@ -117,6 +123,12 @@ export interface BrowserProviderDownloads {
   readonly dir: string;
   /** The bytes of one finished download, `file` an absolute path under `dir`, read off the leased browser's disk. */
   read(lease: BrowserLease, file: string, context: BrowserDownloadContext): Promise<Uint8Array>;
+  /**
+   * Runs once per `waitForDownload` or `waitForDownloads` before its
+   * trigger; its result reaches every `read` of that wait as
+   * `context.before`.
+   */
+  before?(lease: BrowserLease, context: Omit<BrowserDownloadContext, 'suggestedFilename' | 'before'>): Promise<unknown>;
 }
 
 /** The downloads of the browser an attempt rides, read through its provider. */
@@ -124,7 +136,9 @@ export interface LeaseDownloads {
   /** The provider as error messages name it: `browser provider "kernel"`. */
   readonly provider: string;
   readonly dir: string;
-  read(file: string, signal: AbortSignal, suggestedFilename: string): Promise<Uint8Array>;
+  read(file: string, signal: AbortSignal, suggestedFilename: string, before?: unknown): Promise<Uint8Array>;
+  /** The provider's `before`, or undefined. */
+  before(signal: AbortSignal): Promise<unknown>;
 }
 
 /** A provider recording the attempt started, with who made it and which lease it covers, for `stopProviderRecording`. */
@@ -207,6 +221,9 @@ export function asBrowserProvider(browser: object): BrowserProvider {
     (typeof downloads !== 'object' || downloads === null || !isNonEmptyString(downloads.dir) || typeof downloads.read !== 'function')
   ) {
     throw new ConfigurationError('INVALID_CONFIG', `web: browser provider "${candidate.name}" has downloads that are not { dir, read() }`);
+  }
+  if (downloads !== undefined && downloads.before !== undefined && typeof downloads.before !== 'function') {
+    throw new ConfigurationError('INVALID_CONFIG', `web: browser provider "${candidate.name}" has a downloads.before that is not a function`);
   }
   // The browser's own machine may be POSIX or Windows, whatever the runner's is.
   if (downloads !== undefined && !path.posix.isAbsolute(downloads.dir as string) && !path.win32.isAbsolute(downloads.dir as string)) {
@@ -613,12 +630,24 @@ export class LeasedBrowsers {
     return {
       provider: label,
       dir: served.dir,
-      read: async (file, signal, suggestedFilename) => {
+      before: async (signal) => {
+        if (served.before === undefined) return undefined;
         const run = this.requireRun();
         const lease = this.scope === 'attempt' ? this.attempt : this.current?.lease;
         if (lease === undefined) throw invalidState(`${label} was asked for a download before the attempt had a browser`);
         try {
-          return await served.read(lease, file, { runId: run.runId, targetName: run.targetName, env: run.env, signal, suggestedFilename });
+          return await served.before(lease, { runId: run.runId, targetName: run.targetName, env: run.env, signal });
+        } catch (cause) {
+          if (signal.aborted) throw connectionAbort(signal, `download from "${provider.name}"`);
+          throw new EngineError('ENGINE_FAILURE', `${label} could not prepare a download wait on browser ${lease.id}: ${message(cause)}`, { retryable: false, cause });
+        }
+      },
+      read: async (file, signal, suggestedFilename, before) => {
+        const run = this.requireRun();
+        const lease = this.scope === 'attempt' ? this.attempt : this.current?.lease;
+        if (lease === undefined) throw invalidState(`${label} was asked for a download before the attempt had a browser`);
+        try {
+          return await served.read(lease, file, { runId: run.runId, targetName: run.targetName, env: run.env, signal, suggestedFilename, ...(before === undefined ? {} : { before }) });
         } catch (cause) {
           if (signal.aborted) throw connectionAbort(signal, `download from "${provider.name}"`);
           throw new EngineError('ENGINE_FAILURE', `${label} could not read download ${file} from browser ${lease.id}: ${message(cause)}`, { retryable: false, cause });

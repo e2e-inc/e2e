@@ -318,6 +318,8 @@ export interface BrowserProviderDownloads {
   readonly dir: string;
   /** The bytes of one finished download, `file` a path under `dir`, read off the leased browser. */
   read(lease: BrowserLease, file: string, context: BrowserDownloadContext): Promise<Uint8Array>;
+  /** Optional: runs once per wait before its trigger; the result reaches each `read` of that wait as `context.before`. */
+  before?(lease: BrowserLease, context: Omit<BrowserDownloadContext, 'suggestedFilename' | 'before'>): Promise<unknown>;
 }
 
 export interface BrowserLease {
@@ -482,6 +484,13 @@ timeout. [Kernel](/integrations/kernel#downloads) serves downloads this
 way. A service that stores downloads by name rather than by path finds the
 file by `context.suggestedFilename`, the name the site suggested, as
 [Notte](/integrations/notte#downloads) does.
+
+Such a service can't tell a new download from an older file of the same
+name. Implement `before` to note what is already stored: the engine calls it
+once per `waitForDownload` or `waitForDownloads`, before the trigger, and
+passes its result to each `read` of that wait as `context.before`. A
+`before` that throws fails the wait with `ENGINE_FAILURE`, naming the
+provider, unless the wait was already cancelled or timed out.
 
 Without `downloads`, a download on a browser on another machine fails with
 `ENGINE_FAILURE`, naming the provider. A provider whose browsers run on the
