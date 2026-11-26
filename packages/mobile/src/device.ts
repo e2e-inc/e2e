@@ -6,7 +6,7 @@
  */
 
 import type { AgentDeviceClient as DeviceSessionClient } from 'agent-device';
-import { TestError, type EngineFixtureContext, type Locator, type ViewportSize } from '@e2e-dev/core/engine';
+import { parseKey, TestError, type EngineFixtureContext, type Locator, type ViewportSize } from '@e2e-dev/core/engine';
 import { appLabel, linkLabel, linkTarget } from './links.ts';
 import { pressRemote, requireRemoteKey, type RemoteKey } from './remote.ts';
 import { pressButton, requireHardwareButton, type HardwareButton } from './buttons.ts';
@@ -298,6 +298,24 @@ export interface Device {
    * Changes nothing on the device.
    */
   isKeyboardShown(): Promise<boolean>;
+  /**
+   * Input to whatever field holds focus, with no locator, as a person types
+   * on the soft keyboard once a field has it. Prefer `fill` and `press` on
+   * the field's locator when the tree lists it; these are for a field it
+   * leaves out, or for input after the app moved focus on its own.
+   */
+  readonly keyboard: {
+    /** Types plain text into the focused field through the device's text input, never a `Secret`. */
+    type(text: string): Promise<void>;
+    /**
+     * Presses one key on the focused field: `Enter` submits through the soft
+     * keyboard, `Backspace` deletes the character before the cursor, and
+     * `Space` or one character is typed. Any other named key and any
+     * modifier is `UNSUPPORTED_CAPABILITY`, since agent-device sends no other
+     * key event; a string outside the key grammar is `INVALID_ARGUMENT`.
+     */
+    press(key: string): Promise<void>;
+  };
   /** Reads the clipboard. */
   clipboard(): Promise<string>;
   /** Writes the clipboard. */
@@ -491,6 +509,23 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     async isKeyboardShown() {
       return surface.keyboardShown(context.signal, surface.inputBudget('device.isKeyboardShown', { timeoutMs: context.timeouts.action, signal: context.signal }));
     },
+    keyboard: {
+      async type(text) {
+        if (typeof text !== 'string') throw new TestError('INVALID_ARGUMENT', 'device.keyboard.type(text): text must be a string; fill a Secret into its field with locator.fill');
+        const operation = context.operation();
+        await surface.typeText(text, { replace: false }, operation, surface.inputBudget('device.keyboard.type', operation));
+      },
+      async press(key) {
+        if (typeof key !== 'string' || parseKey(key) === undefined) {
+          throw new TestError(
+            'INVALID_ARGUMENT',
+            `device.keyboard.press(${typeof key === 'string' ? JSON.stringify(key) : typeof key}): not a key; press Enter, Space, Backspace, or one character`,
+          );
+        }
+        const operation = context.operation();
+        await surface.pressFocusedKey(key, operation, surface.inputBudget('device.keyboard.press', operation));
+      },
+    },
     async clipboard() {
       const result = await surface.command(
         'device.clipboard',
@@ -535,6 +570,10 @@ export function createDeviceFixture(surface: AgentDeviceSurface, context: Engine
     alert: { ...action, label: (value) => value },
     dismissKeyboard: action,
     isKeyboardShown: action,
+    keyboard: {
+      type: { ...action, label: (text) => (typeof text === 'string' ? `${text.length} chars` : typeof text) },
+      press: { ...action, label: (key) => (typeof key === 'string' ? key : typeof key) },
+    },
     clipboard: action,
     setClipboard: { ...action, label: (text) => `${text.length} chars` },
   });

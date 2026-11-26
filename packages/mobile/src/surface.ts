@@ -204,6 +204,64 @@ function keyboardShowing(raw: RawSnapshot): boolean {
   return keyboardShownIn(raw, isTruncated(raw)) === true;
 }
 
+/** What one pressed key sends: agent-device's keyboard Enter, text typed into the focused field, or the delete key typed as `\b`. */
+type SoftKey = { readonly kind: 'enter' } | { readonly kind: 'delete' } | { readonly kind: 'text'; readonly text: string };
+
+/**
+ * One key of the contract grammar on a touch surface. `Enter` submits
+ * through the soft keyboard. `Space`, a single character, and `Backspace`
+ * are typed into the focused field: agent-device types a `\b` as the delete
+ * key, through XCUITest on iOS and as `KEYCODE_DEL` on Android, the same
+ * text its own Maestro `eraseText` sends. agent-device exposes no other key
+ * event, so modifiers and the other named keys (`Escape`, `Tab`, `Delete`,
+ * the arrows) have nothing to land on and are refused before anything is sent.
+ */
+function softKey(key: string): SoftKey {
+  const parsed = parseKey(key);
+  if (parsed === undefined) {
+    throw unsupported(`"${key}" is not a key: press takes one key in the form [Modifier+]...Key, a named key (${KEY_NAMES.join(', ')}) or one character`);
+  }
+  if (parsed.modifiers.length > 0) {
+    throw unsupported(`agent-device cannot hold ${parsed.modifiers.join('+')} on a device surface; press the key alone`);
+  }
+  if (parsed.key.kind === 'char') return { kind: 'text', text: parsed.key.char };
+  switch (parsed.key.name) {
+    case 'Enter':
+      return { kind: 'enter' };
+    case 'Space':
+      return { kind: 'text', text: ' ' };
+    case 'Backspace':
+      return { kind: 'delete' };
+    default:
+      throw unsupported(
+        `agent-device cannot press ${parsed.key.name} on a device surface; only Enter, Space, Backspace, and single characters reach the soft keyboard`,
+      );
+  }
+}
+
+/**
+ * Whether a press focuses this node before its key goes out: a text field
+ * (`textbox`, `searchbox`, or a `combobox` the platform says takes text).
+ * Anything else, a picker included, is pressed where focus already is.
+ */
+function typesIntoNode(node: SemanticNode): boolean {
+  return node.role === 'textbox' || node.role === 'searchbox' || (node.role === 'combobox' && node.states?.readonly === false);
+}
+
+/** A node's role, with the state that kept a press from reaching its text. */
+function describeField(node: SemanticNode): string {
+  const role = node.role ?? 'unknown';
+  if (node.states?.disabled === true) return `a disabled ${role}`;
+  if (node.states?.readonly === true) return `a read-only ${role}`;
+  return role;
+}
+
+/** Sends a {@link softKey} to whatever holds focus. */
+function sendSoftKey(client: AgentDeviceClient, key: SoftKey): Promise<unknown> {
+  if (key.kind === 'enter') return client.command.keyboard({ action: 'enter' });
+  return client.interactions.type({ text: key.kind === 'delete' ? '\b' : key.text });
+}
+
 /**
  * Whether a snapshot leaves out nodes that are on screen: agent-device says
  * it cut the tree, or the tree is still sparse after the retries (one
@@ -1697,33 +1755,43 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   }
 
   /**
-   * Keys on a touch surface, in the contract's key grammar: `Enter` submits
-   * through the soft keyboard, `Space` and any single character are typed
-   * into the focused field. agent-device exposes no key event bus, so
-   * modifiers and the other named keys (`Escape`, `Tab`, `Backspace`, the
-   * arrows) have nothing to land on and are refused.
+   * {@link softKey} on this device. On Android, the typed `\b` becomes
+   * `KEYCODE_DEL` only through agent-device's adb backend; a device a cloud
+   * provider leases through agent-device (`leaseProvider`: BrowserStack,
+   * TestMu, Revyl) takes text through the provider's own backend, where a
+   * WebDriver session inserts the character instead, so Backspace is refused
+   * there before anything is sent.
    */
-  private async pressKey(client: AgentDeviceClient, entry: NodeBinding, key: string, settle: SettleOptions, input: InputBudget): Promise<unknown> {
-    const parsed = parseKey(key);
-    if (parsed === undefined) {
+  private softKey(key: string): SoftKey {
+    const sent = softKey(key);
+    const provider = this.device?.client?.leaseProvider;
+    if (sent.kind === 'delete' && this.options.platform === 'android' && provider !== undefined) {
       throw unsupported(
-        `"${key}" is not a key: press takes one key in the form [Modifier+]...Key, a named key (${KEY_NAMES.join(', ')}) or one character`,
+        `agent-device cannot press Backspace on an Android device leased from ${provider}: only its own adb backend types \\b as the delete key; clear the field with locator.clear() or fill() instead`,
       );
     }
-    if (parsed.modifiers.length > 0) {
-      throw unsupported(`agent-device cannot hold ${parsed.modifiers.join('+')} on a device surface; press the key alone`);
-    }
-    const enter = parsed.key.kind === 'named' && parsed.key.name === 'Enter';
-    if (!enter && parsed.key.kind === 'named' && parsed.key.name !== 'Space') {
-      throw unsupported(`agent-device cannot press ${parsed.key.name} on a device surface; only Enter, Space, and single characters reach the soft keyboard`);
+    return sent;
+  }
+
+  /**
+   * Keys on a touch surface, in the contract's key grammar, sent to the
+   * field once it holds focus: see {@link softKey}.
+   */
+  private async pressKey(client: AgentDeviceClient, entry: NodeBinding, key: string, settle: SettleOptions, input: InputBudget): Promise<unknown> {
+    const sent = this.softKey(key);
+    const field = typesIntoNode(entry.node);
+    // Only a text field is focused before the key goes out, and a tap on a
+    // disabled or read-only one leaves focus where it was, so Backspace on
+    // any of them would delete from whichever field kept focus.
+    if (sent.kind === 'delete' && (!field || entry.node.states?.disabled === true || entry.node.states?.readonly === true)) {
+      throw unsupported(`agent-device can only press Backspace on an enabled, editable field; node ${entry.id} is ${describeField(entry.node)}`);
     }
     // A key reaches the field through the soft keyboard, which is up only
     // while the field holds focus.
-    if (entry.node.role === 'textbox' && entry.node.states?.focused !== true) {
+    if (field && entry.node.states?.focused !== true) {
       await input.press(client, { ...this.actionTarget(entry), ...settle });
     }
-    if (enter) return input.send(() => client.command.keyboard({ action: 'enter' }));
-    return input.send(() => client.interactions.type({ text: parsed.key.kind === 'char' ? parsed.key.char : ' ' }));
+    return input.send(() => sendSoftKey(client, sent));
   }
 
   /**
@@ -1759,29 +1827,13 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   }
 
   /**
-   * One key to the focused field, with the same reach as a node press: Enter
-   * submits through the soft keyboard, Space and single characters are typed.
-   * Modifiers and the other named keys have no event bus to land on.
+   * One key to the focused field, with the same reach as a node press: see
+   * {@link softKey}.
    */
   async pressFocusedKey(key: string, operation: OperationContext, input: InputBudget): Promise<void> {
-    const parsed = parseKey(key);
-    if (parsed === undefined) {
-      throw unsupported(
-        `"${key}" is not a key: press takes one key in the form [Modifier+]...Key, a named key (${KEY_NAMES.join(', ')}) or one character`,
-      );
-    }
-    if (parsed.modifiers.length > 0) {
-      throw unsupported(`agent-device cannot hold ${parsed.modifiers.join('+')} on a device surface; press the key alone`);
-    }
+    const sent = this.softKey(key);
     const before = this.latestScreen;
-    if (parsed.key.kind === 'named' && parsed.key.name === 'Enter') {
-      await this.command('keyboard.press', (client) => input.send(() => client.command.keyboard({ action: 'enter' })), operation.signal);
-    } else if (parsed.key.kind === 'char' || parsed.key.name === 'Space') {
-      const text = parsed.key.kind === 'char' ? parsed.key.char : ' ';
-      await this.command('keyboard.press', (client) => input.send(() => client.interactions.type({ text })), operation.signal);
-    } else {
-      throw unsupported(`agent-device cannot press ${parsed.key.name} on a device surface; only Enter, Space, and single characters reach the soft keyboard`);
-    }
+    await this.command('keyboard.press', (client) => input.send(() => sendSoftKey(client, sent)), operation.signal);
     this.markAction(before);
   }
 
