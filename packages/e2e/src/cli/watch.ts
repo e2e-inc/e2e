@@ -490,6 +490,8 @@ export async function watchSession(options: WatchSessionOptions): Promise<number
   let watcher: ChangeWatcher | undefined;
   let running: RunCancel | undefined;
   let wake: ((value: Wake) => void) | undefined;
+  /** Closes the open filter prompt, as Ctrl-C typed into it does. */
+  let closePrompt: (() => void) | undefined;
   let exitCode = 0;
 
   const arrive = (next: WatchTrigger): void => {
@@ -497,8 +499,10 @@ export async function watchSession(options: WatchSessionOptions): Promise<number
     else wake(next);
   };
   const keyboard = options.stdin === undefined ? undefined : new Keyboard(options.stdin, keyOf);
-  keyboard?.listen((key) => {
+  keyboard?.listen((key, press) => {
     if (key === 'interrupt') {
+      // clack cancels a prompt on this same Ctrl-C keypress; closing the prompt here too would close it twice.
+      if (press.ctrl && press.name === 'c') closePrompt = undefined;
       signals.escalate();
       return;
     }
@@ -531,7 +535,10 @@ export async function watchSession(options: WatchSessionOptions): Promise<number
         arrive({ kind: 'key', key });
     }
   });
-  const quit = (): void => wake?.('quit');
+  const quit = (): void => {
+    wake?.('quit');
+    closePrompt?.();
+  };
   signals.interruptSignal.addEventListener('abort', quit, { once: true });
   const waiting = (): void =>
     options.write(`\n${pc.dim('Waiting for file changes...')}\n${keyboard === undefined ? '' : `  ${helpText(pc, false)}`}`);
@@ -622,17 +629,18 @@ export async function watchSession(options: WatchSessionOptions): Promise<number
           woken = value;
           break;
         }
+        // An interrupt that came with the key, as Ctrl-C in the same read does, ends the session at the loop top.
+        if (signals.interruptSignal.aborted) continue;
         // The prompt owns the terminal: keys wait, and so does a change, in `pending`.
         keyboard?.pause();
         // A signal closes the prompt, so a SIGTERM from outside the terminal ends the session as Ctrl-C in it does.
         // The prompt gets its own signal: clack never removes its abort listener from a signal that did not abort.
         const closer = new AbortController();
-        const close = (): void => closer.abort();
-        signals.interruptSignal.addEventListener('abort', close, { once: true });
+        closePrompt = () => closer.abort();
         const prompt = value === 'p' ? promptFile : promptTitle;
-        const answer = await prompt(filters, terminal, closer.signal).finally(() =>
-          signals.interruptSignal.removeEventListener('abort', close),
-        );
+        const answer = await prompt(filters, terminal, closer.signal).finally(() => {
+          closePrompt = undefined;
+        });
         keyboard?.resume();
         if (answer !== undefined && !signals.interruptSignal.aborted) {
           filters = answer;
