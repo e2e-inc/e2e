@@ -466,7 +466,8 @@ export type Point = ViewportPoint;
 /**
  * CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`),
  * `'0%'` through `'100%'`. In a locator action's `position`, a percentage is
- * of the part of the node's box the screen shows instead.
+ * of the part of the node's box inside the viewport and every frame around
+ * it instead.
  */
 export type ScreenCoordinate = number | `${number}%`;
 
@@ -481,17 +482,20 @@ export interface ClickOptions extends ActionOptions {
   /**
    * Where to tap in the node. A pixel coordinate is measured from the node's
    * top-left corner, inside its border on a document platform. A percentage
-   * is a share of the part of the node's box the screen shows: the whole
-   * pixels inside the viewport and every frame around the node. On a
-   * document platform that box includes the border, so `{ x: '0%', y: '0%' }`
-   * is the border's outer corner while `{ x: 0, y: 0 }` is inside the
-   * border. `{ x: '50%', y: '50%' }` is the center of the part shown, and
-   * `'100%'` stays on its last pixel. Without it the platform picks a
-   * point of the node, usually its center, behind its own actionability
-   * checks; with it the pointer is dispatched at that point once the node is
-   * in view and has a box. The engine needs the matching pointer action:
-   * `tap`, `secondaryTap` for a single right tap, `doubleTap` for 2 taps, or
-   * `multiTap` for 3 or more.
+   * is a share of the part of the node's box inside the viewport and every
+   * frame around the node, in whole pixels. On a document platform that box
+   * includes the border, so `{ x: '0%', y: '0%' }` is the border's outer
+   * corner while `{ x: 0, y: 0 }` is inside the border.
+   * `{ x: '50%', y: '50%' }` is the center of that part, and `'100%'` its
+   * last pixel. A scrolling or `overflow: hidden` ancestor does not cut the
+   * box: in a 200px wide scroll container, `'50%'` of a 600px wide button is
+   * 300px into it, on whatever the page shows past the container's edge. Use
+   * a pixel position, or scroll the container, there. Without `position`
+   * the platform picks a point of the node, usually its center, behind its
+   * own actionability checks; with it the pointer is dispatched at that
+   * point once the node is in view and has a box. The engine needs the
+   * matching pointer action: `tap`, `secondaryTap` for a single right tap,
+   * `doubleTap` for 2 taps, or `multiTap` for 3 or more.
    */
   position?: ScreenPoint;
   /**

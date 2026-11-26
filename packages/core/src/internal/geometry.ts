@@ -93,16 +93,25 @@ export function containsPoint(box: Box, point: ViewportPoint): boolean {
 }
 
 /**
- * The whole CSS pixels of the box inside the viewport, undefined when it
- * covers none. A pixel the box covers only in part is left out: a browser
- * hit-tests the edge of a box at a fractional position as outside it.
+ * The whole CSS pixels of the box inside the viewport, undefined when no part
+ * of it is inside. A pixel the box covers only in part is left out, since a
+ * neighbor can own it. Along a side where the part inside holds no whole
+ * pixel, as a 1px node at x 300.5 does, that part is kept unrounded.
  */
 export function pixelsInViewport(box: Box, viewport: ViewportSize): Box | undefined {
-  const x = Math.max(Math.ceil(box.x), 0);
-  const y = Math.max(Math.ceil(box.y), 0);
-  const width = Math.min(Math.floor(box.x + box.width), viewport.width) - x;
-  const height = Math.min(Math.floor(box.y + box.height), viewport.height) - y;
-  return width > 0 && height > 0 ? { x, y, width, height } : undefined;
+  const x = pixelsAlong(box.x, box.width, viewport.width);
+  const y = pixelsAlong(box.y, box.height, viewport.height);
+  return x === undefined || y === undefined ? undefined : { x: x.start, y: y.start, width: x.size, height: y.size };
+}
+
+/** One side of `pixelsInViewport`: the part of `start` to `start + size` inside 0 to `limit`. */
+function pixelsAlong(start: number, size: number, limit: number): { start: number; size: number } | undefined {
+  const from = Math.max(start, 0);
+  const to = Math.min(start + size, limit);
+  if (to <= from) return undefined;
+  const first = Math.ceil(from);
+  const last = Math.floor(to);
+  return last > first ? { start: first, size: last - first } : { start: from, size: to - from };
 }
 
 /**

@@ -608,13 +608,18 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
    * coordinate is measured from the node's origin (`SemanticNode.origin`,
    * else its box's top-left corner), a percentage is that share of the
    * whole pixels its box covers inside the viewport, from their top-left
-   * corner. The engine clips the box to every frame around the node, so
-   * `'100%'` always lands on a pixel of the node the screen shows.
+   * corner. The engine clips the box to every frame around the node, and
+   * this clips it to the viewport. Nothing clips it to a scrolling or
+   * `overflow: hidden` ancestor, so `'50%'` of a node such an ancestor cuts
+   * can land on whatever the ancestor shows there.
    * The node is scrolled into view when the engine can, then its box is read
    * and the pointer dispatched at the point, with no node behind the
-   * gesture. The node has to be visible with a box, and for a percentage
-   * with some of it in the viewport, within the deadline; one that never is
-   * fails as LOCATOR_NOT_FOUND, as `waitFor` does.
+   * gesture. For a percentage, each round reads the viewport from a screen
+   * observation right after the node, and a retryable failure of that read
+   * waits for the next round, as a stale node does. The node has to be
+   * visible with a box, and for a percentage with some of it in the
+   * viewport, within the deadline; one that never is fails as
+   * LOCATOR_NOT_FOUND, as `waitFor` does.
    */
   async performWithin(
     expression: LocatorExpression,
@@ -627,7 +632,7 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     if (this.session.actions.has('scrollIntoView')) {
       await this.performUntil(expression, { kind: 'scrollIntoView' }, deadline);
     }
-    const viewport = isPixelPoint(offset) ? undefined : await this.viewport(deadline);
+    const percentage = !isPixelPoint(offset);
     let point: ViewportPoint | undefined;
     await pollReads({
       deadline,
@@ -639,7 +644,18 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
         if (deadline.expired()) return false;
         const { node } = await this.tryRead(expression, reads);
         if (!isNodeVisible(node) || node.rect === undefined) return false;
-        const box = viewport === undefined ? node.rect : pixelsInViewport(node.rect, viewport);
+        let box: SemanticNode['rect'] = node.rect;
+        if (percentage) {
+          let viewport: ViewportSize;
+          try {
+            viewport = (await reads.read((readMs) => this.session.observe(this.readOperation(readMs)))).viewport;
+          } catch (cause) {
+            // A document replaced mid-round is read again on the next one, as a stale node is.
+            if (asEngineError(cause)?.retryable === true && !deadline.expired()) return false;
+            throw translateLocatorError(cause, expression);
+          }
+          box = pixelsInViewport(node.rect, viewport);
+        }
         if (box === undefined) return false;
         const origin = node.origin ?? node.rect;
         const into = resolveScreenPoint(offset, box);
@@ -650,7 +666,7 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
         return true;
       },
       onTimeout: (cause) =>
-        new TestError('LOCATOR_NOT_FOUND', `locator did not become visible with a box${viewport === undefined ? '' : ' in the viewport'} to act within: ${describeExpression(expression)}`, {
+        new TestError('LOCATOR_NOT_FOUND', `locator did not become visible with a box${percentage ? ' in the viewport' : ''} to act within: ${describeExpression(expression)}`, {
           details: locatorDetails(expression, deadline.elapsed()),
           ...(cause === undefined ? {} : { cause }),
         }),

@@ -17,6 +17,7 @@ import {
   LOCATOR_ACTION_KINDS,
 } from '@e2e-dev/core/lib/engine/index';
 import type { ActionOptions, ClickOptions, HoverOptions, Locator, Screen, ScreenPoint, TapOptions } from '@e2e-dev/core/lib/types';
+import { EngineError } from '@e2e-dev/core/lib/engine/contract';
 import { invalid } from '../helpers/invalid.ts';
 import { screenOver, type ScreenOverOptions } from '../helpers/screen-over.ts';
 import { snapshot } from '../helpers/snapshot.ts';
@@ -89,15 +90,21 @@ function pointScreen(
   flags: Pick<ScreenOverOptions, 'tapButtons' | 'pointerActions'> & {
     origin?: { x: number; y: number };
     rect?: { x: number; y: number; width: number; height: number };
+    observeFailures?: Error[];
   } = {},
 ) {
-  const { origin, rect = { x: 10, y: 20, width: 100, height: 40 }, ...engine } = flags;
+  const { origin, rect = { x: 10, y: 20, width: 100, height: 40 }, observeFailures = [], ...engine } = flags;
   const box = { ...BOX, rect, ...(origin === undefined ? {} : { origin }) };
   const at: { action: PointerAction; point: { x: number; y: number } }[] = [];
   const locate = vi.fn(async (expression: LocatorExpression) => resolveExpression(expression, [box]));
+  const observe = vi.fn(() => {
+    const failure = observeFailures.shift();
+    if (failure !== undefined) throw failure;
+    return snapshot([box]);
+  });
   const { screen, steps } = screenOver({
     locate,
-    observe: () => snapshot([box]),
+    observe,
     perform: () => {},
     performAt: (point, action: PointerAction) => {
       at.push({ action, point });
@@ -106,7 +113,7 @@ function pointScreen(
     ...engine,
     timeoutMs: 1_000,
   });
-  return { screen, steps, at, locate };
+  return { screen, steps, at, locate, observe };
 }
 
 describe('locator action options', () => {
@@ -476,7 +483,7 @@ describe('locator action options', () => {
       ]);
     });
 
-    it('reads a percentage as a share of the part of the box inside the viewport', async () => {
+    it('reads a percentage as a share of the part of the box inside the viewport, and a pixel coordinate from the uncut box', async () => {
       const { screen, at } = pointScreen({ rect: { x: 1200, y: -500, width: 200, height: 3000 } });
       await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } });
       await screen.getByLabel('Agree').hover({ position: { x: '100%', y: 10 } });
@@ -494,6 +501,45 @@ describe('locator action options', () => {
         { action: { kind: 'tap' }, point: { x: 11, y: 21 } },
         { action: { kind: 'tap' }, point: { x: 109, y: 59 } },
       ]);
+    });
+
+    it('takes a percentage of the unrounded part of a box in the viewport along a side that holds no whole pixel', async () => {
+      const { screen, at } = pointScreen({ rect: { x: 300.5, y: 20, width: 1, height: 40 } });
+      await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } });
+      await screen.getByLabel('Agree').tap({ position: { x: '100%', y: '100%' } });
+      expect(at).toEqual([
+        { action: { kind: 'tap' }, point: { x: 300.5, y: 40 } },
+        { action: { kind: 'tap' }, point: { x: 300.5, y: 59 } },
+      ]);
+    });
+
+    it('reads the viewport once for a percentage, and not for pixels', async () => {
+      const { screen, at, observe } = pointScreen();
+      await screen.getByLabel('Agree').tap({ position: { x: 5, y: 5 } });
+      expect(observe).not.toHaveBeenCalled();
+      await screen.getByLabel('Agree').tap({ position: { x: '50%', y: 5 } });
+      expect(observe).toHaveBeenCalledTimes(1);
+      expect(at.map(({ point }) => point)).toEqual([{ x: 15, y: 25 }, { x: 60, y: 25 }]);
+    });
+
+    it('reads the viewport again when a retryable failure cuts its read short, as it reads a stale node again', async () => {
+      const { screen, at, observe } = pointScreen({
+        observeFailures: [new EngineError('NODE_STALE', 'observation page was replaced', { retryable: true })],
+      });
+      await screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } });
+      expect(observe).toHaveBeenCalledTimes(2);
+      expect(at).toEqual([{ action: { kind: 'tap' }, point: { x: 60, y: 40 } }]);
+    });
+
+    it('fails with the public error when the viewport read fails for good, and taps nothing', async () => {
+      const { screen, at } = pointScreen({
+        observeFailures: [new EngineError('ENGINE_FAILURE', 'the device reported no screen geometry', { retryable: false })],
+      });
+      await expect(screen.getByLabel('Agree').tap({ position: { x: '50%', y: '50%' } })).rejects.toMatchObject({
+        code: 'ENGINE_FAILURE',
+        message: expect.stringContaining('the device reported no screen geometry'),
+      });
+      expect(at).toEqual([]);
     });
 
     it('waits for a box outside the viewport to come into it before taking a percentage of it, and fails with LOCATOR_NOT_FOUND', async () => {
