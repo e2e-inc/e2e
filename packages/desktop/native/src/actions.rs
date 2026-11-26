@@ -404,8 +404,13 @@ const MAX_STEPS: usize = 500;
 
 /// Whether two stepper values are the same number: a step of 0.1 sums to 0.30000000000000004, not 0.3.
 fn same(a: f64, b: f64) -> bool {
-    // A few hundred float epsilons of the larger value: the error of summing steps, never a whole step of a stepper
-    // whose values run into the billions (a Unix time in seconds steps by 1 at 1.8e9).
+    // Whole numbers a float holds exactly compare exactly: a step of 1 apart is a step, however large the value (a Unix
+    // time in microseconds). Others compare up to a few hundred float epsilons of the larger, the error of summing
+    // fractional steps such as 0.1.
+    const EXACT: f64 = 9_007_199_254_740_992.0;
+    if a.fract() == 0.0 && b.fract() == 0.0 && a.abs() <= EXACT && b.abs() <= EXACT {
+        return a == b;
+    }
     (a - b).abs() <= f64::EPSILON * 256.0 * a.abs().max(b.abs()).max(1.0)
 }
 
@@ -1115,6 +1120,8 @@ mod tests {
     #[test]
     fn tells_a_large_value_from_the_next_step_after_it() {
         assert!(!super::same(1_800_000_000.0, 1_800_000_001.0));
+        // Whole numbers past the reach of a relative tolerance (a Unix time in microseconds) still differ by one.
+        assert!(!super::same(1_800_000_000_000_000.0, 1_800_000_000_000_001.0));
         assert!(super::same(0.1 + 0.1 + 0.1, 0.3));
         let value = Cell::new(1_800_000_000.0);
         let reached = step_to(
