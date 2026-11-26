@@ -14,21 +14,23 @@
  * (`addressKey`): from one order's page to another's and back is a visit to
  * another record, and from one order to another is no return at all. Each
  * action carries the location it ran at (`RecordedAction.at`) on entries
- * recorded since that was added, spelled as its route with every minted
- * value as `:id` (`routeLocation`), so a token a URL carried is never
- * stored; the detours are found on the run's own locations before that and
- * kept as spans (`ActionTrace.detours`). For older
+ * recorded since that was added, spelled with every minted segment and
+ * every query value as `:id` (`routeLocation`), so a token a URL carried is
+ * not stored; the detours are found on the run's own locations before that
+ * and kept as spans (`ActionTrace.detours`). For older
  * entries, which have none, the actions alone are read for the narrowest
  * shape of the same thing: a tap or a navigate, nothing but looking around
  * after it, then `back`.
  *
  * A detour is a hint, never a verdict: an instruction that asks to look at
- * a page and return is one by design. The report and `e2e cache check` name
- * it; neither replay nor recording treats it differently.
+ * a page and return is one by design, and so is a tap that changes data and
+ * returns (a delete that goes back to the list). The report and
+ * `e2e cache check` name it; neither replay, recording, nor `check`'s exit
+ * code treats it differently.
  */
 
 import { bound } from '../internal/text.ts';
-import { addressKey, routeKey, routeLocation, spelledAsRoute } from './route.ts';
+import { addressKey, routeLocation, spelledAsRoute } from './route.ts';
 import type { ActionTrace, RecordedAction } from './trace.ts';
 
 /** What the detour check reads of a trace. */
@@ -154,10 +156,10 @@ function places(trace: DetourInput): (string | undefined)[] {
   return [...trace.actions.map((action, index) => action.at ?? (index === 0 ? trace.startPath : undefined)), end];
 }
 
-/** How a place compares: its address, its route, and whether it is spelled as a route already. */
+/** How a place compares: its address, its spelling as an entry keeps it, and whether it is spelled so already. */
 interface PlaceKeys {
   readonly address: string;
-  readonly route: string;
+  readonly spelling: string;
   readonly spelled: boolean;
 }
 
@@ -167,9 +169,10 @@ interface PlaceKeys {
  * The last, so a flow that tried two wrong pages from one menu reads as one
  * detour; a return, so actions that stay home after it are not part of it.
  *
- * A place spelled as a route (the location a recording kept, copied onto an
- * action a replay ran before a hand-off) has no record ids left to compare,
- * so it is the same place as any other on its route.
+ * A place spelled as an entry keeps it (the location a recording kept,
+ * copied onto an action a replay ran before a hand-off) has no record ids
+ * or query values left to compare, so it is the same place as any other
+ * with that spelling.
  */
 function byLocations(trace: DetourInput): TraceDetour[] {
   const where = places(trace);
@@ -178,7 +181,7 @@ function byLocations(trace: DetourInput): TraceDetour[] {
   const keysOf = (place: string): PlaceKeys => {
     let read = keys.get(place);
     if (read === undefined) {
-      read = { address: addressKey(place), route: routeKey(place), spelled: spelledAsRoute(place) };
+      read = { address: addressKey(place), spelling: routeLocation(place), spelled: spelledAsRoute(place) };
       keys.set(place, read);
     }
     return read;
@@ -186,7 +189,7 @@ function byLocations(trace: DetourInput): TraceDetour[] {
   const samePlace = (first: string, second: string): boolean => {
     const a = keysOf(first);
     const b = keysOf(second);
-    return a.address === b.address || ((a.spelled || b.spelled) && a.route === b.route);
+    return a.address === b.address || ((a.spelled || b.spelled) && a.spelling === b.spelling);
   };
   const { actions } = trace;
   const detours: TraceDetour[] = [];

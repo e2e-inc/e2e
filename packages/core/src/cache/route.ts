@@ -191,14 +191,14 @@ export function sameRoute(recorded: string, live: string): boolean {
 }
 
 /** A location's route as one string: two locations are one screen exactly when their keys are equal (`sameRoute`). */
-export function routeKey(location: string): string {
+function routeKey(location: string): string {
   return routeIdentity(routeOf(location));
 }
 
 /**
- * Whether a location is spelled as a route (`routeLocation`): a segment or a
- * query key or value reads `:id`, so its own record ids are gone and only
- * its route can be compared.
+ * Whether a location is spelled as a recording keeps it (`routeLocation`):
+ * a segment or a query key or value reads `:id`, so its own record ids and
+ * query values are gone and only that spelling can be compared.
  */
 export function spelledAsRoute(location: string): boolean {
   const route = routeOf(location, false);
@@ -216,19 +216,36 @@ export function addressKey(location: string): string {
 }
 
 /**
- * A location as a recording keeps it: spelled as its route, each segment
- * and query value the app minted per record as `:id`, so a token, a code,
- * or a record id a URL carried mid-flow (a magic link, an OAuth callback)
- * is never written to an entry or a report. A device screen title, or any
+ * A location as a recording keeps it: each path segment the app minted per
+ * record as `:id`, and every non-empty query value as `:id`, its key kept.
+ * A query value is often a token or a code (a magic link, an OAuth
+ * callback), and one of letters only reads as a word to the route rule, so
+ * no query value is written to an entry or a report. A path segment of
+ * letters only reads as a route word and stays. A `<secret:name>` marker
+ * the ledger put in its place stays readable. A device screen title, or any
  * other location that is not a web address, is kept as it is.
+ *
+ * The stored location names the screen for a reader; detours are found on
+ * the live addresses before an entry is written (`cache/detours.ts`).
  */
 export function routeLocation(location: string): string {
   const route = routeOf(location);
   if (route.kind === 'opaque') return route.location;
-  const spell = (text: string) => (text === PARAM ? text : encodeURIComponent(text));
-  const path = `/${route.segments.map(spell).join('/')}`;
-  const query = route.query.map(([key, value]) => `${spell(key)}=${spell(value)}`).join('&');
+  const path = `/${route.segments.map(spellPart).join('/')}`;
+  const query = route.query.map(([key, value]) => `${spellPart(key)}=${value === '' ? '' : PARAM}`).join('&');
   return `${route.origin ?? ''}${path}${query === '' ? '' : `?${query}`}`;
+}
+
+/** A secret's marker as the ledger writes it (`internal/redact.ts`). */
+const SECRET_MARKER = /(<secret:[A-Za-z0-9_.-]*>)/;
+
+/** One segment or query key as a URL spells it, `:id` and secret markers kept as they read. */
+function spellPart(text: string): string {
+  if (text === PARAM) return text;
+  return text
+    .split(SECRET_MARKER)
+    .map((part, index) => (index % 2 === 1 ? part : encodeURIComponent(part)))
+    .join('');
 }
 
 /** A route's parts as one comparable string, a slash inside a segment kept inside it. */

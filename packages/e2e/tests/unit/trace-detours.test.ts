@@ -117,11 +117,14 @@ describe('findDetours by recorded locations', () => {
     expect(detours).toEqual([{ from: 1, to: 3, at: '/home', via: '/reports', evidence: 'locations' }]);
   });
 
-  it('names the places by route, a record id or a token as :id', () => {
+  it('names the places as an entry keeps them, a record id and every query value as :id', () => {
     const detours = findDetours(
       flow([tap('Order', '/orders/123'), back('/login/callback?code=482913&state=eyJhbGciOi.x1.y2'), tap('Ship', '/orders/123')], { endPath: '/orders/123' }),
     );
     expect(detours).toEqual([{ from: 0, to: 2, at: '/orders/:id', via: '/login/callback?code=:id&state=:id', evidence: 'locations' }]);
+    // A code of letters only reads as a word to the route rule, and is still not named.
+    const lettersOnly = findDetours(flow([tap('Order', '/orders/123?tab=notes'), back('/callback?code=SplxlOBeZQQYbYSWxSbIAqrTuvXyz'), tap('Ship', '/orders/123?tab=notes')]));
+    expect(lettersOnly).toEqual([{ from: 0, to: 2, at: '/orders/:id?tab=:id', via: '/callback?code=:id', evidence: 'locations' }]);
   });
 
   it('compares a location kept as a route by its route, since its record ids are gone', () => {
@@ -130,6 +133,9 @@ describe('findDetours by recorded locations', () => {
     expect(findDetours(stayed)).toEqual([]);
     const trip = flow([tap('Invoices', '/orders/:id'), back('/invoices'), tap('Ship', '/orders/789')], { endPath: '/orders/789' });
     expect(findDetours(trip)).toEqual([{ from: 0, to: 2, at: '/orders/:id', via: '/invoices', evidence: 'locations' }]);
+    // A kept query value reads :id too, so the live one compares by that spelling.
+    const query = flow([tap('Invoices', '/orders/:id?tab=:id'), back('/invoices'), tap('Ship', '/orders/789?tab=notes')], { endPath: '/orders/789?tab=notes' });
+    expect(findDetours(query)).toEqual([{ from: 0, to: 2, at: '/orders/:id?tab=:id', via: '/invoices', evidence: 'locations' }]);
   });
 
   it('is no return to another record on the same route', () => {

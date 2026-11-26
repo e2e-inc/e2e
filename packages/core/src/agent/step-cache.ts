@@ -663,14 +663,15 @@ export class StepTraceSession {
       if (this.info !== undefined) this.info = { ...this.info, notRecorded: 'param-collision' };
       return 'skipped';
     }
-    // Each action's location is kept as its route, a minted value as `:id`:
-    // a token or code a URL carried mid-flow never reaches the entry.
+    // Each action's location is kept with a minted segment and every query
+    // value as `:id`: a token or code a URL's query carried mid-flow never
+    // reaches the entry.
     const templated = templateTrace(withRouteLocations(trace), this.options.templates);
     if (templated === undefined) return 'skipped';
     // The detours are found here, on the addresses this run saw, and kept in
-    // the entry: a stored location reads `:id` for each record id and a
-    // placeholder for each `unique()` value, so it no longer tells two
-    // records apart the way this run's did.
+    // the entry: a stored location reads `:id` for each record id and query
+    // value and a placeholder for each `unique()` value, so it no longer
+    // tells two records apart the way this run's did.
     const detours = findDetours(trace);
     const located = trace.actions.some((action) => action.at !== undefined);
     const staged = located ? { ...templated, detours: detours.map(({ from, to }) => ({ from, to })) } : templated;
@@ -692,8 +693,8 @@ export class StepTraceSession {
    * the next recorded action stood, so a trip the replay completed is not
    * merged with one it never reached. A span the recording run found that
    * ends inside the prefix is kept as found: a stored location reads `:id`
-   * for a record id, so comparing again would lose a trip to another
-   * record. Only a span the hand-off cut through is read again, on the
+   * for a record id and a query value, so comparing again would lose a trip
+   * to another record. Only a span the hand-off cut through is read again, on the
    * stored locations, and a trip found there counts only inside it.
    * Joined with commas: the report line separates its own parts with
    * semicolons (`cacheLine`).
@@ -877,7 +878,7 @@ export function recordedVerdictOf(summary: string): string {
   return at === -1 ? summary : summary.slice(at + RECORDED_VERDICT_SEPARATOR.length);
 }
 
-/** The trace with each action's location spelled as its route (`routeLocation`). */
+/** The trace with each action's location spelled as an entry keeps it (`routeLocation`). */
 function withRouteLocations(trace: ActionTrace): ActionTrace {
   return {
     ...trace,

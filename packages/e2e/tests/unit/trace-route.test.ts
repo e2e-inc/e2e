@@ -88,21 +88,38 @@ describe('route identity', () => {
 });
 
 describe('routeLocation', () => {
-  it('spells a location as its route, every minted segment and query value as :id', () => {
+  it('spells a location with every minted segment and every query value as :id', () => {
     expect(routeLocation('/orders/123/edit')).toBe('/orders/:id/edit');
     expect(routeLocation('/auth/magic/Zx8aQ2pLmN4tR7')).toBe('/auth/magic/:id');
     expect(routeLocation('/callback?state=eyJhbGciOi.x1.y2&code=482913')).toBe('/callback?code=:id&state=:id');
-    expect(routeLocation('/settings?tab=notes#top')).toBe('/settings?tab=notes');
-    expect(routeLocation('/#/companies/1?view=list')).toBe('/companies/:id?view=list');
-    expect(routeLocation('https://idp.test/authorize?client_id=app&nonce=n0nce4c0ffee99')).toBe('https://idp.test/authorize?client_id=app&nonce=:id');
+    expect(routeLocation('/settings?tab=notes#top')).toBe('/settings?tab=:id');
+    expect(routeLocation('/search?q=&page=2')).toBe('/search?page=:id&q=');
+    expect(routeLocation('/#/companies/1?view=list')).toBe('/companies/:id?view=:id');
+    expect(routeLocation('https://idp.test/authorize?client_id=app&nonce=n0nce4c0ffee99')).toBe('https://idp.test/authorize?client_id=:id&nonce=:id');
     expect(routeLocation('/files/a%2Fb/caf%C3%A9')).toBe('/files/a%2Fb/caf%C3%A9');
   });
 
-  it('tells a location spelled as a route from one the app showed', () => {
+  it('stores no query code, even one the route rule reads as a word', () => {
+    // RFC 6749's example code: letters only but for one digit, so not minted.
+    expect(sameRoute('/callback?code=SplxlOBeZQQYbYS6WxSbIA', '/callback?code=other')).toBe(false);
+    expect(routeLocation('/callback?code=SplxlOBeZQQYbYS6WxSbIA')).toBe('/callback?code=:id');
+    expect(routeLocation('/orders/123/?code=SplxlOBeZQQYbYSWxSbIAqrTuvXyz')).toBe('/orders/:id?code=:id');
+  });
+
+  it('keeps a secret marker readable', () => {
+    expect(routeLocation('/invite/<secret:token>/accept')).toBe('/invite/<secret:token>/accept');
+    expect(routeLocation('/invite/x<secret:token>y')).toBe('/invite/x<secret:token>y');
+    expect(routeLocation('/invite?code=<secret:token>')).toBe('/invite?code=:id');
+    expect(routeLocation('https://idp.test/invite/<secret:token>')).toBe('https://idp.test/invite/<secret:token>');
+  });
+
+  it('tells a location spelled as an entry keeps it from one the app showed', () => {
     expect(spelledAsRoute(routeLocation('/orders/123/edit'))).toBe(true);
     expect(spelledAsRoute(routeLocation('/callback?code=482913'))).toBe(true);
+    expect(spelledAsRoute(routeLocation('/settings?tab=notes'))).toBe(true);
     expect(spelledAsRoute('/orders/123/edit')).toBe(false);
-    expect(spelledAsRoute(routeLocation('/settings?tab=notes'))).toBe(false);
+    expect(spelledAsRoute('/settings?tab=notes')).toBe(false);
+    expect(spelledAsRoute(routeLocation('/settings'))).toBe(false);
     expect(spelledAsRoute('com.example / :id')).toBe(false);
   });
 
@@ -111,11 +128,11 @@ describe('routeLocation', () => {
     expect(routeLocation('about:blank')).toBe('about:blank');
   });
 
-  it('names the same route as the location it spells', () => {
-    for (const location of ['/orders/123/edit', '/callback?code=482913&tab=a', '/#/companies/1', 'https://other.test/x/9f8e7d6c5b4a', '/', '/files/a%2Fb']) {
-      expect(sameRoute(routeLocation(location), location)).toBe(true);
+  it('spells a spelling as itself, and two addresses of one route alike', () => {
+    for (const location of ['/orders/123/edit?tab=notes', '/callback?code=482913&state=eyJhbGciOi.x1.y2', '/', 'https://idp.test/a b/c', '/invite/<secret:token>']) {
       expect(routeLocation(routeLocation(location))).toBe(routeLocation(location));
     }
+    expect(routeLocation('/orders/123?tab=notes')).toBe(routeLocation('/orders/456?tab=history'));
   });
 });
 
