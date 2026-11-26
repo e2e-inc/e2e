@@ -283,6 +283,8 @@ pub struct PointerTarget {
     pub sheet: bool,
     /// That sheet's window server id, when it has one: another sheet in its place does not take the click.
     pub sheet_id: Option<String>,
+    /// The point is on a node with no ref, which takes no click of its own: no control may be under it when it goes.
+    pub content: Option<bool>,
 }
 
 /// Physical pointer input at a point on screen: `tap`, `doubleTap`, `secondaryTap`, or `hover`. `inputId` names it, so
@@ -300,7 +302,7 @@ pub async fn pointer(x: f64, y: f64, kind: String, input_id: Option<u32>, timeou
                     (true, Some(id)) => Sheet::Known(window_id(&id)?),
                     (true, None) => Sheet::Unknown,
                 };
-                Some((target.pid, window_id(&target.window_id)?, sheet))
+                Some(actions::PointTarget { pid: target.pid, window: window_id(&target.window_id)?, sheet, content: target.content.unwrap_or(false) })
             }
             None => None,
         };

@@ -1178,9 +1178,20 @@ fn takes_point(frontmost: bool, holds: bool, now: Sheet, then: Sheet) -> Outcome
     Err(Failure::refused(codes::ACTION_FAILED, message))
 }
 
+/// The window a point was taken in, which must still take a click at it.
+#[derive(Clone, Copy, Debug)]
+pub struct PointTarget {
+    pub pid: i32,
+    pub window: u32,
+    pub sheet: Sheet,
+    /// The point is on a node that takes no click of its own (one the snapshot gave no ref): no control may be under it.
+    pub content: bool,
+}
+
 /// `takes_point` for a window of `pid`, read now, and the point on top of that window, not of another app's or
 /// window's over it. A read the app did not answer in time is a stall.
-fn window_takes_point(pid: i32, id: u32, sheet: Sheet, x: f64, y: f64) -> Outcome<()> {
+fn window_takes_point(target: PointTarget, x: f64, y: f64) -> Outcome<()> {
+    let PointTarget { pid, window: id, sheet, content } = target;
     let window = windows::find(pid, id)?;
     let app = Element::application(pid);
     let frontmost = frontmost(pid)?;
@@ -1195,18 +1206,29 @@ fn window_takes_point(pid: i32, id: u32, sheet: Sheet, x: f64, y: f64) -> Outcom
         Some(on) => on.window_id().map_or(Sheet::Unknown, Sheet::Known),
     };
     takes_point(frontmost, holds, now, sheet)?;
-    // Any control of the window may be at the point: a tap at a point names no element.
-    match aim_at(&window, x, y) {
-        Ok(Aim::Target | Aim::Control) => Ok(()),
+    point_lands(aim_at(&window, x, y), content)
+}
+
+/// Whether a click at a point may go where the hit test (relative to the window) says it lands. A tap at a point names
+/// no element, so any control of the window may be there, unless the point was taken on `content`, a node that takes
+/// no click of its own: a control there now (one coming forward revealed) would take the click.
+fn point_lands(aim: Result<Aim, AXError>, content: bool) -> Outcome<()> {
+    match aim {
+        Ok(Aim::Target) => Ok(()),
+        Ok(Aim::Control) if !content => Ok(()),
+        Ok(Aim::Control) => {
+            Err(Failure::refused(codes::ACTION_FAILED, "a control is under the pointer now, over the node the point was taken on, so no click was sent"))
+        }
         Ok(Aim::Other) => Err(Failure::refused(codes::ACTION_FAILED, "another window or app is on top at the point, so no click was sent")),
         Err(error) => Err(unread(error, "find the element under the pointer")),
     }
 }
 
 /// Physical pointer input at a point on screen, sent only while `input_id` is not cancelled and `deadline` has not
-/// passed. With `target` (the app, the window the point was taken in, and whether a sheet on it held the focus then),
-/// the first click goes only while that window still takes it, checked after the move.
-pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: Instant, target: Option<(i32, u32, Sheet)>) -> Outcome<()> {
+/// passed. With `target` (the app, the window the point was taken in, the sheet on it then, and whether the point is on
+/// a node that takes no click of its own), the first click goes only while that window still takes it, checked after
+/// the move.
+pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: Instant, target: Option<PointTarget>) -> Outcome<()> {
     let action = match kind {
         "hover" => Pointer::Move,
         "tap" => Pointer::Click { right: false, count: 1 },
@@ -1220,8 +1242,8 @@ pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: I
             match target {
                 // A sheet or window that opened during the move would take the click: the first one checks, and the
                 // caller once more after that check, which waits on the app.
-                Some((pid, window, sheet)) if click == 1 => {
-                    window_takes_point(pid, window, sheet, x, y)?;
+                Some(target) if click == 1 => {
+                    window_takes_point(target, x, y)?;
                     go("pointer")
                 }
                 _ => Ok(()),
@@ -1425,6 +1447,17 @@ mod tests {
         let missed = super::guarded(Some(1_000_035), later(), || super::still_aimed(|| Ok(Aim::Other))).expect_err("the point hits another element");
         assert_eq!(missed.code, crate::failure::codes::ACTION_FAILED);
         assert!(super::guarded(Some(1_000_036), later(), || super::still_aimed(|| Ok(Aim::Target))).is_ok());
+    }
+
+    #[test]
+    fn takes_a_control_at_a_point_unless_the_point_is_on_a_node_with_no_click_of_its_own() {
+        use super::{Aim, point_lands};
+        assert!(point_lands(Ok(Aim::Control), false).is_ok());
+        assert!(point_lands(Ok(Aim::Target), true).is_ok());
+        let revealed = point_lands(Ok(Aim::Control), true).expect_err("a control came over the node");
+        assert_eq!((revealed.code, revealed.delivery), (crate::failure::codes::ACTION_FAILED, crate::failure::Delivery::NotDelivered));
+        assert!(point_lands(Ok(Aim::Other), false).is_err());
+        assert_eq!(point_lands(Err(crate::ax::AX_CANNOT_COMPLETE), false).expect_err("a stall").code, crate::failure::codes::APP_UNRESPONSIVE);
     }
 
     #[test]
