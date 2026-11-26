@@ -69,6 +69,12 @@ describe('regionSignature', () => {
     expect(regionSignature(project([row('A', 90), row('Outside', 600)]), region)).not.toBe(before);
   });
 
+  it('tells apart pages of a gallery that differ only in their test id', () => {
+    const region = { x: 0, y: 0, width: 390, height: 844 };
+    const page = (identifier: string): RawNode => ({ ...row('Photo', 100, 'image'), identifier });
+    expect(regionSignature(project([page('photo-2')]), region)).not.toBe(regionSignature(project([page('photo-1')]), region));
+  });
+
   it('leaves out a spinner, which turns on its own, and rounds boxes to whole points', () => {
     const region = { x: 0, y: 0, width: 390, height: 844 };
     const base = regionSignature(project([row('A', 120)]), region);
@@ -189,5 +195,37 @@ describe('scrollTo on the device surface', () => {
     await expect(h.engine.perform!(root.ref, { kind: 'scrollTo', edge: 'bottom' }, operation(200))).rejects.toMatchObject({
       code: expect.stringMatching(/^(OPERATION_TIMEOUT|ACTION_MAY_HAVE_COMMITTED)$/),
     });
+  });
+
+  /** Swipes sent since call `from`, counting each drag of a multi-drag swipe. */
+  function dragsSince(h: Harness, from: number): number {
+    return h.fake.calls.slice(from).filter((call) => call.method === 'interactions.swipe').reduce((sum, call) => sum + (call.args as { count: number }).count, 0);
+  }
+
+  it('counts every drag it sent in its timeout message, not the reads between them', async () => {
+    const h = await opened();
+    const { root } = await h.engine.observe!(operation());
+    let loaded = 0;
+    h.fake.respond('capture.snapshot', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      const base = scrolled(0);
+      return { ...base, nodes: base.nodes.map((node) => (node.label === 'About' ? { ...node, label: `About ${(loaded += 1)}` } : node)) };
+    });
+    const before = h.fake.calls.length;
+    const failure = await h.engine.perform!(root.ref, { kind: 'scrollTo', edge: 'bottom' }, operation(600)).catch((cause: unknown) => cause);
+    const drags = dragsSince(h, before);
+    expect(drags).toBeGreaterThan(3);
+    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT', message: `the content was still moving after ${drags} drags when the budget ran out` });
+  });
+
+  it('says the screen could not be read whole when every capture is truncated', async () => {
+    const h = await opened();
+    const { root } = await h.engine.observe!(operation());
+    h.fake.respond('capture.snapshot', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      return { ...scrolled(0), truncated: true };
+    });
+    const failure = await h.engine.perform!(root.ref, { kind: 'scrollTo', edge: 'bottom' }, operation(600)).catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT', message: expect.stringContaining('read with nodes left out (agent-device truncated it)') });
   });
 });

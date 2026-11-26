@@ -25,13 +25,17 @@ const NODES = [TITLE, FEED];
 function feedScreen(options: {
   actions?: readonly LocatorActionKind[];
   perform?: (action: LocatorAction, operation: OperationContext) => Promise<void>;
+  observeMs?: number;
   timeoutMs?: number;
 } = {}) {
   const received: { ref: string; action: LocatorAction }[] = [];
   const locate = vi.fn(async (expression: LocatorExpression) => resolveExpression(expression, NODES));
   const { screen, steps } = screenOver({
     locate,
-    observe: () => snapshot(NODES),
+    observe: async () => {
+      if (options.observeMs !== undefined) await new Promise((resolve) => setTimeout(resolve, options.observeMs));
+      return snapshot(NODES);
+    },
     perform: async (ref: NodeRef, action, operation) => {
       received.push({ ref: ref.id, action });
       await options.perform?.(action, operation);
@@ -48,6 +52,13 @@ describe('scrollTo', () => {
     await screen.scrollTo('bottom');
     expect(received).toEqual([{ ref: 'root', action: { kind: 'scrollTo', edge: 'bottom' } }]);
     expect(steps.all()).toEqual([expect.objectContaining({ api: 'screen.scrollTo', label: 'bottom', status: 'passed' })]);
+  });
+
+  it('gives the scroll only what the first observation left of the timeout', async () => {
+    let budget = 0;
+    const { screen } = feedScreen({ observeMs: 300, perform: async (_action, operation) => { budget = operation.timeoutMs; } });
+    await screen.scrollTo('bottom', { timeout: 1_000 });
+    expect(budget).toBeLessThanOrEqual(720);
   });
 
   it('scrolls a located node, its step naming the node and the edge', async () => {

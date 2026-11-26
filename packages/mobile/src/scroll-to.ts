@@ -37,9 +37,10 @@ export function edgeDrag(region: Rect, edge: ScrollEdge): { from: Point; to: Poi
 
 /**
  * What a region of the screen shows, as one comparable string: every node
- * whose box meets the region, by role, name, text, value, and box rounded to
- * whole points. Two equal signatures around a drag mean the drag moved
- * nothing, so the container is at its edge.
+ * whose box meets the region, by role, name, text, value, test id (pages of a
+ * gallery can differ in nothing else), and box rounded to whole points. Two
+ * equal signatures around a drag mean the drag moved nothing, so the
+ * container is at its edge.
  */
 export function regionSignature(index: readonly ProjectedNode[], region: Rect): string {
   const lines: string[] = [];
@@ -49,7 +50,7 @@ export function regionSignature(index: readonly ProjectedNode[], region: Rect): 
     if (rect.x >= region.x + region.width || rect.x + rect.width <= region.x) continue;
     if (rect.y >= region.y + region.height || rect.y + rect.height <= region.y) continue;
     const box = [rect.x, rect.y, rect.width, rect.height].map(Math.round).join(',');
-    lines.push([node.role ?? '', node.name ?? '', node.text ?? '', node.value ?? '', box].join('\u0000'));
+    lines.push([node.role ?? '', node.name ?? '', node.text ?? '', node.value ?? '', node.testId ?? '', box].join('\u0000'));
   }
   return lines.join('\n');
 }

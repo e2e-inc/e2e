@@ -575,7 +575,8 @@ inside the page, call it on the list: [`scrollTo`](#scrollto).
 
 - On the web, `screen` scrolls the page. When the page itself does not
   scroll, as in an app shell, it scrolls the scroll container under the
-  viewport's center. It sets the offset with the page's own scroll API, so
+  viewport's center; an iframe there is not entered, so call it on a locator
+  inside the frame. It sets the offset with the page's own scroll API, so
   `scroll-behavior: smooth` is skipped and no wheel event fires.
 - On a device, it drags toward the edge from the middle of the container
   (the screen on `screen`), up to three drags at a time, until a drag moves
@@ -583,8 +584,8 @@ inside the page, call it on the list: [`scrollTo`](#scrollto).
   about 22 s on an Android emulator and 50 s on an iOS simulator, so give a
   very long list a longer `timeout`.
 - Content that grows when the end is reached is followed: the web jumps
-  again while the end moves, a device drags again while the list changes.
-  Neither waits for a slow load. To reach a row a feed loads, use
+  again until a jump moves nothing, a device drags again while the list
+  changes. Neither waits for a slow load. To reach a row a feed loads, use
   [`scrollUntilVisible`](#screen-scrolluntilvisible).
 - On a device, a drag that lands on something that does not scroll moves
   nothing, so it reads as the edge.
@@ -600,7 +601,7 @@ inside the page, call it on the list: [`scrollTo`](#scrollto).
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | An edge it does not know, an option other than `timeout`, or a frame's screen. |
-| `ACTION_FAILED` | The edge was not reached before the timeout: `scrollTo('bottom') did not reach the edge within 30000ms (the content was still moving after 9 drags when the budget ran out)`. The parentheses hold the engine's reason. |
+| `ACTION_FAILED` | The edge was not reached before the timeout: `scrollTo('bottom') did not reach the edge within 30000ms (the content was still moving after 24 drags when the budget ran out)`. The parentheses hold the engine's reason. |
 | `UNSUPPORTED_CAPABILITY` | The engine does not list `scrollTo` in its actions, as the desktop engine does not. |
 
 ### Screen reads

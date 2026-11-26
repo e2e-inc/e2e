@@ -1,28 +1,41 @@
 /** `scrollTo`: scrolls a container to one of its edges with the page's own scroll API. */
 
-import type { Page } from 'playwright-core';
+import type { ElementHandle, JSHandle, Page } from 'playwright-core';
 import { Deadline, EngineError, type ScrollEdge } from '@e2e-dev/core/engine';
 import { CLOSED_SHADOW_ROOTS_KEY } from './closed-shadow.ts';
 import type { ConnectionBudget } from './operation-budget.ts';
-import type { ActionTarget } from './support.ts';
+import { isPwTimeout, type ActionTarget } from './support.ts';
 
 /**
- * One jump: `none` when nothing scrolls along the axis, else whether the
- * container still sat at the end the jump reached after the next rendered
- * frame, with its scrollable extent unchanged.
+ * One jump: `settled` when it moved nothing and the container still held that
+ * end, with the same extent, after the next rendered frame; `moved` when it
+ * moved or the end did; `detached` when the container left the document.
  */
-type JumpResult = { readonly container: 'none' } | { readonly container: 'found'; readonly settled: boolean };
+type JumpResult = 'settled' | 'moved' | 'detached';
+
+interface FindArgs {
+  readonly edge: ScrollEdge;
+  readonly fromCenter: boolean;
+  readonly closedRootsKey: string;
+}
+
+/**
+ * Below this much budget no jump starts: a jump is a round trip and a
+ * rendered frame, and one cut short would only report the budget late.
+ */
+const MIN_JUMP_MS = 50;
 
 /**
  * Scrolls the container of `target` (the node, or its nearest ancestor that
  * scrolls along the edge's axis), or with no target the page, else (an app
  * shell whose page does not scroll) the container under the viewport's
- * center, to `edge`. Each jump sets the offset past the end, which
- * the browser clamps, and waits for a rendered frame. Content that grows at the
- * end (an infinite list) moves the end, so it jumps again until the container
- * still holds the end a jump reached one frame later. The loop runs
- * here, one evaluate per jump, so a cancelled step leaves nothing running in
- * the page.
+ * center, to `edge`. The container is found once and held by a handle, so a
+ * located row that unmounts while the list grows does not lose it. Each jump
+ * sets the offset past the end, which the browser clamps, and waits for a
+ * rendered frame. The edge is reached on the first jump that moves nothing,
+ * so content that loads at the end after that frame (an IntersectionObserver
+ * on a sentinel row) gets another jump. The loop runs here, one evaluate per
+ * jump, so a cancelled step leaves nothing running in the page.
  */
 export async function scrollToEdge(page: Page, target: ActionTarget | undefined, edge: ScrollEdge, operation: ConnectionBudget): Promise<void> {
   const deadline = new Deadline(operation.timeoutMs);
@@ -30,46 +43,70 @@ export async function scrollToEdge(page: Page, target: ActionTarget | undefined,
   // yet (still arriving, or display: none) is waited on, not taken as at its edge.
   if (target?.kind === 'locator') await target.locator.waitFor({ state: 'visible', timeout: operation.timeoutMs });
   else if (target?.kind === 'element') await target.element.waitForElementState('visible', { timeout: operation.timeoutMs });
-  const args = { edge, fromCenter: target === undefined, closedRootsKey: CLOSED_SHADOW_ROOTS_KEY } as const;
-  for (let jumps = 1; ; jumps += 1) {
-    operation.signal.throwIfAborted();
-    const remaining = Math.max(1, deadline.remaining());
-    const result = target === undefined
-      ? await page.locator(':root').evaluate(jumpToEdge, args, { timeout: remaining })
-      : target.kind === 'locator'
-        ? await target.locator.evaluate(jumpToEdge, args, { timeout: remaining })
-        : await target.element.evaluate(jumpToEdge, args);
-    if (result.container === 'none' || result.settled) return;
-    if (deadline.expired()) {
-      throw new EngineError('OPERATION_TIMEOUT', `more content kept loading at the ${edge} edge after ${jumps} jumps, until the budget ran out`, {
-        retryable: false,
-      });
+  const args: FindArgs = { edge, fromCenter: target === undefined, closedRootsKey: CLOSED_SHADOW_ROOTS_KEY };
+  const outOfBudget = (jumps: number): EngineError =>
+    new EngineError('OPERATION_TIMEOUT', `more content kept loading at the ${edge} edge after ${jumps} jumps, until the budget ran out`, { retryable: false });
+  let container: JSHandle<Element | null> | undefined;
+  try {
+    for (let jumps = 0; ; ) {
+      operation.signal.throwIfAborted();
+      if (container === undefined) {
+        try {
+          container = await findContainer(page, target, args, Math.max(1, deadline.remaining()));
+        } catch (cause) {
+          if (isPwTimeout(cause)) throw outOfBudget(jumps);
+          throw cause;
+        }
+      }
+      const element = container.asElement();
+      if (element === null) return;
+      const result = await element.evaluate(jumpOnce, edge);
+      if (result === 'settled') return;
+      if (result === 'detached') {
+        await container.dispose();
+        container = undefined;
+      } else {
+        jumps += 1;
+      }
+      if (deadline.remaining() < MIN_JUMP_MS) throw outOfBudget(jumps);
     }
+  } finally {
+    await container?.dispose().catch(() => undefined);
   }
 }
 
+/** The container a scroll toward `args.edge` moves, as a handle that holds `null` when nothing scrolls. */
+function findContainer(page: Page, target: ActionTarget | undefined, args: FindArgs, timeout: number): Promise<JSHandle<Element | null>> {
+  if (target === undefined) return page.locator(':root').evaluateHandle(scrollContainer, args, { timeout });
+  if (target.kind === 'locator') return target.locator.evaluateHandle(scrollContainer, args, { timeout });
+  const element: ElementHandle<Element> = target.element;
+  return element.evaluateHandle(scrollContainer, args);
+}
+
 /**
- * Page-side: one jump toward `edge`, then the position after the next
- * rendered frame. A hidden document renders no frames, so it reads at once.
+ * Page-side: the element that scrolls along the edge's axis from `start`
+ * (itself, or its nearest ancestor across slots and open and closed shadow
+ * roots), or for the screen the page, else what is under the viewport's
+ * center; `null` when nothing does.
  */
-function jumpToEdge(
-  start: Element,
-  args: { readonly edge: ScrollEdge; readonly fromCenter: boolean; readonly closedRootsKey: string },
-): Promise<JumpResult> {
-  const { edge } = args;
-  const vertical = edge === 'top' || edge === 'bottom';
+function scrollContainer(start: Element, args: FindArgs): Element | null {
+  const vertical = args.edge === 'top' || args.edge === 'bottom';
   const doc = start.ownerDocument;
   const view = doc.defaultView ?? window;
   const scrolling = doc.scrollingElement ?? doc.documentElement;
   const closedRoots = (globalThis as Record<symbol, unknown>)[Symbol.for(args.closedRootsKey)] as WeakMap<Element, ShadowRoot> | undefined;
   const overflowOf = (style: CSSStyleDeclaration): string => (vertical ? style.overflowY : style.overflowX);
+  const paintContained = (style: CSSStyleDeclaration): boolean => /\b(paint|strict|content)\b/.test(style.contain);
 
   // The viewport takes the root element's overflow, or the body's when the
-  // root's is visible on both axes; the body then does not scroll itself.
+  // root's is visible on both axes and neither has paint containment; the
+  // body then does not scroll itself.
   const rootStyle = view.getComputedStyle(doc.documentElement);
-  const bodyGivesOverflow = doc.body !== null && rootStyle.overflowX === 'visible' && rootStyle.overflowY === 'visible';
+  const bodyStyle = doc.body === null ? undefined : view.getComputedStyle(doc.body);
+  const bodyGivesOverflow = bodyStyle !== undefined && rootStyle.overflowX === 'visible' && rootStyle.overflowY === 'visible'
+    && !paintContained(rootStyle) && !paintContained(bodyStyle);
   const viewportScrolls = (): boolean => {
-    const overflow = bodyGivesOverflow && doc.body !== null ? overflowOf(view.getComputedStyle(doc.body)) : overflowOf(rootStyle);
+    const overflow = overflowOf(bodyGivesOverflow && bodyStyle !== undefined ? bodyStyle : rootStyle);
     return overflow !== 'hidden' && overflow !== 'clip';
   };
   const scrolls = (element: Element): boolean => {
@@ -80,8 +117,15 @@ function jumpToEdge(
     const overflow = overflowOf(view.getComputedStyle(element));
     return overflow === 'auto' || overflow === 'scroll' || overflow === 'overlay';
   };
-  const parentOf = (element: Element): Element | null => {
+  // A closed shadow root hides its slots from `assignedSlot`; the registry of closed roots finds them.
+  const slotOf = (element: Element): Element | null => {
     if (element.assignedSlot !== null) return element.assignedSlot;
+    const root = element.parentElement === null ? undefined : closedRoots?.get(element.parentElement);
+    return root === undefined ? null : [...root.querySelectorAll('slot')].find((slot) => slot.assignedNodes().includes(element)) ?? null;
+  };
+  const parentOf = (element: Element): Element | null => {
+    const slot = slotOf(element);
+    if (slot !== null) return slot;
     if (element.parentElement !== null) return element.parentElement;
     const parent = element.parentNode;
     return parent instanceof ShadowRoot ? parent.host : null;
@@ -91,9 +135,10 @@ function jumpToEdge(
   // The screen is the page when the page scrolls along the axis, as a test
   // migrated from `cy.scrollTo` expects; an inner pane that happens to sit
   // under the center is scrolled only through a locator.
-  if (args.fromCenter && scrolls(scrolling)) from = scrolling;
-  else if (args.fromCenter) {
-    // The element under the viewport's center, inside open and closed shadow roots.
+  if (args.fromCenter && scrolls(scrolling)) return scrolling;
+  if (args.fromCenter) {
+    // The element under the viewport's center, inside open and closed shadow
+    // roots. A frame there is not entered: its document is not this one.
     const x = view.innerWidth / 2;
     const y = view.innerHeight / 2;
     from = doc.elementFromPoint(x, y);
@@ -104,31 +149,46 @@ function jumpToEdge(
       from = inner;
     }
   }
-  let container: Element | null = null;
   for (let element = from; element !== null; element = parentOf(element)) {
-    if (scrolls(element)) {
-      container = element;
-      break;
-    }
+    if (scrolls(element)) return element;
     if (element === scrolling) break;
   }
-  if (container === null && scrolls(scrolling)) container = scrolling;
-  if (container === null) return Promise.resolve({ container: 'none' });
+  return scrolls(scrolling) ? scrolling : null;
+}
 
+/**
+ * Page-side: one jump of `container` toward `edge`, then the position after
+ * the next rendered frame. A hidden document renders no frames, so it reads
+ * at once; a frame that renders none while out of view (a cross-origin
+ * iframe) reads after 100 ms.
+ */
+function jumpOnce(container: Element, edge: ScrollEdge): Promise<JumpResult> {
+  if (!container.isConnected) return Promise.resolve('detached');
+  const vertical = edge === 'top' || edge === 'bottom';
+  const view = container.ownerDocument.defaultView ?? window;
+  const extentOf = (): number => (vertical ? container.scrollHeight : container.scrollWidth);
+  const offsetOf = (): number => (vertical ? container.scrollTop : container.scrollLeft);
+  const start = offsetOf();
   // Past the end on purpose: the browser clamps the offset, and the sign
   // covers a container whose offsets run negative (right-to-left, column-reverse).
-  const far = vertical ? container.scrollHeight : container.scrollWidth;
+  const far = extentOf();
   const offset = edge === 'top' || edge === 'left' ? -far : far;
   // `instant` overrides `scroll-behavior: smooth`, so the offset is read where it landed.
   container.scrollTo(vertical ? { top: offset, behavior: 'instant' } : { left: offset, behavior: 'instant' });
-  const found = container;
-  const extentOf = (): number => (vertical ? found.scrollHeight : found.scrollWidth);
-  const offsetOf = (): number => (vertical ? found.scrollTop : found.scrollLeft);
   const extent = extentOf();
   const landed = offsetOf();
   // Content that loads at the end grows the extent; a scroll handler that pulls
   // the container back moves the offset. Either means the end was not held.
-  const read = (): JumpResult => ({ container: 'found', settled: extentOf() === extent && offsetOf() === landed });
-  if (doc.visibilityState === 'hidden') return Promise.resolve(read());
-  return new Promise((resolve) => view.requestAnimationFrame(() => view.setTimeout(() => resolve(read()), 0)));
+  const read = (): JumpResult => (landed === start && extentOf() === extent && offsetOf() === landed ? 'settled' : 'moved');
+  if (container.ownerDocument.visibilityState === 'hidden') return Promise.resolve(read());
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      resolve(read());
+    };
+    view.requestAnimationFrame(() => view.setTimeout(finish, 0));
+    view.setTimeout(finish, 100);
+  });
 }

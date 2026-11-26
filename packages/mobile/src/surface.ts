@@ -1738,15 +1738,21 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     const region = this.scrollRegion(entry, first.raw, first.projected);
     let before = signature(first, region);
     let passMs = 0;
-    for (let drags = 0; ; drags += 1) {
-      if (drags > 0 && input.remainingMs() < passMs) {
-        throw new EngineError('OPERATION_TIMEOUT', `the content was still moving after ${drags} drags when the budget ran out`, { retryable: false });
+    let drags = 0;
+    for (let passes = 0; ; passes += 1) {
+      if (passes > 0 && input.remainingMs() < passMs) {
+        // No read since the first that left no node out: the region was never seen whole, not seen moving.
+        const reason = before === undefined
+          ? `the screen was read with nodes left out (agent-device truncated it) after ${drags} drags, so the edge could not be confirmed`
+          : `the content was still moving after ${drags} drags when the budget ran out`;
+        throw new EngineError('OPERATION_TIMEOUT', reason, { retryable: false });
       }
       const startedMs = Date.now();
-      // The first drag is one, since a container at its edge already needs no
-      // more; one that moves gets up to three per read, as reads cost more than drags.
-      const count = Math.min(drags + 1, MAX_EDGE_DRAGS);
+      // The first pass is one drag, since a container at its edge already needs
+      // no more; one that moves gets up to three per read, as reads cost more than drags.
+      const count = Math.min(passes + 1, MAX_EDGE_DRAGS);
       await input.send(() => client.interactions.swipe({ ...edgeDrag(region, edge), count, pauseMs: 0 }));
+      drags += count;
       const after = signature(await capture(), region);
       passMs = Date.now() - startedMs;
       if (after !== undefined && after === before) return;

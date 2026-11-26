@@ -24,6 +24,7 @@ import { timestamp } from '../internal/ids.ts';
 import { bound } from '../internal/text.ts';
 import { pixelsProvenMasked } from '../run/secrecy.ts';
 import type { AppLogEntry, EngineHandle, EngineSnapshot, EngineTabs } from './index.ts';
+import type { OperationContext } from './contract.ts';
 import {
   type AppEvent,
   type AppLogRoute,
@@ -485,13 +486,15 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
     },
     async swipe(direction, momentum, operation) {
       if (!actions.has('swipe')) unsupported('swipe gestures');
+      const startedMs = Date.now();
       const target = root ?? (await session.observe(operation)).root;
-      await performRaw(target, { kind: 'swipe', direction, ...(momentum === undefined ? {} : { momentum }) }, operation);
+      await performRaw(target, { kind: 'swipe', direction, ...(momentum === undefined ? {} : { momentum }) }, leftSince(operation, startedMs));
     },
     async scrollTo(edge, operation) {
       if (!actions.has('scrollTo')) unsupported('the "scrollTo" action');
+      const startedMs = Date.now();
       const target = root ?? (await session.observe(operation)).root;
-      await performRaw(target, { kind: 'scrollTo', edge }, operation);
+      await performRaw(target, { kind: 'scrollTo', edge }, leftSince(operation, startedMs));
     },
     async performAt(point, action, operation) {
       if (!pointerActions.has(action.kind)) unsupported(`the "${action.kind}" action at a point`);
@@ -524,6 +527,15 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
  * must never pass on a ratio outside 0 to 1, a missing verdict, or a ratio
  * that contradicts the verdict (`{ intersects: false, ratio: 1 }`).
  */
+/**
+ * `operation` with what is left of its budget since `startedMs`, for the
+ * second call of a step that first observes for the root ref: `timeout`
+ * bounds the whole step, so the observe's time comes out of the action's.
+ */
+function leftSince(operation: OperationContext, startedMs: number): OperationContext {
+  return { ...operation, timeoutMs: Math.max(1, operation.timeoutMs - (Date.now() - startedMs)) };
+}
+
 function checkIntersection(value: ViewportIntersection, engineName: string): ViewportIntersection {
   const { intersects, ratio } = (value ?? {}) as Partial<Record<keyof ViewportIntersection, unknown>>;
   const validRatio =

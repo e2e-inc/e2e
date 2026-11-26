@@ -142,6 +142,44 @@ describe('scrollTo on the screen', () => {
     expect(failure).toBeInstanceOf(EngineError);
     expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT', message: expect.stringContaining('more content kept loading at the bottom edge') });
   });
+
+  it('reports the budget, not a Playwright timeout, when the page is busy as the budget ends', async () => {
+    // Each scroll adds content, then blocks the page for 300 ms right after the jump reads (a frame
+    // callback queued after the jump's own), so the next jump waits on the main thread as the budget ends.
+    await page.setContent(`${ROWS}
+      <script>
+        addEventListener('scroll', () => {
+          document.body.insertAdjacentHTML('beforeend', '<p style="height: 400px">More</p>');
+          requestAnimationFrame(() => setTimeout(() => { const end = Date.now() + 300; while (Date.now() < end); }, 0));
+        });
+      </script>`);
+    const failure = await scroll('bottom', undefined, 400).catch((cause: unknown) => cause);
+    expect(failure).toBeInstanceOf(EngineError);
+    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT', message: expect.stringContaining('more content kept loading at the bottom edge') });
+  });
+
+  it('follows a feed that loads from an IntersectionObserver on a sentinel row', async () => {
+    // The observer runs after the frame a jump waits for, so only a jump that moves nothing may end the scroll.
+    await page.setContent(`<!doctype html><body style="margin: 0"><div id="feed">${ROWS}</div><div id="sentinel" style="height: 1px"></div>
+      <script>
+        let batches = 0;
+        const sentinel = document.getElementById('sentinel');
+        const observer = new IntersectionObserver((entries) => {
+          if (batches < 3 && entries.some((entry) => entry.isIntersecting)) {
+            batches += 1;
+            document.getElementById('feed').insertAdjacentHTML('beforeend', '<p style="height: 400px; margin: 0">Batch ' + batches + '</p>');
+            // Observe again, as feed libraries do, so the next visit reports afresh.
+            observer.unobserve(sentinel);
+            observer.observe(sentinel);
+          }
+        });
+        observer.observe(sentinel);
+      </script></body>`);
+    await scroll('bottom');
+    const bottom = await offsets();
+    expect(await page.locator('text=Batch 3').count()).toBe(1);
+    expect(bottom.top).toBe(bottom.maxTop);
+  });
 });
 
 describe('scrollTo on a node', () => {
@@ -201,13 +239,14 @@ describe('scrollTo on a node', () => {
     expect((await offsets()).top).toBe(0);
   });
 
-  it('walks from a slotted node up through its slot to the pane in the shadow root', async () => {
-    await page.setContent(`<div id="host">${ROWS}</div>`);
-    await page.evaluate(() => {
-      const root = document.getElementById('host')!.attachShadow({ mode: 'open' });
+  it.each(['open', 'closed'] as const)('walks from a slotted node up through its slot to the pane in a %s shadow root', async (mode) => {
+    // A navigation, not setContent: init scripts, the closed-root registry among them, run on a new document only.
+    await page.goto(`data:text/html,${encodeURIComponent(`<div id="host">${ROWS}</div>`)}`);
+    await page.evaluate((shadowMode) => {
+      const root = document.getElementById('host')!.attachShadow({ mode: shadowMode });
       root.innerHTML = '<div id="pane" style="height: 300px; overflow-y: auto"><slot></slot></div>';
       (window as unknown as { pane: Element }).pane = root.getElementById('pane')!;
-    });
+    }, mode);
     await scroll('bottom', '#host p:first-child');
     const pane = await page.evaluate(() => {
       const element = (window as unknown as { pane: Element }).pane;
@@ -216,6 +255,45 @@ describe('scrollTo on a node', () => {
     expect(pane.maxTop).toBeGreaterThan(0);
     expect(pane.top).toBe(pane.maxTop);
     expect((await offsets()).top).toBe(0);
+  });
+
+  it('keeps the container when the located row unmounts while the list grows', async () => {
+    await page.setContent(`<div id="pane" style="height: 300px; overflow-y: auto"><p id="row" style="height: 40px; margin: 0">Row</p>${ROWS}</div>
+      <script>
+        let batches = 0;
+        const pane = document.getElementById('pane');
+        pane.addEventListener('scroll', () => {
+          if (batches < 3 && pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 1) {
+            batches += 1;
+            document.getElementById('row')?.remove();
+            pane.insertAdjacentHTML('beforeend', '<p style="height: 400px; margin: 0">Batch ' + batches + '</p>');
+          }
+        });
+      </script>`);
+    await scroll('bottom', '#row');
+    const pane = await offsets('#pane');
+    expect(await page.locator('text=Batch 3').count()).toBe(1);
+    expect(pane.top).toBe(pane.maxTop);
+  });
+
+  it('scrolls a body with paint containment itself, since its overflow stays its own', async () => {
+    await page.setContent(`<!doctype html><body style="margin: 0; height: 100vh; overflow: auto; contain: paint"><p id="first">Row 0</p>${ROWS}</body>`);
+    await scroll('bottom', '#first');
+    const body = await offsets('body');
+    expect(body.maxTop).toBeGreaterThan(0);
+    expect(body.top).toBe(body.maxTop);
+  });
+
+  it('finishes for a node in a cross-origin iframe out of view, which renders no frames', async () => {
+    const inner = `<div id="pane" style="height: 300px; overflow-y: auto">${ROWS}</div>`;
+    await page.setContent(`<div style="height: 2000px"></div><iframe id="frame" style="height: 400px; width: 400px" src="data:text/html,${encodeURIComponent(inner)}"></iframe>`);
+    const pane = page.frameLocator('#frame').locator('#pane');
+    await pane.waitFor();
+    const done = scrollToEdge(page, { kind: 'locator', locator: pane }, 'bottom', { timeoutMs: 2_000, signal: new AbortController().signal }).then(() => 'resolved');
+    const outcome = await Promise.race([done, new Promise((resolve) => setTimeout(() => resolve('pending'), 1_500))]);
+    expect(outcome).toBe('resolved');
+    const offsetsInFrame = await pane.evaluate((element) => ({ top: element.scrollTop, maxTop: element.scrollHeight - element.clientHeight }));
+    expect(offsetsInFrame.top).toBe(offsetsInFrame.maxTop);
   });
 
   it('waits for a node that is not visible yet, then scrolls it', async () => {
