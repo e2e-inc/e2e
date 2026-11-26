@@ -265,14 +265,28 @@ pub async fn focus_window(pid: i32, window_id_text: String) -> Value {
     .await
 }
 
+/// The window a point was taken in, which must still take the click when it goes.
+#[napi(object)]
+pub struct PointerTarget {
+    pub pid: i32,
+    pub window_id: String,
+    /// Whether a sheet on the window held its focus when the point was taken.
+    pub sheet: bool,
+}
+
 /// Physical pointer input at a point on screen: `tap`, `doubleTap`, `secondaryTap`, or `hover`. `inputId` names it, so
-/// `cancelInput` stops what it has yet to send.
+/// `cancelInput` stops what it has yet to send. With `target`, no click goes once another window, a new sheet, or
+/// another app took the focus from that window.
 #[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
-pub async fn pointer(x: f64, y: f64, kind: String, input_id: Option<u32>, timeout_ms: Option<f64>) -> Value {
+pub async fn pointer(x: f64, y: f64, kind: String, input_id: Option<u32>, timeout_ms: Option<f64>, target: Option<PointerTarget>) -> Value {
     // No budget given: the call sends at once, as before `timeoutMs` was passed.
     let deadline = deadline(timeout_ms.unwrap_or(60_000.0));
     blocking(move || {
-        actions::pointer_at(x, y, &kind, input_id, deadline)?;
+        let target = match target {
+            Some(target) => Some((target.pid, window_id(&target.window_id)?, target.sheet)),
+            None => None,
+        };
+        actions::pointer_at(x, y, &kind, input_id, deadline, target)?;
         Ok(serde_json::json!({}))
     })
     .await

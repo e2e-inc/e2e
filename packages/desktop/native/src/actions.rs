@@ -1034,9 +1034,43 @@ pub fn focus_window(pid: i32, window: u32) -> Outcome<()> {
     raise(pid, &element)
 }
 
+/// Whether a click at a point taken in a window may go: the app is frontmost, the window holds its focus, and no sheet
+/// took that focus since the point was taken (`sheet` says whether one held it then).
+fn takes_point(frontmost: bool, holds: bool, on_sheet: bool, sheet: bool) -> Outcome<()> {
+    if !frontmost {
+        return Err(Failure::refused(codes::ACTION_FAILED, "another app came forward over the window the point was taken in, so no click was sent"));
+    }
+    if !holds {
+        return Err(Failure::refused(codes::ACTION_FAILED, "another window took focus from the one the point was taken in, so no click was sent"));
+    }
+    if on_sheet && !sheet {
+        return Err(Failure::refused(codes::ACTION_FAILED, "a sheet opened over the window the point was taken in, so no click was sent"));
+    }
+    Ok(())
+}
+
+/// `takes_point` for a window of `pid`, read now. A read the app did not answer in time is a stall.
+fn window_takes_point(pid: i32, id: u32, sheet: bool) -> Outcome<()> {
+    let window = windows::find(pid, id)?;
+    let app = Element::application(pid);
+    let frontmost = match app.attribute("AXFrontmost") {
+        Ok(value) => value.boolean() == Some(true),
+        Err(error) if error == ax::AX_CANNOT_COMPLETE => return Err(unread(error, "read whether the app is frontmost")),
+        Err(_) => false,
+    };
+    let focused = match app.attribute("AXFocusedWindow") {
+        Ok(Value::Element(focused)) => Some(focused),
+        Err(error) if error == ax::AX_CANNOT_COMPLETE => return Err(unread(error, "read the app's focused window")),
+        _ => None,
+    };
+    let holds = focused.as_ref().is_some_and(|focused| windows::holds_focus(focused, &window));
+    takes_point(frontmost, holds, focused.is_some_and(|focused| focused != window), sheet)
+}
+
 /// Physical pointer input at a point on screen, sent only while `input_id` is not cancelled and `deadline` has not
-/// passed.
-pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
+/// passed. With `target` (the app, the window the point was taken in, and whether a sheet on it held the focus then),
+/// the first click goes only while that window still takes it, checked after the move.
+pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: Instant, target: Option<(i32, u32, bool)>) -> Outcome<()> {
     let action = match kind {
         "hover" => Pointer::Move,
         "tap" => Pointer::Click { right: false, count: 1 },
@@ -1044,7 +1078,20 @@ pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: I
         "secondaryTap" => Pointer::Click { right: true, count: 1 },
         other => return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("no pointer action {other}"))),
     };
-    guarded(input_id, deadline, || input::pointer(x, y, action, &|_| go("pointer")))
+    guarded(input_id, deadline, || {
+        input::pointer(x, y, action, &|click| {
+            go("pointer")?;
+            match target {
+                // A sheet or window that opened during the move would take the click: the first one checks, and the
+                // caller once more after that check, which waits on the app.
+                Some((pid, window, sheet)) if click == 1 => {
+                    window_takes_point(pid, window, sheet)?;
+                    go("pointer")
+                }
+                _ => Ok(()),
+            }
+        })
+    })
 }
 
 #[cfg(test)]
@@ -1204,6 +1251,18 @@ mod tests {
         let missed = super::guarded(Some(1_000_035), later(), || super::still_aimed(|| Ok(Aim::Other))).expect_err("the point hits another element");
         assert_eq!(missed.code, crate::failure::codes::ACTION_FAILED);
         assert!(super::guarded(Some(1_000_036), later(), || super::still_aimed(|| Ok(Aim::Target))).is_ok());
+    }
+
+    #[test]
+    fn sends_a_coordinate_click_only_while_its_window_takes_it() {
+        use super::takes_point;
+        assert!(takes_point(true, true, false, false).is_ok());
+        // A sheet that held the focus when the point was taken is where the point was taken.
+        assert!(takes_point(true, true, true, true).is_ok());
+        for (frontmost, holds, on_sheet, sheet) in [(false, true, false, false), (true, false, false, false), (true, true, true, false)] {
+            let refused = takes_point(frontmost, holds, on_sheet, sheet).expect_err("another window or app would take the click");
+            assert_eq!((refused.code, refused.delivery), (crate::failure::codes::ACTION_FAILED, crate::failure::Delivery::NotDelivered));
+        }
     }
 
     #[test]
