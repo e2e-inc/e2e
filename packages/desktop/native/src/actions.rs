@@ -812,11 +812,17 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
     } else {
         Route::Process(entry.pid)
     };
-    // Each key goes only while the field's window still has the keyboard: a Return that opened another window or app must not
-    // take the rest of the text with it.
+    // Each key goes only while the window that held the keyboard when typing began still does: a Return that opened another
+    // window, a sheet on this one included, or another app must not take the rest of the text with it. A field in a sheet
+    // that was there from the start keeps its sheet.
+    let typing_in = Element::application(entry.pid).element("AXFocusedWindow");
     let still = || -> Outcome<()> {
         let app = Element::application(entry.pid);
-        let held = app.element("AXFocusedWindow").is_some_and(|focused| windows::holds_focus(&focused, &window));
+        let focused = app.element("AXFocusedWindow");
+        let held = match &typing_in {
+            Some(start) => focused.as_ref() == Some(start),
+            None => focused.is_some_and(|focused| windows::holds_focus(&focused, &window)),
+        };
         let forward = !physical || app.boolean("AXFrontmost") == Some(true);
         if held && forward {
             Ok(())
