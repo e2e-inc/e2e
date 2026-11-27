@@ -160,6 +160,30 @@ fn label(value: Option<String>) -> Option<String> {
     value.filter(|text| !text.trim().is_empty())
 }
 
+/// Whether a character is an invisible bidirectional mark: AppKit wraps numbers and paths in them (Calculator's
+/// history, a document's location), and a name that carries them matches no locator a test types.
+fn bidi_mark(character: char) -> bool {
+    matches!(character, '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// A text as a person reads it: without invisible bidirectional marks, and no text when nothing else is left.
+fn plain(text: Option<String>) -> Option<String> {
+    label(text.map(|text| if text.chars().any(bidi_mark) { text.chars().filter(|character| !bidi_mark(*character)).collect() } else { text }))
+}
+
+/// Whether an identifier is one AppKit made up rather than one a developer gave: a nib's object id (`_NS:61`) or the
+/// selector of a menu item's action (`_popUpItemAction:`, `chose:`). Neither names the control: the first changes with
+/// the nib, and the second is the same for every item of a menu.
+fn generated_identifier(identifier: &str) -> bool {
+    identifier.starts_with("_NS:")
+        || (identifier.len() > 1
+            && identifier.ends_with(':')
+            && identifier
+                .split(':')
+                .filter(|part| !part.is_empty())
+                .all(|part| part.chars().all(|character| character.is_ascii_alphanumeric() || character == '_')))
+}
+
 /// What a node's attributes say, read in one request.
 struct Read {
     role: &'static str,
@@ -683,13 +707,14 @@ impl Walk {
         let mut node = RawNode {
             ref_id,
             role,
-            name,
-            value: text_value,
-            description,
-            hint: read.help.clone(),
+            name: plain(name),
+            // What a field holds is the user's text, marks and all, as a fill put it there.
+            value: if roles::takes_text(role) { text_value } else { plain(text_value) },
+            description: plain(description),
+            hint: plain(read.help.clone()),
             level: if role == "heading" { read.heading_level } else { None },
-            placeholder: read.placeholder.clone(),
-            native_id: read.identifier.clone().map(|value| NativeId { kind: "ax_identifier", value }),
+            placeholder: plain(read.placeholder.clone()),
+            native_id: read.identifier.clone().filter(|identifier| !generated_identifier(identifier)).map(|value| NativeId { kind: "ax_identifier", value }),
             states,
             available_actions: actions,
             scroll_axes,
@@ -849,7 +874,25 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::{content_name, expanded, inner_clip, level_of, missed, outside, selected};
+    use super::{content_name, expanded, generated_identifier, inner_clip, level_of, missed, outside, plain, selected};
+
+    #[test]
+    fn drops_bidirectional_marks_from_a_name() {
+        assert_eq!(plain(Some("\u{200E}7\u{200E}+\u{200E}8 \u{200E}15".to_owned())).as_deref(), Some("7+8 15"));
+        assert_eq!(plain(Some("\u{2068}Documents\u{2069}".to_owned())).as_deref(), Some("Documents"));
+        assert_eq!(plain(Some("\u{200F}".to_owned())), None);
+        assert_eq!(plain(Some("שלום".to_owned())).as_deref(), Some("שלום"));
+    }
+
+    #[test]
+    fn tells_an_identifier_appkit_made_up_from_a_developers() {
+        for made_up in ["_NS:61", "_popUpItemAction:", "chose:", "menuItemSelected:", "performClick:withEvent:"] {
+            assert!(generated_identifier(made_up), "{made_up}");
+        }
+        for given in ["username", "sign-in.submit", "StandardInputView;value:15", "com.apple.settings.keyboard", "time: 12:00", ":"] {
+            assert!(!generated_identifier(given), "{given}");
+        }
+    }
     use crate::ax;
     use crate::windows::Rect;
 
