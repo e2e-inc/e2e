@@ -142,8 +142,9 @@ into the app's window for an app with no control that takes keyboard focus
 (`desktop.closeApp()`).
 
 `desktop.useWindow()` takes a window's title: a string is the whole title, a
-`RegExp` matches part of it. It waits within the action timeout for a window
-that is still opening. When two windows match, it fails and names them; pass
+`RegExp` matches part of it. Either reads the title as `screen` reads text,
+with each run of whitespace as one space. It waits within the action timeout
+for a window that is still opening. When two windows match, it fails and names them; pass
 one of `desktop.windows()` instead, which is picked by its `id`. With no
 argument, `screen` goes back to the focused window.
 

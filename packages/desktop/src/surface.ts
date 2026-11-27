@@ -37,6 +37,7 @@ import {
   type SemanticNode,
   type ViewportPoint,
 } from '@e2e-dev/core/engine';
+import { withDeadline } from './deadline.ts';
 import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
 import { toCombo } from './keys.ts';
 import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_POLL_MS, LAUNCH_TOKEN, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
@@ -44,7 +45,7 @@ import { launchArgumentList } from './launch-arguments.ts';
 import { ROOT_ID, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
-import { ambiguousTitle, noWindowTitled, titled, titleText, type WindowChoice } from './window-choice.ts';
+import { chosenWindow, type DesktopWindow, type WindowChoice } from './window-choice.ts';
 
 /** How long a quit waits for a launch whose outcome was unknown to report the process it started. */
 const PENDING_SETTLE_MS = 3_000;
@@ -57,9 +58,6 @@ const LATE_APP_MS = 2_000;
 
 /** How often it looks. */
 const LATE_APP_POLL_MS = 100;
-
-/** How often `desktop.useWindow()` lists the windows again while it waits for a title. */
-const WINDOW_POLL_MS = 100;
 
 /** How long a launch waits for its process, and then for the app's window to become readable, before it reports why it did not. */
 const LAUNCH_READY_MS = 10_000;
@@ -93,14 +91,6 @@ const MAX_BINDINGS = 4096;
 
 /** Codes a read fails with while the app has no window to read: not launched yet, still opening, or just closed. */
 const NO_WINDOW_CODES = new Set(['APP_NOT_FOUND', 'WINDOW_NOT_FOUND']);
-
-/** One window of the app under test, as `desktop.windows()` lists it. */
-export interface DesktopWindow {
-  /** The window server's id of the window, valid while the window stays open. */
-  readonly id: string;
-  readonly title: string;
-  readonly focused: boolean;
-}
 
 /** What a target launches: a `.app` bundle on disk, or an installed app by bundle id or name. */
 type LaunchTarget = { readonly path: string; readonly label: string } | { readonly bundleId: string; readonly label: string };
@@ -145,22 +135,6 @@ function unsupported(text: string): EngineError {
 
 function invalidState(text: string): EngineError {
   return new EngineError('INVALID_STATE', text, { retryable: false });
-}
-
-/**
- * The operation with one deadline: `timeoutMs` reads what is left of the
- * budget the call started with, so every call an action makes (a press
- * that focuses first, a type that clears first) shares one budget instead
- * of each getting the whole of it.
- */
-function withDeadline(operation: OperationContext): OperationContext {
-  const deadline = Date.now() + operation.timeoutMs;
-  return {
-    ...operation,
-    get timeoutMs() {
-      return Math.max(0, deadline - Date.now());
-    },
-  };
 }
 
 /** Constrains a caller-supplied artifact label to a safe filename. */
@@ -527,58 +501,27 @@ export class DesktopSurface {
     );
   }
 
-  /** The windows of the app the engine launched, for the `desktop` fixture; none while it is not running. */
-  async windows(signal: AbortSignal, timeoutMs: number): Promise<readonly DesktopWindow[]> {
-    const windows = await this.ownWindows({ signal, timeoutMs });
+  /** The windows of the app the engine launched, for the `desktop` fixture; none while it is not running, unless `strict`, which reads as `ownWindows` does. */
+  async windows(signal: AbortSignal, timeoutMs: number, strict = false): Promise<readonly DesktopWindow[]> {
+    const windows = await this.ownWindows({ signal, timeoutMs }, strict);
     return windows.map((window) => ({ id: window.id, title: window.title ?? '', focused: window.is_focused === true }));
   }
 
   /**
    * `desktop.useWindow()`: reads and acts in the window `choice` names from
-   * now on, until the app quits, rather than the focused one. A title is
-   * waited for within `timeoutMs`, since a window still opening is not
-   * listed yet; an id names a window already listed. With no choice, goes
-   * back to the focused window.
+   * now on, until the app quits, rather than the focused one. With no
+   * choice, goes back to the focused window.
    */
   async useWindow(choice: WindowChoice | undefined, signal: AbortSignal, timeoutMs: number): Promise<void> {
-    this.chosenWindow = choice === undefined ? undefined : 'id' in choice ? await this.listedWindow(choice.id, signal, timeoutMs) : await this.titledWindow(choice.title, signal, timeoutMs);
+    const source = {
+      app: this.appName ?? 'the app',
+      opened: () => this.pid !== undefined,
+      list: (operation: Pick<OperationContext, 'signal' | 'timeoutMs'>, strict: boolean) => this.windows(operation.signal, operation.timeoutMs, strict),
+      locked: () => this.requireDriver().screenLocked() === true,
+    };
+    this.chosenWindow = choice === undefined ? undefined : await chosenWindow(choice, { signal, timeoutMs }, source);
     // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
     this.pointWindow = undefined;
-  }
-
-  private async listedWindow(id: string, signal: AbortSignal, timeoutMs: number): Promise<string> {
-    const windows = await this.ownWindows({ signal, timeoutMs });
-    if (!windows.some((window) => window.id === id)) throw notActionable(`the app has no window with the id ${id}; desktop.windows() lists the ones it has, and desktop.useWindow('Title') picks one by its title`);
-    return id;
-  }
-
-  /** The id of the one window with the title, read again until it shows or the budget is spent. */
-  private async titledWindow(title: string | RegExp, signal: AbortSignal, timeoutMs: number): Promise<string> {
-    const deadline = Date.now() + timeoutMs;
-    let windows: readonly RawWindow[] = [];
-    for (;;) {
-      if (signal.aborted) throw new EngineError('CANCELLED', `the wait for a window titled ${titleText(title)} was cancelled`, { retryable: false });
-      if (this.pid === undefined) throw invalidState(`desktop.useWindow(${titleText(title)}) needs the app open; open it with app.open()`);
-      await this.requireRunning();
-      const left = deadline - Date.now();
-      if (left <= 0) break;
-      try {
-        windows = await this.ownWindows({ signal, timeoutMs: left });
-      } catch (cause) {
-        // A list cut off by the deadline ends the wait, and one the app was too busy to answer is asked for again: neither says more than the last list did.
-        if (!(cause instanceof EngineError && (cause.code === 'OPERATION_TIMEOUT' || (cause.code === 'NODE_STALE' && cause.retryable)))) throw cause;
-      }
-      const matches = titled(windows, title);
-      const [match] = matches;
-      if (matches.length > 1) throw notActionable(ambiguousTitle(this.appName ?? 'the app', title, matches));
-      if (match !== undefined) return match.id;
-      await sleep(Math.min(WINDOW_POLL_MS, Math.max(deadline - Date.now(), 0)), signal);
-    }
-    // A locked screen lists none of the app's windows, which must not read as an app with none open.
-    if (windows.length === 0 && this.requireDriver().screenLocked() === true) {
-      throw notActionable(`the Mac's screen is locked, so no window of ${this.appName ?? 'the app'} can be listed to find the one titled ${titleText(title)}; unlock it and run again`);
-    }
-    throw notActionable(noWindowTitled(this.appName ?? 'the app', title, windows, timeoutMs));
   }
 
   private chosenClosed(): EngineError {

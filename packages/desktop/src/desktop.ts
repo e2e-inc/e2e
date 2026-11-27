@@ -4,10 +4,10 @@
  * `desktop.<method>` step bounded by the action timeout.
  */
 
-import type { EngineFixtureContext } from '@e2e-dev/core/engine';
+import { TestError, type EngineFixtureContext } from '@e2e-dev/core/engine';
 import type { DesktopPlatform } from './options.ts';
-import type { DesktopSurface, DesktopWindow } from './surface.ts';
-import { titleText } from './window-choice.ts';
+import type { DesktopSurface } from './surface.ts';
+import { choiceLabel, windowChoice, type DesktopWindow, type WindowArgument } from './window-choice.ts';
 
 /** Deterministic desktop management exposed to tests as `desktop`. */
 export interface Desktop {
@@ -19,12 +19,12 @@ export interface Desktop {
    * Reads and acts in this window from now on, rather than the focused one,
    * until the app quits: a panel or bubble that takes focus then cannot hide
    * the window the test is about. A string is the window's whole title and a
-   * `RegExp` matches a part of it; either waits within the action timeout
-   * for a window still opening, and is refused when two windows match. A
-   * window from `desktop.windows()` is picked by its id, with no wait. With
-   * no window, goes back to the focused one.
+   * `RegExp` matches a part of it, as `screen` matches text; either waits
+   * within the action timeout for a window still opening, and is refused
+   * when two windows match. A window from `desktop.windows()` is picked by
+   * its id, with no wait. With no window, goes back to the focused one.
    */
-  useWindow(window?: string | RegExp | Pick<DesktopWindow, 'id'>): Promise<void>;
+  useWindow(window?: WindowArgument): Promise<void>;
   /**
    * Presses one key, or a combo such as `ControlOrMeta+2`, into the app's
    * window, for an app with no control that takes keyboard focus. Without
@@ -44,7 +44,10 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
     },
     async useWindow(window) {
       const operation = context.operation();
-      const choice = window === undefined ? undefined : typeof window === 'string' || window instanceof RegExp ? { title: window } : { id: window.id };
+      const choice = windowChoice(window);
+      if (window !== undefined && choice === undefined) {
+        throw new TestError('INVALID_ARGUMENT', `desktop.useWindow() takes a window's title, as a string or a RegExp, or a window from desktop.windows(), not ${window === null ? 'null' : typeof window}`);
+      }
       await surface.useWindow(choice, operation.signal, operation.timeoutMs);
     },
     async press(key) {
@@ -57,8 +60,8 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
   };
   return context.fixture('desktop', desktop, {
     windows: { kind: 'resource' },
-    // The wait for a title owns the deadline, so a window that never shows fails with the titles the app has.
-    useWindow: { kind: 'resource', timeout: false, label: (window) => (typeof window === 'string' || window instanceof RegExp ? titleText(window) : '') },
+    // The wait for a title owns the deadline, so a window that never shows fails with the titles the app has; an id is looked up in one window list, which the driver call bounds.
+    useWindow: { kind: 'resource', timeout: false, label: (window) => choiceLabel(windowChoice(window)) },
     press: { kind: 'resource', label: (key) => key },
     closeApp: { kind: 'resource' },
   });

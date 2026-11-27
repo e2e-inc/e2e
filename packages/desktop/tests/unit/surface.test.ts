@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { EngineAppInfo, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
+import { toTextPattern, type EngineAppInfo, type OperationContext, type SemanticNode } from '@e2e-dev/core/engine';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDesktopFixture } from '../../src/desktop.ts';
 import { resolveOptions } from '../../src/options.ts';
@@ -810,13 +810,10 @@ describe('DesktopSurface: windows', () => {
 
   it('chooses a window by its whole title, or by a pattern of it', async () => {
     const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', title: 'Sign In', is_focused: true }, { id: 'w-panel', title: 'Find & Replace' }])] });
-    await surface.useWindow({ title: 'Find & Replace' }, signal, 5_000);
+    await surface.useWindow({ title: toTextPattern('Find & Replace') }, signal, 5_000);
     await surface.observe(operation(), undefined);
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-panel' });
-    // A `g` pattern keeps where its last match ended, which must not make the next one miss.
-    const pattern = /sign/gi;
-    pattern.test('Sign In');
-    await surface.useWindow({ title: pattern }, signal, 5_000);
+    await surface.useWindow({ title: toTextPattern(/sign/i) }, signal, 5_000);
     await surface.observe(operation(), undefined);
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
   });
@@ -826,55 +823,62 @@ describe('DesktopSurface: windows', () => {
     const fake = fakeDriver({ listWindows: [one, one, one, one, windows(() => [{ id: 'w-mine', title: 'Sign In' }, { id: 'w-panel', title: 'Find & Replace', is_focused: true }])] });
     const { surface } = await launched(fake);
     const listed = fake.of('listWindows').length;
-    await surface.useWindow({ title: 'Find & Replace' }, signal, 5_000);
+    await surface.useWindow({ title: toTextPattern('Find & Replace') }, signal, 5_000);
     expect(fake.of('listWindows').length).toBeGreaterThan(listed + 1);
     await surface.observe(operation(), undefined);
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-panel' });
   });
 
-  it('names the titles the app has when no window gets the title in time, and takes a title for no id', async () => {
+  it('names the titles the app has when no window gets the title in time, and keeps the window in use', async () => {
     const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', title: 'Sign In', is_focused: true }, { id: 'w-panel' }])] });
     const before = Date.now();
-    await expect(surface.useWindow({ title: 'w-panel' }, signal, 400)).rejects.toMatchObject({
+    // A string is a title, never an id: the untitled window's id names nothing.
+    await expect(surface.useWindow({ title: toTextPattern('w-panel') }, signal, 400)).rejects.toMatchObject({
       code: 'NOT_ACTIONABLE',
       message: expect.stringMatching(/showed no window titled "w-panel" within 400 ms; its windows are "Sign In", ""$/),
     });
     expect(Date.now() - before).toBeGreaterThanOrEqual(250);
-    // The window in use stays the one it was.
     await surface.observe(operation(), undefined);
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
   });
 
-  it('ends the wait for a title with the titles the app has when the last list runs out of time, and says a locked screen lists none', async () => {
+  it('ends the wait for a title with the titles the app has when the last list runs out of time', async () => {
     const one = windows(() => [{ id: 'w-mine', title: 'Sign In', is_focused: true }]);
     const fake = fakeDriver({ listWindows: [one, one, one, { ok: true, data: [], sleepMs: 2_000 }] });
     const { surface } = await launched(fake);
-    await expect(surface.useWindow({ title: 'Controls' }, signal, 300)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/within 300 ms; its windows are "Sign In"$/) });
+    await expect(surface.useWindow({ title: toTextPattern('Controls') }, signal, 300)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/within 300 ms; its windows are "Sign In"$/) });
+  });
+
+  it('says a locked screen lists no window, rather than that the app has none open', async () => {
+    const one = windows(() => [{ id: 'w-mine', title: 'Sign In', is_focused: true }]);
     const locked = fakeDriver({ listWindows: [one, one, one, ok([])] });
     const { surface: behindLock } = await launched(locked);
     locked.locked = true;
-    await expect(behindLock.useWindow({ title: 'Controls' }, signal, 300)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/screen is locked.*titled "Controls"/) });
+    await expect(behindLock.useWindow({ title: toTextPattern('Controls') }, signal, 300)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/screen is locked.*titled "Controls"/) });
   });
 
   it('refuses a title two windows have, naming both, without waiting', async () => {
     const { surface } = await launched({ listWindows: [windows(() => [{ id: 'w-one', title: 'Untitled', is_focused: true }, { id: 'w-two', title: 'Untitled 2' }])] });
     const before = Date.now();
-    await expect(surface.useWindow({ title: /Untitled/ }, signal, 5_000)).rejects.toMatchObject({
+    await expect(surface.useWindow({ title: toTextPattern(/Untitled/) }, signal, 5_000)).rejects.toMatchObject({
       code: 'NOT_ACTIONABLE',
       message: expect.stringMatching(/2 windows of .* are titled \/Untitled\/: "Untitled" \(id w-one\), "Untitled 2" \(id w-two\); pass the one meant from desktop\.windows\(\)/),
     });
     expect(Date.now() - before).toBeLessThan(2_000);
-    await surface.useWindow({ title: 'Untitled' }, signal, 5_000);
+    await surface.useWindow({ title: toTextPattern('Untitled') }, signal, 5_000);
   });
 
-  it('waits for no title once the app quit, or before it is open', async () => {
-    const { surface: closed } = await initialized();
-    await expect(closed.useWindow({ title: 'Sign In' }, signal, 5_000)).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/app\.open\(\)/) });
+  it('waits for no title before the app is open', async () => {
+    const { surface } = await initialized();
+    await expect(surface.useWindow({ title: toTextPattern('Sign In') }, signal, 5_000)).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/app\.open\(\)/) });
+  });
+
+  it('waits for no title once the app quit', async () => {
     const { surface, fake } = await launched({}, { observe: false });
     process.kill(fake.pid, 'SIGKILL');
     expect(await gone(fake.pid)).toBe(true);
     const before = Date.now();
-    await expect(surface.useWindow({ title: 'Sign In' }, signal, 5_000)).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/quit/) });
+    await expect(surface.useWindow({ title: toTextPattern('Sign In') }, signal, 5_000)).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/quit/) });
     expect(Date.now() - before).toBeLessThan(2_000);
   });
 
@@ -904,6 +908,8 @@ describe('DesktopSurface: windows', () => {
     expect(await used()).toBe('w-panel');
     await desktop.useWindow((await desktop.windows()).find((window) => window.title === 'Sign In'));
     expect(await used()).toBe('w-mine');
+    await expect(desktop.useWindow(42 as never)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringMatching(/takes a window's title.*not number/) });
+    expect(declared.useWindow?.label?.(42)).toBe('');
   });
 });
 
