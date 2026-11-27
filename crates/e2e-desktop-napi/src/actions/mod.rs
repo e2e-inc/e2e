@@ -102,7 +102,7 @@ fn cancelled() -> bool {
 
 /// The failure for a read that failed before anything was sent: nothing reached the app. A read the app did not answer
 /// in time is a stall, which a retry may get past.
-fn unread(error: AXError, what: &str) -> Failure {
+pub(crate) fn unread(error: AXError, what: &str) -> Failure {
     match error {
         ax::AX_CANNOT_COMPLETE => {
             Failure::refused(codes::APP_UNRESPONSIVE, format!("{what}: the app did not answer in time")).with_details(serde_json::json!({ "retryable": true }))
@@ -111,6 +111,27 @@ fn unread(error: AXError, what: &str) -> Failure {
         ax::AX_API_DISABLED => Failure::refused(codes::PERM_DENIED, format!("{what}: {}", ax::describe(error))),
         _ => Failure::refused(codes::ACTION_FAILED, format!("{what}: {}", ax::describe(error))),
     }
+}
+
+/// A read whose only failure that counts is a stall: the app did not answer in time, which says nothing about the
+/// answer and passes up as `AX_CANNOT_COMPLETE`. Any other failure reads as no answer.
+pub(crate) fn stalled<T>(read: Result<T, AXError>) -> Result<Option<T>, AXError> {
+    match read {
+        Ok(value) => Ok(Some(value)),
+        Err(ax::AX_CANNOT_COMPLETE) => Err(ax::AX_CANNOT_COMPLETE),
+        Err(_) => Ok(None),
+    }
+}
+
+/// The element an attribute names, such as the app's focused element or key window. A read the app did not answer in
+/// time fails as a stall, which a retry may get past, never as focus that moved; any other failure reads as none.
+pub(crate) fn element_attribute(element: &Element, name: &str, what: &str) -> Outcome<Option<Element>> {
+    Ok(stalled(element.attribute(name)).map_err(|error| unread(error, what))?.and_then(|value| value.element().cloned()))
+}
+
+/// Whether `focused`, the app's focused window, holds `window`'s focus (`windows::holds_focus`). A stall fails as one.
+pub(crate) fn holds(focused: &Element, window: &Element, what: &str) -> Outcome<bool> {
+    windows::holds_focus(focused, window).map_err(|error| unread(error, what))
 }
 
 /// Whether an attribute can be set. A stall fails, so a busy app does not read as one whose control takes no input;
@@ -177,6 +198,17 @@ fn until(deadline: Instant, mut check: impl FnMut() -> bool) -> bool {
 /// How long an action that answered with an error is watched for its element going away, the sign that it landed.
 const GONE_WAIT: Duration = Duration::from_millis(300);
 
+/// When the watch for an element going away ends: after `GONE_WAIT`, and in time for the answer to reach the caller
+/// before the action's deadline. An answer that comes after it is cut off, and reads as an action that may have
+/// landed even when the app refused it.
+fn gone_wait_end(now: Instant, deadline: Option<Instant>) -> Instant {
+    let end = now + GONE_WAIT;
+    match deadline {
+        Some(deadline) => end.min(deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline)),
+        None => end,
+    }
+}
+
 /// Performs an AX action. Once the action is sent, an error answer cannot show that nothing happened, so the element is
 /// read again to tell (`answered`).
 fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
@@ -187,12 +219,14 @@ fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
         Ok(()) => Ok(()),
         Err(error) => {
             let then = match error {
-                _ if refuses(error) || error == ax::AX_INVALID_ELEMENT => None,
+                // "No such attribute" is watched too: a SwiftUI alert's button answers it once its press closed the alert.
+                _ if error != ax::AX_ATTRIBUTE_UNSUPPORTED && (refuses(error) || error == ax::AX_INVALID_ELEMENT) => None,
                 // The app is busy in the action's handler (a synchronous save) or quit because of it.
                 ax::AX_CANNOT_COMPLETE => busy(element),
                 // A press that closes what holds its element (a dismissed alert) can leave it readable a moment more.
                 _ => {
-                    let end = Instant::now() + GONE_WAIT;
+                    let deadline = CURRENT.with(|current| current.borrow().as_ref().map(|(_, deadline)| *deadline));
+                    let end = gone_wait_end(Instant::now(), deadline);
                     loop {
                         let then = element.attribute("AXRole").err();
                         if then == Some(ax::AX_INVALID_ELEMENT) || Instant::now() >= end {
@@ -238,6 +272,8 @@ fn refuses(error: AXError) -> bool {
 /// What an action's error answer means, from the error and a read of the element after it (`then`, its error, `None`
 /// when the element still answers):
 /// - refused outright: nothing reached the app;
+/// - "no such attribute" with the element gone after: a SwiftUI alert's button answers so once its press closed the
+///   alert, so it landed; with the element unread after (the button's handler keeps the app busy), it may have landed;
 /// - the element gone as the action was sent: the action may have closed what held it, so it may have landed;
 /// - gone after: the action closed what held it (an alert's button, a panel's), so it landed;
 /// - a timeout while the app still answers: the action opened a menu or a modal and runs inside the app's handler;
@@ -245,6 +281,8 @@ fn refuses(error: AXError) -> bool {
 /// - any other error: it may have landed, delivered but unverified. The caller reads the effect where it can.
 fn answered(error: AXError, then: Option<AXError>, what: &str) -> Outcome<()> {
     match (error, then) {
+        (ax::AX_ATTRIBUTE_UNSUPPORTED, Some(ax::AX_INVALID_ELEMENT)) => Ok(()),
+        (ax::AX_ATTRIBUTE_UNSUPPORTED, Some(_)) => Err(refused(error, what).delivered()),
         _ if refuses(error) => Err(refused(error, what)),
         (ax::AX_INVALID_ELEMENT, _) => Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("{what}: the element went away as the action was sent"))),
         (_, Some(ax::AX_INVALID_ELEMENT)) => Ok(()),
@@ -303,10 +341,28 @@ pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
     go("bring the window forward")?;
     let _ = window.set_bool("AXMain", true);
     let deadline = Instant::now() + Duration::from_millis(1_500);
-    let forward = until(deadline, || {
-        app.boolean("AXFrontmost") == Some(true) && app.element("AXFocusedWindow").is_some_and(|focused| windows::holds_focus(&focused, window))
+    let mut last = Ok(false);
+    until(deadline, || {
+        last = forward(&app, window);
+        last == Ok(true)
     });
-    if forward { Ok(()) } else { Err(Failure::refused(codes::ACTION_FAILED, "the window could not be brought forward")) }
+    match last {
+        Ok(true) => Ok(()),
+        // An app that did not answer in time may have come forward: no proof it did not, and a retry may get past it.
+        Err(error) => Err(unread(error, "bring the window forward")),
+        Ok(false) => Err(Failure::refused(codes::ACTION_FAILED, "the window could not be brought forward")),
+    }
+}
+
+/// Whether the app is frontmost with `window` holding its focus. A stall fails as `AX_CANNOT_COMPLETE`.
+fn forward(app: &Element, window: &Element) -> Result<bool, AXError> {
+    if stalled(app.attribute("AXFrontmost"))?.and_then(|value| value.boolean()) != Some(true) {
+        return Ok(false);
+    }
+    match stalled(app.attribute("AXFocusedWindow"))?.and_then(|value| value.element().cloned()) {
+        Some(focused) => windows::holds_focus(&focused, window),
+        None => Ok(false),
+    }
 }
 
 /// Waits a moment for a menu an action opened to show, so the next read finds it; an action that opens none waits it out and is still done.
@@ -347,11 +403,27 @@ fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<bool> {
         Placement::Collapsed => return Err(Failure::refused(codes::ACTION_FAILED, "the element has no size on screen, so the user cannot reach it")),
         Placement::ScrolledOut => {}
     }
-    let shown = || placement(element) == Ok(Placement::Shown);
+    // Whether the element shows. A list can replace a row's element as it scrolls the row in: the element is gone then,
+    // and no wait shows it.
+    let wait = || -> Outcome<bool> {
+        let mut gone = false;
+        let shown = until(deadline, || match placement(element) {
+            Ok(Placement::Shown) => true,
+            Err(ax::AX_INVALID_ELEMENT) => {
+                gone = true;
+                true
+            }
+            _ => false,
+        });
+        if gone {
+            return Err(Failure::unconfirmed(codes::STALE_REF, "the list replaced the element as it scrolled it into view"));
+        }
+        Ok(shown)
+    };
     let own = action_names(element, what)?.iter().any(|name| name == "AXScrollToVisible");
     if own {
         perform(element, "AXScrollToVisible", "scroll into view")?;
-        if until(deadline, shown) {
+        if wait()? {
             return Ok(true);
         }
     }
@@ -361,7 +433,7 @@ fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<bool> {
     if !own && !moved {
         return Err(Failure::refused(codes::ACTION_FAILED, "the element is off screen and cannot be scrolled into view; scroll its list first"));
     }
-    if until(deadline, shown) {
+    if wait()? {
         return Ok(true);
     }
     Err(Failure::unconfirmed(codes::ACTION_FAILED, "the element is still off screen after it was scrolled into view"))
@@ -431,32 +503,45 @@ fn click_shown(entry: &Entry, deadline: Instant) -> Outcome<()> {
 fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
     // The app's focused element is the one source, as the snapshot reads it: a table's cell reports the table's focus as
     // its own `AXFocused`.
-    let holds = || match element.pid() {
-        Some(pid) => Element::application(pid).element("AXFocusedUIElement").as_ref() == Some(element),
-        None => element.boolean("AXFocused") == Some(true),
+    let holds = || -> Result<bool, AXError> {
+        Ok(match element.pid() {
+            Some(pid) => {
+                stalled(Element::application(pid).attribute("AXFocusedUIElement"))?.and_then(|value| value.element().cloned()).as_ref() == Some(element)
+            }
+            None => stalled(element.attribute("AXFocused"))?.and_then(|value| value.boolean()) == Some(true),
+        })
     };
-    if holds() {
+    // A stall before the write is no proof the element lacks focus: nothing is sent, and a retry may get past it.
+    if holds().map_err(|error| unread(error, "focus"))? {
         return Ok(());
     }
     go("focus")?;
     // A focus write that failed after the app took it (a focus handler that replaced the element) may have run its
     // handlers: only a refusal shows nothing was sent, as for `set_value`.
     element.set_bool("AXFocused", true).map_err(|error| write_failed(error, "focus"))?;
-    if until(deadline, holds) {
-        return Ok(());
+    let mut last = Ok(false);
+    until(deadline, || {
+        last = holds();
+        last == Ok(true)
+    });
+    match last {
+        Ok(true) => Ok(()),
+        Err(_) => Err(Failure::unconfirmed(codes::APP_UNRESPONSIVE, "focus: the app did not answer in time after the element was focused")),
+        Ok(false) => {
+            // An app gives keyboard focus only within its key window: say so where that is why, as a press into the window would.
+            let key = element.pid().and_then(|pid| Element::application(pid).element("AXFocusedWindow"));
+            let home = element.element("AXWindow");
+            if let (Some(key), Some(home)) = (key, home)
+                && windows::holds_focus(&key, &home) == Ok(false)
+            {
+                return Err(Failure::unconfirmed(
+                    codes::ACTION_FAILED,
+                    "focus: the element's window is not the app's key window, so it cannot take keyboard focus; with desktop({ physicalInput: true }) the window comes forward first",
+                ));
+            }
+            Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus"))
+        }
     }
-    // An app gives keyboard focus only within its key window: say so where that is why, as a press into the window would.
-    let key = element.pid().and_then(|pid| Element::application(pid).element("AXFocusedWindow"));
-    let home = element.element("AXWindow");
-    if let (Some(key), Some(home)) = (key, home)
-        && !windows::holds_focus(&key, &home)
-    {
-        return Err(Failure::unconfirmed(
-            codes::ACTION_FAILED,
-            "focus: the element's window is not the app's key window, so it cannot take keyboard focus; with desktop({ headed: true }) the window comes forward first",
-        ));
-    }
-    Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus"))
 }
 
 /// Runs `work` as the action `input_id` names: until it returns, every input it sends first checks that the action was
@@ -591,7 +676,7 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option
         // The control a locator's key is for must hold the app's focus, read after the window check: a sheet that opened
         // during it took the focus, and its default button would take the key.
         if let Some(entry) = &control
-            && Element::application(pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element)
+            && element_attribute(&Element::application(pid), "AXFocusedUIElement", "press")?.as_ref() != Some(&entry.element)
         {
             return Err(Failure::refused(codes::ACTION_FAILED, "the control lost keyboard focus before the key was sent, so nothing was sent"));
         }
@@ -616,7 +701,9 @@ fn frontmost(pid: i32) -> Outcome<bool> {
 /// Refuses unless `window` is the app's key window, or holds the focused sheet or alert: a key or text sent to the app
 /// goes to its key window, and would land in another one.
 fn key_window(pid: i32, window: &Element) -> Outcome<()> {
-    if Element::application(pid).element("AXFocusedWindow").is_some_and(|focused| windows::holds_focus(&focused, window)) {
+    if let Some(focused) = element_attribute(&Element::application(pid), "AXFocusedWindow", "read the app's key window")?
+        && holds(&focused, window, "read the app's key window")?
+    {
         return Ok(());
     }
     Err(Failure::refused(codes::ACTION_FAILED, "the window is not the app's key window, so a key sent to the app would land elsewhere")
@@ -631,6 +718,29 @@ pub fn focus_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Inst
         go("bring the window forward")?;
         let element = windows::find(pid, window)?;
         raise(pid, &element)
+    })
+}
+
+/// Closes a window of `pid` as its close button does, and waits for it to leave the app's windows. A window that asks
+/// before it closes (unsaved changes) stays open: the press landed, and the failure says so.
+pub fn close_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
+    guarded(input_id, deadline, || {
+        // A call given up on before it began reads nothing either.
+        go("close the window")?;
+        let element = windows::find(pid, window)?;
+        let Some(button) = element.element("AXCloseButton") else {
+            return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "the window has no close button"));
+        };
+        if button.boolean("AXEnabled") == Some(false) {
+            return Err(Failure::refused(codes::ACTION_FAILED, "the window's close button is disabled, as it is while a sheet is open on the window"));
+        }
+        // A press that closes its own window may answer with an error: the window lists tell whether it closed.
+        let pressed = perform(&button, "AXPress", "close the window");
+        if until(deadline, || windows::closed(pid, window)) {
+            return Ok(());
+        }
+        pressed?;
+        Err(Failure::unconfirmed(codes::ACTION_FAILED, "the window stayed open after its close button was pressed; it may be asking to save its changes"))
     })
 }
 
@@ -727,7 +837,8 @@ mod tests {
         );
         let failure = past.expect_err("2 does not divide 3");
         assert_eq!(failure.delivery, crate::failure::Delivery::Unknown);
-        assert!(failure.message.contains("stepped back to 0"), "{}", failure.message);
+        assert!(failure.message.contains("stepped back to where it started"), "{}", failure.message);
+        assert!(!failure.message.contains('3'), "names no value: {}", failure.message);
         assert_eq!(value.get(), 0.0);
         let count = Cell::new(0);
         let stuck = step_to(
@@ -1154,6 +1265,12 @@ mod tests {
             assert_eq!(answer(refused, None).expect_err("refused").delivery, Delivery::NotDelivered);
         }
         assert!(answer(AX_FAILURE, Some(AX_INVALID_ELEMENT)).is_ok(), "gone after the press: it closed its alert");
+        assert!(answer(AX_ATTRIBUTE_UNSUPPORTED, Some(AX_INVALID_ELEMENT)).is_ok(), "a SwiftUI alert's button, gone after the press");
+        for unread in [AX_CANNOT_COMPLETE, AX_FAILURE] {
+            let busy = answer(AX_ATTRIBUTE_UNSUPPORTED, Some(unread)).expect_err("unread after: no proof the element stayed");
+            assert_eq!(busy.delivery, Delivery::Unknown);
+        }
+        assert_eq!(answer(AX_ACTION_UNSUPPORTED, Some(AX_INVALID_ELEMENT)).expect_err("no such action").delivery, Delivery::NotDelivered);
         assert!(answer(AX_CANNOT_COMPLETE, None).is_ok(), "a modal runs in the press's handler");
         let stalled = answer(AX_CANNOT_COMPLETE, Some(AX_CANNOT_COMPLETE)).expect_err("no answer after");
         assert_eq!((stalled.code, stalled.delivery), (codes::APP_UNRESPONSIVE, Delivery::Unknown));
@@ -1161,6 +1278,119 @@ mod tests {
         assert_eq!((failed.code, failed.delivery), (codes::ACTION_FAILED, Delivery::Unknown));
         let gone = answer(AX_INVALID_ELEMENT, None).expect_err("went away as it was sent");
         assert_eq!(gone.delivery, Delivery::Unknown);
+    }
+
+    #[test]
+    fn stops_watching_for_a_gone_element_in_time_to_answer() {
+        use super::{ANSWER_MARGIN, GONE_WAIT, gone_wait_end};
+        let now = Instant::now();
+        assert_eq!(gone_wait_end(now, None), now + GONE_WAIT);
+        assert_eq!(gone_wait_end(now, Some(now + Duration::from_secs(5))), now + GONE_WAIT);
+        let soon = now + ANSWER_MARGIN + Duration::from_millis(40);
+        assert_eq!(gone_wait_end(now, Some(soon)), now + Duration::from_millis(40));
+    }
+
+    #[test]
+    fn fails_a_stepper_value_read_that_stalled_or_went_away_before_any_step() {
+        use super::shown_number;
+        use crate::ax::{AX_CANNOT_COMPLETE, AX_FAILURE, AX_INVALID_ELEMENT, Value};
+        use crate::failure::{Delivery, codes};
+        assert_eq!(shown_number(Ok(Value::Number(4.0)), "set value").unwrap(), Some(4.0));
+        assert_eq!(shown_number(Ok(Value::Text("four".into())), "set value").unwrap(), None);
+        assert_eq!(shown_number(Err(AX_FAILURE), "set value").unwrap(), None);
+        let stall = shown_number(Err(AX_CANNOT_COMPLETE), "set value").expect_err("a stall");
+        assert_eq!((stall.code, stall.delivery), (codes::APP_UNRESPONSIVE, Delivery::NotDelivered));
+        let gone = shown_number(Err(AX_INVALID_ELEMENT), "set value").expect_err("gone");
+        assert_eq!((gone.code, gone.delivery), (codes::STALE_REF, Delivery::NotDelivered));
+    }
+
+    #[test]
+    fn reads_a_stall_as_one_and_any_other_failure_as_no_answer() {
+        use super::stalled;
+        use crate::ax::{AX_CANNOT_COMPLETE, AX_FAILURE, AX_INVALID_ELEMENT, AX_NO_VALUE};
+        assert_eq!(stalled(Ok(3)), Ok(Some(3)));
+        assert_eq!(stalled::<i32>(Err(AX_CANNOT_COMPLETE)), Err(AX_CANNOT_COMPLETE));
+        for none in [AX_FAILURE, AX_INVALID_ELEMENT, AX_NO_VALUE] {
+            assert_eq!(stalled::<i32>(Err(none)), Ok(None), "{none}");
+        }
+        // The stall reaches the engine as one it may retry.
+        let failure = super::unread(AX_CANNOT_COMPLETE, "type");
+        assert_eq!((failure.code, failure.delivery), (crate::failure::codes::APP_UNRESPONSIVE, crate::failure::Delivery::NotDelivered));
+        assert_eq!(failure.details, Some(serde_json::json!({ "retryable": true })));
+    }
+
+    #[test]
+    fn names_no_value_in_any_stepper_failure() {
+        let digitless = |failure: crate::failure::Failure| {
+            assert!(!failure.message.chars().any(|c| c.is_ascii_digit()), "names a value: {}", failure.message);
+        };
+        // Wraps: one step up from 42 goes to 0.
+        let value = Cell::new(42.0);
+        digitless(
+            step_to(
+                43.0,
+                Some(42.0),
+                later(),
+                |_| {
+                    value.set(0.0);
+                    Ok(())
+                },
+                || Some(value.get()),
+            )
+            .expect_err("wraps"),
+        );
+        // Steps past and back: 40, 42, 44 past 43, then back to 40.
+        let value = Cell::new(40.0);
+        digitless(
+            step_to(
+                43.0,
+                Some(40.0),
+                later(),
+                |up| {
+                    value.set(value.get() + if up { 2.0 } else { -2.0 });
+                    Ok(())
+                },
+                || Some(value.get()),
+            )
+            .expect_err("past"),
+        );
+        // Steps past and cannot go back.
+        let value = Cell::new(40.0);
+        digitless(
+            step_to(
+                43.0,
+                Some(40.0),
+                later(),
+                |up| {
+                    if up {
+                        value.set(value.get() + 2.0)
+                    }
+                    Ok(())
+                },
+                || Some(value.get()),
+            )
+            .expect_err("stuck past"),
+        );
+        // Already showed the target up to rounding, and the step to tell it left it changed.
+        let summed = 0.1 + 0.1 + 0.1;
+        let value = Cell::new(summed);
+        digitless(
+            step_to(
+                0.3,
+                Some(summed),
+                later(),
+                |up| {
+                    if !up {
+                        value.set(value.get() - 0.1)
+                    }
+                    Ok(())
+                },
+                || Some(value.get()),
+            )
+            .expect_err("left changed"),
+        );
+        // Out of time before the first step.
+        digitless(step_to(43.0, Some(40.0), Instant::now(), |_| Ok(()), || Some(40.0)).expect_err("no time"));
     }
 
     #[test]
@@ -1187,5 +1417,64 @@ mod tests {
         assert_eq!(presses.get(), 1);
         let unreadable = press_to_state(1, None, || Ok(()), || None);
         assert!(!unreadable.unwrap());
+    }
+
+    #[test]
+    fn lets_a_scroll_area_scroll_itself_only_with_a_scroll_bar_for_the_axis() {
+        let pages = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+        let swiftui = pages(&["AXScrollDownByPage", "AXScrollUpByPage", "AXScrollLeftByPage", "AXScrollRightByPage"]);
+        // A SwiftUI scroll area offers every page action: only its scroll bar for the axis says it scrolls along it.
+        assert!(!super::scroll::scrolls_itself("scrollarea", false, &swiftui, "down"));
+        assert!(super::scroll::scrolls_itself("scrollarea", true, &swiftui, "down"));
+        assert!(super::scroll::scrolls_itself("scrollarea", true, &[], "left"));
+        // Any other role scrolls itself by the page action for the direction.
+        assert!(super::scroll::scrolls_itself("list", false, &pages(&["AXScrollDownByPage"]), "down"));
+        assert!(!super::scroll::scrolls_itself("list", false, &pages(&["AXScrollDownByPage"]), "right"));
+        assert!(!super::scroll::scrolls_itself("list", false, &[], "up"));
+    }
+
+    #[test]
+    fn confirms_no_secure_fill_by_a_field_that_went_away_or_did_not_answer() {
+        use crate::ax::{AX_ATTRIBUTE_UNSUPPORTED, AX_CANNOT_COMPLETE, AX_INVALID_ELEMENT, Value};
+        assert_eq!(super::secure_count(Ok(Value::Number(8.0))), Ok(Some(8)));
+        // A field that counts none is taken at the write's word.
+        assert_eq!(super::secure_count(Err(AX_ATTRIBUTE_UNSUPPORTED)), Ok(None));
+        assert_eq!(super::secure_count(Err(AX_CANNOT_COMPLETE)), Err(()));
+        assert_eq!(super::secure_count(Err(AX_INVALID_ELEMENT)), Err(()));
+    }
+
+    /// A node of a fake accessibility tree, for the text gathering that names a row.
+    #[derive(Clone)]
+    struct Fake {
+        role: &'static str,
+        label: Option<&'static str>,
+        children: Vec<Fake>,
+    }
+
+    fn fake(role: &'static str, label: Option<&'static str>, children: Vec<Fake>) -> Fake {
+        Fake { role, label, children }
+    }
+
+    fn gathered(row: &Fake) -> Option<String> {
+        let mut texts = Vec::new();
+        super::gather_texts(row, 0, &mut texts, &|node: &Fake| Ok(node.children.clone()), &|node: &Fake| Ok(node.role), &|node: &Fake| {
+            Ok(node.label.map(str::to_owned))
+        })
+        .expect("read");
+        crate::snapshot::content_name(&texts)
+    }
+
+    #[test]
+    fn names_a_row_from_the_texts_under_its_texts_as_the_snapshot_does() {
+        // An untitled heading over "Paid": the snapshot walks into it, and so does the row's name.
+        let row = fake("row", None, vec![fake("statictext", Some("Invoice"), vec![]), fake("heading", None, vec![fake("statictext", Some("Paid"), vec![])])]);
+        assert_eq!(gathered(&row).as_deref(), Some("Invoice Paid"));
+        // A titled text comes after the texts inside it, in the snapshot's order.
+        let titled = fake("row", None, vec![fake("heading", Some("Total"), vec![fake("statictext", Some("42"), vec![])])]);
+        assert_eq!(gathered(&titled).as_deref(), Some("42 Total"));
+        // A scroll bar's parts are not read.
+        let scrolled =
+            fake("row", None, vec![fake("statictext", Some("Notes"), vec![]), fake("scrollbar", None, vec![fake("statictext", Some("50%"), vec![])])]);
+        assert_eq!(gathered(&scrolled).as_deref(), Some("Notes"));
     }
 }

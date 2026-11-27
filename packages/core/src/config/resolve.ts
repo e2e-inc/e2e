@@ -183,7 +183,7 @@ const REMOVED_TOP_LEVEL_KEYS: ReadonlyMap<string, string> = new Map([
   ['specVersion', 'delete it; the runner version is the format version'],
   [
     'limits',
-    'set maxInputTokens on each agent (it was limits.maxModelTokensPerCall); the runner fixes maxAgentContextBytes, maxLedgerBytes, and maxEventsPerStep',
+    'set maxInputTokens (it was limits.maxModelTokensPerCall) and maxContextBytes (it was limits.maxAgentContextBytes) on each agent; the runner fixes maxLedgerBytes and maxEventsPerStep',
   ],
 ]);
 

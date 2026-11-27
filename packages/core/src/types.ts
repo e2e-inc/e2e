@@ -535,7 +535,7 @@ export interface SwipePathOptions {
   from: ScreenPoint;
   /** Where it lifts. */
   to: ScreenPoint;
-  /** Gesture duration in milliseconds; omitted = the engine's default. */
+  /** Gesture duration, an integer from 16 through 10000 ms; omitted = the engine's default. */
   duration?: number;
   direction?: never;
   momentum?: never;
@@ -1244,7 +1244,7 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
  * not a boolean, is `INVALID_ARGUMENT` before the first read.
  */
 export interface AsyncExpectation {
-  /** Inverts the matcher. A negated matcher passes after 1000 ms of continuous truth. */
+  /** Inverts the matcher. A negated matcher passes on the first read that satisfies the negation. */
   readonly not: AsyncExpectation;
   /** Waits for visibility; `visible: false` waits for hidden or absent state, as `toBeHidden`. */
   toBeVisible(options?: { visible?: boolean; timeout?: number }): Promise<void>;
@@ -1963,7 +1963,7 @@ export interface AgentOptions {
   /**
    * What the app calls things, told to every model call this agent makes,
    * act turns and judgments alike: the names of screens and menus, where a
-   * feature lives, which button submits a form. At most 16384 bytes.
+   * feature lives, which button submits a form. At most `maxContextBytes`.
    */
   context?: string;
   /** Committed actions per agent call, 1 through 100; default 25. */
@@ -1976,6 +1976,8 @@ export interface AgentOptions {
   maxObservationBytes?: number;
   /** Input tokens per model request, 1 through 1000000; default 64000. A dense screen is cut to fit under it. */
   maxInputTokens?: number;
+  /** Bytes `context` may take, 1024 through 65536; default 16384. */
+  maxContextBytes?: number;
   /**
    * Provider options every model call carries, e.g. a reasoning effort.
    * OpenAI and Azure OpenAI Responses calls also carry `store: false` and a

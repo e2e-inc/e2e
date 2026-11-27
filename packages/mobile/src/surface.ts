@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { CaptureSnapshotResult } from 'agent-device';
+import { formatPinnedRef, type CaptureSnapshotResult } from 'agent-device';
 import {
   EngineError,
   KEY_NAMES,
@@ -48,6 +48,7 @@ import {
   type ViewportPoint,
   type ViewportSize,
   ConfigurationError,
+  readPngSize,
   TestError,
 } from '@e2e-dev/core/engine';
 import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
@@ -81,7 +82,6 @@ import {
   invalidState,
   notActionable,
   logicalScreenSize,
-  readPngSize,
   sanitizeFilename,
   screenLocation,
   type RawScreenshotResult,
@@ -1044,16 +1044,17 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * Installs a build on the session's device. `reinstall` removes the app
    * named by `options.app` (else the pinned app) first, so the build starts
    * with no data; a plain install replaces the binary and keeps its data.
-   * A path passed in with nothing at it is `INVALID_ARGUMENT`, before any
-   * device command.
+   * A leased daemon can resolve an absolute path on its own filesystem.
+   * Other explicit paths must exist on the runner.
    */
   async installApp(appPath: string | undefined, options: InstallAppOptions, signal: AbortSignal): Promise<InstalledApp> {
     const build = appPath ?? this.app.appPath;
     if (build === undefined) throw invalidState("installApp needs a build: pass a path, or name one with the target's app.appPath");
     const resolved = path.resolve(this.projectRoot, build);
-    // A path the test passed is the test's own mistake when nothing is there;
-    // agent-device would refuse it as a device failure (exit 3).
-    if (appPath !== undefined && (appPath.trim() === '' || !existsSync(resolved))) {
+    // The remote client uploads a runner-visible build and forwards an absent
+    // path to the leased daemon. Relative paths belong to the project root.
+    const daemonCanResolve = this.device?.daemon !== undefined && path.isAbsolute(build);
+    if (appPath !== undefined && (appPath.trim() === '' || (!daemonCanResolve && !existsSync(resolved)))) {
       throw new TestError('INVALID_ARGUMENT', `device.installApp(${JSON.stringify(appPath)}): no build at ${resolved}; the path resolves against the project root`);
     }
     const selection = this.selection();
@@ -1366,7 +1367,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   private actionTarget(entry: NodeBinding, control = false): { ref: string } {
     const ref = control ? entry.controlRef : entry.ref;
     if (ref === '') throw notActionable(`node ${entry.id} has no agent-device ref to act on`);
-    return { ref: entry.refsGeneration === undefined ? `@${ref}` : `@${ref}~s${entry.refsGeneration}` };
+    return { ref: entry.refsGeneration === undefined ? `@${ref}` : formatPinnedRef(ref, entry.refsGeneration) };
   }
 
   /**

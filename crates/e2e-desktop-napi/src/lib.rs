@@ -82,11 +82,11 @@ pub fn process_started(pid: i32) -> Option<f64> {
     process::started(pid).map(|micros| micros as f64)
 }
 
-/// Every process whose environment holds `marker` (`NAME=value`); `null` when the processes cannot be listed. It reads
+/// Every process that carries the launch `token`; `null` when the processes cannot be listed. It reads
 /// every process, which takes tens of milliseconds, so it runs on a blocking thread, off the JavaScript thread.
 #[napi]
-pub async fn processes_carrying(marker: String) -> Option<Vec<i32>> {
-    spawn_blocking(move || process::carrying(&marker)).await.ok().flatten()
+pub async fn processes_carrying(token: String) -> Option<Vec<i32>> {
+    spawn_blocking(move || process::carrying(&token)).await.ok().flatten()
 }
 
 /// The path of the installed app a bundle id or an app name names, as a launch would find it; `null` when none does.
@@ -286,6 +286,17 @@ pub async fn focus_window(pid: i32, window_id_text: String, input_id: Option<u32
     let deadline = deadline(timeout_ms.unwrap_or(60_000.0));
     blocking(move || {
         actions::focus_window(pid, window_id(&window_id_text)?, input_id, deadline)?;
+        Ok(serde_json::json!({}))
+    })
+    .await
+}
+
+/// Closes a window as its close button does. `inputId` names it, so `cancelInput` stops it before the button is pressed.
+#[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
+pub async fn close_window(pid: i32, window_id_text: String, input_id: Option<u32>, timeout_ms: Option<f64>) -> Value {
+    let deadline = deadline(timeout_ms.unwrap_or(60_000.0));
+    blocking(move || {
+        actions::close_window(pid, window_id(&window_id_text)?, input_id, deadline)?;
         Ok(serde_json::json!({}))
     })
     .await

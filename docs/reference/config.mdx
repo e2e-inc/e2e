@@ -599,9 +599,11 @@ type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumen
 ```
 
 - An object value is a string, a finite number below 2^53 in magnitude, a
-  boolean, or a list of strings. A name has no leading dash, whitespace, or
-  control characters, and nothing holds a NUL character. A value read from the
-  environment may be `undefined`: that entry is left out.
+  boolean, or a list of strings. A name has no leading dash and no control
+  characters. Spaces inside a name are fine, as in
+  `'NSSplitView Subview Frames Main'`; a space at either end and any other
+  whitespace are not. Nothing holds a NUL character. A
+  value read from the environment may be `undefined`: that entry is left out.
 - The table under
   [Launch arguments and permissions](/reference/mobile#launch-arguments-and-permissions)
   shows each value type on iOS and Android.
@@ -610,7 +612,7 @@ type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumen
 
 | Throws | When |
 | --- | --- |
-| `INVALID_CONFIG` | A list item that is not a string. An object with an empty name, a name with whitespace or a control character, a value of another kind, a number beyond 2^53 - 1 in magnitude, or a NUL character anywhere. The engine adds its own rules: see [the mobile reference](/reference/mobile#launch-arguments-and-permissions). |
+| `INVALID_CONFIG` | A list item that is not a string. An object with an empty name, a name with a control character, a space at either end, or whitespace other than a space, a value of another kind, a number beyond 2^53 - 1 in magnitude, or a NUL character anywhere. The engine adds its own rules: see [the mobile reference](/reference/mobile#launch-arguments-and-permissions). |
 
 #### `permissions`
 
@@ -1109,6 +1111,7 @@ export default {
 | [`judgmentTimeout`](#judgmenttimeout) | `number` | `30000` |
 | [`maxObservationBytes`](#maxobservationbytes) | `number` | `262144` |
 | [`maxInputTokens`](#maxinputtokens) | `number` | `64000` |
+| [`maxContextBytes`](#maxcontextbytes) | `number` | `16384` |
 | [`providerOptions`](#provideroptions) | `Record<string, ProviderOptions[string] \| undefined>` | - |
 
 - Tests use the `default` agent unless you select another: with
@@ -1185,7 +1188,7 @@ turns and judgments alike.
 context: 'Plans are called tiers. Billing lives under Settings.',
 ```
 
-At most 16384 bytes.
+At most [`maxContextBytes`](#maxcontextbytes).
 
 #### `system`
 
@@ -1278,6 +1281,19 @@ maxInputTokens: 128_000, // default: 64000
 - 1 through 1000000.
 - A dense screen is cut to fit under it.
 
+#### `maxContextBytes`
+
+Bytes [`context`](#context) may take. A longer one fails the config load.
+
+```ts
+maxContextBytes: 32_768, // default: 16384
+```
+
+- 1024 through 65536.
+- The context counts against [`maxInputTokens`](#maxinputtokens) byte for
+  byte and leaves the screen less room, so raise both together. A context
+  that leaves the screen no room fails the config load.
+
 #### `providerOptions`
 
 Provider options every model call carries, such as a reasoning effort.
@@ -1301,7 +1317,8 @@ value in an old shape fails the config load with `INVALID_CONFIG`:
 | `timeout` | `judgmentTimeout` |
 | `maxTurns` (on the entry or `createToolLoopExecutor`) | `maxModelCalls` |
 | top-level `limits.maxModelTokensPerCall` | `maxInputTokens` on each agent |
-| top-level `limits.maxAgentContextBytes`, `maxLedgerBytes`, `maxEventsPerStep` | removed; the runner fixes them at 16384 bytes, 8192 bytes, and 1000 events |
+| top-level `limits.maxAgentContextBytes` | `maxContextBytes` on each agent |
+| top-level `limits.maxLedgerBytes`, `maxEventsPerStep` | removed; the runner fixes them at 8192 bytes and 1000 events |
 
 ### filters
 
@@ -1621,12 +1638,12 @@ opt-in. Remove that line to share replays with CI and teammates. CI stays
 ## Run limits
 
 The report's `run.limits` block records the ceilings a run enforced. There is
-no `limits` key: two fields come from the agents, and the runner fixes the
+no `limits` key: three fields come from the agents, and the runner fixes the
 rest.
 
 | Report field | Value |
 | --- | --- |
-| `maxAgentContextBytes` | 16384: an agent's `context` and a test's `agentContext` |
+| `maxAgentContextBytes` | the largest `agents.<name>.maxContextBytes` |
 | `maxLedgerBytes` | 8192: the prior-step ledger an act step reads |
 | `maxEventsPerStep` | 1000: events recorded per step |
 | `maxObservationBytes` | the largest `agents.<name>.maxObservationBytes` |
@@ -2043,7 +2060,7 @@ export interface AgentOptions {
   model?: ModelInstance;
   /** Model for `assert`, `waitFor`, and `extract`; defaults to `model`. */
   judge?: ModelInstance;
-  /** What the app calls things, told to every model call; at most 16384 bytes. */
+  /** What the app calls things, told to every model call; at most `maxContextBytes`. */
   context?: string;
   /** Committed actions per agent call, 1 through 100; default 25. */
   maxSteps?: number;
@@ -2055,6 +2072,8 @@ export interface AgentOptions {
   maxObservationBytes?: number;
   /** Input tokens per model request, 1 through 1000000; default 64000. */
   maxInputTokens?: number;
+  /** Bytes `context` may take, 1024 through 65536; default 16384. */
+  maxContextBytes?: number;
   /** Provider options every model call carries, such as a reasoning effort. */
   providerOptions?: Readonly<Record<string, ProviderOptions[string] | undefined>>;
 }

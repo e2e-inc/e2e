@@ -89,6 +89,8 @@ export interface Launched {
   readonly bundle_id?: string;
   /** When the process started, in microseconds since the epoch, read as the driver claimed it. */
   readonly started?: number;
+  /** The copies of the app that ran before the launch, which the launch never claims. */
+  readonly running_before: readonly number[];
 }
 
 /** What the driver can do: one function per native call. */
@@ -100,8 +102,8 @@ export interface DesktopDriver {
   screenLocked(): boolean | null;
   /** When a process started, in microseconds since the epoch; null when it is not running. */
   processStarted(pid: number): number | null;
-  /** Every process whose environment holds `marker` (`NAME=value`); null when the processes cannot be listed. */
-  processesCarrying(marker: string): Promise<readonly number[] | null>;
+  /** Every process that carries the launch `token`, in its environment or its arguments; null when the processes cannot be listed. */
+  processesCarrying(token: string): Promise<readonly number[] | null>;
   /** Drops the refs of a process that quit. */
   forgetProcess(pid: number): void;
   /** The path of the installed app a bundle id or an app name names, as a launch finds it; null when none does. */
@@ -134,6 +136,8 @@ export interface DesktopDriver {
   checkCombo(combo: string): Promise<Envelope<unknown>>;
   /** `inputId` names the call, so `cancelInput` stops it before it changes the focus. */
   focusWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
+  /** Closes a window as its close button does, and answers once it left the app's windows. `inputId` names the call, so `cancelInput` stops it before the button is pressed. */
+  closeWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
   /**
    * `inputId` names the pointer input, so `cancelInput` stops what it has yet to send. With `target`, the window the
    * point was taken in, no click goes once another window or app took the focus from it, or its sheet changed: `sheet`
@@ -242,6 +246,12 @@ export class DriverFailure extends Error {
     this.code = failure.code;
     this.notDelivered = failure.disposition?.delivery === 'not_delivered';
     this.details = failure.details ?? {};
+  }
+
+  /** The copies of the app a failed launch says ran before it; none when it names none. */
+  get runningBefore(): readonly number[] {
+    const before = this.details.running_before;
+    return Array.isArray(before) ? before.filter((pid): pid is number => typeof pid === 'number') : [];
   }
 }
 

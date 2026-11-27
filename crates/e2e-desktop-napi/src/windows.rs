@@ -179,9 +179,13 @@ fn system_dialog(identifiers: &[String]) -> bool {
 }
 
 /// Whether `window` holds the app's focused window: is it, or carries it as a sheet or an alert. The app's focused window
-/// is the sheet then, and keys reach the window through it.
-pub fn holds_focus(focused: &Element, window: &Element) -> bool {
-    focused == window || focused.element("AXParent").as_ref() == Some(window)
+/// is the sheet then, and keys reach the window through it. A parent the app did not answer for in time is no proof
+/// either way: it fails as `AX_CANNOT_COMPLETE`.
+pub fn holds_focus(focused: &Element, window: &Element) -> Result<bool, ax::AXError> {
+    if focused == window {
+        return Ok(true);
+    }
+    Ok(crate::actions::stalled(focused.attribute("AXParent"))?.and_then(|parent| parent.element().cloned()).as_ref() == Some(window))
 }
 
 /// The windows of one process: every accessibility window, and every
@@ -192,7 +196,9 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
     }
     let app = Element::application(pid);
     let accessible = ax_windows(&app)?;
-    let focused = app.element("AXFocusedWindow");
+    // The app's focus decides which window is focused: a stall reading it fails the list, which a retry may get past,
+    // rather than list every window as unfocused.
+    let focused = crate::actions::element_attribute(&app, "AXFocusedWindow", "list windows")?;
     let server: Vec<ServerWindow> = server_windows().into_iter().filter(|window| window.pid == pid).collect();
     let mut out = Vec::new();
     let mut listed = Vec::new();
@@ -218,13 +224,17 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
             (Some(ax::Value::Point(x, y)), Some(ax::Value::Size(width, height))) => Some(Rect { x: *x, y: *y, width: *width, height: *height }),
             _ => None,
         };
+        let holds = match &focused {
+            Some(focused) => crate::actions::holds(focused, element, "list windows")?,
+            None => false,
+        };
         listed.push(id);
         out.push(WindowInfo {
             id: id.to_string(),
             title: title.or_else(|| entry.and_then(|window| window.title.clone())),
-            is_focused: focused.as_ref().is_some_and(|focused| holds_focus(focused, element)),
-            sheet_focused: focused.as_ref().is_some_and(|focused| focused != element && holds_focus(focused, element)),
-            sheet_id: focused.as_ref().filter(|focused| *focused != element && holds_focus(focused, element)).map(Element::sheet_key),
+            is_focused: holds,
+            sheet_focused: holds && focused.as_ref() != Some(element),
+            sheet_id: focused.as_ref().filter(|focused| holds && *focused != element).map(Element::sheet_key),
             is_main: values[5].as_ref().and_then(|value| value.boolean()).unwrap_or(false),
             visible: entry.is_some_and(|window| window.onscreen),
             accessible: true,
@@ -280,6 +290,20 @@ fn complete(listed: usize, unresolved: usize) -> Outcome<()> {
             .with_details(serde_json::json!({ "retryable": true })));
     }
     Ok(())
+}
+
+/// Whether a window of `pid` has left both lists `list` reads: the app's accessibility windows, and the window server's
+/// windows on screen, which keeps a closing window through its animation. An app that quits with its last window, as
+/// Calculator does, took the window with it: its accessibility then answers nothing, so the process is asked first.
+pub fn closed(pid: i32, id: u32) -> bool {
+    if !crate::process::alive(pid) {
+        return true;
+    }
+    let listed = match ax_windows(&Element::application(pid)) {
+        Ok(open) => open.iter().any(|(_, window)| *window == Some(id)),
+        Err(failure) => failure.code != codes::APP_NOT_FOUND,
+    };
+    !listed && !server_windows().iter().any(|window| window.pid == pid && window.id == id && window.onscreen)
 }
 
 /// The accessibility element of a window of `pid` by its window server id.

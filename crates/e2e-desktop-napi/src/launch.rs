@@ -17,8 +17,16 @@ use std::time::{Duration, Instant};
 /// The variable that carries a launch's token into the process it starts.
 pub const TOKEN_VARIABLE: &str = "E2E_DESKTOP_LAUNCH";
 
-/// The argument that carries a launch's token into an app whose environment macOS hides, followed by the token.
-pub const TOKEN_ARGUMENT: &str = "-E2EDesktopLaunch";
+/// The environment entry of a launch's token.
+pub fn token_marker(token: &str) -> String {
+    format!("{TOKEN_VARIABLE}={token}")
+}
+
+/// The argument that carries a launch's token into an app whose environment macOS hides: `-E2EDesktopLaunch=<token>`,
+/// one entry, so no app reads the token as a file or a URL to open.
+pub fn token_argument(token: &str) -> String {
+    format!("-E2EDesktopLaunch={token}")
+}
 
 /// What `launch` was asked to start.
 pub struct LaunchRequest {
@@ -54,6 +62,9 @@ pub struct Launched {
     /// later one the OS gives the same id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started: Option<f64>,
+    /// The copies of the app that ran before the launch. An app that runs one copy at a time hands the launch to one
+    /// of them and exits, which the caller can then say.
+    pub running_before: Vec<i32>,
 }
 
 /// The folders an app named by its name is looked for in, in order.
@@ -66,13 +77,13 @@ fn app_folders() -> Vec<String> {
     folders
 }
 
-/// The bundle of an installed app: by bundle id first, then by name in the usual folders, in any case, then by name
-/// through LaunchServices.
 /// The path of the installed app a bundle id or an app name names, as a launch finds it; `None` when none does.
 pub fn installed_path(target: &str) -> Option<String> {
     installed(target)?.path().map(|path| path.to_string())
 }
 
+/// The bundle of an installed app: by bundle id first, then by name in the usual folders, in any case, then by name
+/// through LaunchServices.
 fn installed(target: &str) -> Option<Retained<NSURL>> {
     let workspace = NSWorkspace::sharedWorkspace();
     if let Some(url) = workspace.URLForApplicationWithBundleIdentifier(&NSString::from_str(target)) {
@@ -125,8 +136,8 @@ fn hides_environment(bundle: &str) -> bool {
 /// Apple's App Store apps (Numbers, Pages, Xcode: signed by Apple Mac OS
 /// Application Signing, with no platform identifier), and builds signed with
 /// the `restrict` flag. Every Mac App Store app carries that signature, so
-/// each gets the token as arguments too, which the claim reads only when the
-/// environment is hidden.
+/// each gets the token as an argument too, which the claim reads only when
+/// the environment is hidden.
 fn hidden_by(signature: &str) -> bool {
     signature.lines().any(|line| {
         line.starts_with("Platform identifier=")
@@ -139,8 +150,8 @@ fn hidden_by(signature: &str) -> bool {
 /// environment given (LaunchServices hands the app the environment of the
 /// process that asks), and finds the process it started: the new copy whose
 /// environment carries the launch token. An app whose environment macOS
-/// hides also gets the token as its last arguments (`-E2EDesktopLaunch
-/// <token>`, a user default AppKit ignores), which stay readable. A copy
+/// hides also gets the token as its last argument
+/// (`-E2EDesktopLaunch=<token>`, which AppKit ignores), which stays readable. A copy
 /// with neither is never taken: it may be one the user opened meanwhile.
 pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     let started = request.asked;
@@ -168,10 +179,10 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     if !request.activate {
         command.arg("-g");
     }
-    command.arg("--env").arg(format!("{TOKEN_VARIABLE}={token}"));
+    command.arg("--env").arg(token_marker(&token));
     command.arg(&bundle).arg("--args").args(&request.arguments);
     if hides_environment(&bundle) {
-        command.arg(TOKEN_ARGUMENT).arg(&token);
+        command.arg(token_argument(&token));
     }
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     // The lookup and `codesign` above can take a while: an app the caller gave up on is never started.
@@ -209,36 +220,61 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
         }
     }
 
-    let marker = format!("{TOKEN_VARIABLE}={token}");
+    let marker = token_marker(&token);
     let claim_until = (Instant::now() + request.claim).min(started + request.timeout);
     loop {
         let fresh: Vec<i32> = running_copies(&bundle_id).into_iter().filter(|pid| !before.contains(pid)).collect();
         for pid in &fresh {
             let ours = match crate::process::carries(*pid, &marker) {
                 Some(carried) => carried,
-                None => crate::process::argument_pair(*pid, TOKEN_ARGUMENT, &token),
+                None => crate::process::holds_argument(*pid, &token_argument(&token)),
             };
             if ours {
-                return Ok(launched(*pid, &bundle, &bundle_id));
+                return Ok(launched(*pid, &bundle, &bundle_id, before));
             }
         }
         if Instant::now() >= claim_until {
-            return Err(Failure::unconfirmed(codes::TIMEOUT, format!("{bundle} was opened, but no new process carries this launch's token"))
-                .with_details(serde_json::json!({ "kind": "unclaimed" })));
+            return Err(unclaimed(&bundle, &before));
         }
         sleep(Duration::from_millis(50));
     }
 }
 
-fn launched(pid: i32, bundle: &str, bundle_id: &str) -> Launched {
+/// The failure of a launch none of whose new processes carries its token, with the copies that ran before it: the
+/// caller reads them from `running_before` to say a running copy may have taken the launch.
+fn unclaimed(bundle: &str, before: &[i32]) -> Failure {
+    Failure::unconfirmed(codes::TIMEOUT, format!("{bundle} was opened, but no new process carries this launch's token"))
+        .with_details(serde_json::json!({ "kind": "unclaimed", "running_before": before }))
+}
+
+fn launched(pid: i32, bundle: &str, bundle_id: &str, running_before: Vec<i32>) -> Launched {
     let name = NSRunningApplication::runningApplicationWithProcessIdentifier(pid).and_then(|app| app.localizedName()).map(|name| name.to_string());
     let app = name.unwrap_or_else(|| Path::new(bundle).file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default());
-    Launched { pid, app, bundle_id: Some(bundle_id.to_owned()), started: crate::process::started(pid).map(|started| started as f64) }
+    Launched { pid, app, bundle_id: Some(bundle_id.to_owned()), started: crate::process::started(pid).map(|started| started as f64), running_before }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::hidden_by;
+    use super::{Launched, hidden_by, token_argument, unclaimed};
+
+    #[test]
+    fn names_the_copies_that_ran_before_the_launch() {
+        let launched = |running_before| Launched { pid: 7, app: "Form".to_owned(), bundle_id: None, started: None, running_before };
+        assert_eq!(serde_json::to_value(launched(vec![3, 5])).unwrap(), serde_json::json!({ "pid": 7, "app": "Form", "running_before": [3, 5] }));
+        assert_eq!(serde_json::to_value(launched(vec![])).unwrap(), serde_json::json!({ "pid": 7, "app": "Form", "running_before": [] }));
+    }
+
+    #[test]
+    fn names_the_copies_that_ran_before_an_unclaimed_launch() {
+        let failure = unclaimed("Form.app", &[3, 5]);
+        assert_eq!(failure.details, Some(serde_json::json!({ "kind": "unclaimed", "running_before": [3, 5] })));
+        assert_eq!(unclaimed("Form.app", &[]).details, Some(serde_json::json!({ "kind": "unclaimed", "running_before": [] })));
+    }
+
+    #[test]
+    fn spells_the_launch_token_as_one_argument() {
+        assert_eq!(token_argument("8ff2bdfb-142f"), "-E2EDesktopLaunch=8ff2bdfb-142f");
+    }
 
     #[test]
     fn tells_which_signatures_hide_the_environment() {

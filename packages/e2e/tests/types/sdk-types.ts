@@ -667,6 +667,8 @@ screen.getByRole('grid').getByRole('rowgroup').getByRole('gridcell');
 screen.getByRole('carousel');
 // @ts-expect-error a Playwright role the vocabulary does not carry stays out
 screen.getByRole('generic');
+// @ts-expect-error static text is `text` in a device or desktop tree, which getByText finds; it is not a role
+screen.getByRole('text', 'Words');
 // @ts-expect-error img is an alias getByRole accepts, never a Role an engine emits
 'img' satisfies Role;
 'image' satisfies Role;
@@ -1664,7 +1666,7 @@ redactStepText('text');
 // A grammar tool's result is a rendered screen: text, or text with its screenshot.
 declare const rendered: ScreenOutput;
 if (typeof rendered !== 'string') rendered.pixels.mediaType satisfies string;
-// @ts-expect-error limits left the config: maxInputTokens is per agent, the rest are fixed by the runner
+// @ts-expect-error limits left the config: maxInputTokens and maxContextBytes are per agent, the rest are fixed by the runner
 ({ targets, limits: { maxModelTokensPerCall: 1_000 } }) satisfies E2EConfig;
 
 declare const report: Report;
@@ -1725,7 +1727,7 @@ grok('grok-4', {});
 opencodeConsole('go/deepseek-v4.1-flash', {});
 
 // agents.<name>: the judge slot beside model, and every budget in one entry.
-({ targets: [{ engine }], agents: { default: { model, judge: model, judgmentTimeout: 30_000, maxSteps: 5, maxModelCalls: 10, maxObservationBytes: 1000, maxInputTokens: 32_000 } } }) satisfies E2EConfig;
+({ targets: [{ engine }], agents: { default: { model, judge: model, judgmentTimeout: 30_000, maxSteps: 5, maxModelCalls: 10, maxObservationBytes: 1000, maxInputTokens: 32_000, maxContextBytes: 32_768 } } }) satisfies E2EConfig;
 // @ts-expect-error the judge is an AI SDK instance like model; a string names no gateway model
 ({ targets: [{ engine }], agents: { default: { model, judge: 'openai/gpt-5.6-luna-fast' } } }) satisfies E2EConfig;
 // @ts-expect-error judgmentTimeout is milliseconds, not a duration string
@@ -1944,6 +1946,7 @@ void host.openSession({
   onStep: (step) => {
     step satisfies StepProgress;
     if (step.phase === 'end') step.status satisfies StepRecord['status'];
+    if (step.phase === 'end') step.cache?.mode satisfies 'self-finalized' | 'agent-concluded' | 'missed' | undefined;
   },
 } satisfies OpenSessionOptions);
 // @ts-expect-error every hosted session requires options with a name
