@@ -529,8 +529,13 @@ fn unblocked(element: &Element, pid: i32) -> Outcome<()> {
     let inside = |holder: &Element| holder == element || ancestors.contains(holder);
     let named = |holder: &Element| holder.text("AXTitle").filter(|title| !title.trim().is_empty()).map(|title| format!(" ({title})")).unwrap_or_default();
     if let Some(window) = ancestors.iter().find(|ancestor| ancestor.text("AXRole").as_deref() == Some("AXWindow")) {
-        let sheets = window.elements("AXChildren", 4096).unwrap_or_default().into_iter().filter(|child| child.text("AXRole").as_deref() == Some("AXSheet"));
-        for sheet in sheets {
+        // A read the app did not answer is no proof no sheet is open: the action waits for the next try.
+        let children = match window.elements("AXChildren", 4096) {
+            Ok(children) => children,
+            Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, "check for a sheet")),
+            Err(_) => Vec::new(),
+        };
+        for sheet in children.into_iter().filter(|child| child.text("AXRole").as_deref() == Some("AXSheet")) {
             if !inside(&sheet) {
                 return Err(Failure::refused(
                     codes::ACTION_FAILED,
@@ -539,8 +544,13 @@ fn unblocked(element: &Element, pid: i32) -> Outcome<()> {
             }
         }
     }
-    for (window, _) in windows::ax_windows(&Element::application(pid)).unwrap_or_default() {
-        if window.boolean("AXModal") == Some(true) && !inside(&window) {
+    for (window, _) in windows::ax_windows(&Element::application(pid))? {
+        let modal = match window.attribute("AXModal") {
+            Ok(value) => value.boolean() == Some(true),
+            Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, "check for a modal window")),
+            Err(_) => false,
+        };
+        if modal && !inside(&window) {
             return Err(Failure::refused(
                 codes::ACTION_FAILED,
                 format!("a modal window{} is open, so the user cannot reach the element; finish it first", named(&window)),
