@@ -30,7 +30,9 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
     // that was there from the start keeps its sheet. Read before the field's own check, so a window a focus handler opens
     // after it shows as a change at the first key, and one it opened before fails that check.
     let typing_in = element_attribute(&Element::application(entry.pid), "AXFocusedWindow", "type")?;
-    if typing_in.as_ref().is_some_and(|start| !windows::holds_focus(start, &window)) {
+    if let Some(start) = &typing_in
+        && !holds(start, &window, "type")?
+    {
         return Err(Failure::refused(codes::ACTION_FAILED, "another window took the keyboard before typing began, so nothing was typed"));
     }
     // Coming forward can run a handler that opens a sheet or another window, and the app can move focus on: the keys
@@ -87,7 +89,10 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
         let focused = element_attribute(&Element::application(entry.pid), "AXFocusedWindow", "type")?;
         let held = match &typing_in {
             Some(start) => focused.as_ref() == Some(start),
-            None => focused.is_some_and(|focused| windows::holds_focus(&focused, &window)),
+            None => match &focused {
+                Some(focused) => holds(focused, &window, "type")?,
+                None => false,
+            },
         };
         let forward = !physical || frontmost(entry.pid)?;
         if held && forward {
