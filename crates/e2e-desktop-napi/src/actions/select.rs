@@ -65,26 +65,44 @@ pub(super) fn own_label(element: &Element) -> Result<Option<String>, AXError> {
 /// The texts inside an element, in reading order, as the snapshot gathers a row's name from them.
 pub(super) fn row_texts(element: &Element, depth: usize, texts: &mut Vec<String>) -> Result<(), AXError> {
     // Every child is read, as the snapshot reads them: a label cut short could match a prefix of the one asked for.
-    let children = match element.elements("AXChildren", crate::snapshot::MAX_CHILDREN) {
-        Ok(children) => children,
-        Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
-        Err(_) => Vec::new(),
+    let children = |element: &Element| match element.elements("AXChildren", crate::snapshot::MAX_CHILDREN) {
+        Ok(children) => Ok(children),
+        Err(ax::AX_CANNOT_COMPLETE) => Err(ax::AX_CANNOT_COMPLETE),
+        Err(_) => Ok(Vec::new()),
     };
-    if !children.is_empty() && depth >= ROW_TEXT_DEPTH {
+    let role = |element: &Element| match element.attribute("AXRole") {
+        Ok(value) => Ok(roles::role(value.text().unwrap_or_default(), None)),
+        Err(ax::AX_CANNOT_COMPLETE) => Err(ax::AX_CANNOT_COMPLETE),
+        Err(_) => Ok(roles::role("", None)),
+    };
+    gather_texts(element, depth, texts, &children, &role, &own_label)
+}
+
+/// The texts under `node`, gathered as the snapshot's walk gathers them for a name from content: every level is read,
+/// a text's own children before the text itself, so a row holding "Invoice" and an untitled heading over "Paid" is
+/// "Invoice Paid" here as it is in the snapshot. A scroll bar's parts are not read, as the snapshot reads none. A node
+/// deeper than `ROW_TEXT_DEPTH` with children counts as a read the app did not answer.
+pub(super) fn gather_texts<T>(
+    node: &T,
+    depth: usize,
+    texts: &mut Vec<String>,
+    children: &dyn Fn(&T) -> Result<Vec<T>, AXError>,
+    role: &dyn Fn(&T) -> Result<&'static str, AXError>,
+    label: &dyn Fn(&T) -> Result<Option<String>, AXError>,
+) -> Result<(), AXError> {
+    let below = children(node)?;
+    if !below.is_empty() && depth >= ROW_TEXT_DEPTH {
         return Err(ax::AX_CANNOT_COMPLETE);
     }
-    for child in children {
-        let role = match child.attribute("AXRole") {
-            Ok(value) => value.text().unwrap_or_default().to_owned(),
-            Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
-            Err(_) => String::new(),
-        };
-        if roles::text(roles::role(&role, None)) {
-            if let Some(text) = own_label(&child)? {
-                texts.push(text);
-            }
-        } else {
-            row_texts(&child, depth + 1, texts)?;
+    for child in below {
+        let kind = role(&child)?;
+        if kind != "scrollbar" {
+            gather_texts(&child, depth + 1, texts, children, role, label)?;
+        }
+        if roles::text(kind)
+            && let Some(text) = label(&child)?
+        {
+            texts.push(text);
         }
     }
     Ok(())

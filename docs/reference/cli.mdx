@@ -370,10 +370,11 @@ bunx e2e init my-app --example with-expo
   this one doesn't; a file you added stays. They never add a directory the
   project did not choose. `--skills` and `--mcp` name the exact locations
   instead and leave the others as they are.
-- Where pnpm links the skill from the installed package, in the project or
-  at its workspace root ([Let pnpm link the skill](/coding-agents)), `init`
-  leaves the links alone, writes no copy beside them, and warns about a copy
-  and a link in one folder.
+- When `init` finds a pnpm skill link in the project or at the workspace root
+  it detects ([Let pnpm link the skill](/coding-agents)), it leaves the link
+  alone and skips creating new copies. It can repair a copy
+  missing `SKILL.md` in another skills directory and warns about a copy and
+  a link in one folder when agents can load two skills there.
 - A `.claude/skills/e2e/` copy from an earlier version becomes the symlink
   when it holds only the shipped files. A copy with other files stays a copy
   and is refreshed.
