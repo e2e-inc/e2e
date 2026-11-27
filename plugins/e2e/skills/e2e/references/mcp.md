@@ -86,8 +86,10 @@ Everything a session does is a catalog tool run through
 - `test_lines`: every test line printed or passed so far, in order, as a
   draft test body.
 - `screenshot` (masked pixels; secure fields only), the point tools
-  (`tap_at`, `type_at`, ...) after a screenshot, `start_recording` and
-  `stop_recording`, and the project's own tools.
+  (`tap_at`, `type_at`, ...) after a screenshot, each with the test line of
+  the listed control it acted on (or `screen.tapAt` for a bare tap), or
+  `No test line:` and why, `start_recording` and `stop_recording`, and the
+  project's own tools.
 
 Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
 Full reference: docs/reference/mcp.mdx.

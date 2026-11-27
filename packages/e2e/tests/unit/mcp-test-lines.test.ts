@@ -7,9 +7,11 @@
 
 import type { ToolSet } from 'ai';
 import { describe, expect, it } from 'vitest';
-import type { ExecutorActions, ExecutorNode, ExecutorObservation, ExecutorObserveOptions, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
+import type { ExecutorActions, ExecutorNode, ExecutorObservation, ExecutorObserveOptions, ExecutorVerb, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
 import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
-import { createGrammarTools } from '@e2e-dev/core/lib/agent/primitives';
+import { imagePointToViewport } from '@e2e-dev/core/lib/agent/point-tap';
+import { createGrammarTools, grammarTools } from '@e2e-dev/core/lib/agent/primitives';
+import { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
 import type { LocatorExpression, NodeRef, SemanticNode } from '@e2e-dev/core/lib/engine/surface';
 import { TestError } from '@e2e-dev/core/lib/internal/errors';
 import { describeExpression } from '@e2e-dev/core/lib/locator/expression';
@@ -75,9 +77,14 @@ async function harness(options: {
   readonly testRan?: string;
   readonly attached?: boolean;
   readonly hasAgent?: boolean;
+  /** The verbs the target declares; the whole grammar by default. */
+  readonly verbs?: readonly ExecutorVerb[];
 }): Promise<Harness> {
   const root: Fake = { id: 'root', role: 'document', name: 'Page', y: 0, children: options.screen };
-  const base = fakeExecutorContext({ secrets: [{ name: 'admin.password', purpose: 'password' }, { name: 'apiKey', purpose: 'generic-secret' }] }).context;
+  const base = fakeExecutorContext({
+    secrets: [{ name: 'admin.password', purpose: 'password' }, { name: 'apiKey', purpose: 'generic-secret' }],
+    ...(options.verbs === undefined ? {} : { verbs: options.verbs }),
+  }).context;
   const ok = async (): Promise<void> => undefined;
   const actions: ExecutorActions = {
     ...base.actions,
@@ -92,6 +99,8 @@ async function harness(options: {
     truncated: false,
     viewport: { width: 800, height: 600 },
     ...(asked.tree === true && options.tree !== false ? { tree: listed(root) } : {}),
+    // A screenshot at twice the CSS pixels, as on a high-density display.
+    ...(asked.pixels === true ? { pixels: { data: new Uint8Array([1, 2, 3]), mediaType: 'image/png' as const, width: 1600, height: 1200, scale: 2, maskedRegionCount: 0 } } : {}),
   });
   const context: StepExecutorContext = { ...base, actions, observe };
   const nodes = new Map<string, Fake>();
@@ -103,6 +112,7 @@ async function harness(options: {
   // A match may be a node observe never listed: one the live screen has since grown.
   for (const node of Object.values(options.matches).flat()) index(node);
   let resolves = 0;
+  const presenter = new ScreenPresenter();
   const lines = new SessionTestLines({
     query: locateQuery,
     resolve: async (expression: LocatorExpression): Promise<readonly NodeRef[]> => {
@@ -111,6 +121,10 @@ async function harness(options: {
     },
     read: async (ref) => read(nodes.get(ref.id)!),
     redact: (text) => text.replaceAll('sk-live-0000', '<secret:apiKey>'),
+    pointOf: (x, y) => {
+      const shot = presenter.latestScreenshot;
+      return shot === undefined ? undefined : imagePointToViewport({ x, y }, shot.pixels, shot.viewport);
+    },
     appBase: { href: 'http://127.0.0.1:4100/', origin: 'http://127.0.0.1:4100' },
     fills: { credentials: [{ name: 'admin', username: 'ada@example.test', password: 'admin.password' }], secrets: ['apiKey'] },
     testRan: options.testRan,
@@ -118,7 +132,7 @@ async function harness(options: {
     hasAgent: options.hasAgent,
   });
   const watched = lines.watch(context);
-  const tools: ToolSet = { ...lines.wrap(createGrammarTools(watched)), test_lines: lines.tool() };
+  const tools: ToolSet = { ...lines.wrap(grammarTools(watched, { screen: presenter })), test_lines: lines.tool() };
   await watched.observe();
   return {
     tools,
@@ -165,12 +179,12 @@ describe('navigationLine', () => {
 });
 
 describe('SessionTestLines', () => {
-  it('answers every grammar action but the point tools, so a new verb needs a line or a reason', async () => {
+  it('answers every grammar action that acts, the point tools among them, so a new verb needs a line or a reason', async () => {
     const context = { ...fakeExecutorContext().context, observe: async () => ({ revision: 'r', text: '', truncated: false, viewport: { width: 1, height: 1 } }) };
     const tools = createGrammarTools(context);
     expect(new Set(Object.keys(tools))).toEqual(GRAMMAR_TOOL_NAMES);
     const wrapped = new SessionTestLines({ query: locateQuery, resolve: async () => [], read: async () => ({ ref: { id: 'x', revision: 'x' } }), redact: (text) => text }).wrap(tools);
-    expect(Object.keys(tools).filter((name) => wrapped[name] === tools[name]).toSorted()).toEqual(['drag_at', 'hover_at', 'observe', 'press_at', 'screenshot', 'select_at', 'tap_at', 'type_at']);
+    expect(Object.keys(tools).filter((name) => wrapped[name] === tools[name]).toSorted()).toEqual(['observe', 'screenshot']);
   });
 
   const save: Fake = { id: 'n2', role: 'button', name: 'Save', y: 40 };
@@ -436,6 +450,64 @@ describe('SessionTestLines', () => {
   it('forgets every id after a screen read without a tree, as the step does', async () => {
     const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] }, tree: false });
     expect(noteOf(await session.run('tap', { target: 'n2' }))).toBe('No test line: #n2 is not on the newest screen.');
+  });
+
+  describe('point tools', () => {
+    const notes: Fake = { id: 'n20', role: 'textbox', name: 'Notes', y: 100 };
+    const plan: Fake = { id: 'n21', role: 'combobox', name: 'Plan', y: 140 };
+    /** What the step's hit test finds at each CSS point: Save over y 40 to 60, Notes over 100 to 120, Plan over 140 to 160. */
+    const hitTest: ExecutorActions['hitTest'] = async (point) => {
+      const control = [save, notes, plan].find((node) => point.y >= node.y && point.y <= node.y + 20);
+      return { point, ...(control === undefined ? {} : { control: { id: control.id } }), summary: control === undefined ? 'nothing the screen lists is there' : `#${control.id}` };
+    };
+    const tapAt: ExecutorActions['tapAt'] = async (point) => ({ point, summary: `Tapped the point (${String(point.x)}, ${String(point.y)}).` });
+    const hoverAt: ExecutorActions['hoverAt'] = async (point) => ({ point, summary: `Hovered over the point (${String(point.x)}, ${String(point.y)}).` });
+    const dragAt: ExecutorActions['dragAt'] = async (from, to) => ({ from, to, summary: 'Dragged.' });
+    const pointActions = { hitTest, tapAt, hoverAt, dragAt };
+    const matches = { 'getByRole("button", name: "Save")': [save], 'getByRole("textbox", name: "Notes")': [notes], 'getByRole("combobox", name: "Plan")': [plan] };
+    // Every verb but the bare-point ones: the point tools act on the listed control under the point by id.
+    const byId = (Object.keys(fakeExecutorContext().context.actions) as ExecutorVerb[]).filter((verb) => verb !== 'tapAt' && verb !== 'hoverAt' && verb !== 'dragAt');
+
+    it('prints nothing for a point tool before the first screenshot, which does not act', async () => {
+      const session = await harness({ screen: [save], matches, actions: pointActions });
+      expect(await session.run('tap_at', { x: 20, y: 100 })).toMatch(/^No screenshot has been taken/);
+      expect(await session.run('test_lines', {})).toMatch(/^No test lines yet\./);
+    });
+
+    it('writes a bare tap as screen.tapAt in CSS pixels, where the engine takes the bare point', async () => {
+      const session = await harness({ screen: [save], matches, actions: pointActions });
+      await session.run('screenshot', {});
+      expect(noteOf(await session.run('tap_at', { x: 20, y: 102 }))).toBe(
+        'Test line: await screen.tapAt({ x: 10, y: 51 }); // a bare point holds only while the layout does; tap a listed node by id for a locator line',
+      );
+      expect(noteOf(await session.run('hover_at', { x: 20, y: 101 }))).toMatch(/^No test line: a hover at a bare point has no screen call/);
+      expect(noteOf(await session.run('drag_at', { x: 20, y: 101, to_x: 20, to_y: 220 }))).toMatch(/^No test line: a drag between bare points has no screen call/);
+    });
+
+    it("writes the listed control's locator where the step acts on it by id", async () => {
+      const session = await harness({ screen: [save, notes, plan], matches, actions: pointActions, verbs: byId });
+      await session.run('screenshot', {});
+      expect(noteOf(await session.run('tap_at', { x: 20, y: 100 }))).toBe('Test line: await screen.getByRole("button", "Save").tap();');
+      expect(noteOf(await session.run('hover_at', { x: 20, y: 100 }))).toBe('Test line: await screen.getByRole("button", "Save").hover();');
+      expect(noteOf(await session.run('type_at', { x: 20, y: 220, value: 'ada@example.test' }))).toBe(
+        'Test line: await screen.getByRole("textbox", "Notes").fill(credentials.user("admin").username);',
+      );
+      expect(noteOf(await session.run('press_at', { x: 20, y: 220, key: 'Enter' }))).toBe('Test line: await screen.getByRole("textbox", "Notes").press("Enter");');
+      expect(noteOf(await session.run('select_at', { x: 20, y: 300, value: 'Pro' }))).toBe('Test line: await screen.getByRole("combobox", "Plan").selectOption("Pro");');
+      expect(noteOf(await session.run('drag_at', { x: 20, y: 100, to_x: 20, to_y: 300 }))).toBe(
+        'Test line: await screen.getByRole("button", "Save").dragTo(screen.getByRole("combobox", "Plan"));',
+      );
+    });
+
+    it('says why a point on nothing listed has no line, and the draft keeps the step as a comment', async () => {
+      const session = await harness({ screen: [save], matches, actions: pointActions, verbs: byId });
+      await session.run('screenshot', {});
+      expect(noteOf(await session.run('press_at', { x: 20, y: 500, key: 'Enter' }))).toBe(
+        'No test line: no listed control is at the point: it was tapped to focus what is there and the keys went through the keyboard, which no locator line repeats.',
+      );
+      const draft = await session.run('test_lines', {});
+      expect(draft).toContain('\n// press_at: no test line: no listed control is at the point: it was tapped');
+    });
   });
 
   it('records the opening of the app as app.open() and drafts the lines in order', async () => {
