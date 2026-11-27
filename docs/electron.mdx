@@ -361,7 +361,8 @@ The engine adds `--no-sandbox` on Linux automatically.
   masks can't reach, screenshots of that window are withheld.
 - **Local file boundary:** if a window navigates to a `file:` path outside
   your app's directory, the agent gets no observation and screenshots are
-  refused.
+  refused. When `app.appPath` names a main script, the app's directory is
+  the script's package inside the project.
 - **Inspector port:** window automation runs over a private pipe, while the
   main process listens on an unauthenticated loopback port for
   `electron.evaluate()` during each test.
