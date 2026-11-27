@@ -148,6 +148,27 @@ line2  </textarea>
   <a href="/">Home</a>
 </body>
 </html>`),
+  '/preferences': constant(`<!doctype html>
+<html>
+<head><title>Preferences</title></head>
+<body>
+  <h1>Preferences</h1>
+  <a href="/preferences/display">Display</a>
+  <output role="status" aria-label="Dark mode" id="dark"></output>
+  <script>document.getElementById('dark').textContent = localStorage.getItem('dark') ?? 'off';</script>
+</body>
+</html>`),
+  '/preferences/display': constant(`<!doctype html>
+<html>
+<head><title>Display</title></head>
+<body>
+  <h1>Display</h1>
+  <button role="switch" aria-checked="false" aria-label="Dark mode" style="width:120px;height:48px" onclick="this.setAttribute('aria-checked', 'true'); localStorage.setItem('dark', 'on')">
+    <svg role="img" aria-label="Moon" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg>
+  </button>
+  <a href="/preferences">Preferences</a>
+</body>
+</html>`),
   '/storage': constant(`<!doctype html>
 <html>
 <head><title>Storage</title></head>

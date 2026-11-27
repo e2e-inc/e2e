@@ -1523,3 +1523,67 @@ describe('trace cache: a hand-off after a trip between two views of one page', (
     expect(step(replayed).cache).toMatchObject({ mode: 'self-finalized', detour });
   }, 240_000);
 });
+
+const DARK_MODE_SUITE = `import { test, expect } from 'e2e';
+
+test('turns on dark mode', async ({ app, agent, screen }) => {
+  await app.open('/preferences');
+  await agent.act('turn on dark mode');
+  await expect(screen.getByRole('status', { name: 'Dark mode' })).toHaveText('on');
+});
+`;
+
+/** Opens Display, taps the moon icon inside the Dark mode switch, by its node or at its center, then follows the link back to Preferences. */
+function darkModeExecutor(by: 'node' | 'point'): StepExecutor {
+  return {
+    name: 'dark-mode-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      let observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /link "Display"/) });
+      const { tree } = await context.observe({ tree: true });
+      const moon = findNode(tree, (node) => node.role === 'image' && node.name === 'Moon')!;
+      if (by === 'node') await context.actions.tap({ id: moon.id });
+      else await context.actions.tapAt({ x: moon.rect!.x + moon.rect!.width / 2, y: moon.rect!.y + moon.rect!.height / 2 });
+      observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /link "Preferences"/) });
+      return { status: 'passed' as const, summary: 'dark mode is on' };
+    },
+  };
+}
+
+describe('trace cache: a tap on the icon inside a switch', () => {
+  let app: FixtureApp;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+  }, 60_000);
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  for (const by of ['node', 'point'] as const) {
+    it(`records the switch it set (a tap by ${by}), so the trip back to Preferences is no detour`, async () => {
+      const project = createProject({ 'tests/dark.e2e.ts': DARK_MODE_SUITE });
+      try {
+        const outcome = await runExisting(project, {
+          appUrl: app.url,
+          config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: darkModeExecutor(by) } }, cache: 'read-write' as const },
+        });
+        expect(outcome.exitCode).toBe(0);
+        const { entry } = readOnlyEntry(project);
+        expect(entry.payload.actions.map((action) => [action.name, 'controlRole' in action ? action.controlRole : undefined, action.at])).toEqual([
+          ['tap', undefined, '/preferences'],
+          [by === 'node' ? 'tap' : 'tapAt', 'switch', '/preferences/display'],
+          ['tap', undefined, '/preferences/display'],
+        ]);
+        expect(entry.payload.detours).toEqual([]);
+        const step = resultByTitle(outcome, 'turns on dark mode').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+        expect(step.cache?.detour).toBeUndefined();
+      } finally {
+        project.cleanup();
+      }
+    }, 240_000);
+  }
+});
