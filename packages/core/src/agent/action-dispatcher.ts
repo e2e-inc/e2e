@@ -20,10 +20,10 @@ import { resolveNavigationUrl } from '../internal/urls.ts';
 import type { ActionEvent, ActionHook, BeforeActionHook, ClickOptions, JsonValue, Momentum, ScrollDirection, Secret } from '../types.ts';
 import { PROJECT_TOOL_EVENT_PREFIX, READ_ONLY_GRAMMAR, type GrammarActionName } from './action-names.ts';
 import { actionEvent, containerKey, describeAction, type PlacedPoint, type Placement, type RecordableAction } from './actions.ts';
-import { describePosition } from '../cache/relocate.ts';
+import { describePosition, hasTwinsWithoutTestId } from '../cache/relocate.ts';
 import { appNavigation } from '../cache/route.ts';
 import { isTapActionName, type NodeActionName, type PointActionName, type RecordedAction } from '../cache/trace.ts';
-import { derivedReason } from './derived.ts';
+import { derivedJoinReason, derivedReason } from './derived.ts';
 import { ActionHookError, AgentError, toAgentError } from './error.ts';
 import {
   RUNTIME_CODES,
@@ -87,6 +87,29 @@ const MAX_SCROLL_UNTIL_TEXT_CHARS = 200;
 const SCROLL_UNTIL_STILL_PAGES = 3;
 const SCROLL_UNTIL_WRONG_LIST_PAGES = 2;
 
+/**
+ * How many typed values in a row are judged joined: room for a code typed
+ * one character per box, and few enough that judging every join after each
+ * value stays cheap.
+ */
+const MAX_TYPED_RUN = 12;
+
+/** A value typed in the step's current run, with the place the recording gave it. */
+interface TypedValue {
+  readonly index: number;
+  readonly value: string;
+}
+
+/**
+ * Whether an action leaves the step's typed run going: a tap or a press of
+ * Tab only moves focus to the next field, the way a code is typed one box at
+ * a time. Every other action ends the run.
+ */
+function keepsTypedRun(action: RecordableAction): boolean {
+  if (action.name === 'tap' || action.name === 'tapAt') return true;
+  return (action.name === 'press' || action.name === 'pressKey') && action.key === 'Tab';
+}
+
 /** The engine action each node verb performs; also the name its engine event carries. */
 const NODE_ACTION_KINDS = {
   tap: 'tap',
@@ -139,6 +162,18 @@ export class ActionDispatcher {
    * rather than a guess.
    */
   readonly actions: ExecutorActions;
+
+  /**
+   * The step's run of typed values, oldest first and at most
+   * `MAX_TYPED_RUN` long: each value typed since the last action that was
+   * not a tap or a Tab press, which `joinTyped` judges joined. A value
+   * recorded as a gap on its own stays in the run, so the code it is a piece
+   * of is still judged whole. A mutating project tool ends the run.
+   */
+  private typedRun: TypedValue[] = [];
+
+  /** The newest look when the last action ran: a later action addressed from it acts on a screen that action may have changed (`placementOf`). */
+  private actedFrom: AgentObservation | undefined;
 
   constructor(
     private readonly runtime: AgentContext,
@@ -368,6 +403,7 @@ export class ActionDispatcher {
         this.assertAllowed('tool');
         this.accounting.reserveAction();
         await this.before();
+        this.typedRun = [];
         this.options.trace()?.recordGap(call.name);
       }
       const name = `${PROJECT_TOOL_EVENT_PREFIX}${call.name}`;
@@ -751,6 +787,12 @@ export class ActionDispatcher {
       this.accounting.checkpoint(cause);
       throw cause;
     }
+    // Scrolling to text reads its last page after its last swipe, unless the
+    // engine then scrolled the node into view (`armAfter`): that page is a
+    // fresh look, not one the scroll acted from. A scroll that found its
+    // text on the look in hand took no page and no look, and leaves the mark.
+    if (action.name !== 'scrollUntil' || this.verbs.has('scrollTo')) this.actedFrom = this.feed.latest;
+    else if (action.screens > 0) this.actedFrom = undefined;
     this.armAfter(action.name);
     this.recordTrace(action);
     await this.notify(action.name, (fields) => actionEvent(action, { ...fields, summary: describeAction(action, redaction).summary }));
@@ -770,14 +812,42 @@ export class ActionDispatcher {
       const derived = derivedReason(action.value, this.options.instruction, this.options.params, {
         shown: this.feed.shownText(),
         pixels: this.feed.pixelsShown,
-        ...(action.name === 'type' ? { inputPurpose: action.node.inputPurpose } : {}),
+        // `typeText` names no field: in a step whose screens listed a one-time-code field, its value may be that code.
+        ...(action.name === 'type'
+          ? { inputPurpose: action.node.inputPurpose }
+          : this.feed.oneTimeCodeShown ? { inputPurpose: 'one-time-code' as const } : {}),
       });
-      if (derived !== undefined) {
-        trace.recordDerivedGap(derived);
-        return;
-      }
+      const index = trace.recordedCount;
+      if (derived === undefined) trace.record(action);
+      else trace.recordDerivedGap(derived);
+      this.joinTyped(trace, index, action.value);
+      return;
     }
+    if (!keepsTypedRun(action)) this.typedRun = [];
     trace.record(action);
+  }
+
+  /**
+   * Adds a typed value to the run and judges it joined with the values typed
+   * before it: every run of two or more that ends at it, longest first. A
+   * code split three and three, or one digit per box, is no word of the
+   * screen in any one piece; once a join is the whole of what a node said, or
+   * a data-shaped word a node showed, the recording becomes a gap from that
+   * join's first piece. The run goes on, so a longer join, the whole code
+   * after its first pieces matched a "30" or a "6-digit" on the page, moves
+   * the gap back to its own first piece.
+   */
+  private joinTyped(trace: StepTraceSession, index: number | undefined, value: string): void {
+    if (index === undefined) return;
+    this.typedRun.push({ index, value });
+    if (this.typedRun.length > MAX_TYPED_RUN) this.typedRun.shift();
+    for (let start = 0; start < this.typedRun.length - 1; start += 1) {
+      const joined = this.typedRun.slice(start).map((typed) => typed.value).join('');
+      const reason = derivedJoinReason(joined, this.options.instruction, this.options.params, this.feed.shownText());
+      if (reason === undefined) continue;
+      trace.gapFrom(this.typedRun[start]!.index, reason);
+      return;
+    }
   }
 
   /**
@@ -888,18 +958,22 @@ export class ActionDispatcher {
   }
 
   /**
-   * Where a node sat when it was acted on, for the trace: the container it
-   * sits in (that is what tells this row's "Delete" from the next row's when
-   * the flow replays) and, when the description still matches several
-   * controls, its position among them, so a replay that finds the same
-   * number picks the same one.
+   * Where a node sat when it was acted on, for the trace: its container (this
+   * row's "Delete", not the next row's), its place among the controls its
+   * description matches, and whether a node its test id tells apart has twins
+   * by its other fields. A count taken on a look an earlier action of the step
+   * ran from is marked: that action may have changed the twins.
    */
   private placementOf({ node, observation }: Resolved): Placement {
     const within = containerKey(node.ref.id, observation.nodes, observation.parents);
     const position = describePosition(node, within, observation.nodes);
+    const twinned = hasTwinsWithoutTestId(node, within, observation.nodes);
+    const earlier = (position !== undefined || twinned) && observation === this.actedFrom;
     return {
       ...(within === undefined ? {} : { within }),
       ...(position === undefined ? {} : { position }),
+      ...(twinned ? { twinsWithoutTestId: true } : {}),
+      ...(earlier ? { countedOnEarlierLook: true } : {}),
     };
   }
 

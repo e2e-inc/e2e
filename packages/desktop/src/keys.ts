@@ -37,6 +37,14 @@ const KEY_NAMES: Readonly<Record<KeyName, string | undefined>> = {
   F12: 'f12',
 };
 
+/**
+ * The characters agent-desktop's macOS key map presses besides letters and
+ * digits. Any other one (`!`, `é`) has no key of its own there, and is
+ * refused before a locator's press focuses its control. `+` is not one: the
+ * combo syntax uses it as the separator.
+ */
+const PUNCTUATION = new Set([',', '.', '/', ';', "'", '[', ']', '\\', '-', '=', '`']);
+
 function modifierName(modifier: KeyModifier): string {
   switch (modifier) {
     case 'Shift':
@@ -52,10 +60,23 @@ function modifierName(modifier: KeyModifier): string {
 }
 
 /**
+ * The shortcuts agent-desktop refuses to press unless forced, which the
+ * engine never is: on macOS they quit, log out, force-quit, or lock the
+ * session. It refuses any combo with one's key and at least its modifiers,
+ * so `cmd+q` stands for `cmd+shift+q` and `ctrl+cmd+q` too.
+ */
+const REFUSED_SHORTCUTS: readonly { readonly key: string; readonly modifiers: readonly string[] }[] = [
+  { key: 'q', modifiers: ['cmd'] },
+  { key: 'escape', modifiers: ['cmd', 'alt'] },
+  { key: 'backspace', modifiers: ['cmd', 'shift'] },
+];
+
+/**
  * The combo agent-desktop's `press` takes for one contract key: `Enter` is
  * `return`, `ControlOrMeta+a` is `cmd+a`.
  * A key agent-desktop has no name for is `UNSUPPORTED_CAPABILITY`, and so is
- * `+`, which its combo syntax uses as the separator.
+ * `+`, which its combo syntax uses as the separator, and a shortcut it
+ * refuses (`REFUSED_SHORTCUTS`).
  */
 export function toCombo(key: string): string {
   const parsed = parseKey(key);
@@ -65,7 +86,7 @@ export function toCombo(key: string): string {
     name = KEY_NAMES[parsed.key.name];
   } else if (parsed.key.char === ' ') {
     name = 'space';
-  } else if (parsed.key.char !== '+') {
+  } else if (/^[A-Za-z0-9]$/.test(parsed.key.char) || PUNCTUATION.has(parsed.key.char)) {
     // agent-desktop lower-cases a combo and adds Shift for a lone capital letter, so a capital needs no help.
     name = parsed.key.char;
   }
@@ -75,5 +96,9 @@ export function toCombo(key: string): string {
   const modifiers = parsed.modifiers.map(modifierName);
   // A capital letter with other modifiers loses its case in agent-desktop's combo, so Shift says it.
   if (parsed.key.kind === 'char' && /^[A-Z]$/.test(parsed.key.char) && modifiers.length > 0 && !modifiers.includes('shift')) modifiers.push('shift');
+  const pressed = name.toLowerCase();
+  if (REFUSED_SHORTCUTS.some((shortcut) => shortcut.key === pressed && shortcut.modifiers.every((modifier) => modifiers.includes(modifier)))) {
+    throw new EngineError('UNSUPPORTED_CAPABILITY', `agent-desktop refuses to press "${key}", a shortcut that quits, logs out, force-quits, or locks the session; end the app with desktop.closeApp()`, { retryable: false });
+  }
   return [...modifiers, name].join('+');
 }

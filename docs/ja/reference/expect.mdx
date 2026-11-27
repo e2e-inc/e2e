@@ -56,10 +56,12 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 | [`toBeAttached`](#tobeattached) | 一致するノードが 1 つ存在するまで待機 |
 | [`toBeEnabled`](#tobeenabled-and-tobedisabled) | 有効になるまで待機 |
 | [`toBeDisabled`](#tobeenabled-and-tobedisabled) | 無効になるまで待機 |
+| [`toBeEditable`](#tobeeditable) | 有効で読み取り専用でないコントロールになるまで待機 |
 | [`toBeChecked`](#tobechecked-tobeselected-and-tobeexpanded) | チェックされるまで待機 |
 | [`toBeSelected`](#tobechecked-tobeselected-and-tobeexpanded) | 選択されるまで待機 |
 | [`toBeExpanded`](#tobechecked-tobeselected-and-tobeexpanded) | 展開されるまで待機 |
 | [`toBeFocused`](#tobefocused) | フォーカスされるまで待機 |
+| [`toBeEmpty`](#tobeempty) | フィールドが空、またはノードのテキストがなくなるまで待機 |
 | [`toHaveText`](#tohavetext-and-tocontaintext) | 正規化後のテキストが完全一致するまで待機 |
 | [`toContainText`](#tohavetext-and-tocontaintext) | 正規化後のテキストが含まれるまで待機 |
 | [`toHaveValue`](#tohavevalue) | フォームコントロールが指定の値になるまで待機 |
@@ -104,6 +106,21 @@ await expect(screen.getByRole('button', 'Pay')).toBeEnabled({ enabled: false });
 - `<fieldset disabled>` 内のコントロールは、その fieldset の最初の `<legend>` 内にない限り無効です。
 - 祖先の `aria-disabled="true"` は、その下のウィジェットを無効にします。途中に `aria-disabled="false"` があると、この継承を止めます。
 
+#### `toBeEditable`
+
+コントロールが有効で、読み取り専用でなくなるまで待ちます。
+
+```ts
+await expect(screen.getByLabel('Email')).toBeEditable();
+await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
+```
+
+- 読み取り専用かどうかはエンジンが報告する状態です。Web エンジンはネイティブコントロールと `aria-readonly` について Playwright のルールに従い、ロールは e2e のもの、無効状態は `toBeEnabled()` が報告するものを使います。`input`、`textarea`、`select` は自身の `readonly` 属性だけを読みます（値は問いません）。`aria-readonly` を取るロール（`textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton`、`gridcell` など）の要素は `aria-readonly="true"` を読みます（大文字小文字は問いません）。編集ホストは ARIA ロール（明示したもの、またはタグのロール。グリッド内の `td` は `gridcell`）でだけこれを読みます。ただの `<div contenteditable>` にはロールがありません。それ以外の編集ホストとその中の要素は読み取り専用になりません。
+- 無効なノードも編集可能ではありません。無効の判定は [`toBeEnabled`](#tobeenabled-and-tobedisabled) と同じです。
+- ボタンなどそれ以外のノードには読み取り専用の状態がありません。否定してもマッチャーは失敗し、失敗メッセージにそのことが表示されます。
+- デバイスでは、プラットフォームがテキストを受け付けるかどうかを報告する場合（Android など）だけ、テキストフィールドに読み取り専用の状態があります。iOS は報告しないので、iOS のフィールドでは推測で成功させずにマッチャーが失敗します。
+- この状態は、`e2e` 0.25.0 を必要とする `@e2e-dev/web` と `@e2e-dev/mobile` のリリースから報告されます。古いエンジンではすべてのノードが `no read-only state` で失敗するので、`e2e` と一緒にエンジンも更新してください。
+
 #### `toBeChecked`、`toBeSelected`、`toBeExpanded`
 
 それぞれ、チェック、選択、展開の状態になるまで待ちます。
@@ -122,6 +139,19 @@ await expect(screen.getByRole('tab', 'Billing')).toBeSelected();
 ```ts
 await expect(screen.getByLabel('Email')).toBeFocused();
 ```
+
+#### `toBeEmpty`
+
+一致した 1 つの要素が空になるまで待ちます。
+
+```ts
+await expect(screen.getByLabel('Search')).toBeEmpty();
+await expect(screen.getByTestId('cart')).not.toBeEmpty();
+```
+
+- 空かどうかはエンジンが報告する状態です。Web エンジンは Playwright と同じ規則で判定します。`input` と `textarea` は値が `''` のとき空です。値はそのまま読むため、スペースが入っていれば空ではありません。それ以外の要素は、テキストコンテンツの前後の空白を除いて `''` のとき空です。[`toHaveText`](#tohavetext-and-tocontaintext) と違い非表示のテキストも数えるため、オプションを持つ `select` や、非表示のテキストだけを持つ `<div>` は空になりません。
+- モバイルエンジンはテキストフィールドを値で判定するため、ラベルやヒントは中身に数えません。それ以外のノードは、サブツリー内のテキストと値で判定します。iOS は Flutter や Compose Multiplatform が描画するフィールドを通常のビューとして報告するため、プレースホルダーが中身に数えられ、空のフィールドも空になりません。
+- デスクトップエンジンはまだ空の状態を報告しません。その場合や、このマッチャーより前のエンジンでは、否定してもしなくても失敗し、失敗メッセージにその旨が出ます。
 
 #### `toHaveText` と `toContainText`
 
@@ -271,7 +301,7 @@ await expect(browser).toHaveURL('/dashboard');
 await expect(browser).toHaveURL(/\/orders\/\d+$/);
 ```
 
-- 相対文字列はベース URL を基準に解決し、正規化後に完全一致で比較します。
+- 相対文字列はベース URL を基準に解決し、正規化後に完全一致で比較します。Playwright と同じく、`*` と `{` はここではリテラルです。グロブは [`browser.waitForURL`](/reference/web#waitforurl) で使います。
 - `RegExp` は URL 全体に適用します。
 - 述語関数など、それ以外は `INVALID_ARGUMENT` です。
 - ロケーターのマッチャーと同じく、Playwright の `ignoreCase` を指定できます（[テキストの照合](#text-matching)）。
@@ -623,7 +653,7 @@ last: expected "running" not to be "running"
 
 | マッチャー | 機密フィールドでの動作 |
 | --- | --- |
-| `toHaveValue`, `toHaveText`, `toContainText` | `inputValue()` や `textContent()` と同じく `POLICY_DENIED`。否定やリスト形式も同様 |
+| `toHaveValue`, `toHaveText`, `toContainText`, `toBeEmpty` | `inputValue()` や `textContent()` と同じく `POLICY_DENIED`。否定やリスト形式も同様 |
 | `toHaveAttribute` | `getAttribute()` と同じく `POLICY_DENIED`。すべての属性名と否定も対象 |
 | `toHaveAccessibleName`、`toHaveRole`、状態のマッチャー | 通常どおりに判定 |
 
@@ -695,6 +725,8 @@ export interface AsyncExpectation {
   toBeEnabled(options?: { enabled?: boolean; timeout?: number }): Promise<void>;
   /** Waits for disabled state. */
   toBeDisabled(options?: { timeout?: number }): Promise<void>;
+  /** Waits for an enabled control that is not read-only; `editable: false` waits for a disabled or read-only one. A node with no read-only state, a button included, fails either way. */
+  toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void>;
   /** Waits for checked state; `checked: false` waits for unchecked state. */
   toBeChecked(options?: { checked?: boolean; timeout?: number }): Promise<void>;
   /** Waits for selected state. */
@@ -703,6 +735,13 @@ export interface AsyncExpectation {
   toBeExpanded(options?: { timeout?: number }): Promise<void>;
   /** Waits for focused state. */
   toBeFocused(options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for a node the engine reports empty: on the web an input or
+   * textarea with no value, or any other element whose text content trims to
+   * nothing; on a device a text field with no value, or a node with no text
+   * or value in its subtree. Denied on a secure field.
+   */
+  toBeEmpty(options?: { timeout?: number }): Promise<void>;
   /** Waits for exact normalized text; a list waits for exactly that many matches, each with its entry's text, in order. */
   toHaveText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
   toHaveText(expected: readonly TextMatch[], options?: TextMatcherOptions): Promise<void>;

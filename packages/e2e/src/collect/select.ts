@@ -7,7 +7,7 @@ import { expectedFailureOption } from '@e2e-dev/core/lib/internal/expected-failu
 import { didYouMean, suggestionNote } from '@e2e-dev/core/lib/internal/suggest';
 import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import { attemptKeep, attemptVideo, pairRecording, type AttemptRecordings } from '@e2e-dev/core/lib/internal/recording-modes';
-import type { Capability, RecordingMode, TestOptions } from '@e2e-dev/core/lib/types';
+import type { RecordingMode, TestOptions } from '@e2e-dev/core/lib/types';
 import { excludingEntry, type Collection, type CollectedTest, type UncollectedFile } from './collect.ts';
 import { assertFixtureUse } from './fixture-use.ts';
 import { groupChain } from './registry.ts';
@@ -17,7 +17,6 @@ export interface ResolvedTestOptions {
   readonly timeout: number;
   readonly retries: number;
   readonly platforms: readonly string[] | undefined;
-  readonly requires: readonly Capability[];
   readonly session: string | undefined;
   readonly agentContext: string | undefined;
   /**
@@ -139,7 +138,6 @@ export function resolveOptions(test: CollectedTest, config: ResolvedConfig): Res
   let timeout = config.timeout;
   let retries = config.retries;
   let platforms: readonly string[] | undefined;
-  let requires: readonly Capability[] = [];
   let session: string | undefined;
   let pin: readonly string[] | undefined;
   let skipReason: string | undefined;
@@ -154,7 +152,6 @@ export function resolveOptions(test: CollectedTest, config: ResolvedConfig): Res
     if (layer.trace !== undefined) trace = layer.trace;
     if (layer.video !== undefined) video = layer.video;
     if (layer.platforms !== undefined) platforms = layer.platforms;
-    if (layer.requires !== undefined) requires = layer.requires;
     if (layer.session !== undefined) session = layer.session;
     if (layer.agent !== undefined) pin = typeof layer.agent === 'string' ? [layer.agent] : layer.agent;
     if (layer.agentContext !== undefined) agentContextParts.push(layer.agentContext);
@@ -197,7 +194,6 @@ export function resolveOptions(test: CollectedTest, config: ResolvedConfig): Res
     timeout,
     retries,
     platforms,
-    requires,
     session,
     agents: effectiveAgents(test, pin, config.agentNames),
     agentContext: agentContextParts.length === 0 ? undefined : agentContextParts.join('\n'),
@@ -315,7 +311,7 @@ export function selectTargets(
 
 /**
  * Expands the collection into test-target pairs and applies focus, tag,
- * platform, capability, session, and serial-closure rules, then checks the
+ * platform, session, and serial-closure rules, then checks the
  * fixtures each pair that runs names against its target.
  */
 export function select(
@@ -329,7 +325,7 @@ export function select(
 
   // Focus is decided among the tests positionals selected: a `.only` left in
   // a file the run did not name neither runs nor silences the named files.
-  const focused = collection.tests.filter((test) => test.mode === 'only' && test.selected);
+  const focused = collection.tests.filter((test) => test.focused && test.selected);
   if (focused.length > 0 && config.ci) {
     throw new ConfigurationError(
       'ONLY_IN_CI',
@@ -456,7 +452,7 @@ function describeNoTests(
     if (nearMisses.length > 0) {
       return `${where}; found ${nameFiles(nearMisses)}, which the pattern does not match: rename to *.e2e.ts, or set tests in the config to a glob that matches`;
     }
-    return `${where}; create tests/example.e2e.ts (e2e init writes one), or set tests in the config`;
+    return `${where}; create a test file such as tests/example.e2e.ts, or set tests in the config`;
   }
   if (!files.some((file) => file.selected) && unmatchedPositionals.length > 0) {
     // A positional may be a whole path or just a file name, so a near miss is looked for as either.
@@ -510,11 +506,11 @@ function describeNoTests(
       case 'fixme':
         count('marked fixme', pair.test);
         break;
+      case 'todo':
+        count('marked todo', pair.test);
+        break;
       case 'platform-unavailable':
         count(`declare platforms other than ${pair.target.platform}`, pair.test);
-        break;
-      case 'capability-unavailable':
-        count('require capabilities the engine lacks', pair.test);
         break;
       case 'filtered':
         count(filterNames.get(pair.skip.reason) ?? pair.skip.reason, pair.test);
@@ -533,7 +529,7 @@ function describeNoTests(
  */
 function describeShard(shard: Shard, pairs: readonly TestTargetPair[]): string {
   // Told after the cut, so the items are the running pairs and the ones the shard itself left out.
-  const items = shardItems(pairs, (pair) => pair.disposition === 'run' || pair.skip?.reason === FILTERED_REASON.shard).length;
+  const items = shardItems(pairs, (pair) => pair.disposition === 'run' || (pair.skip?.cause === 'filtered' && pair.skip.otherShard === true)).length;
   return `fall outside shard ${shard.index}/${shard.total} (${items} ${items === 1 ? 'test' : 'tests'} split across ${shard.total} shards)`;
 }
 
@@ -642,7 +638,7 @@ function classifyPair(
         skip: { cause: 'filtered', reason: selectedFiles.has(test.file) ? FILTERED_REASON.line : FILTERED_REASON.file },
       };
     }
-    if (focused.length > 0 && test.mode !== 'only') {
+    if (focused.length > 0 && !test.focused) {
       return {
         ...base,
         disposition: 'filtered',
@@ -698,29 +694,11 @@ function classifyPair(
     };
   }
 
-  // Targets are graded from the engine's declared capability set (harness
-  // tiers plus one name per contributed fixture) and the kind of app the
-  // target declares. Selection runs at config load, before any engine boots,
-  // which is why the manifest is synchronous.
-  const capabilities = target.engine?.capabilities;
-  const kinds = appKinds(target);
-  const missing = options.requires.filter((capability) => capabilities?.has(capability) !== true && !kinds.includes(capability));
-  if (missing.length > 0) {
-    return {
-      ...base,
-      disposition: 'skip',
-      skip: {
-        cause: 'capability-unavailable',
-        reason: `engine lacks required capabilities: ${missing.join(', ')}`,
-      },
-    };
-  }
-
   if (options.skipReason !== undefined) {
     return {
       ...base,
       disposition: 'skip',
-      skip: { cause: test.mode === 'fixme' ? 'fixme' : 'explicit', reason: options.skipReason },
+      skip: { cause: test.mode === 'fixme' || test.mode === 'todo' ? test.mode : 'explicit', reason: options.skipReason },
     };
   }
 
@@ -800,6 +778,9 @@ function shardItem(pair: TestTargetPair): string {
  * and each shard brings only the setups it needs. A skipped test is not an
  * item: the shard holding the item before it in report order reports it, the
  * first shard when none comes before, so the shards together report it once.
+ * Every row the cut gives another shard carries `otherShard`, so a reader
+ * knows without parsing the reason. The cut is this run's: with
+ * `--last-failed`, it slices the tests the last run did not pass.
  */
 function applyShard(pairs: readonly TestTargetPair[], shard: Shard): TestTargetPair[] {
   const items = shardItems(pairs);
@@ -812,10 +793,13 @@ function applyShard(pairs: readonly TestTargetPair[], shard: Shard): TestTargetP
   return pairs.map((pair) => {
     if (pair.test.kind !== 'test') return pair;
     if (pair.disposition === 'filtered') return pair;
-    if (pair.disposition === 'skip') return previousKept ? pair : { ...pair, disposition: 'filtered' as const };
+    if (pair.disposition === 'skip') {
+      if (previousKept) return pair;
+      return { ...pair, disposition: 'filtered' as const, ...(pair.skip === undefined ? {} : { skip: { ...pair.skip, otherShard: true as const } }) };
+    }
     previousKept = kept.has(shardItem(pair));
     if (previousKept) return pair;
-    return { ...pair, disposition: 'filtered' as const, skip: { cause: 'filtered' as const, reason: FILTERED_REASON.shard } };
+    return { ...pair, disposition: 'filtered' as const, skip: { cause: 'filtered' as const, reason: FILTERED_REASON.shard, otherShard: true as const } };
   });
 }
 
@@ -854,10 +838,10 @@ function applySessionSelection(
     const key = `${pair.target.name}::${pair.test.id}`;
     const sessions = neededSetups.get(key);
     if (sessions === undefined) return pair;
-    // A producer the target cannot run - skipped for a missing capability or
-    // filtered out by its own platform list - cannot be promoted; a consumer
-    // that needs it is a configuration error, not a silent run elsewhere.
-    if (pair.disposition === 'skip' || pair.skip?.cause === 'platform-unavailable') {
+    // A producer its own platform list filters out of the target cannot be
+    // promoted; a consumer that needs it is a configuration error, not a
+    // silent run elsewhere.
+    if (pair.skip?.cause === 'platform-unavailable') {
       throw new CollectionError(
         `setup test ${pair.test.id} is required by a session consumer but cannot run on target "${pair.target.name}": ${pair.skip?.reason ?? ''}`,
       );
@@ -872,14 +856,4 @@ function applySessionSelection(
     }
     return { ...pair, disposition: 'run' as const, skip: undefined };
   });
-}
-
-/**
- * The kinds of app a target declares, which `requires` filters on beside
- * the engine's capabilities: `browser` for an app at a URL, `native-app` for
- * an installed app or a build a device launches.
- */
-function appKinds(target: ResolvedTarget): readonly string[] {
-  const { base, bundleId, appPath } = target.app;
-  return [...(base === undefined ? [] : ['browser']), ...(bundleId === undefined && appPath === undefined ? [] : ['native-app'])];
 }

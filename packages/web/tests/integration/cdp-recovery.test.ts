@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { chromium } from 'playwright-core';
+import { chromium, type Page } from 'playwright-core';
 import type { EngineFixtureContext, EngineHandle, OperationContext } from '@e2e-dev/core/engine';
 import { web as webEngine, surfaceOf, type WebConnectOptions, type WebOptions, type Browser } from '../../src/index.ts';
 import { closeRemoteChrome, launchRemoteChrome, type RemoteChrome } from '../helpers/cdp-host.ts';
@@ -58,6 +58,7 @@ describe('CDP session recovery', () => {
   function fixtureOf(engine: EngineHandle, timeoutMs = 10_000): Browser {
     return engine.fixtures!['browser']!({
       operation: () => operation(timeoutMs),
+      signal: new AbortController().signal,
       app: { resolveUrl: (url: string) => new URL(url, app.url).href },
       expectable: (target: object) => target,
       fixture: (_name: string, target: object) => target,
@@ -136,6 +137,31 @@ describe('CDP session recovery', () => {
     }
   }, 60_000);
 
+  it('identifies the persistent browser by its own endpoint, after reconnect too', async () => {
+    const remote = await host();
+    const { port } = new URL(remote.endpoint);
+    const reported = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json() as { Browser: string };
+    const engine = await start({ cdpEndpoint: () => remote.endpoint, reconnectEndpoint: () => remote.endpoint });
+    // One fixture, as a test body keeps it across the reconnect.
+    const fixture = fixtureOf(engine);
+    const identity = () => ({ name: fixture.name, version: fixture.version });
+    try {
+      expect(identity()).toEqual({ name: 'chromium', version: reported.Browser.split('/')[1] });
+      const dropped = surfaceOf(engine)!.context().browser()!;
+      await dropped.close();
+      expect((await engine.locate!(heading, operation()))[0]?.name).toBe('Login');
+      // Both connections reach the same Chrome, so the value cannot tell them apart: the replacement has to be the one asked.
+      const replacement = surfaceOf(engine)!.context().browser()!;
+      expect(replacement).not.toBe(dropped);
+      const asked = vi.spyOn(replacement, 'version');
+      expect(identity()).toEqual({ name: 'chromium', version: reported.Browser.split('/')[1] });
+      expect(asked).toHaveBeenCalled();
+    } finally {
+      await engine.dispose!(cleanup());
+      await closeRemoteChrome(remote);
+    }
+  }, 60_000);
+
   it('emulates the configured and requested media on the persistent page, after reconnect too', async () => {
     const remote = await host();
     const engine = await start(
@@ -167,6 +193,31 @@ describe('CDP session recovery', () => {
     } finally {
       await engine.dispose!(cleanup());
       await closeRemoteChrome(remote);
+    }
+  }, 60_000);
+
+  it('keeps the browser offline after reconnect, and puts it back online when the test does', async () => {
+    const remote = await host();
+    const engine = await start({ cdpEndpoint: () => remote.endpoint, reconnectEndpoint: () => remote.endpoint });
+    const answered = (page: Page) => page.evaluate(() => fetch('/form', { cache: 'no-store' }).then((response) => response.ok, () => false));
+    const browser = fixtureOf(engine);
+    await browser.setNetwork('offline');
+    expect(await answered(surfaceOf(engine)!.page())).toBe(false);
+    await surfaceOf(engine)!.context().browser()!.close();
+    expect((await engine.locate!(heading, operation()))[0]?.name).toBe('Login');
+    expect(await answered(surfaceOf(engine)!.page())).toBe(false);
+    await browser.setNetwork('online');
+    expect(await answered(surfaceOf(engine)!.page())).toBe(true);
+    // The host's browser outlives an attempt that ended offline, and is online again without it.
+    await browser.setNetwork('offline');
+    await engine.dispose!(cleanup());
+    const direct = await chromium.connectOverCDP(remote.endpoint);
+    try {
+      const page = direct.contexts()[0]?.pages().find((open) => open.url().endsWith('/login'));
+      expect(page).toBeDefined();
+      expect(await answered(page!)).toBe(true);
+    } finally {
+      await direct.close();
     }
   }, 60_000);
 

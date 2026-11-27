@@ -15,9 +15,12 @@ export type {
   AppPermissionState,
   ClickOptions,
   Expectable,
+  FilePayload,
   JsonPrimitive,
   JsonValue,
   KeyModifier,
+  LaunchArgumentValue,
+  LaunchArguments,
   Locator,
   LongPressOptions,
   Point,
@@ -40,4 +43,5 @@ export type {
   TapOptions,
   TextMatch,
   TextMatchOptions,
+  WebResponse,
 } from '../types.ts';

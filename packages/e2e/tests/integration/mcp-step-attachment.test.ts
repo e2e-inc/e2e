@@ -211,8 +211,9 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     const held = await pause(dir);
     const { client } = await mcp(dir);
     const opened = await openSession(client, { attach: held.id });
-    expect(opened.text).toContain('Current screen');
-    expect(opened.text).toContain('button "Submit"');
+    expect(opened.text).toMatch(/\nScreen: revision \S+, path \/checkout, \d+ nodes, not listed\..*$/);
+    expect(opened.text).not.toContain('button "Submit"');
+    expect((await invoke(client, 'call', { tool: 'observe' })).text).toContain('button "Submit"');
 
     const detail = await invoke(client, 'tools', { session: opened.session, tool: 'tap' });
     expect(detail.text).toContain('Arguments (JSON Schema)');
@@ -228,13 +229,20 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     const tapped = await invoke(client, 'call', { tool: 'tap', args: { target } });
     expect(tapped.isError, tapped.text).toBe(false);
     expect(tapped.text).toContain('Submitted');
-    expect((await invoke(client, 'call', { tool: 'test_lines' })).text).toContain('.tap()');
+    const linesTool = await invoke(client, 'tools', { session: opened.session, tool: 'test_lines' });
+    expect(linesTool.isError, linesTool.text).toBe(false);
+    expect(linesTool.text).toContain('Use these lines at the pause point of the held test');
+    expect(linesTool.text).not.toMatch(/split the draft into tests/i);
+    const drafted = await invoke(client, 'call', { tool: 'test_lines' });
+    expect(drafted.text).toContain('.tap()');
+    expect(drafted.text).toContain('Put them in the held test at the pause point');
+    expect(drafted.text).not.toMatch(/split these lines into tests/i);
     expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
     expect(await held.exited).toBe(0);
   });
 
-  it('redacts a displayed secret from the opening screen, tool results, and errors', async () => {
-    const dir = project('await screen.pause();');
+  it('redacts a displayed secret from the screen, tool results, and errors', async () => {
+    const dir = project(`await app.open('/reset/${PASSWORD}'); await screen.pause();`);
     const held = await pause(dir);
     const { client } = await mcp(dir);
     const opened = await openSession(client, { attach: held.id });
@@ -246,7 +254,10 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     expect(located.isError).toBe(false);
     expect(failed.isError).toBe(true);
     expect(failed.text).toContain('UNKNOWN_TOOL');
-    for (const text of [opened.text, observed.text, located.text, failed.text]) {
+    // The opening names the screen by its path, where the value sits URL-encoded once redacted.
+    expect(opened.text).toContain('path /reset/%3Csecret:password%3E,');
+    expect(opened.text).not.toContain(PASSWORD);
+    for (const text of [observed.text, located.text, failed.text]) {
       expect(text).toContain('<secret:password>');
       expect(text).not.toContain(PASSWORD);
     }
@@ -301,6 +312,7 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
       test: 'checkout',
       engine: '@e2e-dev/web',
       app: {},
+      path: '/echo',
       headed: false,
     };
 
@@ -394,7 +406,8 @@ ${CONFIG.replace('  video: true,', `  video: true,
   },`)}`);
     const held = await pause(dir);
     const { client } = await mcp(dir);
-    const { session, text } = await openSession(client, { attach: held.id });
+    const { session } = await openSession(client, { attach: held.id });
+    const { text } = await invoke(client, 'call', { tool: 'observe' });
     const target = /^[ \t]*#(\S+) button "Submit"/m.exec(text)?.[1];
 
     if (target === undefined) {
@@ -624,16 +637,16 @@ ${CONFIG.replace('  video: true,', `  video: true,
       },
     });
     expect(ran.isError, ran.text).toBe(false);
-    expect(ran.text).toContain('All 2 statements passed.');
+    expect(ran.text).toContain('Test lines: 2.');
     expect(ran.text).toContain('Submitted');
-    expect((await invoke(client, 'call', { tool: 'test_lines' })).text).toContain('await app.open("/from-code");');
+    expect((await invoke(client, 'call', { tool: 'test_lines' })).text).toContain("await app.open('/from-code');");
 
     const missed = await invoke(client, 'call', {
       tool: 'run_code',
       args: { code: 'await screen.getByRole("button", "Missing").tap();', timeout: 50 },
     });
     expect(missed.isError, missed.text).toBe(true);
-    expect(missed.text).toContain('Each statement waited at most 50 ms.');
+    expect(missed.text).toContain('Test lines: 1, 1 failed.');
     expect(missed.text).toContain('LOCATOR_NOT_FOUND');
 
     expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
@@ -644,6 +657,65 @@ ${CONFIG.replace('  video: true,', `  video: true,
     expect(report).not.toContain('Missing');
   });
 
+  it("keeps what attached run_code leaves behind out of the held test's verdict", async () => {
+    const dir = project(`await screen.pause(); ${STEP}`);
+    const held = await pause(dir);
+    const { client } = await mcp(dir);
+    await openSession(client, { attach: held.id });
+    const run = (code: string) => invoke(client, 'call', { tool: 'run_code', args: { code } });
+
+    // A soft failure is the call's, not the test's.
+    const soft = await run('expect.soft(1).toBe(2);');
+    expect(soft.isError, soft.text).toBe(true);
+    expect(soft.text).toContain('1 soft assertion failed');
+    // Thrown outside the code's own promise, while the call runs: the call fails.
+    const microtask = await run("queueMicrotask(() => { throw new Error('in a microtask'); });\nawait new Promise((resolve) => setTimeout(resolve, 100));");
+    expect(microtask.text).toContain('Error: in a microtask');
+    // Thrown after the call ended: nobody is left to fail, and the worker goes on.
+    expect((await run("setTimeout(() => { throw new Error('late'); }, 150);\nreturn 'returned';")).text).toContain('Returned: "returned"');
+    await sleep(400);
+
+    expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
+    expect(await held.exited).toBe(0);
+  });
+
+  it("reads the config's services in attached run_code and calls their functions in the run's process", async () => {
+    const config = `import { appendFileSync } from 'node:fs';
+${CONFIG.replace('export default {', `const inbox = {
+  async *start() {
+    yield {
+      url: 'http://inbox.test',
+      record: (what: string) => {
+        appendFileSync('events.log', 'record ' + what + '\\n');
+
+        return what.length;
+      },
+    };
+  },
+};
+
+export default {
+  services: { inbox },`)}`;
+
+    const dir = project(`await screen.pause(); ${STEP}`, config);
+    const held = await pause(dir);
+    const { client } = await mcp(dir);
+
+    await openSession(client, { attach: held.id });
+
+    const ran = await invoke(client, 'call', {
+      tool: 'run_code',
+      args: { code: "return { url: services.inbox.url, length: await services.inbox.record('attached') };" },
+    });
+
+    expect(ran.isError, ran.text).toBe(false);
+    expect(ran.text).toContain('{"url":"http://inbox.test","length":8}');
+    expect(readFileSync(path.join(dir, 'events.log'), 'utf8')).toBe('record attached\n');
+
+    expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
+    expect(await held.exited).toBe(0);
+  });
+
   it('fills configured secrets only into authorized fields and redacts their values', async () => {
     const dir = project('await screen.pause();');
     const held = await pause(dir);
@@ -651,10 +723,11 @@ ${CONFIG.replace('  video: true,', `  video: true,
     const opened = await openSession(client, { attach: held.id });
     expect(opened.text).toContain('"buyer" (username "buyer@example.test", password secret "buyer.password")');
     expect(opened.text).toContain('Secrets: "password"');
-    const email = /^[ \t]*#(\S+) textbox "Email"/m.exec(opened.text)?.[1];
+    const screen = await invoke(client, 'call', { tool: 'observe' });
+    const email = /^[ \t]*#(\S+) textbox "Email"/m.exec(screen.text)?.[1];
 
     if (email === undefined) {
-      throw new Error(opened.text);
+      throw new Error(screen.text);
     }
 
     const denied = await invoke(client, 'call', { tool: 'type_secret', args: { target: email, name: 'buyer.password' } });
@@ -683,31 +756,24 @@ ${CONFIG.replace('  video: true,', `  video: true,
     }
   });
 
-  it('fills a password through attached run_code only in a password field and keeps its value out of the output', async () => {
+  it('fills a password through attached run_code and keeps its value out of the output', async () => {
     const dir = project('await screen.pause();');
     const held = await pause(dir, '--trace', 'on');
     const { client, log } = await mcp(dir);
     const opened = await openSession(client, { attach: held.id });
-    const denied = await invoke(client, 'call', {
-      tool: 'run_code',
-      args: { code: 'await screen.getByRole("textbox", "Email").fill(credentials.user("buyer").password);' },
-    });
-    expect(denied.isError).toBe(true);
-    expect(denied.text).toContain('POLICY_DENIED');
-
     const allowed = await invoke(client, 'call', {
       tool: 'run_code',
       args: { code: 'await screen.getByRole("textbox", "Password").fill(credentials.user("buyer").password);' },
     });
     expect(allowed.isError, allowed.text).toBe(false);
-    expect(allowed.text).toContain('The statement passed.');
+    expect(allowed.text).toContain('Test lines: 1.');
 
     const observed = await invoke(client, 'call', { tool: 'observe' });
     expect(observed.text).toMatch(/textbox "Password".*<secret:buyer\.password>/);
     expect(observed.text).not.toMatch(/textbox "Email".*<secret:buyer\.password>/);
 
     const lines = await invoke(client, 'call', { tool: 'test_lines' });
-    expect(lines.text).toContain('getByRole("textbox", "Password").fill(credentials.user("buyer").password)');
+    expect(lines.text).toContain("getByRole('textbox', 'Password').fill(credentials.user('buyer').password)");
 
     const next = e2e(dir, 'run', '--step', 'next');
     expect(next.status).toBe(0);
@@ -715,7 +781,6 @@ ${CONFIG.replace('  video: true,', `  video: true,
 
     const output = [
       opened.text,
-      denied.text,
       allowed.text,
       observed.text,
       lines.text,

@@ -1,6 +1,6 @@
 /** Which package manager a project uses, for install hints that name a runnable command. */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { compileGlob, matchesGlob } from '@e2e-dev/core/lib/internal/globs';
 import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
@@ -28,7 +28,13 @@ function fieldManager(packageManagerField: string | undefined): PackageManager |
 
 /** The manager whose lockfile sits in `dir`, or undefined when none does. */
 function lockfileManager(dir: string): PackageManager | undefined {
-  return LOCKFILES.find(([lock]) => existsSync(path.join(dir, lock)))?.[1];
+  return LOCKFILES.find(([lock]) => {
+    try {
+      return statSync(path.join(dir, lock)).isFile();
+    } catch {
+      return false;
+    }
+  })?.[1];
 }
 
 /**
@@ -158,6 +164,18 @@ function includesPackage(globs: readonly string[], relative: string): boolean {
     globs.some((glob) => !glob.startsWith('!') && matches(glob)) &&
     !globs.some((glob) => glob.startsWith('!') && matches(glob.slice(1)))
   );
+}
+
+/**
+ * The install that resolves an edited package.json: its arguments, and the
+ * variables to add to its environment. The lockfile changes with the new
+ * specs, which pnpm and Yarn refuse in CI unless told otherwise.
+ */
+export function installCommand(manager: PackageManager): { args: string[]; env: NodeJS.ProcessEnv } {
+  return {
+    args: manager === 'pnpm' ? ['install', '--no-frozen-lockfile'] : ['install'],
+    env: { YARN_ENABLE_IMMUTABLE_INSTALLS: 'false' },
+  };
 }
 
 /** The command that runs the package.json script `name` with the given manager. */

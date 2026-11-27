@@ -23,9 +23,11 @@
 
 import { engineBrand, engineFixtures } from '../internal/brands.ts';
 import type { ComputedStyleProperty, ComputedStyleValues } from './computed-style.ts';
+import type { EngineFinishInfo, EnginePrepareInfo, EnginePrepareResult } from './lifecycle.ts';
 
 export { COMPUTED_STYLE_PROPERTIES, validateComputedStyleProperties } from './computed-style.ts';
 export type { ComputedStyleProperty, ComputedStyleValues } from './computed-style.ts';
+export type { EngineFinishInfo, EnginePrepareInfo, EnginePrepareResult } from './lifecycle.ts';
 
 // Semantics the spec requires every engine and contributed fixture to
 // reproduce exactly, exported so an engine never carries its own copy: the
@@ -35,6 +37,7 @@ export type { ComputedStyleProperty, ComputedStyleValues } from './computed-styl
 // config options get.
 export { ConfigurationError, InfrastructureError, TestError } from '../internal/errors.ts';
 export { rejectUnknownKeys, rejectUnknownOptions } from '../internal/options.ts';
+export { appleUserDefaults, checkLaunchArguments } from '../internal/launch-arguments.ts';
 export { validateJsonValue, type JsonValueRules } from '../internal/json-value.ts';
 export { describePattern, matchesText, toTextPattern } from '../internal/text.ts';
 export { resolveExpression, type ResolveExpressionOptions } from './resolve.ts';
@@ -51,7 +54,7 @@ export type {
 export { Deadline, pollCondition, stepTimeout, withTimeout, withinCleanupBudget, type PollConditionOptions } from '../internal/time.ts';
 export { isRefusedLinkScheme, sameSite, siteOf, urlMatches } from '../internal/urls.ts';
 export { obj, type WithoutUndefined } from '../internal/objects.ts';
-import type { AppPermissionState, Expectable, Locator, Screen, Secret } from '../types.ts';
+import type { AppPermissionState, Expectable, LaunchArgumentValues, Locator, Screen, Secret } from '../types.ts';
 import type {
   EngineHostIdentity,
   EngineSpiVersion,
@@ -64,6 +67,7 @@ import type {
   PointerAction,
   PointerActionKind,
   SemanticNode,
+  ViewportIntersection,
   ViewportPoint,
   ViewportSize,
 } from './contract.ts';
@@ -83,7 +87,7 @@ export {
   RETRYABLE_ENGINE_ERROR_CODES,
   parseKey,
 } from './contract.ts';
-export type { AppPermissionState, Expectable, JsonValue, Locator, Screen, Secret } from '../types.ts';
+export type { AppPermissionState, Expectable, JsonValue, LaunchArgumentValue, LaunchArgumentValues, LaunchArguments, Locator, ResolvedLaunchArguments, Screen, Secret, WebResponse } from '../types.ts';
 export { isSecret } from '../secrets.ts';
 
 /**
@@ -97,6 +101,7 @@ export { isSecret } from '../secrets.ts';
 export type EngineCapability =
   | 'observation'
   | 'computed-style'
+  | 'viewport-intersection'
   | 'actions'
   | 'location'
   | 'pointer'
@@ -142,6 +147,12 @@ export interface EngineKeyboard {
 export interface EngineAppCheckInfo {
   /** The target declaring the app, for the message of a refusal. */
   readonly targetName: string;
+  /**
+   * The app's `url` names a file on the runner's disk, as the harness reads
+   * the URL. Only an engine that declares `fileApps` is handed one. Refuse
+   * here what cannot read that disk, such as a browser on another machine.
+   */
+  readonly fileApp?: boolean;
 }
 
 /**
@@ -156,23 +167,39 @@ export interface EngineAppInfo {
    * The origin of the app's `url` on the run's port (`scheme://host:port`, as
    * `URL.origin` serializes it): where credentials an engine injects into
    * requests (headers, basic auth) go by default. Absent for an app without
-   * a URL, and for a free port the run has not assigned (`e2e doctor`).
+   * a URL, for one whose URL is a file, and for a free port the run has not
+   * assigned (`e2e doctor`).
    */
   readonly origin?: string;
   /**
    * The site of the app's `url`, its registrable domain as `siteOf` reads it:
    * whose child frames an observation reads; `sameSite` applies it. Absent
-   * for an app without a URL, which is no policy at all.
+   * for an app without a URL or with a file for one, which is no policy at
+   * all.
    */
   readonly site?: string;
   /** The installed app to launch, as the target declared it. */
   readonly bundleId?: string;
   /** The build to install, as the target declared it; relative to `projectRoot`. */
   readonly appPath?: string;
-  /** Arguments every fresh launch passes the app. */
+  /** Arguments every fresh launch passes the app, when the target declared them as a list of strings. */
   readonly launchArguments?: readonly string[];
+  /**
+   * Arguments every fresh launch passes the app, when the target declared
+   * them as an object of argument name to value; the engine spells them for
+   * its launch command. Only an engine that declares `launchArgumentValues`
+   * receives one: for any other engine the object is `INVALID_CONFIG` at
+   * config load.
+   */
+  readonly launchArgumentValues?: LaunchArgumentValues;
   /** Permissions the app holds, by name; what each state means is the engine's (a device sets them before every fresh launch). */
   readonly permissions?: Readonly<Record<string, AppPermissionState>>;
+  /**
+   * `app.permissions: 'all'`: grant every permission the engine can grant,
+   * in place of `permissions`. Only an engine that declares
+   * `grantsAllPermissions` receives it; for any other, the config is refused.
+   */
+  readonly allPermissions?: true;
 }
 
 /**
@@ -397,82 +424,6 @@ export interface EngineSession {
   restart?(context: OperationContext): Promise<void>;
   /** Clears persisted client state and recreates the execution context. */
   reset?(context: OperationContext): Promise<void>;
-}
-
-/**
- * What `prepare` learned that the run must honour. `workers` replaces the
- * engine's declared cap for this target and run: the surfaces the engine
- * actually provisioned, `1` to `info.slots`. Declared `workers` stays the
- * static answer for engines that know it up front.
- */
-export interface EnginePrepareResult {
-  /** Lowers the target's worker cap for this run, `1` to `info.slots`. */
-  readonly workers?: number;
-  /**
-   * Variables every worker of this target is spawned with, on top of the
-   * run's environment: how a runner-side `prepare` hands what it provisioned
-   * (a device pool it discovered) to each worker's `init`. The run's own
-   * variables win on a clash.
-   */
-  readonly env?: Readonly<Record<string, string>>;
-}
-
-/**
- * Facts handed to `prepare`, once per run and target in the runner process,
- * before any worker exists.
- */
-export interface EnginePrepareInfo extends EngineHostIdentity {
-  /** The run id. */
-  readonly runId: string;
-  /** The target being prepared. */
-  readonly targetName: string;
-  /** Directory relative paths in the config resolve against; see `EngineInitInfo.projectRoot`. */
-  readonly projectRoot: string;
-  /** The app the target declares, as `init` receives it: what a device installs or warms up here. */
-  readonly app: EngineAppInfo;
-  /**
-   * The worker slots the run will start for this target, `0` to `slots - 1`:
-   * the run's worker cap, the engine's declared `workers`, and the work units
-   * selected for the target, whichever is smallest; `0` when nothing runs on
-   * it while another target has work. A run with nothing to run prepares no
-   * target. Provision for exactly these slots (boot that many devices of a
-   * pool); `init` then finds them ready.
-   */
-  readonly slots: number;
-  /**
-   * The run's environment: what every worker is started with. A host may hand
-   * the run an environment other than the runner process's own, so anything
-   * provisioned here that a worker later looks up by environment (a browser
-   * cache location) must be resolved and spawned against this, not
-   * `process.env`.
-   */
-  readonly env: Readonly<Record<string, string | undefined>>;
-  /**
-   * Aborts on interrupt only. Provisioning has no budget: a first-run
-   * download is as long as the network makes it, and cutting it short would
-   * fail every test behind it.
-   */
-  readonly signal: AbortSignal;
-  /** Whether the run asked for a visible surface (`--headed`), as `EngineInitInfo` declares it. */
-  readonly headed: boolean;
-  /**
-   * Reports one line of progress. The runner streams it as a `notice` run
-   * event, so it reaches the reporter and every host sink instead of being
-   * written to a worker's stderr underneath the live status block.
-   */
-  readonly log: (line: string) => void;
-}
-
-/** Handed to `finish`, once per run and target after the last worker is gone, with the cleanup budget of one hook. */
-export interface EngineFinishInfo extends EngineCleanupContext, EngineHostIdentity {
-  /** The run id. */
-  readonly runId: string;
-  /** The target being finished. */
-  readonly targetName: string;
-  /** The run's environment, the same `prepare` saw. */
-  readonly env: Readonly<Record<string, string | undefined>>;
-  /** Reports one line of progress, streamed as a `notice` run event like `prepare`'s. */
-  readonly log: (line: string) => void;
 }
 
 /** Facts handed to `doctor`, once per target in the process `e2e doctor` runs in. */
@@ -753,9 +704,10 @@ export interface EngineSnapshot {
    * Regions masked in the screenshot; the harness checks it covers every secure
    * node. An engine asked for pixels (`pixels: true`) that cannot mask every
    * secure node on screen omits `pixels` and still reports the regions it
-   * could mask, fewer than the secure nodes, so `toHaveScreenshot` fails with
-   * `POLICY_DENIED` and the agent reads `MASKING_UNPROVEN`, not a missing
-   * screenshot.
+   * could mask. A count with no `pixels` always reads as withheld, even when
+   * the tree holds no secure node, since a tree read only in part can leave
+   * one out: `toHaveScreenshot` fails with `POLICY_DENIED` and the agent reads
+   * `MASKING_UNPROVEN`, not a missing screenshot.
    */
   readonly maskedRegionCount?: number;
 }
@@ -807,6 +759,14 @@ export interface Engine {
    * protocol as JSON and are redacted by the harness before a tool sees them.
    */
   readStyle?(ref: NodeRef, properties: readonly ComputedStyleProperty[], context: OperationContext): Promise<ComputedStyleValues>;
+  /**
+   * capability: viewport-intersection - requires location. Measures how much
+   * of a node `locate` returned is inside the viewport, for `toBeInViewport`,
+   * without scrolling or changing app state. Throw NODE_STALE if the node no
+   * longer binds, and `UNSUPPORTED_CAPABILITY` for a node whose geometry the
+   * platform does not report.
+   */
+  viewportIntersection?(ref: NodeRef, context: OperationContext): Promise<ViewportIntersection>;
   /**
    * capability: actions - requires observation. Performs exactly one action
    * on a ref this engine minted, from the newest observation or from
@@ -862,19 +822,48 @@ export interface Engine {
    */
   readonly pointerActions?: readonly PointerActionKind[];
   /**
-   * The surface honors `modifiers` on the `tap`, `doubleTap`, and
-   * `secondaryTap` actions `perform` receives, holding each key for the
+   * The surface honors `modifiers` on the `tap`, `doubleTap`, `multiTap`,
+   * and `secondaryTap` actions `perform` receives, holding each key for the
    * click. Without it the harness fails an action that carries modifiers
    * with `UNSUPPORTED_CAPABILITY` before it reaches the engine, so an engine
    * that predates the field never drops one silently.
    */
   readonly tapModifiers?: boolean;
+  /**
+   * `prepare` binds the target to the device `EnginePrepareInfo.device`
+   * names, for `e2e run --device`, over the device the engine was configured
+   * with. Without it the runner refuses the flag for the target before
+   * anything is prepared.
+   */
+  readonly selectsDevice?: boolean;
+  /**
+   * The engine grants `app.permissions: 'all'`, which reaches it as
+   * `EngineAppInfo.allPermissions`. Without it the harness refuses `'all'` at
+   * config load, so an engine that predates the value never receives it.
+   */
+  readonly grantsAllPermissions?: boolean;
+  /**
+   * The engine reads the object form of `app.launchArguments` from
+   * `EngineAppInfo.launchArgumentValues`. Without it the harness refuses an
+   * object at config load, so an engine that predates the object form only
+   * ever receives a list in `EngineAppInfo.launchArguments`.
+   */
+  readonly launchArgumentValues?: boolean;
+  /**
+   * The engine opens an app whose `url` is a `file:` URL, reading the file
+   * from the disk of the machine the harness runs on. The harness checks
+   * every file navigation against that disk, so an engine whose surface
+   * may read another one must not declare this, or must refuse such a
+   * target in `validateApp` (`EngineAppCheckInfo.fileApp`). Without it the
+   * harness refuses a file `app.url` at config load.
+   */
+  readonly fileApps?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**
    * Named deterministic surfaces this engine contributes to TestFixtures
    * (a device fixture, a document fixture - anything). Keys become fixture and
-   * capability names; `requires: ['<name>']` gates at selection.
+   * capability names.
    */
   readonly fixtures?: Readonly<Record<string, EngineFixtureFactory>>;
   /**
@@ -902,7 +891,7 @@ export interface Engine {
    * machine here (a first-run browser download, a toolchain fetch), so it
    * happens once instead of per worker and its progress reaches the reporter
    * through `info.log`. It runs after collection and before the run's clock
-   * starts: `plan` is emitted, the report's `startedAt` taken, and the app
+   * starts: `collected` is emitted, the report's `startedAt` taken, and the app
    * started only once every target is prepared, so a download is never part
    * of a run's duration. A run with nothing to run (the test filters left
    * nothing, or `--pass-with-no-tests` on an empty selection) prepares no
@@ -982,10 +971,16 @@ export type EngineIsolation = 'attempt' | 'worker';
  * `@e2e-dev/core` types a session without a hand-written argument. It is a type
  * only: no handle carries a value under `engineFixtures`.
  */
-export interface EngineHandle<Fixtures extends object = {}> extends Engine {
+export interface EngineHandle<
+  Fixtures extends object = {},
+  Platform extends string = string,
+  Isolation extends EngineIsolation = EngineIsolation,
+> extends Engine {
   readonly [engineBrand]: true;
   readonly capabilities: ReadonlySet<EngineCapability>;
   readonly [engineFixtures]?: Fixtures;
+  readonly platform?: Platform;
+  readonly isolation?: Isolation;
 }
 
 export { defineEngine, isEngineHandle } from './manifest.ts';

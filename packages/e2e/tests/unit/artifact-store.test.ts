@@ -6,13 +6,17 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ArtifactStore, StoredArtifact } from '@e2e-dev/core/lib/types';
+import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import { uuidv7 } from '@e2e-dev/core/lib/internal/ids';
 import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { createAttemptArtifacts } from '@e2e-dev/core/lib/run/artifacts';
+import { buildReport } from '../../src/report/build.ts';
+import { assertValidReport } from '../helpers/report-schema.ts';
 
 const roots: string[] = [];
 function root(): string {
@@ -177,6 +181,94 @@ describe('createAttemptArtifacts with an ArtifactStore', () => {
 });
 
 describe('artifact redaction labels', () => {
+  it.each([false, true])('marks files that never appeared incomplete and keeps reports schema-valid (store: %s)', async (withStore) => {
+    const store = capturing();
+    const attemptId = uuidv7();
+    const ledger = new SecretLedger([['api-key', 'missing-download-secret-9921']]);
+    const artifacts = createAttemptArtifacts({
+      artifactsRoot: root(),
+      segments: ['web', 'test-1', 'attempt-0'],
+      attemptId,
+      ledger: () => ledger,
+      ...(withStore ? { store } : {}),
+    });
+    writeFileSync(path.join(artifacts.dir, 'present.png'), 'x');
+    writeFileSync(path.join(artifacts.dir, 'present.txt'), 'ok');
+    artifacts.sink.register('screenshot', 'missing.png');
+    artifacts.sink.register('log', 'missing.txt');
+    artifacts.sink.register('download', 'missing.csv');
+    artifacts.sink.register('screenshot', 'present.png');
+    artifacts.sink.register('log', 'present.txt');
+
+    // Before settlement no path, size, or digest exists yet, so records stay incomplete.
+    for (const record of artifacts.records) {
+      expect(record.path).toBeUndefined();
+      expect(record.redaction).toBe('incomplete');
+    }
+
+    await artifacts.settle();
+
+    const [missingShot, missingLog, missingDownload, presentShot, presentLog] = artifacts.records;
+    for (const missing of [missingShot, missingLog, missingDownload]) {
+      expect(missing?.path).toBeUndefined();
+      expect(missing?.size).toBeUndefined();
+      expect(missing?.sha256).toBeUndefined();
+      expect(missing?.redaction).toBe('incomplete');
+    }
+    expect(presentShot).toMatchObject({ path: 'web/test-1/attempt-0/present.png', redaction: 'complete', size: 1 });
+    expect(presentLog).toMatchObject({ path: 'web/test-1/attempt-0/present.txt', redaction: 'complete', size: 2 });
+    expect(store.puts).toHaveLength(withStore ? 2 : 0);
+
+    const target = {
+      name: 'web',
+      index: 0,
+      platform: 'web',
+      engine: undefined,
+      app: { base: undefined, site: undefined, environment: 'test', identity: undefined },
+    } as unknown as ResolvedTarget;
+    const report = buildReport({
+      runId: uuidv7(),
+      config: undefined,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      status: 'passed',
+      exitCode: 0,
+      results: [{
+        test: {
+          kind: 'test',
+          title: 'missing artifacts',
+          titlePath: ['missing artifacts'],
+          declarationIndex: 0,
+          sessions: [],
+          tags: [],
+          source: undefined,
+          file: 'tests/case.e2e.ts',
+          id: 'tests/case.e2e.ts::missing artifacts',
+          serialId: undefined,
+        },
+        target,
+        agent: 'default',
+        repeat: 0,
+        status: 'passed',
+        selected: true,
+        attempts: [{
+          id: attemptId,
+          index: 0,
+          status: 'passed',
+          startedAt: '2026-01-01T00:00:00.000Z',
+          durationMs: 10,
+          steps: [],
+          artifacts: artifacts.records,
+          secondaryErrors: [],
+          cleanup: 'complete',
+        }],
+      }],
+      serialGroups: [],
+      runErrors: [],
+      targetProvenance: new Map(),
+    });
+    assertValidReport(report);
+  });
+
   it('labels each kind by what the runner masked: a screenshot and a log complete, a video incomplete', async () => {
     const artifacts = createAttemptArtifacts({
       artifactsRoot: root(),
@@ -249,6 +341,58 @@ describe('download redaction', () => {
     await artifacts.settle();
     expect(artifacts.records[0]).toMatchObject({ redaction: 'complete' });
     expect(readFileSync(path.join(artifacts.dir, 'downloads', 'headers.txt'), 'utf8')).toBe('authorization: <secret:api-key>\n');
+  });
+
+  it('rewrites a provider key in a download whole, beside a secret of the run or alone', async () => {
+    const key = 'sk-proj-artifact-4c9e1a7f2b6d8035';
+    const beside = { revision: 1, values: () => [], providerKeys: () => [['OPENAI_API_KEY', key] as const] };
+    const withSecret = new SecretLedger([['api-key', SECRET]], beside);
+    expect(withSecret.redact(key)).toBe('<secret:OPENAI_API_KEY>');
+    const rewritten = createAttemptArtifacts({ artifactsRoot: root(), segments: ['web', 'test-1', 'attempt-0'], attemptId: 'att-1', ledger: () => withSecret });
+    mkdirSync(path.join(rewritten.dir, 'downloads'));
+    writeFileSync(path.join(rewritten.dir, 'downloads', 'export.txt'), `secret ${SECRET}\nkey ${key}\n`);
+    rewritten.sink.register('download', 'downloads/export.txt');
+    await rewritten.settle();
+    expect(rewritten.records[0]).toMatchObject({ redaction: 'complete' });
+    expect(readFileSync(path.join(rewritten.dir, 'downloads', 'export.txt'), 'utf8')).toBe('secret <secret:api-key>\nkey <secret:OPENAI_API_KEY>\n');
+
+    const store = capturing();
+    const keyOnly = createAttemptArtifacts({ artifactsRoot: root(), segments: ['web', 'test-2', 'attempt-0'], attemptId: 'att-2', ledger: () => new SecretLedger([], beside), store });
+    mkdirSync(path.join(keyOnly.dir, 'downloads'));
+    writeFileSync(path.join(keyOnly.dir, 'downloads', 'export.txt'), `key ${key}\n`);
+    keyOnly.sink.register('download', 'downloads/export.txt');
+    await keyOnly.settle();
+    expect(readFileSync(path.join(keyOnly.dir, 'downloads', 'export.txt'), 'utf8')).toBe('key <secret:OPENAI_API_KEY>\n');
+    expect(keyOnly.records[0]).toMatchObject({ redaction: 'incomplete' });
+    expect(store.puts[0]).toMatchObject({ redaction: 'incomplete' });
+    expect(Buffer.from(store.puts[0]!.bytes).toString('utf8')).toBe('key <secret:OPENAI_API_KEY>\n');
+  });
+
+  it.each([
+    { withAppSecret: false, overLimit: false },
+    { withAppSecret: false, overLimit: true },
+    { withAppSecret: true, overLimit: true },
+  ])('bounds download scans (app secret: $withAppSecret, over limit: $overLimit)', async ({ withAppSecret, overLimit }) => {
+    const key = 'sk-proj-large-download-5a31b9b578f0';
+    const beside = { revision: 1, values: () => [], providerKeys: () => [['OPENAI_API_KEY', key] as const] };
+    const ledger = new SecretLedger(withAppSecret ? [['api-key', SECRET]] : [], beside);
+    const artifacts = createAttemptArtifacts({ artifactsRoot: root(), segments: ['attempt'], attemptId: 'att', ledger: () => ledger });
+    const file = path.join(artifacts.dir, 'export.txt');
+    const body = `key ${key}\nsecret ${SECRET}\n`;
+    const size = 16 * 1024 * 1024 + Number(overLimit);
+    writeFileSync(file, body);
+    truncateSync(file, size);
+    artifacts.sink.register('download', 'export.txt');
+    await artifacts.settle();
+    const text = readFileSync(file, 'utf8');
+    const expected = withAppSecret
+      ? 'key <secret:OPENAI_API_KEY>\nsecret <secret:api-key>\n'
+      : overLimit ? body : `key <secret:OPENAI_API_KEY>\nsecret ${SECRET}\n`;
+    expect(text.startsWith(expected)).toBe(true);
+    expect(artifacts.records[0]).toMatchObject({
+      redaction: withAppSecret ? 'complete' : 'incomplete',
+      size: size + expected.length - body.length,
+    });
   });
 
   it('labels a rewritten download complete, and stores the rewritten bytes', async () => {

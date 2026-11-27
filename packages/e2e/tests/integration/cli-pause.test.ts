@@ -304,7 +304,10 @@ describe('screen.pause() without a terminal', () => {
     const run = start(dir, ['run']);
     await run.shows(pauseMessage('Paused ({id}) in pauses three times'));
     const id = printedPauseId(run.stdout());
-    expect(run.stdout()).toContain('Next: e2e run --step next to resume the test, or e2e run --step stop to end the run.\n');
+    // The prompt can arrive in more than one read of the pipe.
+    const commands = 'Next: e2e run --step next to resume the test, or e2e run --step stop to end the run.\n';
+    await run.shows(commands);
+    expect(run.stdout()).toContain(commands);
 
     const next = e2e(dir, ['run', '--step', 'next']);
     expect(next.exitCode).toBe(0);
@@ -559,7 +562,7 @@ test('pauses in a step', async ({ app, agent, screen }) => {
     );
     const ran = e2e(dir, ['run']);
     expect(ran.exitCode, ran.stdout + ran.stderr).toBe(1);
-    expect(ran.stdout).toContain('ACTION_FAILED: screen.pause() was called inside another step (an onAction hook or a project tool) or an expect.poll read');
+    expect(ran.stdout).toContain('ACTION_FAILED: screen.pause() was called inside another step (an onAction hook or a project tool), an expect.poll read, or a toPass block');
     expect(ran.stdout).not.toContain('Paused (');
   }, 60_000);
 });

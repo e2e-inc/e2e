@@ -11,7 +11,8 @@
  * - model-call accounting and a step transcript for `--debug`.
  */
 
-import { redactToolResult } from './redaction.ts';
+import { executorRedactors, redactToolResult } from './redaction.ts';
+import { processSecrets, redactProviderKeys } from '../run/secrecy.ts';
 import type { StepTurn } from '../run/steps.ts';
 import type { AssistantModelMessage, ModelMessage, StepResult, Tool, ToolCallPart, ToolExecutionOptions, ToolSet } from 'ai';
 import { asSdkLanguageModel, loadAiSdk, type AiSdk, type SdkLanguageModel } from './ai-sdk.ts';
@@ -26,6 +27,7 @@ import {
   isForcedToolChoiceDowngraded,
   isForcedToolChoiceRejected,
 } from './model/tool-choice.ts';
+import { missingCredentialError, withMissingCredentialNamed } from './model/missing-credential.ts';
 import { withStallGuard } from './model/stall.ts';
 import { providerHints, type ProviderHints, type ProviderModelRef } from './model/provider-hints.ts';
 import { isScreenOutput, reportsNoEffect, toolResultTexts } from './screen-update.ts';
@@ -262,6 +264,8 @@ class LoopRun {
   /** Whether each look (by call id) showed a change, read when the result was new and kept past compaction. */
   private readonly looks = new Map<string, boolean>();
   private noticedLowClock = false;
+  /** A turn asked again (a refused forced choice, an overflow) resends the request that already carries the notice. */
+  private noticedWindDown = false;
   /** Every turn that ran, oldest first: the debug transcript is rendered from it, the report keeps the tail. */
   private readonly turns: LoopTurn[] = [];
   /** Loop notes from before the first turn. */
@@ -311,7 +315,7 @@ class LoopRun {
     this.conclusion = createVerdictTool(context.step.kind);
     this.toolChoice = FREE_TOOL_CHOICE_MODELS.has(model) ? 'auto' : 'required';
     this.requestModel = ai.wrapLanguageModel({
-      model: withStallGuard(ai, model, (stallMs) => {
+      model: withStallGuard(ai, withMissingCredentialNamed(ai, model), (stallMs) => {
         this.note(`turn ${String(this.turnsUsed + 1)} got no response in ${String(stallMs / 1000)}s: sending it again`);
       }),
       middleware: {
@@ -325,7 +329,7 @@ class LoopRun {
         },
         transformParams: async ({ params }) => ({
           ...params,
-          prompt: params.prompt.map(message => message.role !== 'tool' ? message : {
+          prompt: params.prompt.map(message => message.role === 'assistant' ? redactAssistantText(message, executorRedactors.get(context)) : message.role !== 'tool' ? message : {
             ...message,
             content: message.content.map(part => {
               if (part.type !== 'tool-result') return part;
@@ -428,8 +432,8 @@ class LoopRun {
             { cause },
           );
         }
-        const unserved = unservedModelError(cause);
-        if (unserved !== undefined) throw unserved;
+        const named = unservedModelError(cause) ?? missingCredentialError(cause);
+        if (named !== undefined) throw named;
         throw new AgentError(
           'MODEL_PROVIDER_FAILED',
           withHint(`the model provider failed: ${message}`, failureHint(cause)),
@@ -842,7 +846,8 @@ class LoopRun {
           'blocked (with errorCode) if something outside the application stopped you.',
       );
     }
-    if (turnsLeft === WIND_DOWN_TURNS && this.guardStop === undefined) {
+    if (turnsLeft === WIND_DOWN_TURNS && this.guardStop === undefined && !this.noticedWindDown) {
+      this.noticedWindDown = true;
       this.note(`before turn ${String(stepNumber + 1)}: only ${String(turnsLeft)} turns remain, asking to wrap up`);
       prepared = appendNotice(
         prepared,
@@ -895,7 +900,8 @@ class LoopRun {
     const system =
       typeof this.options.system === 'function' ? this.options.system(this.context) : this.options.system;
     if (system !== undefined && system.trim() !== '') {
-      parts.push(system);
+      // Written by the config or an executor, so core never redacted it: the step's own redactor, which knows this test's secrets and the keys of the moment, not values earlier tests learned.
+      parts.push((executorRedactors.get(this.context) ?? redactProviderKeys)(system));
     }
     const project = this.context.agentContext;
     if (project !== undefined && project.trim() !== '') {
@@ -1101,8 +1107,30 @@ function textChars(messages: readonly ModelMessage[]): number {
   return total;
 }
 
+/**
+ * An assistant message with what the model wrote redacted, before it is sent
+ * back as history: a model that repeats a secret or a provider key it was
+ * shown, in an error or on a screen, must not be handed it again as text.
+ * Its tool calls stay as it made them, and so does its reasoning, which a
+ * provider signs and refuses once a character of it has changed.
+ */
+function redactAssistantText<Message extends { content: unknown }>(message: Message, redact: ((text: string) => string) | undefined): Message {
+  if (redact === undefined) return message;
+  if (typeof message.content === 'string') return { ...message, content: redact(message.content) };
+  if (!Array.isArray(message.content)) return message;
+  return {
+    ...message,
+    content: message.content.map((part: unknown) => {
+      const record = part as { type?: unknown; text?: unknown };
+      return record.type === 'text' && typeof record.text === 'string' ? { ...record, text: redact(record.text) } : part;
+    }),
+  };
+}
+
 function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max)}…[truncated]`;
+  // Redacted before the cut: half a value is no longer a match. What the step reports is redacted again, whole.
+  const safe = processSecrets.redact(text);
+  return safe.length <= max ? safe : `${safe.slice(0, max)}…[truncated]`;
 }
 
 /** A tool result for the transcript: a screenshot-carrying result reads as its text plus the image size, never the bytes. */

@@ -73,6 +73,8 @@ async function harness(options: {
   readonly actions?: Partial<ExecutorActions>;
   readonly tree?: boolean;
   readonly testRan?: string;
+  readonly attached?: boolean;
+  readonly hasAgent?: boolean;
 }): Promise<Harness> {
   const root: Fake = { id: 'root', role: 'document', name: 'Page', y: 0, children: options.screen };
   const base = fakeExecutorContext({ secrets: [{ name: 'admin.password', purpose: 'password' }, { name: 'apiKey', purpose: 'generic-secret' }] }).context;
@@ -112,6 +114,8 @@ async function harness(options: {
     appBase: { href: 'http://127.0.0.1:4100/', origin: 'http://127.0.0.1:4100' },
     fills: { credentials: [{ name: 'admin', username: 'ada@example.test', password: 'admin.password' }], secrets: ['apiKey'] },
     testRan: options.testRan,
+    attached: options.attached,
+    hasAgent: options.hasAgent,
   });
   const watched = lines.watch(context);
   const tools: ToolSet = { ...lines.wrap(createGrammarTools(watched)), test_lines: lines.tool() };
@@ -192,6 +196,35 @@ describe('SessionTestLines', () => {
     const star: Fake = { id: 'n4', role: 'button', testId: 'star', y: 80 };
     const session = await harness({ screen: [save, star], matches: { 'getByRole("button")': [save, star], 'getByTestId("star")': [star] } });
     expect(noteOf(await session.run('tap', { target: 'n4' }))).toBe('Test line: await screen.getByTestId("star").tap();');
+  });
+
+  it('finds a control nothing names by its role: alone, under its row, or by position', async () => {
+    const quantity: Fake = { id: 'n40', role: 'spinbutton', y: 80 };
+    const only = await harness({ screen: [quantity, save], matches: { 'getByRole("spinbutton")': [quantity] } });
+    expect(noteOf(await only.run('type', { target: 'n40', value: '10' }))).toBe(
+      'Test line: await screen.getByRole("spinbutton").fill("10"); // the only spinbutton on the screen, found by its role alone; a name or test id holds up better',
+    );
+
+    const other: Fake = { id: 'n41', role: 'spinbutton', y: 120 };
+    const rows: Fake[] = [
+      { id: 'n42', role: 'row', y: 80, children: [{ id: 'n43', text: 'Boxes', y: 80 }, quantity] },
+      { id: 'n44', role: 'row', y: 120, children: [{ id: 'n45', text: 'Crates', y: 120 }, other] },
+    ];
+    const scoped = await harness({
+      screen: rows,
+      matches: { 'getByRole("spinbutton")': [quantity, other], 'getByRole("row").filter({ hasText: "Crates" }) >> getByRole("spinbutton")': [other] },
+    });
+    expect(noteOf(await scoped.run('type', { target: 'n41', value: '3' }))).toBe(
+      'Test line: await screen.getByRole("row").filter({ hasText: "Crates" }).getByRole("spinbutton").fill("3");',
+    );
+
+    const placed = await harness({ screen: [quantity, other], matches: { 'getByRole("spinbutton")': [quantity, other] } });
+    expect(noteOf(await placed.run('type', { target: 'n41', value: '3' }))).toBe(
+      'Test line: await screen.getByRole("spinbutton").nth(1).fill("3"); // 2 of 2 matches, by position; a unique name or test id holds up better',
+    );
+    // A node with no role getByRole takes still has nothing to find it by.
+    const bare = await harness({ screen: [{ id: 'n46', y: 200 }], matches: {} });
+    expect(noteOf(await bare.run('tap', { target: 'n46' }))).toBe('No test line: the node has no name, text, placeholder, or test id to find it by.');
   });
 
   it('never prints a locator whose one match is another node', async () => {
@@ -406,7 +439,7 @@ describe('SessionTestLines', () => {
   });
 
   it('records the opening of the app as app.open() and drafts the lines in order', async () => {
-    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] } });
+    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] }, hasAgent: true });
     session.lines.opened();
     await session.run('tap', { target: 'n2' });
     await session.run('scroll', { direction: 'down' });
@@ -418,9 +451,38 @@ describe('SessionTestLines', () => {
         'await screen.getByRole("button", "Save").tap();',
         '// scroll: no test line: a test action brings its node into view itself, and a row deep in a windowed list takes screen.scrollUntilVisible(locator)',
         '',
-        'Paste it into a test body, async ({ app, screen }) => { ... }, and add an expect after each step that should change the screen.',
+        'Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ app, screen }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice. Prefer agent.act for user flows, with agent among the test fixtures (keep screen lines for low-level mechanics under test or a sign-in setup). Give the agent the steps for one test goal, and split into calls when a later step needs a known screen state, risks maxSteps or maxModelCalls budgets, or needs a middle step boundary. Wait for the intermediate screen state before continuing. See topic writing-tests, Structure.',
       ].join('\n'),
     );
+    expect(session.tools.test_lines?.description).toContain('Split the draft into tests, one behavior each');
+    expect(session.tools.test_lines?.description).not.toContain('continue the existing test');
+    expect(session.tools.test_lines?.description).not.toContain('pause point');
+  });
+
+  it('drafts the lines while attached to a held test for its pause point', async () => {
+    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] }, attached: true });
+    await session.run('tap', { target: 'n2' });
+    expect(session.lines.draft()).toBe(
+      [
+        "Test lines from this session's actions while the test was held, in order (1 lines):",
+        '',
+        'await screen.getByRole("button", "Save").tap();',
+        '',
+        "Put them in the held test at the pause point. Keep the test's checks together at its end, with one that checks its outcome. See topic writing-tests, Structure.",
+      ].join('\n'),
+    );
+    expect(session.tools.test_lines?.description).toContain('Use these lines at the pause point of the held test');
+    expect(session.tools.test_lines?.description).not.toMatch(/split the draft into tests/i);
+    expect(session.tools.test_lines?.description).not.toContain('continue the existing test');
+  });
+
+  it('omits agent.act advice from the draft when no model or executor is configured', async () => {
+    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] }, hasAgent: false });
+    session.lines.opened();
+    await session.run('tap', { target: 'n2' });
+    const draft = session.lines.draft();
+    expect(draft).toContain('Split these lines into tests, one behavior each');
+    expect(draft).not.toContain('agent.act');
   });
 
   it('prints no line for a resize, naming the size to set with the engine fixture', async () => {
@@ -438,15 +500,17 @@ describe('SessionTestLines', () => {
         '',
         'await screen.getByRole("button", "Save").tap();',
         '',
-        'Put them in that test where it stopped, in place of the line that failed or after its last line, and add an expect after each step that should change the screen.',
+        "Put them in that test where it stopped, in place of the line that failed or after its last step. Keep the test's checks together at its end, with one that checks its outcome. See topic writing-tests, Structure.",
       ].join('\n'),
     );
+    expect(session.tools.test_lines?.description).toContain('Use these lines to continue the existing test');
+    expect(session.tools.test_lines?.description).not.toMatch(/split the draft into tests/i);
   });
 
-  it('drafts the statements run_code passed among the action lines, each awaited and ended', async () => {
+  it('drafts the lines run_code passed among the action lines', async () => {
     const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] } });
     session.lines.opened();
-    session.lines.ran(["await screen.getByLabel('Email').fill(credentials.user('admin').password);", "expect(screen.getByRole('status')).toHaveText('Saved')"]);
+    session.lines.ran(["await screen.getByLabel('Email').fill(credentials.user('admin').password);", "await expect(screen.getByRole('status')).toHaveText('Saved');"]);
     await session.run('tap', { target: 'n2' });
     const draft = session.lines.draft();
     expect(draft.split('\n').slice(0, 6)).toEqual([
@@ -458,6 +522,29 @@ describe('SessionTestLines', () => {
       'await screen.getByRole("button", "Save").tap();',
     ]);
     expect(draft).toContain("Import credentials from 'e2e'.");
+  });
+
+  it("asks the draft's test body for an engine fixture a line only passes along", () => {
+    const drafted = (line: string): string => {
+      const lines = new SessionTestLines({ query: locateQuery, resolve: async () => [], read: async () => ({ ref: { id: 'x', revision: 'x' } }), redact: (text) => text, engineFixtures: ['browser'] });
+      lines.ran([line]);
+      return /async \(\{ ([^}]*) \}\)/.exec(lines.draft())?.[1] ?? '';
+    };
+    expect(drafted('await expect(browser).toHaveURL(/done/);')).toBe('app, screen, browser');
+    expect(drafted('await screen.getByRole("row").dragTo(browser.locator("#bin"));')).toBe('app, screen, browser');
+    // The word in a string, or as another object's member, is not the fixture.
+    expect(drafted("await screen.getByText('browser, then').tap();")).toBe('app, screen');
+    expect(drafted('await app.browser.open();')).toBe('app, screen');
+  });
+
+  it("asks the draft's test body for services, whether a line starts from them or only passes them along", () => {
+    const drafted = (line: string): string => {
+      const lines = new SessionTestLines({ query: locateQuery, resolve: async () => [], read: async () => ({ ref: { id: 'x', revision: 'x' } }), redact: (text) => text, engineFixtures: ['browser'] });
+      lines.ran([line]);
+      return /async \(\{ ([^}]*) \}\)/.exec(lines.draft())?.[1] ?? '';
+    };
+    expect(drafted('await services["my-mail"].createInbox();')).toBe('app, screen, services');
+    expect(drafted('await browser.setViewport(services.layout.size);')).toBe('app, screen, browser, services');
   });
 
   it('hands the caller the observation it asked for, tree or not, and keeps the context live', async () => {

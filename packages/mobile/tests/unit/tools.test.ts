@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { defineEngine } from '@e2e-dev/core/engine';
 import { buildEngine } from '../../src/engine.ts';
 import { AgentDeviceSurface } from '../../src/surface.ts';
-import { unstable_deviceSession, mobileTools } from '../../src/tools.ts';
+import { foldTools, unstable_deviceSession, mobileTools, tvTools } from '../../src/tools.ts';
 import { createFakeClient, type FakeClient } from '../helpers/fake-client.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
@@ -29,7 +29,7 @@ describe('agent tool pack', () => {
     const androidFake = createFakeClient({ 'apps.open': () => ({ appName: 'Clock' }) });
     const ios = buildEngine(new AgentDeviceSurface({ platform: 'ios' }, () => iosFake.client));
     const android = buildEngine(new AgentDeviceSurface({ platform: 'android', device: 'emulator-5554' }, () => androidFake.client));
-    const init = (engine: typeof ios, targetName: string) =>
+    const init = (engine: typeof ios | typeof android, targetName: string) =>
       engine.init!({
         runId: 'r',
         targetName,
@@ -71,6 +71,71 @@ describe('agent tool pack', () => {
     await ios.startAttempt!(attempt('a2'));
     expect(await run('open_app', { app: 'Reminders' })).toBe('Opened Reminders.');
     expect(iosFake.lastArgs('apps.open')).toEqual({ app: 'Reminders', platform: 'ios' });
+  });
+
+  it('keeps the TV remote in a pack of its own, which presses the button on the running device once per press', async () => {
+    const fake = createFakeClient();
+    const tv = buildEngine(new AgentDeviceSurface({ platform: 'android', device: 'emulator-5554' }, () => fake.client));
+    expect(Object.keys(mobileTools(tv))).not.toContain('tv_remote');
+    const tools = tvTools(tv);
+    expect(Object.keys(tools)).toEqual(['tv_remote']);
+    expect(tools.tv_remote!.annotations).toEqual({ mutates: true, platforms: ['android'] });
+    const foreign = defineEngine({ name: 'other', version: '1', spiVersion: 1 });
+    expect(() => tvTools(foreign)).toThrowError(expect.objectContaining({ code: 'INVALID_STATE' }));
+
+    await tv.init!({ runId: 'r', targetName: 'tv', projectRoot: '/project', app: {}, headed: false, workerSlot: 0, log: () => undefined, env: {}, signal: new AbortController().signal });
+    const run = (input: unknown) =>
+      (tools.tv_remote!.tool.execute as (input: unknown, options: object) => Promise<unknown>)(input, { toolCallId: 'c1', messages: [] });
+    await expect(run({ key: 'down' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+    await tv.startAttempt!({ attemptId: 'a1', artifactsDir: '/tmp', signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+    const before = fake.calls.length;
+    expect(await run({ key: 'play-pause' })).toBe('Pressed play-pause on the remote.');
+    expect(await run({ key: 'down', times: 3 })).toBe('Pressed down on the remote 3 times.');
+    const selection = { platform: 'android', serial: 'emulator-5554' };
+    expect(fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
+      ['command.tvRemote', { ...selection, button: 'media-play-pause' }],
+      ['command.tvRemote', { ...selection, button: 'down' }],
+      ['command.tvRemote', { ...selection, button: 'down' }],
+      ['command.tvRemote', { ...selection, button: 'down' }],
+    ]);
+
+    fake.respond('command.tvRemote', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'tv-remote is not supported on this device');
+    });
+    await expect(run({ key: 'menu' })).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+  });
+
+  it('keeps the hinge in a pack of its own, which folds the running device to the pose', async () => {
+    const fake = createFakeClient();
+    const duo = buildEngine(new AgentDeviceSurface({ platform: 'ios', device: 'iPhone Duo' }, () => fake.client));
+    expect(Object.keys(mobileTools(duo))).not.toContain('fold');
+    const tools = foldTools(duo);
+    expect(Object.keys(tools)).toEqual(['fold']);
+    expect(tools.fold!.annotations).toEqual({ mutates: true, platforms: ['ios'] });
+    const foreign = defineEngine({ name: 'other', version: '1', spiVersion: 1 });
+    expect(() => foldTools(foreign)).toThrowError(expect.objectContaining({ code: 'INVALID_STATE' }));
+
+    await duo.init!({ runId: 'r', targetName: 'ios', projectRoot: '/project', app: {}, headed: false, workerSlot: 0, log: () => undefined, env: {}, signal: new AbortController().signal });
+    const run = (input: unknown) =>
+      (tools.fold!.tool.execute as (input: unknown, options: object) => Promise<unknown>)(input, { toolCallId: 'c1', messages: [] });
+    await expect(run({ pose: 'open' })).rejects.toMatchObject({ code: 'INVALID_STATE' });
+
+    await duo.startAttempt!({ attemptId: 'a1', artifactsDir: '/tmp', signal: new AbortController().signal, resolveSecret: noSecrets, ...ignoreTrace });
+    const before = fake.calls.length;
+    expect(await run({ pose: 'open' })).toBe('Unfolded the device flat; the app is on the inner display.');
+    expect(await run({ pose: 'half-open' })).toBe('Folded the device half-open; the app is on the inner display.');
+    expect(await run({ pose: 'closed' })).toBe('Folded the device closed; the app is on the outer display.');
+    expect(fake.calls.slice(before).filter((call) => call.method === 'command.fold').map((call) => call.args)).toEqual([
+      { platform: 'ios', device: 'iPhone Duo', pose: 'open' },
+      { platform: 'ios', device: 'iPhone Duo', pose: 'half-open' },
+      { platform: 'ios', device: 'iPhone Duo', pose: 'closed' },
+    ]);
+
+    fake.respond('command.fold', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'fold is not supported on this device');
+    });
+    await expect(run({ pose: 'open' })).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
   });
 
   it('hands a custom tool the running attempt\'s session and client', async () => {

@@ -24,6 +24,8 @@ interface SessionOptions {
   readonly contextOptions: BrowserContextOptions;
   readonly acquire: (signal: AbortSignal) => Promise<Browser>;
   readonly configure: (context: BrowserContext) => Promise<void>;
+  /** Whether a test moved the page clock this attempt, which a CDP reconnect cannot carry. */
+  readonly clockUsed: () => boolean;
   /** Starts the browser provider's own recording of the attempt's browser, when it records; the attempt records the screencast otherwise. */
   readonly record?: ((signal: AbortSignal) => Promise<LeaseRecording>) | undefined;
   readonly persistent?: {
@@ -75,6 +77,8 @@ export class AttemptSession {
   private firstPage = true;
   private requestedViewport: { readonly width: number; readonly height: number } | undefined;
   private media: WebMedia;
+  /** Whether a test took the attempt's browser offline. */
+  private offline = false;
   /** The emulation each page got as it appeared, so the attempt's own page is ready before it shows. */
   private readonly emulated = new WeakMap<Page, Promise<void>>();
   /** The active page being opened for the current binding, shared by concurrent callers. */
@@ -112,6 +116,18 @@ export class AttemptSession {
     if (this.generation !== token || this.state.kind !== 'ready') {
       throw new EngineError('NODE_STALE', 'the connection changed while reading the screen', { retryable: true });
     }
+  }
+
+  /**
+   * A check for between the steps of one input: a delayed focus read or key
+   * must not continue input past the operation's end or into a retired connection.
+   */
+  checkpoint(signal: AbortSignal, label: string): () => void {
+    const token = this.token();
+    return () => {
+      if (signal.aborted) throw connectionAbort(signal, label);
+      this.check(token);
+    };
   }
 
   /** An observation commits its references and freshness together against the same generation. */
@@ -206,6 +222,10 @@ export class AttemptSession {
         const previous = this.current();
         this.observed = false;
         await this.transition(previous, remaining(), async () => {
+          // The open documents keep their fake clock, but Playwright's clock
+          // script and state belonged to the old connection: replaying the
+          // calls would run their timers again, so the attempt fails instead.
+          if (this.options.clockUsed()) throw recoveryFailed('the page clock cannot be carried across a reconnect');
           await this.video.pageClosing();
           return attachPersistent(persistent.reconnect, remaining(), previous.identity);
         }, true);
@@ -237,6 +257,8 @@ export class AttemptSession {
       try {
         if (budget.signal.aborted) throw connectionAbort(budget.signal, 'connection');
         await this.options.configure(candidate.context);
+        // Offline belongs to the context and to the CDP session that set it, so a replaced context and a new transport take it again.
+        if (this.offline) await candidate.context.setOffline(true);
         this.watchPages(candidate.context);
         if (recover) await this.remapTabs(candidate);
         if (recover && candidate.page !== null) {
@@ -660,6 +682,24 @@ export class AttemptSession {
     const { context, page } = this.current();
     if (page !== null && !page.isClosed()) await page.emulateMedia(this.media);
     await this.emulateOnOthers(context, page, (other) => other.emulateMedia(this.media));
+  }
+
+  /**
+   * Whether a navigation that just failed ran on a live browser a test holds
+   * offline. A browser that dropped or a page that closed is an engine
+   * fault whatever the network state.
+   */
+  navigatedOffline(): boolean {
+    if (!this.offline || this.state.kind !== 'ready') return false;
+    const { browser, page } = this.state.binding;
+    return browser.isConnected() && page !== null && !page.isClosed();
+  }
+
+  /** Cuts or restores the network of every tab and service worker of the attempt's context, and of each one opened after. */
+  async setOffline(offline: boolean): Promise<void> {
+    // Set before the await, so a context or transport that replaces this one meanwhile takes the new state.
+    this.offline = offline;
+    await this.current().context.setOffline(offline);
   }
 
   /**

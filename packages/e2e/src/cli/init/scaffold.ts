@@ -1,7 +1,9 @@
 import { packageVersion } from '@e2e-dev/core/lib/internal/package-version';
+import type { PackageManager } from '../../internal/package-manager.ts';
 import { getEnginePreset, type EngineId, type EnginePreset } from './engines.ts';
+import type { FrameworkApp } from './frameworks.ts';
 import { dependencyRange, siblingDependency } from './versions.ts';
-import { getGatewayPreset, type GatewayId } from './gateways.ts';
+import { AI_DEPENDENCIES, getGatewayPreset, type GatewayId } from './gateways.ts';
 
 /** The model choice `init` writes: which gateway, and for an OpenAI-compatible one, where. */
 export interface ScaffoldModel {
@@ -43,6 +45,44 @@ test('app responds', async () => {
 });
 `;
 
+/** A detected app the web target starts with the project's package manager. */
+export interface ScaffoldApp {
+  readonly app: FrameworkApp;
+  readonly manager: PackageManager;
+}
+
+/** The line that tells a config whether it runs in CI, the way the runner reads `CI`. */
+const CI_CONSTANT = `// e2e reads CI the same way: unset, '', '0', and 'false' mean a local run.
+const ci = !['', '0', 'false'].includes(process.env.CI?.trim().toLowerCase() ?? '');`;
+
+/** An `app.command` that runs a package.json script with the project's package manager. */
+function scriptCommand(manager: PackageManager, script: string, reuse: boolean): string {
+  return `{ executable: '${manager}', args: ['run', '${script}']${reuse ? ', reuseExisting: true' : ''} }`;
+}
+
+/**
+ * The web target for a detected app: its URL, and the command that starts
+ * it. Locally the runner starts the dev server or reuses one already on the
+ * port; in CI, when the project has a production build, it serves the build
+ * the pipeline made.
+ */
+function appTarget({ app, manager }: ScaffoldApp): string {
+  const dev = scriptCommand(manager, app.dev, true);
+  const command = app.production === undefined
+    ? [
+      `    // The runner starts the ${app.framework} dev server, or uses one you already started on that port.`,
+      `    command: ${dev},`,
+    ]
+    : [
+      `    // ${app.framework}: the dev server here, or one you already started on that port.`,
+      `    // CI serves the production build: run \`${manager} run ${app.production.build}\` before \`e2e run\`.`,
+      '    command: ci',
+      `      ? ${scriptCommand(manager, app.production.start, false)}`,
+      `      : ${dev},`,
+    ];
+  return ['{', '  engine: web(),', '  app: {', `    url: '${app.url}',`, ...command, '  },', '}'].join('\n');
+}
+
 /** Every line of `text` after the first indented by `prefix`, for a block nested one level deeper. */
 function indentTail(text: string, prefix: string): string {
   return text.replaceAll('\n', `\n${prefix}`);
@@ -53,14 +93,15 @@ function indentTail(text: string, prefix: string): string {
  * target inline; several get one entry each, and a setting two engines share
  * is written once.
  */
-function targetsConfig(engines: readonly EnginePreset[]): string {
+function targetsConfig(engines: readonly EnginePreset[], app: ScaffoldApp | undefined): string {
+  const target = (preset: EnginePreset): string => (preset.id === 'web' && app !== undefined ? appTarget(app) : preset.target);
   const [engine, ...others] = engines;
   if (engine === undefined) return NO_ENGINE_CONFIG;
   const settings = [...new Set(engines.flatMap((preset) => preset.settings))];
   if (others.length === 0) {
     return [
       ...(engine.targetComment === undefined ? [] : [`  // ${engine.targetComment}`]),
-      `  targets: [${indentTail(engine.target, '  ')}],`,
+      `  targets: [${indentTail(target(engine), '  ')}],`,
       ...settings,
     ].join('\n');
   }
@@ -68,7 +109,7 @@ function targetsConfig(engines: readonly EnginePreset[]): string {
     '  targets: [',
     ...engines.flatMap((preset) => [
       ...(preset.targetComment === undefined ? [] : [`    // ${preset.targetComment}`]),
-      `    ${indentTail(preset.target, '    ')},`,
+      `    ${indentTail(target(preset), '    ')},`,
     ]),
     '  ],',
     ...settings,
@@ -77,7 +118,7 @@ function targetsConfig(engines: readonly EnginePreset[]): string {
 
 /**
  * The example tests. One engine writes `tests/example.e2e.ts`; several write
- * one file per engine, each test requiring its engine's fixture so the other
+ * one file per engine, each test scoped to its engine's platform so the other
  * engines' targets skip it.
  */
 function exampleTests(engines: readonly EnginePreset[], ai: boolean): ScaffoldTest[] {
@@ -85,13 +126,17 @@ function exampleTests(engines: readonly EnginePreset[], ai: boolean): ScaffoldTe
   if (engine === undefined) return [{ name: 'example', content: NO_ENGINE_EXAMPLE }];
   if (others.length === 0) return [{ name: 'example', content: engine.example('') + (ai ? engine.aiExample('') : '') }];
   return engines.map((preset) => {
-    const options = `{ requires: ['${preset.fixture}'] }, `;
+    const options = `{ platforms: ['${preset.platform}'] }, `;
     return { name: preset.file, content: preset.example(options) + (ai ? preset.aiExample(options) : '') };
   });
 }
 
-/** Composes common setup, the selected engines (none for an engine-less config), and optional AI support. */
-export function createScaffold(engineIds: readonly EngineId[], model: ScaffoldModel | undefined) {
+/**
+ * Composes common setup, the selected engines (none for an engine-less
+ * config), and optional AI support. With `app`, the web target starts the
+ * detected app instead of reading `APP_URL`.
+ */
+export function createScaffold(engineIds: readonly EngineId[], model: ScaffoldModel | undefined, app?: ScaffoldApp) {
   const engines = engineIds.map(getEnginePreset);
   const gateway = model === undefined ? undefined : getGatewayPreset(model.gateway);
   const imports = [
@@ -101,8 +146,11 @@ export function createScaffold(engineIds: readonly EngineId[], model: ScaffoldMo
   ];
   const configFields = [
     ...(model === undefined ? [] : [agentConfig(model)]),
-    targetsConfig(engines),
+    targetsConfig(engines, app),
   ];
+  // Only the web target reads the detected app, and only one with a production build switches on CI.
+  const webApp = engines.some((engine) => engine.id === 'web') ? app : undefined;
+  const preamble = webApp?.app.production === undefined ? '' : `${CI_CONSTANT}\n\n`;
 
   return {
     dependencies: {
@@ -110,17 +158,18 @@ export function createScaffold(engineIds: readonly EngineId[], model: ScaffoldMo
       ...Object.fromEntries(engines.flatMap((engine) => Object.entries(engine.dependencies))),
       // Every engine peers on `@e2e-dev/core`; npm and pnpm install peers, Yarn does not, and Plug'n'Play then cannot load the engine.
       ...(engines.length === 0 ? {} : siblingDependency('@e2e-dev/core')),
-      // zod is a peer of `ai` and every provider; npm and pnpm install peers, Yarn does not.
-      ...(gateway === undefined ? {} : { ai: '^7.0.0', zod: '^4.1.8', ...gateway.dependencies }),
+      ...(gateway === undefined ? {} : { ...AI_DEPENDENCIES, ...gateway.dependencies }),
     },
     config: `${imports.join('\n')}
 
-export default {
+${preamble}export default {
 ${configFields.join('\n')}
 } satisfies E2EConfig;
 `,
     tests: exampleTests(engines, gateway !== undefined),
-    // An engine-less config's example fetches APP_URL too.
-    needsAppUrl: engines.length === 0 || engines.some((engine) => engine.needsAppUrl),
+    // An engine-less config's example fetches APP_URL too; a detected app's target has its own URL.
+    needsAppUrl: engines.length === 0 || engines.some((engine) => engine.needsAppUrl && !(engine.id === 'web' && webApp !== undefined)),
+    /** Whether the config starts the app, which a fresh CI machine needs. */
+    startsApp: webApp !== undefined,
   };
 }

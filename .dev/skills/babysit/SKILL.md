@@ -1,6 +1,6 @@
 ---
 name: babysit
-description: Drive an open e2e-inc/e2e PR through conflicts, review bots, and CI until it is green with every thread handled, then label it Ready for Human Review. Use after opening a PR, or when asked to babysit, watch, monitor, check on, or get a PR green.
+description: Drive an open e2e-inc/e2e PR through conflicts, review bots, and CI until it is green with every thread handled and its description matching the final change, then label it Ready for Human Review. Use after opening a PR, or when asked to babysit, watch, monitor, check on, or get a PR green.
 metadata:
   internal: true
 ---
@@ -84,9 +84,14 @@ your own sleep loop.
       answered in one attributed PR comment.
 3. Fixes that change behavior get re-verified with the
    [verify](../verify/SKILL.md) skill before the push, not after.
-4. Push, then reply on each thread citing the commit, and resolve the ones
-   you fixed or disproved. Replies go after the push so they can cite it.
-5. `--watch` until the verdict changes. Repeat from step 1.
+4. Push, then run `writing-pr`, "After every push to an open PR". When the
+   push changed behavior, API, scope, or a number in the body, rewrite the
+   steps under `## How it works`, capture again or remove any output,
+   benchmark, or recording it made stale, and run the `unslop` pass on what
+   you rewrote. Never describe the new behavior only in a thread reply.
+5. Reply on each thread citing the commit, and resolve the ones you fixed
+   or disproved. Replies go after the push so they can cite it.
+6. `--watch` until the verdict changes. Repeat from step 1.
 
 ## Replying
 
@@ -117,9 +122,10 @@ so in the reply and move on. Never churn code just to quiet a bot.
 
 On `READY`:
 
-1. Re-read the PR body. It must describe the change as it now stands and
-   carry verification evidence (`writing-pr` skill). Update it if fixes
-   changed the story.
+1. Re-read the PR body against the final diff
+   (`gh pr diff <pr> --name-only`). It must describe the change as it now
+   stands, step by step, and its evidence must come from the current head
+   (`writing-pr` skill). Fix whatever drifted.
 2. Confirm everything in `escalated` is a thread you deliberately left for
    the human.
 3. `gh pr edit <pr> --add-label "Ready for Human Review"`, then snapshot
@@ -138,22 +144,17 @@ again whenever it is gone.
 Without triage access `gh pr edit --add-label` fails. The PR's author asks
 for the label with a comment that is exactly `/ready`, and
 `.github/workflows/review-ready.yml` adds it or replies with what is missing.
-Its gates are stricter than `READY`, because nobody on the team vouches for
-the PR:
+Nobody on the team vouches for the PR, so its gates add to `READY`:
 
 - Every review thread is resolved, and each one somebody else opened has
   your reply. An escalated thread blocks until a maintainer resolves it, so
   say in the reply that it waits on them.
-- Every comment from someone else has the author's 👍, and so does every
-  review summary a person wrote. Reviews take the reaction through GraphQL
-  only: `gh api graphql -f query='mutation($id:ID!){addReaction(input:{subjectId:$id,content:THUMBS_UP}){reaction{content}}}' -f id=<review node_id>`,
-  with the `node_id` from `gh api repos/{owner}/{repo}/pulls/<pr>/reviews`.
 - No conflict, no draft, no maintainer's standing change request, no
   `needs:compliance` label, checks reported and green.
 
 Reach `READY` first, then comment `/ready`. A first PR's CI waits for a
 maintainer's approval, and `/ready` is refused until it has run. Never resolve
-or react to get past the gate.
+a thread to get past the gate.
 
 ## Learn
 

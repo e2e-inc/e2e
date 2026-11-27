@@ -38,6 +38,7 @@ import {
   type SessionApp,
   type SessionArtifacts,
   type TargetSession,
+  type ViewportIntersection,
 } from './surface.ts';
 
 export interface EngineSessionOptions {
@@ -142,7 +143,11 @@ function validTabs(tabs: EngineTabs | undefined): tabs is EngineTabs {
     && tabs.count >= 2 && tabs.active >= 0 && tabs.active < tabs.count;
 }
 
-/** Located refs are pruned oldest-first past this bound so the map cannot grow unboundedly. */
+/**
+ * Located refs are pruned oldest-first past this bound so the map cannot grow
+ * unboundedly. A single locate with more matches keeps all of its own: the
+ * bound is then that locate's size.
+ */
 const MAX_LOCATED_REFS = 2048;
 
 /** Revision prefixes: the adapter mints `l<n>` for locate, `b<n>` for observe, and `s<n>` for a screen the engine handed over. */
@@ -293,6 +298,7 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
   const locateRaw = guard('locators (screen)', engine?.locate);
   const observeRaw = guard('observation', engine?.observe);
   const readStyleRaw = guard('computed styles', engine?.readStyle);
+  const viewportIntersectionRaw = guard('viewport geometry (toBeInViewport)', engine?.viewportIntersection);
   const performRaw = guard('actions', engine?.perform);
   const actions: ReadonlySet<LocatorActionKind> = new Set(engine?.actions ?? []);
   const performAtRaw = guard('point actions', engine?.performAt);
@@ -339,6 +345,7 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
     actions,
     pointerActions,
     tapModifiers,
+    measuresViewport: engine?.viewportIntersection !== undefined,
     app,
     artifacts,
     appLog: createAppLogRoute(),
@@ -410,10 +417,12 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       // Pixels stay only when their masked regions cover every secure node.
       // Pixels or a count the engine answered a pixels request with, short of
       // that proof, are marked instead, so no reader of the observation checks
-      // it again. An unavailable tree above has no secure node to count, so
-      // its fallback pixels rest on the engine's own proof.
+      // it again. A count with no pixels is the engine withholding them itself,
+      // even when the tree it read shows no secure node: a tree read only in
+      // part can leave one out. An unavailable tree above has no secure node
+      // to count, so its fallback pixels rest on the engine's own proof.
       const captured = observeOptions?.pixels === true && (snapshot.pixels !== undefined || snapshot.maskedRegionCount !== undefined);
-      const proven = pixelsProvenMasked(metadata.redaction);
+      const proven = snapshot.pixels !== undefined && pixelsProvenMasked(metadata.redaction);
       const observation: Observation = {
         ...metadata,
         kind: 'semantic',
@@ -444,8 +453,11 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
         located.set(stamped.ref.id, stamped);
         refs.push(stamped.ref);
       }
+      // The refs just added are the newest, so pruning oldest-first down to
+      // this locate's size never evicts them; reading them back as a set works.
+      const keep = Math.max(MAX_LOCATED_REFS, refs.length);
       for (const oldest of located.keys()) {
-        if (located.size <= MAX_LOCATED_REFS) break;
+        if (located.size <= keep) break;
         located.delete(oldest);
       }
       return refs;
@@ -457,6 +469,10 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
       return node;
     },
     readStyle: readStyleRaw,
+    async viewportIntersection(ref, operation) {
+      rejectSupersededLocate(ref);
+      return checkIntersection(await viewportIntersectionRaw(ref, operation), engine?.name ?? targetName);
+    },
     async perform(ref, action, operation) {
       if (!actions.has(action.kind)) unsupported(`the "${action.kind}" action`);
       if ('modifiers' in action && action.modifiers !== undefined && !tapModifiers) {
@@ -496,4 +512,23 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
     }),
   };
   return session;
+}
+
+/**
+ * An engine's `viewportIntersection` answer, held to the contract: a matcher
+ * must never pass on a ratio outside 0 to 1, a missing verdict, or a ratio
+ * that contradicts the verdict (`{ intersects: false, ratio: 1 }`).
+ */
+function checkIntersection(value: ViewportIntersection, engineName: string): ViewportIntersection {
+  const { intersects, ratio } = (value ?? {}) as Partial<Record<keyof ViewportIntersection, unknown>>;
+  const validRatio =
+    ratio === undefined || (typeof ratio === 'number' && ratio >= 0 && ratio <= 1 && ratio > 0 === intersects);
+  if (typeof intersects !== 'boolean' || !validRatio) {
+    throw new EngineError(
+      'ENGINE_FAILURE',
+      `engine ${engineName} returned an invalid viewport intersection: intersects must be a boolean, and ratio a number from 0 to 1 that is above 0 exactly when intersects is true`,
+      { retryable: false },
+    );
+  }
+  return ratio === undefined ? { intersects } : { intersects, ratio };
 }

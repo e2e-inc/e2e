@@ -56,10 +56,12 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 | [`toBeAttached`](#tobeattached) | 等待存在一个匹配项 |
 | [`toBeEnabled`](#tobeenabled-and-tobedisabled) | 等待启用状态 |
 | [`toBeDisabled`](#tobeenabled-and-tobedisabled) | 等待禁用状态 |
+| [`toBeEditable`](#tobeeditable) | 等待启用且非只读的控件 |
 | [`toBeChecked`](#tobechecked-tobeselected-and-tobeexpanded) | 等待勾选状态 |
 | [`toBeSelected`](#tobechecked-tobeselected-and-tobeexpanded) | 等待选中状态 |
 | [`toBeExpanded`](#tobechecked-tobeselected-and-tobeexpanded) | 等待展开状态 |
 | [`toBeFocused`](#tobefocused) | 等待获得焦点 |
+| [`toBeEmpty`](#tobeempty) | 等待字段为空，或节点没有文本 |
 | [`toHaveText`](#tohavetext-and-tocontaintext) | 等待规范化后的文本完全匹配 |
 | [`toContainText`](#tohavetext-and-tocontaintext) | 等待规范化后的文本包含指定内容 |
 | [`toHaveValue`](#tohavevalue) | 等待表单控件的值 |
@@ -104,6 +106,21 @@ await expect(screen.getByRole('button', 'Pay')).toBeEnabled({ enabled: false });
 - `<fieldset disabled>` 内的控件被禁用，除非它位于该 fieldset 的第一个 `<legend>` 中。
 - 祖先上的 `aria-disabled="true"` 会禁用其下的控件，直到 `aria-disabled="false"` 截断该继承链。
 
+#### `toBeEditable`
+
+等待控件启用且非只读。
+
+```ts
+await expect(screen.getByLabel('Email')).toBeEditable();
+await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
+```
+
+- 只读是引擎报告的状态。Web 引擎对原生控件和 `aria-readonly` 遵循 Playwright 的规则，角色使用 e2e 的角色，禁用状态使用 `toBeEnabled()` 报告的状态。`input`、`textarea` 和 `select` 只读取自身的 `readonly` 属性（任意值）。接受 `aria-readonly` 的角色（`textbox`、`searchbox`、`combobox`、`listbox`、`checkbox`、`switch`、`slider`、`spinbutton`、`gridcell` 等）的元素读取 `aria-readonly="true"`（不区分大小写）。编辑宿主只按其 ARIA 角色读取它（显式角色或标签的角色，网格中的 `td` 是 `gridcell`）；普通的 `<div contenteditable>` 没有角色。其他编辑宿主及其内部的任何元素都不是只读的。
+- 禁用的节点也不可编辑，禁用的判定与 [`toBeEnabled`](#tobeenabled-and-tobedisabled) 相同。
+- 其他节点（例如按钮）没有只读状态。无论是否取反，匹配器都会失败，失败信息会说明这一点。
+- 在设备上，只有当平台报告文本字段是否接受输入时（例如 Android），该字段才有只读状态。iOS 不报告，因此 iOS 字段会让匹配器失败，而不是靠猜测通过。
+- 引擎从需要 `e2e` 0.25.0 的 `@e2e-dev/web` 和 `@e2e-dev/mobile` 版本开始报告此状态。使用旧引擎时，每个节点都会以 `no read-only state` 失败：请随 `e2e` 一起更新引擎。
+
 #### `toBeChecked`、`toBeSelected` 和 `toBeExpanded`
 
 各自等待对应状态：勾选、选中或展开。
@@ -122,6 +139,19 @@ await expect(screen.getByRole('tab', 'Billing')).toBeSelected();
 ```ts
 await expect(screen.getByLabel('Email')).toBeFocused();
 ```
+
+#### `toBeEmpty`
+
+等待唯一匹配的元素为空。
+
+```ts
+await expect(screen.getByLabel('Search')).toBeEmpty();
+await expect(screen.getByTestId('cart')).not.toBeEmpty();
+```
+
+- 是否为空由引擎报告的状态决定。Web 引擎遵循 Playwright 的规则：`input` 或 `textarea` 的值为 `''` 时为空，值按原样读取，因此含空格的字段不为空。其他元素的文本内容去掉首尾空白后为 `''` 时为空。与 [`toHaveText`](#tohavetext-and-tocontaintext) 不同，隐藏文本也算在内，因此带选项的 `select` 从不为空，只含隐藏文本的 `<div>` 也不为空。
+- 移动端引擎按值判断文本字段，因此标签或提示不算内容；其他节点按其子树中的文本和值判断。iOS 会把 Flutter 或 Compose Multiplatform 绘制的字段报告为普通视图，因此其占位文本算作内容，空字段也不为空。
+- 桌面引擎目前不报告空状态。在桌面引擎上，以及在早于此匹配器的引擎版本上，无论是否取反都会失败，失败消息会说明原因。
 
 #### `toHaveText` 和 `toContainText`
 
@@ -271,7 +301,7 @@ await expect(browser).toHaveURL('/dashboard');
 await expect(browser).toHaveURL(/\/orders\/\d+$/);
 ```
 
-- 相对字符串根据基础 URL 解析，并在规范化后精确匹配。
+- 相对字符串根据基础 URL 解析，并在规范化后精确匹配。与 Playwright 一样，`*` 和 `{` 在这里按字面匹配；glob 请使用 [`browser.waitForURL`](/reference/web#waitforurl)。
 - `RegExp` 对完整 URL 进行测试。
 - 其他值，例如谓词函数，会导致 `INVALID_ARGUMENT`。
 - 与定位器匹配器一样，它接受 Playwright 的 `ignoreCase`（[文本匹配](#text-matching)）。
@@ -623,7 +653,7 @@ last: expected "running" not to be "running"
 
 | 匹配器 | 在安全字段上的行为 |
 | --- | --- |
-| `toHaveValue`、`toHaveText`、`toContainText` | 与 `inputValue()` 和 `textContent()` 一样触发 `POLICY_DENIED`，取反或列表形式也如此 |
+| `toHaveValue`、`toHaveText`、`toContainText`、`toBeEmpty` | 与 `inputValue()` 和 `textContent()` 一样触发 `POLICY_DENIED`，取反或列表形式也如此 |
 | `toHaveAttribute` | 与 `getAttribute()` 一样触发 `POLICY_DENIED`，所有属性名以及取反形式都如此 |
 | `toHaveAccessibleName`、`toHaveRole` 和状态匹配器 | 正常返回结果 |
 
@@ -695,6 +725,8 @@ export interface AsyncExpectation {
   toBeEnabled(options?: { enabled?: boolean; timeout?: number }): Promise<void>;
   /** Waits for disabled state. */
   toBeDisabled(options?: { timeout?: number }): Promise<void>;
+  /** Waits for an enabled control that is not read-only; `editable: false` waits for a disabled or read-only one. A node with no read-only state, a button included, fails either way. */
+  toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void>;
   /** Waits for checked state; `checked: false` waits for unchecked state. */
   toBeChecked(options?: { checked?: boolean; timeout?: number }): Promise<void>;
   /** Waits for selected state. */
@@ -703,6 +735,13 @@ export interface AsyncExpectation {
   toBeExpanded(options?: { timeout?: number }): Promise<void>;
   /** Waits for focused state. */
   toBeFocused(options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for a node the engine reports empty: on the web an input or
+   * textarea with no value, or any other element whose text content trims to
+   * nothing; on a device a text field with no value, or a node with no text
+   * or value in its subtree. Denied on a secure field.
+   */
+  toBeEmpty(options?: { timeout?: number }): Promise<void>;
   /** Waits for exact normalized text; a list waits for exactly that many matches, each with its entry's text, in order. */
   toHaveText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
   toHaveText(expected: readonly TextMatch[], options?: TextMatcherOptions): Promise<void>;

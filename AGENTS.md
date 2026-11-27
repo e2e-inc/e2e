@@ -131,7 +131,9 @@ suites that consume the built packages the way a user would.
   device-cloud providers (`testmu`, `browserstack`, `revyl`) share: one
   daemon per slot, heartbeat, a release that fails unless the session end is
   confirmed, and `agentDevicePlugin()`, which checks a provider plugin's
-  version and registers it in the daemon's home.
+  version and registers it in the daemon's home. Its `installLeasedApp()`
+  installs a target's `app.appPath` through any lease's daemon; `eas` uses
+  it too.
 - `packages/desktop` - the published `@e2e-dev/desktop` package: the
   desktop engine on agent-desktop (native apps through the OS accessibility
   tree), built with the same public `defineEngine`,
@@ -168,9 +170,28 @@ suites that consume the built packages the way a user would.
 - `packages/notte` - the published `@e2e-dev/notte` package: Notte cloud
   browsers for the web engine, `attempt` scope only, with a marker-file
   ledger for `sweep` since sessions carry no tags. Maintained by Notte.
+- `packages/browser-run` - the published `@e2e-dev/browser-run` package:
+  Cloudflare Browser Run hosted Chromium for the web engine
+  (`BrowserProvider`). It reads `CLOUDFLARE_ACCOUNT_ID` and
+  `CLOUDFLARE_API_TOKEN` from the run's environment when it acquires a
+  browser, so importing a config needs no login. One session per worker slot
+  by default, or a fresh browser per attempt with `scope: 'attempt'`; the CDP
+  endpoint is built from the account and session id rather than taken from the
+  response, so a response cannot send the token to another origin. Each
+  session is journaled by id under the OS temp directory, and `sweep` deletes
+  what a killed worker left open.
 - `packages/lightpanda` - the published `@e2e-dev/lightpanda` package: a
   `BrowserProvider` that starts a local `lightpanda serve` per worker slot
   and stops it with the run; no vendor SDK, the binary is the dependency.
+- `packages/moli` - the published `@e2e-dev/moli` package: a `BrowserProvider`
+  that runs a local Moli browser for the web engine, one `moli serve` process
+  on an available loopback port per worker slot, stopped when the lease is
+  released. The binary is `binary` when given, else `MOLI_PATH`, then `PATH`,
+  then `~/.local/bin/moli`, resolved when a browser is acquired, so importing
+  a config starts nothing; no vendor SDK, the binary is the dependency.
+  On-demand layout and screenshots (`--layout`) and optional resource fetching
+  (`--resource`) are on by default, and `args` passes further `moli serve`
+  flags. Worker scope only.
 - `packages/eas` - the published `@e2e-dev/eas` package: Expo Simulators
   hosted iOS simulators and Android emulators for the mobile engine
   (`DeviceProvider`). Expo publishes no SDK for the sessions API, so it calls
@@ -326,16 +347,18 @@ suites that consume the built packages the way a user would.
   block that runs `npx` or `npm install`/`ci` sits in a `<CodeGroup>` of
   `npm`, `pnpm`, and `bun` blocks, which the site syncs site-wide, enforced
   by `scripts/check-docs-package-managers.ts`).
-  `docs/ja/`, `docs/zh/`, `docs/cs/`, `docs/es/`, `docs/pt/`, `docs/hi/`, and
-  `docs/fr/` hold the Japanese, Simplified Chinese, Czech, Spanish, Brazilian
-  Portuguese, Hindi, and French translations, one page per English page at
-  the same path, with the tab and group labels in
+  `docs/ja/`, `docs/zh/`, `docs/cs/`, `docs/es/`, `docs/pt/`, `docs/hi/`,
+  `docs/fr/`, and `docs/pl/` hold the Japanese, Simplified Chinese, Czech,
+  Spanish, Brazilian Portuguese, Hindi, French, and Polish translations, one
+  page per English page at the same path, with the tab and group labels in
   `docs/<language>/navigation.json`. Translations are best
   effort: keep the English pages current in every change, and leave the
   translations to lag behind, since no contributor is expected to update a
   language they don't speak. `scripts/check-docs-translations.ts` warns on a
-  stale outline, code block, or label and fails only on a translation whose
-  English page is gone (`authoring-docs` "Translations").
+  stale outline, code block, or label. It fails on a translation whose English
+  page is gone or that has no title, a language with no `navigation.json`, and
+  a line that repeats the end of the line above it (`repeatedLines` in
+  `scripts/docs-prose.ts`; `authoring-docs` "Translations").
   The `e2e` build copies the
   pages to `packages/e2e/docs/` (gitignored,
   `packages/e2e/scripts/prepare-build.ts`) so the published package ships
@@ -444,7 +467,7 @@ pnpm --filter @e2e-dev/testbed run test:headed
   `tests/types/sdk-types.ts` a test.
 - Integration tests need Chromium: `pnpm --filter @e2e-dev/web exec
   playwright-core install chromium`. The web engine's `prepare` hook
-  also installs a missing browser once per run, in the runner, before `plan`
+  also installs a missing browser once per run, in the runner, before `collected`
   is emitted and the run's clock starts.
 
 ## Definition of done
@@ -458,9 +481,19 @@ thread handled, and labeled `Ready for Human Review`. "It compiles" and
   iterating and before the PR: the built CLI on the testbed or a benchmark,
   the `e2e` MCP server (`.mcp.json`), a scratch project for `init`, the docs
   site. If you cannot verify something, say so; never imply you did.
-- Every PR body states under `## Verified` whether it was run locally, with
-  CLI output, screenshots, or video when it was, and a main-vs-branch table
-  for fixes (`writing-pr` skill).
+- The PR body is the source of truth for the change (`writing-pr` skill):
+  `## What`, `## Why`, `## How it works` as numbered steps through the diff,
+  then `## Verified`. It describes the head commit. After every push to a
+  branch with an open PR, whatever the task was, run the `writing-pr`
+  skill's "After every push to an open PR" steps. A push that changes how
+  the PR works, its scope, or a measured number edits the body in the same
+  step and captures stale evidence again. Run the `unslop` pass on the
+  text you edit. A body and a diff that disagree are a review finding.
+- `## Verified` states whether the change was run locally and carries the
+  evidence: CLI output, a main-vs-branch table for fixes, the `pnpm bench:ab`
+  table for a perf claim or a runner, agent, or engine change, a
+  `pnpm record:terminal` recording when terminal output or UI changes, and
+  the run's video for on-screen behavior.
 - Open every PR through the `ship-pr` skill (`.dev/skills/ship-pr`):
   checks, verification, fresh-context self-review, the PR, then the
   `babysit` skill (`.dev/skills/babysit`) until the label is on. Asking
@@ -471,9 +504,8 @@ thread handled, and labeled `Ready for Human Review`. "It compiles" and
 - On a PR from a fork you cannot add the label. Comment exactly `/ready` as
   the PR's author once the gates in
   [CONTRIBUTING.md](./CONTRIBUTING.md#ready-for-human-review) hold: green,
-  conflict-free, every review thread replied to and resolved, every comment
-  from anyone else acknowledged with your 👍. The workflow refuses
-  it otherwise and lists what is open. Never resolve a thread or react just to
+  conflict-free, every review thread replied to and resolved. The workflow
+  refuses it otherwise and lists what is open. Never resolve a thread just to
   pass: handle the feedback first.
 - Never merge or approve.
 - When a reviewer (human or bot) corrects the same thing twice, encode it:
@@ -601,6 +633,31 @@ CROSSCHECK_BENCHMARK_URL=http://127.0.0.1:4280 pnpm --filter @e2e-dev/web exec v
   Playwright's copy, MPL-2.0). Its disagreements live in
   `tests/conformance/expected.txt` the same way, grouped by reason; a line
   that starts with `Bug:` is a fix waiting to be made, and the fix deletes it.
+## Recording the terminal
+
+`pnpm record:terminal` records a command in a real TTY as a video for the PR
+body, at one size and font so recordings compare. It drives
+[VHS](https://github.com/charmbracelet/vhs), which must be on `PATH`
+(`brew install vhs`, or `nix shell nixpkgs#vhs -c pnpm record:terminal ...`).
+Use it whenever a change alters what the terminal shows: CLI output, a
+reporter, a prompt, watch or pause UI.
+
+```bash
+pnpm record:terminal --cwd apps/testbed --out /tmp/branch.gif -- node node_modules/e2e/dist/cli/bin.js run tests/todos.e2e.ts
+pnpm record:terminal --cwd /tmp/e2e-main/apps/testbed --out /tmp/main.gif -- node node_modules/e2e/dist/cli/bin.js run tests/todos.e2e.ts
+pnpm record:terminal --cwd apps/testbed --out /tmp/watch.gif --tape /tmp/watch.tape
+```
+
+The recording ends when the prompt returns, whatever the exit code. Several
+arguments after `--` are a program and its arguments; one is a shell line
+(`"a && b"`). A UI
+that takes keys needs `--tape <file>` with the VHS commands to play (`Type`,
+`Enter`, `Ctrl+C`, `Wait+Screen /regex/`, `Sleep`); the script owns the
+output, shell, and size. `.gif` renders inside a markdown table, `.mp4` and
+`.webm` as players at the end of the body. The options are in the header of
+`scripts/record-terminal.ts`; the tape builder is tested in
+`scripts/record-terminal/` (`pnpm test:scripts`).
+
 ## Measuring a change against main
 
 `pnpm bench:ab` runs a benchmark suite through two builds, the merge base
@@ -635,6 +692,49 @@ calls the model. A load average above half the cores is warned about; shared
 CI runners are too noisy for wall-time verdicts, so trust the behavior and
 counter sections there. The harness's statistics have unit tests under
 `scripts/bench-ab/` (`pnpm test:scripts`).
+## Microbenchmarks
+
+`pnpm microbench` measures small pure-JS functions (secret redaction,
+locator resolution, mobile tree projection; the cases are in
+`scripts/microbench/cases.mjs`) as instruction counts under Valgrind's
+Cachegrind, so the result does not move with the machine's load. Valgrind
+runs on Linux only; on macOS, `--tool time` runs the same cases on wall time
+as a smoke check.
+
+```bash
+pnpm microbench --trials 10 --base-root .                      # repeatability: one build against itself
+pnpm microbench --base-root /path/to/base/checkout             # base against this checkout
+pnpm microbench --tool time --case redact                      # local smoke run, noisy
+```
+
+- Each trial runs a case in two fresh processes, N and 3N iterations, and
+  keeps the difference: startup, loading, warmup, and compilation cancel.
+  Cases and inputs come from this checkout, the code under test from each
+  `--root`/`--base-root`, which must be built. Give both roots paths of the
+  same length: a different length moved one case by a fixed 0.075% between
+  builds of the same code, and the harness warns about it.
+- The default mode, `jitless`, counts the interpreter only, regexps
+  included; in CI, the trials of one commit spread at most 0.17% per case.
+  `--mode jit` keeps V8's compilers under `--predictable`,
+  `--single-threaded`, `--predictable-gc-schedule`, and fixed seeds, but V8
+  still optimizes differently in some processes and its trials cluster up
+  to 2% apart: use it to look at JIT behavior, not to compare. Every
+  process runs with `--v8-pool-size=0`, and with ASLR off (`setarch -R`) on
+  Linux. Counts are not wall time.
+- A direction is reported only when the base and head trial ranges do not
+  overlap and the change reaches the noise floor (`--threshold`, 0.5% for
+  instruction counts). `--expect-same` (implied by one directory twice)
+  makes the run a repeatability check, which exits 1 when any case's ranges
+  separate, under the floor too.
+- `.github/workflows/microbench.yml` runs both checks on a Blacksmith runner
+  with one pinned Node version; dispatch it with a `base` ref to compare. On
+  a pull request from this repository it posts the comparison and the
+  repeatability result as one comment and edits it on every run; a fork's or
+  Dependabot's pull request has the tables in the job summaries only. A
+  measured regression never fails the job: read the comment.
+- A case's `child.mjs` and `cases.mjs` are plain JavaScript: `--jitless`
+  turns off WebAssembly, which Node's TypeScript stripping needs.
+
 ## Golden device trees
 
 `packages/mobile/tests/fixtures/snapshots/{ios,android}/` holds raw
@@ -708,6 +808,17 @@ trees, on both platforms, without a device.
     (`redactsDownloads` in `run/secrecy.ts`), since a plain string reaches
     the app unseen. What an executor keeps in `attempt.memory` is its own;
     the harness never reports it.
+  - Provider keys are a class of their own in the ledger
+    (`registerProviderKey` in `run/secrecy.ts`): the closed list of model
+    provider variables there, subscription tokens, a coding agent's saved
+    login, and what an executor registers through `e2e/agent`. Every ledger
+    redacts them from what the run writes and from model input, whole
+    values only, text downloads included (an app can be given one). They
+    never enter a ledger's own entries (so no saved session carries one), and never
+    redact what a test id is made of, since the runner and a worker need
+    not know the same keys. A new provider adds its variable to the list;
+    a name pattern is not a substitute. Redact before any cut: half a
+    value is no longer a match.
   - An agent's secret fill is authorized by the runner, not the model.
     `typeSecret` (`action-dispatcher.ts`) takes only a handle the step's
     params declare, the target resolves on the newest observation
@@ -729,14 +840,48 @@ trees, on both platforms, without a device.
     `LOCATOR_NOT_FOUND`, an action failure the model reads and re-aims from.
     `POLICY_DENIED` is for denied destinations, forbidden fills, and withheld
     pixels. Model text is never evaluated as code, selectors, shell, or
-    config. App content, ledger text, and pixels are quoted as untrusted
+    config. The one exception is `e2e mcp`'s `run_code`, which runs a coding
+    agent's JavaScript in the server's process with a test file's authority
+    (`session-tools/run-code.ts`): that agent can already write a test and
+    run it. The code can read every configured secret and credential (the
+    config file, the environment, the app) and fill one into whatever field
+    it likes. Its result passes the secret ledger, which replaces a secret's
+    exact value only: that prevents accidents and is not a boundary. An
+    accepted exception to the first invariant and to the fill rule above. On
+    by default by design (maintainer decision): no flag or config gates it.
+    App content, ledger text, and pixels are quoted as untrusted
     evidence with no policy authority.
   - Every navigation a test or the agent asks for (`app.open`,
     `browser.goto`, the `navigate` verb) goes through one rule,
     `resolveNavigationUrl`: only `http:`, `https:`, and the exact
     `about:blank` pass; every other scheme (`view-source:file:` included) and
     a malformed URL is `POLICY_DENIED` (a relative URL on a target with no
-    `app.url` is `APP_URL_REQUIRED`). `device.openLink` takes custom app
+    `app.url` is `APP_URL_REQUIRED`). One exception: on a target whose
+    `app.url` is itself a `file:` URL (one file, no host, never a directory),
+    a `file:` URL passes for a file in that file's directory or below it,
+    compared as decoded paths with symbolic links resolved, so neither an
+    encoded separator nor a link climbs out, and never for a directory,
+    whose listing links to its parent; a path that cannot be resolved is
+    outside. The agent names navigation URLs and a page can tell it to, so
+    anything wider would let a local page read any file the user can and
+    carry it to an http(s) address. A link or a script in the local page
+    can still take the browser anywhere a file page may go, which an
+    http(s) page cannot, so `leftFileApp` holds the same bound over every
+    sink that keeps or sends a screen on its own: an observation taken for
+    a model (`checkObservedLocation` in `agent/observation-feed.ts` and
+    `agent/invocation.ts`), the trace's step screens (`traceScreen`), and
+    failure evidence (`run/failure-evidence.ts`). Out of the directory, the
+    screen is withheld and only the location kept. A model is sent no
+    pixels of a file app at all (`isFileApp` where `pixelsAllowed` is
+    set and where `Invocation.observe` asks for pixels), since pixels can
+    show a frame of another local file that no tree lists. For the same
+    reason no automatic screenshot of a file app is kept: the two
+    `captureEvidence` of `agent.assert` and the failure screenshot are
+    second captures nothing places. A video the user turns on is not gated. A test's own reads are trusted and not gated. An engine opens a
+    file app only when it declares `fileApps`, and the harness tells its
+    `validateApp` with `fileApp: true`; the scheme is read once, in core
+    (`namesFile`). The web engine refuses a provider and `connect` there,
+    since the bound is checked against the runner's disk. `device.openLink` takes custom app
     schemes, so it refuses a list instead (`packages/mobile/src/links.ts`):
     `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:`.
     There is no origin or host allowlist; PR #290 removed them on purpose, since a
@@ -754,7 +899,8 @@ trees, on both platforms, without a device.
 
 - CI: `.github/workflows/spec.yml` runs lint, typecheck, and the testbed on
   Node 26, `pnpm test` on the newest Node 22, 24, and 26 and on the
-  `engines.node` floors (22.22.3, 24.8.0), the CLI on Bun 1.4.3 and the
+  `engines.node` floors (22.22.3, 24.8.0), as two jobs per version
+  (`test:runner` for core and e2e, `test:packages` for the rest), the CLI on Bun 1.4.3 and the
   latest Bun, and `scripts/install-smoke.ts`, a fresh install of the packed
   packages with pnpm 11 and 12; `benchmark.yml` runs the
   web benchmark's two suites; `mobile.yml` runs the mobile benchmark's on an

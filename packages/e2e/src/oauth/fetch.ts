@@ -9,6 +9,7 @@
  * concurrent refresh.
  */
 
+import { registerProviderKey } from '@e2e-dev/core/lib/run/secrecy';
 import { withAbort } from '@e2e-dev/core/lib/internal/time';
 import { OAuthError, describeResponse } from './errors.ts';
 import type { CredentialStore, FetchFunction, OAuthCredentials, OAuthProvider } from './types.ts';
@@ -68,12 +69,20 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
       );
     }
     // What this process renewed wins over a source that could not keep it; the store holds this provider's own shape.
-    return (shared.renewed.get(provider.id) ?? stored) as Credentials;
+    return known((shared.renewed.get(provider.id) ?? stored) as Credentials);
   }
 
-  async function persist(renewed: Credentials): Promise<void> {
+  /** `credentials`, once the run redacts them like a provider key: before a token is sent anywhere, to the vendor's API or its token endpoint, an answer that quotes it back is covered. */
+  function known(credentials: Credentials): Credentials {
+    registerProviderKey(`${provider.id}.access-token`, credentials.access);
+    registerProviderKey(`${provider.id}.refresh-token`, credentials.refresh);
+    return credentials;
+  }
+
+  /** Stores what `sent` was renewed to, unless a login or logout replaced `sent` meanwhile. */
+  async function persist(sent: Credentials, renewed: Credentials): Promise<void> {
     try {
-      await store.set(provider.id, renewed);
+      await store.replace(provider.id, sent, renewed);
       shared.renewed.delete(provider.id);
     } catch (cause) {
       if (!(cause instanceof OAuthError && cause.code === 'MISCONFIGURED')) throw cause;
@@ -102,8 +111,8 @@ export function createOAuthFetch<Credentials extends OAuthCredentials>(
           try {
             // No deadline: the vendor may rotate the token before a late answer,
             // and dropping that answer loses the login.
-            const renewed = await provider.refresh(latest);
-            await persist(renewed);
+            const renewed = known(await provider.refresh(latest));
+            await persist(latest, renewed);
             return { renewed };
           } catch (cause) {
             if (cause instanceof OAuthError && cause.code === 'LOGIN_REQUIRED') {

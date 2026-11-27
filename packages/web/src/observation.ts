@@ -381,6 +381,8 @@ export function toSemanticNode(
   if (raw.states.focused) states['focused'] = true;
   if (raw.states.hidden) states['hidden'] = true;
   if (raw.states.secure) states['secure'] = true;
+  if (raw.states.readonly !== null) states['readonly'] = raw.states.readonly;
+  if (raw.states.empty !== null) states['empty'] = raw.states.empty;
   return {
     ref,
     ...(raw.role !== null ? { role: raw.role } : {}),

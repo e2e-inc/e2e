@@ -1,6 +1,6 @@
 /**
  * One pool for every fixture a piece of test code reads: the built-in ones
- * (`agent`, `app`, `screen`, `platform`, `session`), the target engine's, and
+ * (`agent`, `app`, `screen`, `platform`, `request`, `services`, `session`), the target engine's, and
  * the `test.extend()` chain it was registered through. Each has a scope, and
  * code sees the fixtures that live at least as long as it does: a test and
  * its per-test hooks see test and worker fixtures, a suite hook and a worker
@@ -26,12 +26,13 @@ export function attemptBuiltIns(fixtures: object): BuiltInReader {
 }
 
 /**
- * The built-in fixtures of code with no attempt behind it: the ones the
- * target alone decides (`platform`). Any other fails with the error
- * `unavailable` returns, which says why no attempt is behind the code.
+ * Returns a built-in fixture reader for code running without an attempt.
+ * Only fixtures derived from the target or worker (`platform` and
+ * `services`) are available. Reading any other fixture throws the error
+ * returned by `unavailable`.
  */
-export function attemptlessBuiltIns(target: BuiltInTarget, unavailable: (name: string) => Error): BuiltInReader {
-  const builtIns = builtInFixtures(target);
+export function attemptlessBuiltIns(target: BuiltInTarget, services: Readonly<Record<string, unknown>>, unavailable: (name: string) => Error): BuiltInReader {
+  const builtIns = builtInFixtures(target, services);
   return (name) => {
     if (builtIns.needsAttempt(name)) throw unavailable(name);
     return builtIns.attemptless(name);
@@ -137,15 +138,15 @@ function startFixture(
 
 /**
  * The worker-scoped `test.extend()` fixtures of one worker and target: one
- * instance per definition, set up the first time a test or suite hook of
- * its chain needs it, and torn down when the worker ends. A definition the
- * test file itself declares is a new definition each time the file is
- * imported again (after a failed test, for a serial group or a setup test),
- * so it gets a new instance; one declared in a module the file imports keeps
- * its instance.
+ * instance per fixture, set up the first time a test or suite hook of
+ * its chain needs it, and torn down when the worker ends. A module that is
+ * evaluated again (the test file after a failed test, a module that
+ * registers hooks with each file that imports it) defines its fixtures
+ * again, and they keep their instance: a fixture is known by its
+ * `identity`, and by the definition itself only where it has none.
  */
 export class WorkerFixturePool {
-  private readonly instances = new Map<FixtureDefinition, Promise<unknown>>();
+  private readonly instances = new Map<FixtureDefinition | string, Promise<unknown>>();
   private readonly active: WorkerFixtureTeardown[] = [];
   private closed = false;
   /** The built-in fixtures of the attempt or suite hook running now; see `enter`. */
@@ -153,8 +154,9 @@ export class WorkerFixturePool {
 
   private readonly builtInFixtures: BuiltInFixtures;
 
-  constructor(target: BuiltInTarget) {
-    this.builtInFixtures = builtInFixtures(target);
+  /** `services` holds the service values started by the worker's entry point for the `services` fixture. */
+  constructor(target: BuiltInTarget, services: Readonly<Record<string, unknown>> = {}) {
+    this.builtInFixtures = builtInFixtures(target, services);
   }
 
   /**
@@ -180,7 +182,8 @@ export class WorkerFixturePool {
    * the fixture reaches the engine, kept for its teardown.
    */
   acquire(definition: FixtureDefinition, fixtures: object, usesEngine: boolean): Promise<unknown> {
-    const known = this.instances.get(definition);
+    const key = definition.identity ?? definition;
+    const known = this.instances.get(key);
     if (known !== undefined) return known;
     let value: unknown;
     const instance = startFixture(definition, fixtures, (provided, teardown) => {
@@ -189,9 +192,9 @@ export class WorkerFixturePool {
       this.active.push({ ...teardown, usesEngine });
       return true;
     }, true).then(() => value);
-    this.instances.set(definition, instance);
+    this.instances.set(key, instance);
     instance.catch(() => {
-      if (this.instances.get(definition) === instance) this.instances.delete(definition);
+      if (this.instances.get(key) === instance) this.instances.delete(key);
     });
     return instance;
   }
@@ -208,9 +211,9 @@ export class WorkerFixturePool {
   }
 
   /**
-   * Built-in `name` as a worker fixture receives it: its value when the
-   * target alone decides it, else an object that forwards to the attempt or
-   * suite hook running at the time it is used.
+   * Returns built-in fixture `name` for a worker fixture. If the value comes
+   * from the target or worker, it's returned directly. Otherwise, it returns
+   * an object that forwards to the attempt or suite hook running at the time.
    */
   builtIn(name: string): unknown {
     return this.builtInFixtures.needsAttempt(name) ? this.forwarder(name) : this.builtInFixtures.attemptless(name);

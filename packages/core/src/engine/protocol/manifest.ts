@@ -28,6 +28,10 @@ export function describeEngine(engine: EngineHandle): EngineManifest {
     actions: engine.actions,
     pointerActions: engine.pointerActions,
     tapModifiers: engine.tapModifiers === true ? true : undefined,
+    selectsDevice: engine.selectsDevice === true ? true : undefined,
+    grantsAllPermissions: engine.grantsAllPermissions === true ? true : undefined,
+    launchArgumentValues: engine.launchArgumentValues === true ? true : undefined,
+    fileApps: engine.fileApps === true ? true : undefined,
     isolation: engine.isolation === 'worker' ? ('worker' as const) : undefined,
   });
 }
@@ -47,6 +51,10 @@ export function checkManifest(manifest: EngineManifest): EngineManifest {
     }
     if (seen.has(method)) throw invalid(`manifest.methods lists "${method}" twice`);
     seen.add(method);
+  }
+  // The client serves `prepare` for `lifecycle/finish` alone, so the hook defineEngine requires is there either way.
+  if (manifest.selectsDevice === true && !seen.has('lifecycle/prepare')) {
+    throw invalid('manifest.selectsDevice needs lifecycle/prepare: prepare binds the device --device names');
   }
   return manifest;
 }
@@ -75,6 +83,10 @@ function comparable(manifest: EngineManifest) {
     actions: sorted(manifest.actions),
     pointerActions: sorted(manifest.pointerActions),
     tapModifiers: manifest.tapModifiers === true,
+    selectsDevice: manifest.selectsDevice === true,
+    grantsAllPermissions: manifest.grantsAllPermissions === true,
+    launchArgumentValues: manifest.launchArgumentValues === true,
+    fileApps: manifest.fileApps === true,
     isolation: manifest.isolation === 'worker' ? 'worker' : 'attempt',
   };
 }
