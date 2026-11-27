@@ -845,6 +845,17 @@ describe('DesktopSurface: windows', () => {
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
   });
 
+  it('ends the wait for a title with the titles the app has when the last list runs out of time, and says a locked screen lists none', async () => {
+    const one = windows(() => [{ id: 'w-mine', title: 'Sign In', is_focused: true }]);
+    const fake = fakeDriver({ listWindows: [one, one, one, { ok: true, data: [], sleepMs: 2_000 }] });
+    const { surface } = await launched(fake);
+    await expect(surface.useWindow({ title: 'Controls' }, signal, 300)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/within 300 ms; its windows are "Sign In"$/) });
+    const locked = fakeDriver({ listWindows: [one, one, one, ok([])] });
+    const { surface: behindLock } = await launched(locked);
+    locked.locked = true;
+    await expect(behindLock.useWindow({ title: 'Controls' }, signal, 300)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/screen is locked.*titled "Controls"/) });
+  });
+
   it('refuses a title two windows have, naming both, without waiting', async () => {
     const { surface } = await launched({ listWindows: [windows(() => [{ id: 'w-one', title: 'Untitled', is_focused: true }, { id: 'w-two', title: 'Untitled 2' }])] });
     const before = Date.now();
@@ -869,8 +880,18 @@ describe('DesktopSurface: windows', () => {
 
   it('takes a title, a pattern, or a listed window through desktop.useWindow()', async () => {
     const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', title: 'Sign In', is_focused: true }, { id: 'w-panel', title: 'Controls' }])] });
-    const context = { operation: () => operation(), fixture: <T,>(_name: string, value: T) => value } as unknown as Parameters<typeof createDesktopFixture>[1];
+    let declared: { useWindow?: { timeout?: unknown; label?: (window: unknown) => string } } = {};
+    const context = {
+      operation: () => operation(),
+      fixture: <T,>(_name: string, value: T, operations: typeof declared) => {
+        declared = operations;
+        return value;
+      },
+    } as unknown as Parameters<typeof createDesktopFixture>[1];
     const desktop = createDesktopFixture(surface, context);
+    // The wait owns its deadline, so the harness cuts it off with no error of its own, and the step is named by the title.
+    expect(declared.useWindow?.timeout).toBe(false);
+    expect([declared.useWindow?.label?.('Controls'), declared.useWindow?.label?.(/^Contr/), declared.useWindow?.label?.({ id: 'w-panel' })]).toEqual(['"Controls"', '/^Contr/', '']);
     const used = async () => {
       await surface.observe(operation(), undefined);
       return last<{ windowId: string }>(fake, 'snapshot')?.windowId;

@@ -555,18 +555,30 @@ export class DesktopSurface {
   /** The id of the one window with the title, read again until it shows or the budget is spent. */
   private async titledWindow(title: string | RegExp, signal: AbortSignal, timeoutMs: number): Promise<string> {
     const deadline = Date.now() + timeoutMs;
+    let windows: readonly RawWindow[] = [];
     for (;;) {
       if (signal.aborted) throw new EngineError('CANCELLED', `the wait for a window titled ${titleText(title)} was cancelled`, { retryable: false });
       if (this.pid === undefined) throw invalidState(`desktop.useWindow(${titleText(title)}) needs the app open; open it with app.open()`);
       await this.requireRunning();
-      const windows = await this.ownWindows({ signal, timeoutMs: Math.max(deadline - Date.now(), 0) });
+      const left = deadline - Date.now();
+      if (left <= 0) break;
+      try {
+        windows = await this.ownWindows({ signal, timeoutMs: left });
+      } catch (cause) {
+        // A list cut off by the deadline ends the wait, and one the app was too busy to answer is asked for again: neither says more than the last list did.
+        if (!(cause instanceof EngineError && (cause.code === 'OPERATION_TIMEOUT' || (cause.code === 'NODE_STALE' && cause.retryable)))) throw cause;
+      }
       const matches = titled(windows, title);
       const [match] = matches;
       if (matches.length > 1) throw notActionable(ambiguousTitle(this.appName ?? 'the app', title, matches));
       if (match !== undefined) return match.id;
-      if (Date.now() + WINDOW_POLL_MS >= deadline) throw notActionable(noWindowTitled(this.appName ?? 'the app', title, windows, timeoutMs));
-      await sleep(WINDOW_POLL_MS, signal);
+      await sleep(Math.min(WINDOW_POLL_MS, Math.max(deadline - Date.now(), 0)), signal);
     }
+    // A locked screen lists none of the app's windows, which must not read as an app with none open.
+    if (windows.length === 0 && this.requireDriver().screenLocked() === true) {
+      throw notActionable(`the Mac's screen is locked, so no window of ${this.appName ?? 'the app'} can be listed to find the one titled ${titleText(title)}; unlock it and run again`);
+    }
+    throw notActionable(noWindowTitled(this.appName ?? 'the app', title, windows, timeoutMs));
   }
 
   private chosenClosed(): EngineError {
