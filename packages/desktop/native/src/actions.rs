@@ -797,9 +797,9 @@ fn select_all(element: &Element, deadline: Instant) -> Outcome<()> {
     }
 }
 
-/// How deep `row_label` reads into a row for its text, and how many children of each element.
-const ROW_TEXT_DEPTH: usize = 6;
-const ROW_TEXT_CHILDREN: usize = 32;
+/// How deep `row_label` reads into a row for its text. A row deeper than this has a label it cannot read whole, which
+/// counts as a read the app did not answer: never a match, and never proof the option is missing.
+const ROW_TEXT_DEPTH: usize = 16;
 
 /// The name a list's row shows, as the snapshot names it: its own title or description (a text item's value), else,
 /// with none, every text inside it in reading order, joined by spaces.
@@ -826,14 +826,15 @@ fn own_label(element: &Element) -> Result<Option<String>, AXError> {
 
 /// The texts inside an element, in reading order, as the snapshot gathers a row's name from them.
 fn row_texts(element: &Element, depth: usize, texts: &mut Vec<String>) -> Result<(), AXError> {
-    if depth >= ROW_TEXT_DEPTH {
-        return Ok(());
-    }
-    let children = match element.elements("AXChildren", ROW_TEXT_CHILDREN) {
+    // Every child is read, as the snapshot reads them: a label cut short could match a prefix of the one asked for.
+    let children = match element.elements("AXChildren", crate::snapshot::MAX_CHILDREN) {
         Ok(children) => children,
         Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
         Err(_) => Vec::new(),
     };
+    if !children.is_empty() && depth >= ROW_TEXT_DEPTH {
+        return Err(ax::AX_CANNOT_COMPLETE);
+    }
     for child in children {
         let role = match child.attribute("AXRole") {
             Ok(value) => value.text().unwrap_or_default().to_owned(),
