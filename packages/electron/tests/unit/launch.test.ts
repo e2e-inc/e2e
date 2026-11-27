@@ -15,7 +15,8 @@ describe('launchEnv', () => {
 
 describe('engineArguments', () => {
   it('opens the main process\'s inspector and the DevTools pipe, and no port', () => {
-    expect(engineArguments([], 'darwin')).toEqual(['--inspect=0', '--remote-debugging-pipe']);
+    expect(engineArguments([], 'darwin')).toEqual(['--inspect=0', '--remote-debugging-pipe', '--force-color-profile=srgb']);
+    expect(engineArguments(['--force-color-profile=display-p3-d65'], 'darwin')).toEqual(['--inspect=0', '--remote-debugging-pipe']);
   });
 
   it('turns Chromium\'s sandbox off on Linux, once', () => {

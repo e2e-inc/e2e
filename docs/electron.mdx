@@ -39,9 +39,11 @@ per run, before the first test. To check the setup, run `npx e2e doctor`.
 Set the target's `app.appPath` to the app's directory or main script, relative
 to the project root. `app.launchArguments` go after it on every launch, where
 the app reads them in `process.argv`. The engine's own `--inspect=0`,
-`--remote-debugging-pipe`, and `--user-data-dir=<directory>` are there
-too, and `--no-sandbox` on Linux, so an app that parses its arguments
-strictly must allow them.
+`--remote-debugging-pipe`, `--force-color-profile=srgb`, and
+`--user-data-dir=<directory>` are there too, and `--no-sandbox` on Linux, so
+an app that parses its arguments strictly must allow them. Screenshots are in
+sRGB on every display; pass your own `--force-color-profile` in `args` to
+change that.
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';

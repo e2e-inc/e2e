@@ -99,6 +99,9 @@ export function performOnNode(context: ActionContext, window: AppWindow, backend
       return dragTo(step, action);
     case 'swipe':
       return swipeNode(step, action);
+    case 'scrollTo':
+      // Not among the engine's declared actions, so the harness refuses it first.
+      throw unsupported('scrollTo is not supported; swipe the container, or scroll a node into view');
   }
 }
 

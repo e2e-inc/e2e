@@ -43,6 +43,8 @@ export function engineArguments(args: readonly string[], platform: NodeJS.Platfo
     '--inspect=0',
     // The windows' DevTools protocol on a pipe: no port, so no other process can connect.
     '--remote-debugging-pipe',
+    // Captures in sRGB whatever the display: a wide-gamut screen would otherwise give other pixels for the same page.
+    ...(args.some((argument) => argument.startsWith('--force-color-profile')) ? [] : ['--force-color-profile=srgb']),
     // Chromium's sandbox needs a setuid helper or user namespaces, which a CI container rarely has.
     ...(platform === 'linux' && !args.includes('--no-sandbox') ? ['--no-sandbox'] : []),
   ];
