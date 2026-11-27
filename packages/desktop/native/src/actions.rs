@@ -1605,7 +1605,10 @@ mod tests {
         assert_eq!(image(Ok(vec!["AXShowMenu".into()])), Ok(false));
         assert_eq!(image(Err(crate::ax::AX_ACTION_UNSUPPORTED)), Ok(false));
         assert_eq!(image(Err(crate::ax::AX_CANNOT_COMPLETE)), Err(crate::ax::AX_CANNOT_COMPLETE));
-        assert_eq!(super::takes_click("AXStaticText", || panic!("no action read for a role that tells")), Ok(false));
+        assert_eq!(super::takes_click("AXSeparator", || panic!("no action read for a role that tells")), Ok(false));
+        // A text label is content unless the app made it a button of its own.
+        assert_eq!(super::takes_click("AXStaticText", || Ok(vec![])), Ok(false));
+        assert_eq!(super::takes_click("AXStaticText", || Ok(vec!["AXPress".into()])), Ok(true));
         // A custom control drawn in a group, which offers a press, is a control of its own too.
         assert_eq!(super::takes_click("AXGroup", || Ok(vec!["AXPress".into()])), Ok(true));
         // An open or a confirm takes a click as a press does.
