@@ -161,7 +161,7 @@ export function registerCacheCommand(program: Command): void {
   cacheSubcommand(
     'check',
     'find recordings that take a detour',
-    'Read every cached trace for a detour: a stretch that leaves a screen and comes back to it with nothing typed, chosen, or set on the way, as an agent does when it opens the wrong page and backs out. Read the list before you commit recordings. A detour is not always a wrong turn: a tap that changes data (a delete that returns to the list) and a step that asks to go back take one too, so a detour fails nothing and the command exits 0. A trace recorded before actions kept their screens is read by its actions alone, and its detours are only hints.',
+    'Read every cached trace for a detour: a stretch that leaves a screen and comes back to it with nothing typed, chosen, or set on the way, as an agent does when it opens the wrong page and backs out. Read the list before you commit recordings. A detour is not always a wrong turn: a tap that changes data (a delete that returns to the list) and a step that asks to go back take one too, so a detour fails nothing and the command exits 0. A trace recorded without screens (by an earlier version, or on an engine that reports no location) is read by its actions alone, and its detours are only hints.',
   );
   cacheSubcommand('clear', 'delete every cached trace', 'Delete the cache files and the directory itself; files the runner never wrote are left alone.');
   cacheSubcommand('stats', 'print the entry count and size', 'Print the store directory, how many readable entries it holds, and how many bytes they take.');
@@ -442,7 +442,7 @@ function check(contents: CacheContents): number {
   if (hinted > 0) {
     // A run that records the same flow again keeps the stored entry, so only a new recording adds the locations.
     process.stdout.write(
-      `${hinted} ${entries(hinted)} recorded without locations only ${hinted === 1 ? 'looks' : 'look'} like one; delete ${hinted === 1 ? 'it' : 'them'} and run the ${hinted === 1 ? 'test' : 'tests'} again to record the locations\n`,
+      `${hinted} ${entries(hinted)} recorded without locations only ${hinted === 1 ? 'looks' : 'look'} like one. Delete an entry an earlier version recorded and run its test again to record them; an engine that reports no location records none\n`,
     );
   }
   warnAboutSkipped(contents);
