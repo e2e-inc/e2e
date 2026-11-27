@@ -66,6 +66,15 @@ const SWIPE_PAGES = { slow: 0.75, none: 0.5, fast: 1.5 } as const;
 /** The cause of an input that was never sent, because the operation's budget ran out first. */
 const NOT_SENT = new Error('the operation ran out of budget before anything was sent');
 
+/** The words a failure of a driver action starts with: the step a test wrote, not the driver's name for it. */
+const STEP_NAMES: Readonly<Record<string, string>> = {
+  click: 'tap',
+  doubleClick: 'double tap',
+  rightClick: 'secondary tap',
+  setValue: 'fill',
+  scrollTo: 'scroll into view',
+};
+
 /** The cause of a read that found the app's windows but could read none of them. */
 const UNREADABLE = new Error('no window of the app could be read');
 
@@ -1014,7 +1023,7 @@ export class DesktopSurface {
       case 'tap': {
         const scrolled = await this.shown(binding, 'tap', operation);
         const click = (): Promise<void> => this.refCommand('click', binding, operation);
-        if (scrolled) await afterChange('click', click);
+        if (scrolled) await afterChange('tap', click);
         else await click();
         break;
       }
@@ -1136,12 +1145,12 @@ export class DesktopSurface {
     throw notActionable(`node ${binding.id} is not on screen, so a ${what} would reach a control the user cannot; scroll it into view first`);
   }
 
-  /** One action on a node's ref, failures translated. */
+  /** One action on a node's ref, failures translated and named by the step a test wrote. */
   private async refCommand(action: string, binding: NodeBinding, operation: OperationContext, extra: { value?: string; direction?: string; pages?: number; physical?: boolean } = {}): Promise<void> {
     try {
       await this.tryRef(action, binding, operation, extra);
     } catch (cause) {
-      throw translate(cause, action, true);
+      throw translate(cause, STEP_NAMES[action] ?? action, true);
     }
   }
 

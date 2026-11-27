@@ -442,7 +442,21 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
     // A focus write that failed after the app took it (a focus handler that replaced the element) may have run its
     // handlers: only a refusal shows nothing was sent, as for `set_value`.
     element.set_bool("AXFocused", true).map_err(|error| write_failed(error, "focus"))?;
-    if until(deadline, holds) { Ok(()) } else { Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus")) }
+    if until(deadline, holds) {
+        return Ok(());
+    }
+    // An app gives keyboard focus only within its key window: say so where that is why, as a press into the window would.
+    let key = element.pid().and_then(|pid| Element::application(pid).element("AXFocusedWindow"));
+    let home = element.element("AXWindow");
+    if let (Some(key), Some(home)) = (key, home)
+        && !windows::holds_focus(&key, &home)
+    {
+        return Err(Failure::unconfirmed(
+            codes::ACTION_FAILED,
+            "focus: the element's window is not the app's key window, so it cannot take keyboard focus; with desktop({ headed: true }) the window comes forward first",
+        ));
+    }
+    Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus"))
 }
 
 /// Runs `work` as the action `input_id` names: until it returns, every input it sends first checks that the action was

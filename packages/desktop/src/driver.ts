@@ -260,7 +260,8 @@ const REFUSED_CODES = new Set(['ACTION_FAILED', 'TIMEOUT']);
  */
 export function translate(cause: unknown, label: string, input: boolean): Error {
   if (!(cause instanceof DriverFailure)) return cause instanceof Error ? cause : new EngineError('ENGINE_FAILURE', `${label}: ${String(cause)}`, { retryable: false });
-  const text = `${label}: ${cause.message}`;
+  // The driver names the step that failed itself ("set value: ...", "focus: ..."): the label would only say it again.
+  const text = /^[a-z][a-z ]*: /.test(cause.message) ? cause.message : `${label}: ${cause.message}`;
   if (input && !cause.notDelivered) return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${text} (the input may have reached the app)`, { retryable: false, cause });
   if (STALE_CODES.has(cause.code)) return new EngineError('NODE_STALE', text, { retryable: true, cause });
   // A read the driver says is safe to try again (the app was busy): read again, as a stale one.
