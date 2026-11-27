@@ -749,6 +749,9 @@ fn open_menu(button: &Element, deadline: Instant) -> Option<Element> {
     menu
 }
 
+/// How often the wait for a typed key reads the field.
+const KEY_POLL: Duration = Duration::from_millis(2);
+
 /// The longest wait for the app to take a typed key before the next one goes.
 const KEY_SETTLE: Duration = Duration::from_millis(250);
 
@@ -1048,7 +1051,15 @@ fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Instant) -> Ou
             let settle = deadline.min(Instant::now() + if quiet.get() { KEY_SETTLE_UNREAD } else { KEY_SETTLE });
             match (target, *before) {
                 (Some(target), Some(count)) => {
-                    if !until(settle, || length(target) != Some(count) || focused_element().as_ref() != Some(target)) {
+                    // A fine poll of its own: the app takes a key within a millisecond or two, and `until`'s coarse one
+                    // would add its whole interval to every key.
+                    let taken = || length(target) != Some(count) || focused_element().as_ref() != Some(target);
+                    let mut seen = taken();
+                    while !seen && Instant::now() < settle {
+                        sleep(KEY_POLL);
+                        seen = taken();
+                    }
+                    if !seen {
                         quiet.set(true);
                     }
                 }
