@@ -151,8 +151,8 @@ export class StepTraceSession {
   private info: StepCacheInfo | undefined;
   private recordedBy: RecordedModel | undefined;
   private prefix: ReplayedPrefix | undefined;
-  /** The spans of the entry a replay that handed off ran to their end: this step's recording keeps them. */
-  private replayedDetours: readonly Pick<TraceDetour, 'from' | 'to'>[] | undefined;
+  /** The actions a replay that handed off ran, and the entry's spans it ran to their end: this step's recording keeps them. */
+  private replayed: { readonly executed: number; readonly spans: readonly Pick<TraceDetour, 'from' | 'to'>[] } | undefined;
   private startPath: string | undefined;
   private startedMs = Date.now();
   /** When the replay handed the step to the executor, if it did. */
@@ -489,7 +489,8 @@ export class StepTraceSession {
     // The replayed actions are this step's recording now; the ones it ran without looking keep where they were recorded.
     this.recorder?.keepLocations(trace.actions.slice(0, outcome.executed));
     // So are the detours the entry found among them (`findDetoursAfterReplay`).
-    this.replayedDetours = trace.detours?.filter(({ to }) => to <= outcome.executed);
+    const spans = trace.detours?.filter(({ to }) => to <= outcome.executed);
+    this.replayed = spans === undefined ? undefined : { executed: outcome.executed, spans };
     this.handOff(outcome, stopReason, detail, this.detourOf(trace, outcome.executed));
     return undefined;
   }
@@ -677,7 +678,7 @@ export class StepTraceSession {
     // value and a placeholder for each `unique()` value, so it no longer
     // tells two records apart the way this run's did. After a hand-off, the
     // replayed actions keep the spans their entry found.
-    const detours = this.replayedDetours === undefined ? findDetours(trace) : findDetoursAfterReplay(trace, this.replayedDetours);
+    const detours = this.replayed === undefined ? findDetours(trace) : findDetoursAfterReplay(trace, this.replayed.spans, this.replayed.executed);
     const located = trace.actions.some((action) => action.at !== undefined);
     const staged = located ? { ...templated, detours: detours.map(({ from, to }) => ({ from, to })) } : templated;
     // Settled with every value the process has learned by then, a closed session's included (`processSecrets`).

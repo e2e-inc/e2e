@@ -134,18 +134,19 @@ export function findDetours(trace: DetourInput): TraceDetour[] {
 }
 
 /**
- * The detours of a recording made again after a replay handed off: the
- * spans the entry kept for the actions the replay ran, and the ones this
- * run found, joined where they overlap. An action the replay ran without
- * looking carries the location its recording had
+ * The detours of a recording made again after a replay ran its first
+ * `executed` actions and handed off: the spans the entry kept for those
+ * actions, and the ones this run found that end after them, joined where
+ * they overlap. The entry already judged the replayed actions: one the
+ * replay ran without looking carries the location its recording had
  * (`TraceRecorder.keepLocations`), which reads `:id` for a record id and a
  * query value, so comparing again would lose a trip between two records
- * the entry had found; a trip the run took after it from the same screen
- * reads as one span with it, as two wrong turns from one menu do.
+ * the entry found, or find one to a record the flow never went back to.
  */
-export function findDetoursAfterReplay(trace: DetourInput, replayed: readonly Pick<TraceDetour, 'from' | 'to'>[]): TraceDetour[] {
+export function findDetoursAfterReplay(trace: DetourInput, replayed: readonly Pick<TraceDetour, 'from' | 'to'>[], executed: number): TraceDetour[] {
   const spans: { from: number; to: number }[] = [];
-  for (const { from, to } of [...replayed, ...findDetours(trace)].toSorted((a, b) => a.from - b.from)) {
+  const found = findDetours(trace).filter(({ to }) => to > executed);
+  for (const { from, to } of [...replayed, ...found].toSorted((a, b) => a.from - b.from)) {
     const last = spans.at(-1);
     if (last !== undefined && from < last.to) last.to = Math.max(last.to, to);
     else spans.push({ from, to });

@@ -203,7 +203,7 @@ describe('findDetoursAfterReplay', () => {
       { endPath: '/?view=account' },
     );
     expect(findDetours(trace)).toEqual([{ from: 3, to: 5, at: '/?view=:id', via: '/help', evidence: 'locations' }]);
-    expect(findDetoursAfterReplay(trace, [{ from: 0, to: 2 }])).toEqual([
+    expect(findDetoursAfterReplay(trace, [{ from: 0, to: 2 }], 3)).toEqual([
       { from: 0, to: 2, at: '/?view=:id', via: '/?view=:id', evidence: 'locations' },
       { from: 3, to: 5, at: '/?view=:id', via: '/help', evidence: 'locations' },
     ]);
@@ -212,12 +212,20 @@ describe('findDetoursAfterReplay', () => {
       [tap('About', '/', 'link'), back('/about'), tap('About', '/', 'link'), back('/about'), tap('Increment', '/')],
       { endPath: '/' },
     );
-    expect(findDetoursAfterReplay(again, [{ from: 0, to: 2 }])).toEqual([
+    expect(findDetoursAfterReplay(again, [{ from: 0, to: 2 }], 2)).toEqual([
       { from: 0, to: 2, at: '/', via: '/about', evidence: 'locations' },
       { from: 2, to: 4, at: '/', via: '/about', evidence: 'locations' },
     ]);
-    // A trip this run reads across a kept span is the entry's, as it found it.
-    expect(findDetoursAfterReplay(trace, [{ from: 2, to: 5 }])).toEqual([{ from: 2, to: 5, at: '/?view=:id', via: '/?view=:id', evidence: 'locations' }]);
+  });
+
+  it('finds no return among the replayed actions the entry did not find, where a kept location matches another record', () => {
+    // Order 1, the list, order 2, back to the list: the replay ran `back` on order 2 without looking, so it carries /orders/:id.
+    const trace = flow(
+      [tap('All orders', '/orders/1', 'link'), tap('Order 2', '/orders', 'link'), back('/orders/:id'), tap('Export', '/orders')],
+      { endPath: '/exports' },
+    );
+    expect(findDetours(trace)[0]).toMatchObject({ from: 0, to: 2 });
+    expect(findDetoursAfterReplay(trace, [{ from: 1, to: 3 }], 3)).toEqual([{ from: 1, to: 3, at: '/orders', via: '/orders/:id', evidence: 'locations' }]);
   });
 });
 
