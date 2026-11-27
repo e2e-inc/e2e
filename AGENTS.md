@@ -925,9 +925,10 @@ trees, on both platforms, without a device.
   packages with pnpm 11 and 12, and `native` on `blacksmith-6vcpu-macos-26`
   (the desktop driver's `cargo fmt --check`, clippy, and `cargo test`, a
   build for both Mac architectures with each one's architecture checked by
-  `lipo`, and a load of the arm64 build, also
-  through the engine's loader test; rustup, when the image has none, comes
-  from the rustup-init release and SHA-256 that
+  `lipo`, a load of the arm64 build, also
+  through the engine's loader test, and a load of the x64 build in the
+  official darwin-x64 Node under Rosetta; rustup, when the image has none,
+  comes from the rustup-init release and SHA-256 that
   `.github/actions/rust-toolchain` pins), which
   `spec gate` needs; `benchmark.yml` runs the
   web benchmark's two suites; `mobile.yml` runs the mobile benchmark's on an
@@ -1031,7 +1032,8 @@ trees, on both platforms, without a device.
   on the pin.
   The canary build also builds the desktop driver into both platform
   packages (`build:desktop-native`), so it runs on a Mac with rustup. In
-  `release.yml`, a macOS `native` job builds the driver, and the release
+  `release.yml`, a macOS `native` job builds the driver and loads both
+  builds the same way before it uploads them, and the release
   and nightly jobs place it into the platform packages (`scripts/native/place-native.ts`)
   before they publish.
 - The runner publishes as the unscoped `e2e` (entry points `e2e`, `e2e/agent`,

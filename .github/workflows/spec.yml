@@ -199,9 +199,10 @@ jobs:
 
   # The Cargo workspace (crates/) formatted, lint-clean, and tested, and the
   # desktop engine's native driver building for both Mac architectures through
-  # the script the release runs, and the arm64 addon loading in Node. rustup
-  # comes from a pinned, checksum-verified rustup-init when the image has none;
-  # the toolchain is pinned in the root rust-toolchain.toml.
+  # the script the release runs, the arm64 addon loading in Node and the x64
+  # one in an x86_64 Node under Rosetta. rustup comes from a pinned,
+  # checksum-verified rustup-init when the image has none; the toolchain is
+  # pinned in the root rust-toolchain.toml.
   native:
     runs-on: blacksmith-6vcpu-macos-26
     timeout-minutes: 20
@@ -220,15 +221,17 @@ jobs:
       - run: node scripts/native/native-licenses.ts desktop --check
       - run: node scripts/native/build-native.ts desktop --target aarch64-apple-darwin
       - run: node scripts/native/build-native.ts desktop --target x86_64-apple-darwin
-      # Only an Intel Mac could load the x64 build; reading its architecture catches a wrong or cut-short build here.
       - name: Check each build's architecture
         working-directory: packages/desktop
         run: |
           test "$(lipo -archs desktop.darwin-arm64.node)" = arm64
           test "$(lipo -archs desktop.darwin-x64.node)" = x86_64
-      - name: Load the addon
+      - name: Load the arm64 addon
         working-directory: packages/desktop
         run: node -e "const status = require('./desktop.darwin-arm64.node').status(); if (typeof status.accessibility !== 'boolean') process.exit(1)"
+      - uses: ./.github/actions/load-x64-addon
+        with:
+          addon: packages/desktop/desktop.darwin-x64.node
       # The engine's loader on the addon just built: the test that runs it is skipped wherever no addon was built.
       - uses: ./.github/actions/workspace-install
       - name: Load the addon through the engine
