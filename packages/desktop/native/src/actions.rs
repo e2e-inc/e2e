@@ -519,7 +519,9 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
         return Ok(());
     }
     go("focus")?;
-    element.set_bool("AXFocused", true).map_err(|error| refused(error, "focus"))?;
+    // A focus write that failed after the app took it (a focus handler that replaced the element) may have run its
+    // handlers: only a refusal shows nothing was sent, as for `set_value`.
+    element.set_bool("AXFocused", true).map_err(|error| if refuses(error) { refused(error, "focus") } else { refused(error, "focus").delivered() })?;
     if until(deadline, holds) { Ok(()) } else { Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus")) }
 }
 
