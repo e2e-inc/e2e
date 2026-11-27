@@ -448,6 +448,12 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
     if until(deadline, holds) { Ok(()) } else { Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus")) }
 }
 
+/// Whether an uncheck asks a selected radio button to clear itself, which only selecting another does: a press would
+/// run its handler and leave it selected.
+fn clears_only_by_another(role: &str, wanted: bool, shown: Option<u8>) -> bool {
+    role == "radiobutton" && !wanted && shown == Some(1)
+}
+
 fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
     // A press on anything but a box would run its handler (a submit, a delete) before the check could fail.
     let (_, role) = role_of(element, "check")?;
@@ -465,6 +471,9 @@ fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
             codes::ACTION_NOT_SUPPORTED,
             format!("the {role} shows no checked state the engine can read, so pressing it could undo the one asked for"),
         ));
+    }
+    if clears_only_by_another(role, wanted, shown) {
+        return Err(Failure::refused(codes::ACTION_FAILED, "a selected radio button is cleared only by selecting another one; nothing was pressed"));
     }
     let reached = press_to_state(
         target,
@@ -1526,6 +1535,15 @@ mod tests {
         })
         .expect("scanned");
         assert_eq!(missed, (None, true));
+    }
+
+    #[test]
+    fn refuses_to_uncheck_a_selected_radio_button_before_pressing_it() {
+        use super::clears_only_by_another;
+        assert!(clears_only_by_another("radiobutton", false, Some(1)));
+        assert!(!clears_only_by_another("radiobutton", false, Some(0)), "already clear: nothing to press");
+        assert!(!clears_only_by_another("radiobutton", true, Some(0)), "a check selects it");
+        assert!(!clears_only_by_another("checkbox", false, Some(1)), "a box unchecks itself");
     }
 
     #[test]
