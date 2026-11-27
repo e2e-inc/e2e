@@ -858,6 +858,21 @@ describe('FileCacheStore', () => {
     expect((await capped.read(keys[0]!, step())).status).toBe('hit');
   });
 
+  it('keeps the lock entry of an edited step its own eviction cannot drop, so undoing the edit restores it', async () => {
+    const { directory, store } = await makeStore();
+    const second = step('web', { callIndex: 1 });
+    await store.write(KEY, payload());
+    await store.write(OTHER_KEY, payload('web', { recordedFor: second, startPath: '/billing', endPath: '/billing' }));
+    const yaml = await readFile(yamlPath(directory), 'utf8');
+    await writeFile(yamlPath(directory), yaml.replace('at: /billing', 'at: /plans'), 'utf8');
+    expect((await store.read(OTHER_KEY, second)).status).toBe('invalid');
+    // The edited step ran live and its attempt failed: its own key is evicted.
+    await store.delete(OTHER_KEY, second);
+    await writeFile(yamlPath(directory), yaml, 'utf8');
+    expect((await store.read(OTHER_KEY, second)).status).toBe('hit');
+    expect(await store.write('c'.repeat(64), payload('ios'))).toBeDefined();
+  });
+
   it('keeps a recording it cannot read when another is written or evicted beside it', async () => {
     const { directory, store } = await makeStore();
     const second = step('web', { callIndex: 1 });

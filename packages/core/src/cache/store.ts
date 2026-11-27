@@ -200,8 +200,10 @@ export class FileCacheStore implements CacheStore {
       if (file === undefined || file.parsed.status === 'invalid') return;
       if (!file.parsed.recordings.some((recording) => recording.keyHash === keyHash)) return;
       // The YAML cannot be rewritten without dropping what does not read, a person's to fix; the lock alone can
-      // let the key go, so a flow a failure implicated stops replaying meanwhile.
+      // let the key go, so a flow a failure implicated stops replaying meanwhile. Only a key that replays: one
+      // whose own block does not read (a person's edit) keeps its entry, so undoing the edit restores it.
       if (unreadable(file, keyHash) !== undefined) {
+        if (!file.parsed.recordings.some((recording) => recording.keyHash === keyHash && recording.status === 'hit')) return;
         if (!(await holdsFileLock(this.lockPath(file.name)))) throw new Error(`lost the lock on ${file.name} to another writer`);
         const lock = this.path(file.name, LOCK_EXTENSION);
         await writeFileAtomic(lock, lockWithout(await readFile(lock, 'utf8'), keyHash), { mode: 0o600 });
