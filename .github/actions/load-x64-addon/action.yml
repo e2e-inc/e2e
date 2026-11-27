@@ -33,8 +33,8 @@ runs:
         name="node-$version-darwin-x64"
         dir="$RUNNER_TEMP/node-x64"
         mkdir -p "$dir"
-        curl --proto '=https' --tlsv1.2 -sSf -o "$dir/SHASUMS256.txt" "https://nodejs.org/dist/$version/SHASUMS256.txt"
-        curl --proto '=https' --tlsv1.2 -sSf -o "$dir/$name.tar.gz" "https://nodejs.org/dist/$version/$name.tar.gz"
+        curl --proto '=https' --tlsv1.2 -sSf --retry 3 -o "$dir/SHASUMS256.txt" "https://nodejs.org/dist/$version/SHASUMS256.txt"
+        curl --proto '=https' --tlsv1.2 -sSf --retry 3 -o "$dir/$name.tar.gz" "https://nodejs.org/dist/$version/$name.tar.gz"
         # shasum fails on no line at all, so a release without this file fails here too.
         (cd "$dir" && awk -v file="$name.tar.gz" '$2 == file' SHASUMS256.txt | shasum -a 256 -c -)
         tar -xzf "$dir/$name.tar.gz" -C "$dir"
