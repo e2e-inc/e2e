@@ -296,7 +296,10 @@ steps:
   one side's step in the YAML and its entry in the lock: a lock that lists
   a key twice doesn't read.
 - Two tests whose names come out the same get one name each: the second to
-  record adds `--` and a hash of its test id.
+  record adds `--` and a hash of its test id. A name that leaves part of
+  the test out (a title in Japanese, say, since names use ASCII letters
+  and digits only, or a name cut at 80 characters) always ends in that
+  hash, so it doesn't depend on which test records first.
 - Recordings hold no prompts, conversations, screenshots, observed trees,
   or secret values. A secret fill stores only the secret's name. A title
   that spells a secret the run learns only mid-test is filed redacted, so

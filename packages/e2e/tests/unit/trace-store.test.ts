@@ -328,6 +328,20 @@ describe('FileCacheStore', () => {
     expect(await store.recordingFile(otherTest)).toBe(names[0]);
   });
 
+  it('names a test whose title its name cannot spell the same whichever test records first', async () => {
+    const [signIn, signOut] = ['tests/login.e2e.ts::%E3%83%AD%E3%82%B0%E3%82%A4%E3%83%B3', 'tests/login.e2e.ts::%E3%83%AD%E3%82%B0%E3%82%A2%E3%82%A6%E3%83%88'];
+    const filesAfter = async (order: readonly string[]) => {
+      const { store } = await makeStore();
+      for (const [index, testId] of order.entries()) await store.write(String(index).repeat(64), payload('web', { recordedFor: step('web', { testId }) }));
+      return Object.fromEntries(await Promise.all(order.map(async (testId) => [testId, await store.recordingFile(testId)] as const)));
+    };
+    const one = await filesAfter([signIn, signOut]);
+    expect(one[signIn]).toMatch(/^login--[a-f0-9]{12}\.yml$/u);
+    expect(one[signOut]).toMatch(/^login--[a-f0-9]{12}\.yml$/u);
+    expect(one[signIn]).not.toBe(one[signOut]);
+    expect(await filesAfter([signOut, signIn])).toEqual(one);
+  });
+
   it('writes two targets of one test at once without losing either', async () => {
     const { store } = await makeStore();
     const targets = ['web', 'ios', 'android', 'desktop'];

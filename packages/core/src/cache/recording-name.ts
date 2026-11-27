@@ -8,7 +8,10 @@
  * whose names come out the same share no file: the store gives the second
  * the name with `--` and 12 hex characters of its test id's SHA-256 after
  * it (`collisionName`), and each file's lock names the test it holds, so a
- * reader opens the one that is its own.
+ * reader opens the one that is its own. A name that leaves part of the test
+ * out (letters or digits outside ASCII, or a name cut short) would
+ * collide with the file's other such tests, which of them records first
+ * deciding who has the bare name, so it carries the suffix from the start.
  */
 
 import { sha256Hex } from '../internal/ids.ts';
@@ -35,6 +38,11 @@ function kebab(text: string): string {
     .replaceAll(/^-+|-+$/gu, '');
 }
 
+/** Whether `kebab` leaves out letters or digits of the text: any but ASCII's, which a name cannot spell. */
+function dropsWords(text: string): boolean {
+  return /[\p{L}\p{N}]/u.test(text.normalize('NFKD').replaceAll(/\p{M}/gu, '').replaceAll(/[a-z0-9]/giu, ''));
+}
+
 function decode(part: string): string {
   try {
     return decodeURIComponent(part);
@@ -52,6 +60,7 @@ function decode(part: string): string {
 export function recordingName(testId: string): string {
   const parts = testId.split('::');
   let words: string[];
+  let partial = false;
   if (parts.length < 2) {
     words = [kebab(testId)];
   } else {
@@ -59,18 +68,22 @@ export function recordingName(testId: string): string {
     const base = file!.split('/').pop() ?? '';
     const stem = kebab(base.split('.')[0] ?? '');
     const named = titles.map((title) => kebab(decode(title)));
+    partial = [base, ...titles.map(decode)].some(dropsWords);
     words = [stem, ...(named[0] === stem ? named.slice(1) : named)];
   }
   let name = words.filter((word) => word !== '').join('-');
   if (name.length > MAX_NAME_CHARS) {
     const cut = name.lastIndexOf('-', MAX_NAME_CHARS);
     name = name.slice(0, cut > 0 ? cut : MAX_NAME_CHARS).replace(/-+$/u, '');
+    partial = true;
   }
-  if (name === '') return 'test';
-  return WINDOWS_DEVICE.test(name) ? `test-${name}` : name;
+  if (name === '') name = 'test';
+  else if (WINDOWS_DEVICE.test(name)) name = `test-${name}`;
+  return partial ? collisionName(name, testId) : name;
 }
 
-/** The name a test takes when another test already holds `name`. */
+/** The name a test takes when another test already holds `name`; a name that carries the test's suffix already is its own. */
 export function collisionName(name: string, testId: string): string {
-  return `${name}--${sha256Hex(testId).slice(0, COLLISION_DIGEST_CHARS)}`;
+  const suffix = `--${sha256Hex(testId).slice(0, COLLISION_DIGEST_CHARS)}`;
+  return name.endsWith(suffix) ? name : `${name}${suffix}`;
 }
