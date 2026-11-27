@@ -749,14 +749,24 @@ describe('replayTrace: bare-point drags', () => {
     { label: 'refuses a twin that moves into the recorded point', twinX: 220, placeable: false, change: 'twin-moves' },
     { label: 'stops when only the unrelated twin leaves', twinX: 220, placeable: false, change: 'twin-leaves' },
     { label: 'stops when the source count drops from three to two', twinX: 220, placeable: false, change: 'three-to-two' },
+    { label: 'refuses a positioned source when the group drops to its recorded count', twinX: 220, placeable: false, change: 'positioned' },
+    { label: 'uses a recovered test ID when the same source group remains', twinX: 220, placeable: true, change: 'regain-id' },
+    { label: 'stops when the source becomes hidden and its twin moves into the point', twinX: 220, placeable: false, change: 'source-hides' },
+    { label: 'stops when the source loses its box and its twin moves into the point', twinX: 220, placeable: false, change: 'source-loses-box' },
   ])('$label', async ({ twinX, placeable, change }) => {
     const card: SemanticNode = { ref: { id: 'c', revision: 'r1' }, role: 'button', name: 'Card', rect: { x: 0, y: 0, width: 200, height: 100 } };
     const twin: SemanticNode = { ...card, ref: { id: 'twin', revision: 'r1' }, rect: { x: twinX, y: 0, width: 200, height: 100 } };
     const lane: SemanticNode = { ref: { id: 'l', revision: 'r1' }, role: 'region', name: 'Done', rect: { x: 450, y: 0, width: 200, height: 100 } };
+    const sourceTarget = {
+      role: 'button',
+      name: 'Card',
+      ...(change === 'positioned' ? { position: { index: 0, of: 2 } } : {}),
+      ...(change === 'regain-id' ? { testId: 'card-primary' } : {}),
+    };
     const drag: RecordedAction = {
       name: 'dragAt',
       summary: 'drag Card to Done',
-      from: { point: { x: 100, y: 50 }, within: { target: { role: 'button', name: 'Card' }, fx: 0.5, fy: 0.5 } },
+      from: { point: { x: 100, y: 50 }, within: { target: sourceTarget, fx: 0.5, fy: 0.5 } },
       to: { point: { x: 550, y: 50 }, within: { target: { role: 'region', name: 'Done' }, fx: 0.5, fy: 0.5 } },
       viewport: VIEWPORT,
     };
@@ -764,11 +774,15 @@ describe('replayTrace: bare-point drags', () => {
     const host = makeHost({ onAction: (name, detail) => void (name === 'dragAt' && drags.push(detail)) });
     const third: SemanticNode = { ...twin, ref: { id: 'third', revision: 'r1' }, rect: { x: 700, y: 0, width: 200, height: 100 } };
     const movedCard = { ...card, rect: { x: 25, y: 0, width: 200, height: 100 } };
-    const before = change === 'three-to-two' ? [card, twin, third] : [card, twin];
+    const before = change === 'three-to-two' || change === 'positioned' ? [card, twin, third] : [card, twin];
     let after = [movedCard, twin, lane];
     if (change === 'source-leaves') after = [twin, lane];
     if (change === 'twin-moves') after = [{ ...card, ref: twin.ref }, lane];
     if (change === 'twin-leaves') after = [movedCard, lane];
+    if (change === 'positioned') after = [{ ...card, ref: twin.ref }, third, lane];
+    if (change === 'regain-id') after = [{ ...movedCard, testId: 'card-primary' }, twin, lane];
+    if (change === 'source-hides') after = [{ ...card, states: { hidden: true } }, { ...card, ref: twin.ref }, lane];
+    if (change === 'source-loses-box') after = [{ ref: card.ref, role: 'button', name: 'Card' }, { ...card, ref: twin.ref }, lane];
     host.capture = async () => screen(host.looks.length === 1 ? before : after);
 
     const outcome = await replayTrace(host, trace([drag]));

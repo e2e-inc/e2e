@@ -12,7 +12,7 @@
  * divergence.
  */
 
-import { isRelocatableDescriptor, MAIN_LIST_SHARE, relocateDescriptor, type RelocationFailure, type RelocationResult } from '../cache/relocate.ts';
+import { isRelocatableDescriptor, MAIN_LIST_SHARE, relocateDescriptor, relocationGroupSize, type RelocationFailure, type RelocationResult } from '../cache/relocate.ts';
 import {
   isNodeAction,
   isTapActionName,
@@ -495,16 +495,10 @@ async function relocateEnds(
   const refused = new Set<TraceTargetDescriptor>();
   let latest: Ends | undefined;
   let sourceCandidateCount: number | undefined;
-  const judge = (descriptor: TraceTargetDescriptor, screen: SemanticScreen, previousCount?: number): { readonly relocated: Relocated; readonly wait: boolean } => {
+  const countSourceCandidates = (descriptor: TraceTargetDescriptor, screen: SemanticScreen): number =>
+    relocationGroupSize(descriptor, screen.nodes, (id) => visibleBox(screen.nodes.get(id)) !== undefined);
+  const judge = (descriptor: TraceTargetDescriptor, screen: SemanticScreen): { readonly relocated: Relocated; readonly wait: boolean } => {
     const result = relocateDescriptor(descriptor, screen.nodes);
-    if (previousCount !== undefined) {
-      const count = result.kind === 'found' ? 1 : result.failure === 'target-ambiguous' ? result.candidates.length : 0;
-      // When the point distinguished the source, a smaller set might have
-      // lost that source. The same point could now land on another control.
-      if (count < previousCount) {
-        return { relocated: { kind: 'failed', failure: 'target-ambiguous', candidates: [], screen, twinLeft: true }, wait: false };
-      }
-    }
     if (result.kind === 'found') {
       const node = screen.nodes.get(result.id);
       if (node === undefined) return { relocated: { kind: 'failed', failure: 'target-not-found' }, wait: true };
@@ -514,17 +508,26 @@ async function relocateEnds(
     const marked = refused.has(descriptor) && result.failure === 'target-ambiguous' ? { ...result, twinLeft: true as const } : result;
     return { relocated: marked.failure === 'target-ambiguous' ? { ...marked, screen } : marked, wait: retryable(marked, descriptor) };
   };
-  const settled = await pollSettled(host, (screen) => {
-    const from = source === undefined ? undefined : judge(source, screen, sourceCandidateCount);
+  const settled = await pollSettled<Ends>(host, (screen) => {
+    const from = source === undefined ? undefined : judge(source, screen);
     const to = destination === undefined ? undefined : judge(destination, screen);
+    if (source !== undefined && sourceCandidateCount !== undefined) {
+      const count = countSourceCandidates(source, screen);
+      if (count < sourceCandidateCount) {
+        const lostSource: Relocated = { kind: 'failed', failure: 'target-ambiguous', candidates: [], screen, twinLeft: true };
+        return { screen, ends: [lostSource, to?.relocated], refused: true };
+      }
+      sourceCandidateCount = count;
+    }
     const unresolved = (descriptor: TraceTargetDescriptor | undefined, judged: typeof from) =>
       descriptor !== undefined && refused.has(descriptor) && judged?.relocated.kind === 'failed';
     latest = { screen, ends: [from?.relocated, to?.relocated], refused: unresolved(source, from) || unresolved(destination, to) };
     if (from?.relocated.kind === 'failed') {
-      if (from.wait) return undefined;
-      if (from.relocated.failure === 'target-ambiguous' && to?.wait === true
-        && shouldWaitForDestination?.(from.relocated, to.relocated) === true) {
-        sourceCandidateCount = from.relocated.candidates.length;
+      if (from.wait || (to?.wait === true && shouldWaitForDestination?.(from.relocated, to.relocated) === true)) {
+        if (sourceCandidateCount === undefined && source !== undefined && shouldWaitForDestination !== undefined
+          && from.relocated.failure === 'target-ambiguous') {
+          sourceCandidateCount = countSourceCandidates(source, screen);
+        }
         return undefined;
       }
       return latest;
@@ -661,9 +664,7 @@ function placeWithin(
   const { viewport, nodes } = relocated.screen;
   if (viewport.width !== planned.viewport.width || viewport.height !== planned.viewport.height) return undefined;
   const containing = relocated.candidates
-    .map((id) => nodes.get(id))
-    .filter((node): node is RedactedNode => node !== undefined && node.states?.hidden !== true)
-    .map((node) => usableBox(node.rect))
+    .map((id) => visibleBox(nodes.get(id)))
     .filter((box): box is Box => box !== undefined && containsPoint(box, planned.point));
   if (containing.length === 1) return inside(containing[0]!);
   // Several look-alikes hold the point and nest: a host view and the view
@@ -689,6 +690,11 @@ function containsBox(outer: Box, inner: Box): boolean {
     inner.x + inner.width <= outer.x + outer.width &&
     inner.y + inner.height <= outer.y + outer.height
   );
+}
+
+/** The box an ambiguous point can land in. */
+function visibleBox(node: RedactedNode | undefined): Box | undefined {
+  return node?.states?.hidden === true ? undefined : usableBox(node?.rect);
 }
 
 function usableBox(rect: SemanticNode['rect']): Box | undefined {

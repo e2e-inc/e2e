@@ -308,6 +308,20 @@ function tierMatches(tier: DescriptorTier, candidates: readonly DescribedNode[])
 }
 
 /**
+ * Counts the source group on the same tier across observations. Prefer the
+ * semantic or placed shape tier so a recovered test id does not shrink it.
+ * The caller supplies the same eligibility check it uses to place the source.
+ */
+export function relocationGroupSize(
+  descriptor: TraceTargetDescriptor,
+  nodes: ReadonlyMap<string, RedactedNode>,
+  eligible: (id: string) => boolean,
+): number {
+  const tier = descriptorTiers(descriptor).findLast((candidate) => candidate.kind !== 'shape' || isPlaced(descriptor));
+  return tier === undefined ? 0 : tierMatches(tier, candidatesWithin(descriptor.within, nodes)).filter(eligible).length;
+}
+
+/**
  * Whether a node its test id tells apart has twins once the test id is set
  * aside: other controls in its container that its semantic tier
  * (`descriptorTiers`) also matches on the screen it was acted on. Replay
