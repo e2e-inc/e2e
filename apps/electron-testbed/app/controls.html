@@ -85,7 +85,18 @@
       <output data-testid="under-header-status">Not tapped</output>
       <div class="spacer"></div>
     </main>
-    <script src="controls.js"></script>
+    <section aria-label="State parity">
+      <input type="checkbox" hidden disabled checked data-testid="hidden-check" />
+      <div role="textbox" aria-label="Locked editor" contenteditable="true" aria-readonly="true" data-testid="locked-editor">Original</div>
+      <div inert><select aria-label="Inert choice" data-testid="inert-select"><option>First</option><option>Second</option></select></div>
+      <select aria-label="Place" data-testid="place"><option><span>City</span> Center</option><option>New&nbsp;York</option></select>
+      <label for="chosen" style="position: relative; display: inline-block">Chosen <a href="#more" data-testid="more-info">More info</a><span data-testid="label-cover" style="position: absolute; inset: 0"></span></label>
+      <input type="checkbox" id="chosen" data-testid="chosen" />
+      <output data-testid="more-clicks">0</output>
+      <div data-testid="disabled-host" aria-disabled="true"></div>
+      <output data-testid="host-clicks">0</output>
+    </section>
     <p data-testid="far-below" style="margin-top: 3000px">Far below</p>
+    <script src="controls.js"></script>
   </body>
 </html>

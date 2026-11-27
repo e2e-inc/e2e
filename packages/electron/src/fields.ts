@@ -187,9 +187,12 @@ function levelOf(role: string, facts: DomFacts | undefined): number | undefined 
  */
 function readOnlyOf(node: AXNode | undefined, facts: DomFacts | undefined, role: string): boolean | undefined {
   if (isTextField(facts) || facts?.nodeName === 'SELECT') return 'readonly' in facts!.attributes;
+  // What the element says of itself comes first: Chromium reports an editing host as not read-only whatever it says.
+  const said = ARIA_READONLY_ROLES.has(role) ? facts?.attributes['aria-readonly']?.toLowerCase() : undefined;
+  if (said !== undefined) return said === 'true';
   const reported = property(node, 'readonly');
   if (reported !== undefined) return reported === true || reported === 'true';
-  if (ARIA_READONLY_ROLES.has(role)) return facts?.attributes['aria-readonly']?.toLowerCase() === 'true';
+  if (ARIA_READONLY_ROLES.has(role)) return false;
   return node?.properties?.some((entry) => entry.name === 'editable') === true ? false : undefined;
 }
 
@@ -264,11 +267,19 @@ function shownAttributes(facts: DomFacts, policy: ProjectionPolicy, baseUrl: str
   return shown;
 }
 
+/** The elements a `disabled` attribute disables. */
+const NATIVE_CONTROLS = new Set(['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'OPTION', 'OPTGROUP', 'FIELDSET']);
+
 function statesOf(node: AXNode | undefined, facts: DomFacts | undefined, role: string): Record<string, boolean> {
   const states: Record<string, boolean> = {};
   if (isSecure(facts)) states['secure'] = true;
   for (const { name, value } of node?.properties ?? []) {
     if (AX_STATES.has(name)) states[name] = value.value === true || value.value === 'true';
+  }
+  // An element the accessibility tree leaves out (a control with `hidden`) still has the state its own DOM gives it.
+  if (node === undefined && facts !== undefined) {
+    if (NATIVE_CONTROLS.has(facts.nodeName)) states['disabled'] = 'disabled' in facts.attributes;
+    if (isCheckable(facts)) states['checked'] = facts.checked;
   }
   const readOnly = readOnlyOf(node, facts, role);
   if (readOnly !== undefined) states['readonly'] = readOnly;

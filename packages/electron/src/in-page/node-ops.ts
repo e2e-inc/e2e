@@ -86,6 +86,16 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
   };
   /** An input's type as the browser reads it (an unknown type is `text`); another element's type attribute. */
   const typeOf = (target: Element): string => (target instanceof HTMLInputElement ? target.type : (target.getAttribute('type') ?? '').toLowerCase());
+  /** The nearest element matching `selector`, from `target` up through the hosts of the shadow roots it sits in: `closest` stops at a root. */
+  const above = (target: Element, selector: string): Element | null => {
+    for (let at: Element | null = target; at !== null; ) {
+      const found = at.closest(selector);
+      if (found !== null) return found;
+      const root = at.getRootNode();
+      at = root instanceof ShadowRoot ? root.host : null;
+    }
+    return null;
+  };
   /**
    * Whether the element is disabled, as Chromium's tree and Playwright read
    * it: its nearest form control's :disabled (a disabled fieldset disables its
@@ -95,8 +105,10 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
   const isDisabled = (target: Element): boolean => {
     const control = target.closest('button, input, select, textarea, option, optgroup');
     if (control?.matches(':disabled') === true) return true;
-    return target.closest('[aria-disabled]')?.getAttribute('aria-disabled')?.toLowerCase() === 'true';
+    return above(target, '[aria-disabled]')?.getAttribute('aria-disabled')?.toLowerCase() === 'true';
   };
+  /** Whether the element, or anything above it, is inert. */
+  const isInert = (target: Element): boolean => above(target, '[inert]') !== null;
   /** Whether the element holds focus within its own document or shadow root. */
   const holdsFocus = (target: Element): boolean => {
     const root = target.getRootNode();
@@ -136,7 +148,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
     checkEnabled(enabled) {
       const element = live();
       if (enabled && isDisabled(element)) return { ok: false, reason: 'it is disabled' };
-      if (element.closest('[inert]') !== null) return { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
+      if (isInert(element)) return { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
       if (getComputedStyle(element).visibility !== 'visible') return { ok: false, reason: 'it is not visible' };
       return { ok: true };
     },
@@ -149,9 +161,10 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       for (let at: Node | null = hit; at !== null; at = at instanceof Element && at.assignedSlot !== null ? at.assignedSlot : (at.parentNode ?? (at instanceof ShadowRoot ? at.host : null))) {
         if (at === element) return { ok: true };
       }
-      // A click inside a label of the element reaches it, unless it presses another control the label holds.
+      // A click inside the label of the element reaches it, unless it presses another control the label holds. Only
+      // the control the label activates: a link in the same label, covered, is not what the click would press.
       const label = hit.closest('label');
-      if (label !== null && (label.control === element || label.contains(element)) && !label.contains(hit.closest(INTERACTIVE))) return { ok: true };
+      if (label !== null && label.control === element && !label.contains(hit.closest(INTERACTIVE))) return { ok: true };
       return { ok: false, reason: `another element (${hit.tagName.toLowerCase()}${hit.id === '' ? '' : `#${hit.id}`}) would receive the click` };
     },
     labelPoint() {
@@ -193,8 +206,9 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       const field = element instanceof HTMLTextAreaElement || (element instanceof HTMLInputElement && (TEXT_INPUT_TYPES.has(type) || SET_VALUE_TYPES.has(type))) ? element : undefined;
       if (field === undefined && !(element instanceof HTMLElement && element.isContentEditable)) return { ok: false, reason: 'it is not a text field' };
       if (isDisabled(element)) return { ok: false, reason: 'it is disabled' };
-      if (element.closest('[inert]') !== null) return { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
-      if (field?.readOnly === true) return { ok: false, reason: 'it is read-only' };
+      if (isInert(element)) return { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
+      // An editing host says so itself: it has no readOnly of its own.
+      if (field?.readOnly === true || (field === undefined && element.getAttribute('aria-readonly')?.toLowerCase() === 'true')) return { ok: false, reason: 'it is read-only' };
       // A value can be set on a field no user reaches; typing into one would fail on its own.
       if (!element.checkVisibility({ visibilityProperty: true })) return { ok: false, reason: 'it is not visible' };
       return { ok: true };
@@ -247,6 +261,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       const element = live();
       if (!(element instanceof HTMLSelectElement)) return { ok: false, reason: 'it is not a <select>' };
       if (isDisabled(element)) return { ok: false, reason: 'it is disabled' };
+      if (isInert(element)) return { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
       if (!element.checkVisibility({ visibilityProperty: true })) return { ok: false, reason: 'it is not visible' };
       const found = findOption(element, wanted);
       return 'index' in found ? { ok: true } : found;

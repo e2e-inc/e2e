@@ -310,7 +310,9 @@ async function chooseFiles(step: Step, files: readonly string[]): Promise<void> 
     const { backendNodeId, mode } = await withTimeout(chooser, Math.max(1, step.deadline.remaining()), () => notActionable('the element is not a file input, and clicking it opened no file chooser'));
     if (backendNodeId === undefined) throw notActionable('the file chooser the element opened belongs to no input in the window');
     if (files.length > 1 && mode !== 'selectMultiple') throw new TestError('INVALID_ARGUMENT', `setInputFiles: the file chooser takes one file, not ${files.length}`);
-    await step.budget.send(() => session.send('DOM.setFileInputFiles', { files: [...files], backendNodeId }));
+    // The DevTools call leaves the input as it was for an empty list, as on the input itself.
+    if (files.length === 0) await step.budget.send(() => step.devtools.callOn(step.window.page, backendNodeId, 'clearFiles'));
+    else await step.budget.send(() => session.send('DOM.setFileInputFiles', { files: [...files], backendNodeId }));
   } finally {
     stopListening();
     await session.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => undefined);

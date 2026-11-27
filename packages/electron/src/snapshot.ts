@@ -24,6 +24,8 @@ export interface SnapshotDocument {
     readonly nodeValue?: readonly number[];
     /** The option elements that are selected. */
     readonly optionSelected?: { readonly index: readonly number[] };
+    /** The checkboxes and radios that are checked. */
+    readonly inputChecked?: { readonly index: readonly number[] };
     readonly parentIndex?: readonly number[];
     /** For every node inside a shadow root, that root's type: `open`, `closed`, or `user-agent`. */
     readonly shadowRootType?: RareStrings;
@@ -62,6 +64,8 @@ export interface DomFacts {
   readonly hasText: boolean;
   /** A select's value: what its first selected option submits. */
   readonly selectValue?: string;
+  /** A checkbox or radio that is checked now, whatever its `checked` attribute says. */
+  readonly checked: boolean;
   /** Device-pixel document bounds; none for a node with no layout box. */
   readonly bounds?: readonly number[];
   /** Its computed `visibility` is `hidden` or `collapse`. */
@@ -236,6 +240,7 @@ export class DomSnapshot {
     const inputValues = this.rare(nodes.inputValue);
     const textValues = this.rare(nodes.textValue);
     const selectValues = this.selectValues(nodes.optionSelected?.index ?? []);
+    const checked = new Set(nodes.inputChecked?.index ?? []);
     const withText = this.nodesWithText();
     const bounds = this.boxes;
     const invisible = new Set<number>();
@@ -257,6 +262,7 @@ export class DomSnapshot {
         attributes: this.attributesAt(index),
         hasText: withText.has(index),
         invisible: invisible.has(index),
+        checked: checked.has(index),
         ...(input === undefined ? {} : { inputValue: input }),
         ...(text === undefined ? {} : { textValue: text }),
         ...(selected === undefined ? {} : { selectValue: selected }),
@@ -278,7 +284,9 @@ export class DomSnapshot {
   /**
    * Each select's value, by node index: what its first selected option
    * submits, the option's `value` attribute or else its text, as
-   * `HTMLSelectElement.value` reads it.
+   * `HTMLSelectElement.value` reads it. An option's text is all the text
+   * under it, with ASCII white space collapsed and no other: a no-break
+   * space stays one.
    */
   private selectValues(selected: readonly number[]): Map<number, string> {
     const values = new Map<number, string>();
@@ -287,14 +295,15 @@ export class DomSnapshot {
     this.types.forEach((_, index) => {
       const text = this.sourceText(index);
       if (text === undefined) return;
-      const parent = this.parents[index] ?? -1;
-      texts.set(parent, (texts.get(parent) ?? '') + text);
+      let option = this.parents[index] ?? -1;
+      while (option >= 0 && this.nameAt(option) !== 'OPTION') option = this.parents[option] ?? -1;
+      if (option >= 0) texts.set(option, (texts.get(option) ?? '') + text);
     });
     for (const option of selected.toSorted((a, b) => a - b)) {
       let select = this.parents[option] ?? -1;
       while (select >= 0 && this.nameAt(select) !== 'SELECT') select = this.parents[select] ?? -1;
       if (select < 0 || values.has(select)) continue;
-      values.set(select, this.attributesAt(option)['value'] ?? collapse(texts.get(option) ?? ''));
+      values.set(select, this.attributesAt(option)['value'] ?? (texts.get(option) ?? '').replace(/[\t\n\f\r ]+/g, ' ').replace(/^ | $/g, ''));
     }
     return values;
   }

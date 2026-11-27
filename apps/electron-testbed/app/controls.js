@@ -97,3 +97,16 @@ picked.addEventListener('change', () => {
 // A custom radio that a click clears, which a native one never does.
 const ariaRadio = document.querySelector('[data-testid="aria-radio"]');
 ariaRadio.addEventListener('click', () => ariaRadio.setAttribute('aria-checked', ariaRadio.getAttribute('aria-checked') === 'true' ? 'false' : 'true'));
+
+const count = (output) => {
+  const target = document.querySelector(`[data-testid="${output}"]`);
+  target.textContent = String(Number(target.textContent) + 1);
+};
+document.querySelector('[data-testid="more-info"]').addEventListener('click', (event) => {
+  event.preventDefault();
+  count('more-clicks');
+});
+const hostButton = document.createElement('button');
+hostButton.textContent = 'Hosted action';
+hostButton.addEventListener('click', () => count('host-clicks'));
+document.querySelector('[data-testid="disabled-host"]').attachShadow({ mode: 'open' }).append(hostButton);
