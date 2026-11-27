@@ -451,8 +451,9 @@ bunx e2e cache clear   # delete every entry
 </CodeGroup>
 
 Entries an older `e2e` wrote, one `<key>.json` file each, are no longer
-read: `ls` counts them, and `clear` deletes them. Record those steps again
-with a `read-write` run.
+read: `ls` counts them, and `clear` deletes them. Run `clear` first, then
+record those steps again with a `read-write` run: `clear` deletes the new
+recordings too. If you recorded first, delete only the `<key>.json` files.
 
 <Note>
 The `cached` percentage in AI usage is the provider's prompt cache. It

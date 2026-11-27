@@ -416,7 +416,7 @@ function warnAboutSkipped(contents: CacheContents): void {
   }
   if (contents.legacy.length > 0) {
     process.stderr.write(
-      `${contents.legacy.length} file(s) in ${contents.directory} are entries an older e2e wrote, one .json file per key, which no run reads; re-record those steps, then delete the files (e2e cache clear removes them)\n`,
+      `${contents.legacy.length} file(s) in ${contents.directory} are entries an older e2e wrote, one .json file per key, which no run reads; record those steps again once they are gone (e2e cache clear removes them and every recording beside them, so run it before recording; after, delete only the .json files)\n`,
     );
   }
   warnAboutForeign(contents);
