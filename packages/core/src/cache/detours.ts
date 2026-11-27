@@ -192,10 +192,11 @@ interface PlaceKeys {
 }
 
 /**
- * For each action that stood on a known place, the last return to the same
- * address that followed a departure from it, with nothing typed, chosen, or set on the way.
- * The last, so a flow that tried two wrong pages from one menu reads as one
- * detour; a return, so actions that stay home after it are not part of it.
+ * For each action that stood on a known place, the first return to the
+ * same address that followed a departure from it, with nothing typed,
+ * chosen, or set on the way. Each wrong turn from one menu is a detour of
+ * its own, so a replay that stops between two of them still has the first
+ * whole (`detourOf` in `agent/step-cache.ts`).
  *
  * A place spelled as an entry keeps it (the location a recording kept,
  * copied onto an action a replay ran before a hand-off) has no record ids
@@ -230,7 +231,6 @@ function byLocations(trace: DetourInput): TraceDetour[] {
     }
     let via: string | undefined;
     let back: number | undefined;
-    let away = false;
     // The action that left: the last one known to stand home before the first departure.
     let left = from;
     for (let to = from + 1; to <= actions.length; to += 1) {
@@ -239,13 +239,11 @@ function byLocations(trace: DetourInput): TraceDetour[] {
       if (place === undefined) continue;
       if (!samePlace(home, place)) {
         via ??= place;
-        away = true;
       } else if (via === undefined) {
         left = to;
-      } else if (away) {
-        // A return after another departure; staying home after it adds nothing.
+      } else {
         back = to;
-        away = false;
+        break;
       }
     }
     if (back === undefined || via === undefined) {

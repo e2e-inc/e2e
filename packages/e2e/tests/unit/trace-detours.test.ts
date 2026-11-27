@@ -50,11 +50,14 @@ describe('findDetours by recorded locations', () => {
     expect(detours).toEqual([{ from: 0, to: 2, at: '/home', via: '/reports', evidence: 'locations' }]);
   });
 
-  it('reads two wrong turns from one menu as one detour', () => {
+  it('reads each wrong turn from one menu as a detour of its own', () => {
     const detours = findDetours(
       flow([tap('A', '/menu'), back('/a'), tap('B', '/menu'), back('/b'), tap('C', '/menu')], { endPath: '/c' }),
     );
-    expect(detours).toEqual([{ from: 0, to: 4, at: '/menu', via: '/a', evidence: 'locations' }]);
+    expect(detours).toEqual([
+      { from: 0, to: 2, at: '/menu', via: '/a', evidence: 'locations' },
+      { from: 2, to: 4, at: '/menu', via: '/b', evidence: 'locations' },
+    ]);
   });
 
   it('is no detour when something was typed or set before going back', () => {
@@ -204,12 +207,15 @@ describe('findDetoursAfterReplay', () => {
       { from: 0, to: 2, at: '/?view=:id', via: '/?view=:id', evidence: 'locations' },
       { from: 3, to: 5, at: '/?view=:id', via: '/help', evidence: 'locations' },
     ]);
-    // A second trip from the same screen after the replayed one reads as one span with it, as on a run from the top.
+    // A second trip from the same screen, after the replayed one, is kept beside it.
     const again = flow(
       [tap('About', '/', 'link'), back('/about'), tap('About', '/', 'link'), back('/about'), tap('Increment', '/')],
       { endPath: '/' },
     );
-    expect(findDetoursAfterReplay(again, [{ from: 0, to: 2 }])).toEqual([{ from: 0, to: 4, at: '/', via: '/about', evidence: 'locations' }]);
+    expect(findDetoursAfterReplay(again, [{ from: 0, to: 2 }])).toEqual([
+      { from: 0, to: 2, at: '/', via: '/about', evidence: 'locations' },
+      { from: 2, to: 4, at: '/', via: '/about', evidence: 'locations' },
+    ]);
     // A trip this run reads across a kept span is the entry's, as it found it.
     expect(findDetoursAfterReplay(trace, [{ from: 2, to: 5 }])).toEqual([{ from: 2, to: 5, at: '/?view=:id', via: '/?view=:id', evidence: 'locations' }]);
   });
