@@ -441,8 +441,8 @@ the way a user would.
   with `npx skills add e2e-inc/e2e --skill migrate-to-e2e`; not shipped
   in the package and not read by `e2e guide`.
 - `.dev/skills/` — the skills we use to work on this repo (`authoring-docs`,
-  `babysit`, `ship-pr`, `verify`, `writing-pr`). `npx skills add e2e-inc/e2e`
-  offers only `skills/*`: its default scan never looks in `.dev/`, and it skips
+  `babysit`, `merge-risk`, `ship-pr`, `verify`, `writing-pr`).
+  `npx skills add e2e-inc/e2e` offers only `skills/*`: its default scan never looks in `.dev/`, and it skips
   `.claude/skills/<name>`, the relative symlink to each that agents load
   them through, because it does not follow symlinked directories. Its
   `--full-depth` scan does reach `.dev/skills/`; there the frontmatter's
