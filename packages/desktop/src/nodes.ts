@@ -454,6 +454,33 @@ export function locatable(screen: ProjectedScreen): SemanticNode {
   return prune(screen.root);
 }
 
+/** Roles whose own text is what they show, whatever nodes the app lists under them: static text and a heading. */
+const OWN_TEXT_ROLES = new Set(['text', 'heading']);
+
+/**
+ * A located node with the text its descendants show as its own, as a web
+ * element's text content is its children's: `textContent()`, `toHaveText`,
+ * and `toContainText` on a list, a tree, a group, or a row read what the
+ * rows and labels in it show, one line each. A node with no children, static
+ * text, and a heading keep their own text, and so does a container none of
+ * whose descendants shows text. A field shows its value, not text, as an input's text
+ * content on the web is empty. Only `locate` answers it: an
+ * observation would list every line twice, and a text query still matches the
+ * innermost node that shows the text.
+ */
+export function withContainerText(node: SemanticNode): SemanticNode {
+  const text = shownText(node);
+  return text === node.text || text === undefined ? node : { ...node, text };
+}
+
+/** The text a node shows: its descendants', a line each, else its own. */
+function shownText(node: SemanticNode): string | undefined {
+  const children = node.children ?? [];
+  if (children.length === 0 || OWN_TEXT_ROLES.has(node.role ?? '')) return node.text;
+  const lines = children.map(shownText).filter((line): line is string => line !== undefined && line.trim() !== '');
+  return lines.length === 0 ? node.text : lines.join('\n');
+}
+
 /** A heading's level: the one the app reports, else one its description names (`heading level 2`). */
 function headingLevel(node: RawNode): { level?: number } {
   if (node.level !== undefined) return { level: node.level };

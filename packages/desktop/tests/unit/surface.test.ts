@@ -639,6 +639,18 @@ describe('DesktopSurface: reading', () => {
     expect(username?.states?.hidden).toBe(true);
   });
 
+  it("answers a located list with the text of its rows, and leaves the agent's observation as it read it", async () => {
+    const rows = [
+      { role: 'row', ref_id: '@s:e2', children: [{ role: 'statictext', value: 'Buy milk' }, { role: 'statictext', value: 'Medium' }] },
+      { role: 'row', ref_id: '@s:e3', children: [{ role: 'statictext', value: 'Call the bank' }] },
+    ];
+    const { surface } = await launched({ snapshot: [screen('w-mine', { name: 'Inbox', children: [{ role: 'outline', ref_id: '@s:e1', native_id: { kind: 'ax_identifier', value: 'tasks' }, children: rows }] })] }, { observe: false });
+    const [tasks] = await surface.locate(testId('tasks'), operation());
+    expect(tasks?.text).toBe('Buy milk\nMedium\nCall the bank');
+    const observed = await surface.observe(operation(), undefined);
+    expect(observed.root.children?.[0]?.text).toBeUndefined();
+  });
+
   it('reads an app with no window as an empty screen', async () => {
     const { surface } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }]), ok([])] }, { observe: false });
     expect(await surface.locate(testId('username'), operation())).toEqual([]);

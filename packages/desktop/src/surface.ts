@@ -45,7 +45,7 @@ import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, OWNER_FILE
 import { launchArgumentList } from './launch-arguments.ts';
 import { handOffClause, type WindowsRead } from './launch-report.ts';
 import { LAUNCH_READY_MS, QUIT, windowReadable } from './launch-wait.ts';
-import { ROOT_ID, locatable, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
+import { ROOT_ID, locatable, projectSnapshot, withContainerText, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
 import { AppState, installedApp, nativeStateHost, type OwnedBuild, type StateHost } from './state.ts';
@@ -912,7 +912,8 @@ export class DesktopSurface {
     this.pointWindow = pointIn(screen);
     await this.video.follow(this.pointWindow?.id, operation);
     this.remember(matches.flatMap((match) => screen.bindings.get(match.ref.id) ?? []));
-    return matches;
+    // A container's text is what the rows and labels in it show, for textContent() and toHaveText; the matching above read each node's own.
+    return matches.map(withContainerText);
   }
 
   // --- acting ---
