@@ -209,6 +209,13 @@ describe('e2e cache show', () => {
     await invoke('cache', 'show', copied);
     expect(process.exitCode).toBe(0);
     expect(written(stdoutSpy)).toContain('summary    the capture');
+    // A bare name that is no digest is a file in the current directory.
+    writeFileSync(path.join(root, 'capture.trace'), JSON.stringify(buildTraceEntry({ ...detouredTrace(), summary: 'the bare capture' })), 'utf8');
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(root);
+    await invoke('cache', 'show', 'capture.trace');
+    cwd.mockRestore();
+    expect(process.exitCode).toBe(0);
+    expect(written(stdoutSpy)).toContain('summary    the bare capture');
     const torn = path.join(root, 'saved', 'torn.json');
     writeFileSync(torn, '{ not json', 'utf8');
     await invoke('cache', 'show', torn);

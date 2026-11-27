@@ -295,9 +295,9 @@ function writeTable(header: readonly string[], rows: readonly (readonly string[]
   for (const row of rows) process.stdout.write(`${line(row)}\n`);
 }
 
-/** Whether `show` was given a file rather than a digest: a name with a directory in it, or one ending in `.json`. */
+/** Whether `show` was given a file rather than a digest: a name with a directory in it, or anything but hex digits. */
 function isFilePath(ref: string): boolean {
-  return path.basename(ref) !== ref || ref.endsWith('.json');
+  return path.basename(ref) !== ref || !/^[a-f0-9]+$/iu.test(ref);
 }
 
 /**
