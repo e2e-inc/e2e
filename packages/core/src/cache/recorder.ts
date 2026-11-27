@@ -73,6 +73,11 @@ export class TraceRecorder {
     return this.actions.length;
   }
 
+  /** Where each action recorded so far ran, as its step saw it: undefined for one taken without a fresh look. */
+  get locations(): readonly (string | undefined)[] {
+    return this.actions.map((action) => action.at);
+  }
+
   /** When the last action or gap was recorded; undefined before the first. */
   get lastActionAtMs(): number | undefined {
     return this.lastActionAt;

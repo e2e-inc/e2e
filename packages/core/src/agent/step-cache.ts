@@ -488,12 +488,15 @@ export class StepTraceSession {
       this.info = this.missed(stopReason, outcome.total, outcome.derived, detail);
       return undefined;
     }
+    // Where the replay saw its actions run, before the ones it ran without looking take where they were recorded.
+    const places = this.recorder?.locations ?? [];
     // The replayed actions are this step's recording now; the ones it ran without looking keep where they were recorded.
     const kept = this.recorder?.keepLocations(trace.actions.slice(0, outcome.executed)) ?? new Set<number>();
     // So are the detours they made: the report names them, and this step's recording keeps them (`findDetoursAfterReplay`).
     // A replay that found no target looked at the screen it stopped on; one whose end never reached the recorded route saw where it stayed.
     const looked = stopReason === 'target-not-found' || stopReason === 'target-ambiguous' || stopReason === 'viewport-changed';
-    const ran = findReplayedDetours(trace, outcome.executed, looked ? screens.at(-1)?.path : end?.seen);
+    const stop = looked ? screens.at(-1)?.path : end?.seen;
+    const ran = findReplayedDetours(trace, outcome.executed, stop === undefined ? undefined : { stop, places });
     if (trace.detours !== undefined) this.replayed = { executed: outcome.executed, spans: ran.map(({ from, to }) => ({ from, to })), kept };
     this.handOff(outcome, stopReason, detail, this.describeDetours(ran));
     return undefined;

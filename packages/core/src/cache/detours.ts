@@ -174,36 +174,49 @@ export function findDetoursAfterReplay(
  * replay ran before it handed off, read as a flow of their own that ends
  * where the next recorded action stood, so a trip the replay completed is
  * not merged with one it never reached. When the replay saw where it
- * stopped (`live`: a screen with no recorded target, or an end that never
- * reached the recorded route), a return there counts only if that screen
- * is where the recording stood: a link that now leads elsewhere took the
- * flow off the recorded route. A span
- * the recording run found that ends inside them is kept as found: a
- * stored location reads `:id` for a record id and a query value, so
- * comparing again would lose a trip to another record. Only a span the
- * hand-off cut through is read again, on the stored locations, and a trip
- * found there counts only inside it.
+ * stopped (`live.stop`: a screen with no recorded target, or an end that
+ * never reached the recorded route), a trip that came back there counts
+ * only if that screen is the one the trip left: by the address the replay
+ * saw there (`live.places`), else by the recorded spelling when it holds no
+ * `:id`, since `/?view=:id` tells no view from another. An end that never
+ * reached its route came back to nothing. A span the recording run found
+ * that ends inside them is kept as found: a stored location reads `:id`
+ * for a record id and a query value, so comparing again would lose a trip
+ * to another record. Only a span the hand-off cut through is read again,
+ * on the stored locations, each on its own so a match outside it takes
+ * none of its trips, and a trip found there counts only inside it.
  */
-export function findReplayedDetours(trace: DetourInput, executed: number, live?: string): TraceDetour[] {
+export function findReplayedDetours(
+  trace: DetourInput,
+  executed: number,
+  live?: { readonly stop: string; readonly places: readonly (string | undefined)[] },
+): TraceDetour[] {
   // Where the action the replay stopped at was recorded, or the recorded end when it ran them all.
-  const next = executed < trace.actions.length ? trace.actions[executed]?.at : trace.endPath;
-  const returned = live === undefined || next === undefined || routeLocation(live) === routeLocation(next);
+  const atEnd = executed >= trace.actions.length;
+  const next = atEnd ? trace.endPath : trace.actions[executed]?.at;
+  const confirmed = ({ from, to }: TraceDetour): boolean => {
+    if (to < executed || live === undefined || next === undefined) return true;
+    if (atEnd) return false;
+    const home = live.places[from];
+    if (home !== undefined) return addressKey(home) === addressKey(live.stop);
+    return !routeLocation(next).includes(':id') && routeLocation(live.stop) === routeLocation(next);
+  };
   const ran = {
     actions: trace.actions.slice(0, executed),
     ...(trace.startPath === undefined ? {} : { startPath: trace.startPath }),
-    ...(next === undefined || !returned ? {} : { endPath: next }),
+    ...(next === undefined ? {} : { endPath: next }),
   };
   const spans = trace.detours;
   if (spans === undefined) return findDetours(ran);
-  const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to < executed || (to === executed && returned)) }, routeLocation);
+  const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to <= executed) }, routeLocation);
   const cut = spans.filter(({ from, to }) => from < executed && executed < to);
-  // Each cut span read on its own, so a match outside it takes none of its trips; every place here is the entry's, spelled as it stores them.
   const inCut = cut.flatMap((span) => {
-    const inside = { actions: ran.actions.slice(span.from), ...(next === undefined || !returned ? {} : { endPath: next }) };
+    // Every place here is the entry's, spelled as it stores them.
+    const inside = { actions: ran.actions.slice(span.from), ...(next === undefined ? {} : { endPath: next }) };
     const stored = new Set(Array.from({ length: inside.actions.length + 1 }, (_, index) => index));
     return findDetours({ ...inside, stored }).map((detour) => ({ ...detour, from: detour.from + span.from, to: detour.to + span.from }));
   });
-  return [...finished, ...inCut].toSorted((a, b) => a.from - b.from);
+  return [...finished, ...inCut].filter(confirmed).toSorted((a, b) => a.from - b.from);
 }
 
 /**

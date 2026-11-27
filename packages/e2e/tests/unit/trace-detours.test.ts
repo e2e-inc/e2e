@@ -293,6 +293,26 @@ describe('findReplayedDetours', () => {
     expect(findReplayedDetours({ ...stored, detours: [{ from: 1, to: 6 }] }, 5)).toEqual([{ from: 2, to: 4, at: '/reports', via: '/details', evidence: 'locations' }]);
   });
 
+  it('counts a return where the replay stopped only when the screen it saw there is the recorded one, and only where the recording can tell', () => {
+    const views = flow([tap('Privacy', '/?view=:id', 'link'), back('/?view=:id'), tap('Increment', '/?view=:id')], { endPath: '/?view=:id' });
+    const kept = [{ from: 0, to: 2, at: '/?view=:id', via: '/?view=:id', evidence: 'locations' as const }];
+    // Not seen: the stored span stands.
+    expect(findReplayedDetours({ ...views, detours: [{ from: 0, to: 2 }] }, 2)).toEqual(kept);
+    // Seen: compared with the address the replay saw where the trip left.
+    expect(findReplayedDetours({ ...views, detours: [{ from: 0, to: 2 }] }, 2, { stop: '/?view=account', places: ['/?view=account'] })).toEqual(kept);
+    expect(findReplayedDetours({ ...views, detours: [{ from: 0, to: 2 }] }, 2, { stop: '/?view=unrelated', places: ['/?view=account'] })).toEqual([]);
+    // With no address seen there, `/?view=:id` cannot tell the recorded view from the one the replay landed on; a literal route can.
+    expect(findReplayedDetours({ ...views, detours: [{ from: 0, to: 2 }] }, 2, { stop: '/?view=account', places: [] })).toEqual([]);
+    const pages = flow([tap('About', '/', 'link'), back('/about'), tap('Increment', '/')], { endPath: '/' });
+    expect(findReplayedDetours({ ...pages, detours: [{ from: 0, to: 2 }] }, 2, { stop: '/', places: [] })).toHaveLength(1);
+    expect(findReplayedDetours({ ...pages, detours: [{ from: 0, to: 2 }] }, 2, { stop: '/diverted', places: [] })).toEqual([]);
+  });
+
+  it('counts no return at an end the replay saw stay off the recorded route', () => {
+    const trip = flow([tap('About', '/settings?tab=:id', 'link'), back('/about')], { endPath: '/settings?tab=privacy' });
+    expect(findReplayedDetours({ ...trip, detours: [{ from: 0, to: 2 }] }, 2)).toHaveLength(1);
+    expect(findReplayedDetours({ ...trip, detours: [{ from: 0, to: 2 }] }, 2, { stop: '/settings?tab=billing', places: ['/settings?tab=privacy'] })).toEqual([]);
+  });
 });
 
 describe('findDetours on an entry recorded without locations', () => {
