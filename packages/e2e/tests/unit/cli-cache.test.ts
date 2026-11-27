@@ -185,6 +185,13 @@ describe('e2e cache show', () => {
     expect(output).toContain(`detour: ${DETOUR_LINE}`);
   });
 
+  it('takes an entry\'s file name as its digest', async () => {
+    await seed([{ keyHash: 'c'.repeat(64), trace: detouredTrace() }]);
+    await invoke('cache', 'show', `${'c'.repeat(64)}.json`);
+    expect(process.exitCode).toBe(0);
+    expect(written(stdoutSpy)).toContain('tests/settings.e2e.ts::opens privacy');
+  });
+
   it('takes the path of the entry file too', async () => {
     await seed([{ keyHash: 'c'.repeat(64), trace: detouredTrace() }]);
     await invoke('cache', 'show', path.join(root, CACHE_DIR, `${'c'.repeat(64)}.json`));

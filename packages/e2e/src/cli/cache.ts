@@ -297,9 +297,16 @@ function writeTable(header: readonly string[], rows: readonly (readonly string[]
   for (const row of rows) process.stdout.write(`${line(row)}\n`);
 }
 
-/** Whether `show` was given a file rather than a digest: a name with a directory in it, or anything but hex digits. */
+/** An entry's file name as the store writes it: its digest and `.json`. */
+const ENTRY_FILE_NAME = /^[a-f0-9]{64}\.json$/iu;
+
+/**
+ * Whether `show` was given a file rather than a digest: a name with a
+ * directory in it, or anything but hex digits and an entry's own file name,
+ * which names its digest.
+ */
 function isFilePath(ref: string): boolean {
-  return path.basename(ref) !== ref || !/^[a-f0-9]+$/iu.test(ref);
+  return path.basename(ref) !== ref || (!/^[a-f0-9]+$/iu.test(ref) && !ENTRY_FILE_NAME.test(ref));
 }
 
 /**
@@ -307,7 +314,7 @@ function isFilePath(ref: string): boolean {
  * why and returns undefined when no entry or more than one matches.
  */
 function findEntry(contents: CacheContents, ref: string): CacheEntrySummary | undefined {
-  const prefix = ref.toLowerCase();
+  const prefix = ref.toLowerCase().replace(/\.json$/u, '');
   const matches = /^[a-f0-9]+$/u.test(prefix) ? contents.entries.filter((entry) => entry.keyHash.startsWith(prefix)) : [];
   if (matches.length === 1) return matches[0];
   if (matches.length === 0) {
