@@ -122,7 +122,7 @@ function squirrelApp(file: string): string | undefined {
   if (!siblings.some((sibling) => sibling.toLowerCase() === 'update.exe')) return undefined;
   const versions = siblings
     .filter((sibling) => /^app-\d/.test(sibling) && existsSync(path.join(directory, sibling, name)))
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    .toSorted((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const newest = versions.at(-1);
   return newest === undefined ? undefined : path.join(directory, newest, name);
 }
