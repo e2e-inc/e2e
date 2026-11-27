@@ -658,14 +658,14 @@ function readSteps(document: unknown): { readonly test: string; readonly file?: 
     const agent = step['agent'] === undefined ? undefined : readString(step['agent'], `${where}.agent`);
     const call = step['call'];
     if (call !== undefined && (typeof call !== 'number' || !Number.isSafeInteger(call) || call < 2)) fail(`${where}.call must be a whole number from 2`);
-    const targetsRaw = object(step['targets'], `${where}.targets`);
+    // Deleting a step's last target leaves a bare `targets:`, null, or `{}`: a step with nothing recorded, as if deleted.
+    const targetsRaw = object(step['targets'] === null ? {} : step['targets'], `${where}.targets`);
     const targets = new Map(
       Object.entries(targetsRaw).map(([targetId, variant]) => [
         targetId,
         { variant: readVariant(variant, `${where}.targets.${targetId}`), digest: recordingDigest(step, targetId) },
       ]),
     );
-    if (targets.size === 0) fail(`${where}.targets names no target`);
     return {
       ...(act === undefined ? {} : { act }),
       ...(params === undefined ? {} : { params }),

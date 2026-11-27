@@ -757,6 +757,21 @@ describe('FileCacheStore', () => {
     });
   });
 
+  it('reads a step whose only target was deleted from the YAML as not recorded, and records it again', async () => {
+    const { directory, store } = await makeStore();
+    const second = step('web', { callIndex: 1 });
+    await store.write(KEY, payload());
+    await store.write(OTHER_KEY, payload('web', { recordedFor: second, startPath: '/billing', endPath: '/billing' }));
+    const yaml = await readFile(yamlPath(directory), 'utf8');
+    // The first step's `web:` block goes, its `targets:` left bare.
+    const start = yaml.indexOf('      web:');
+    await writeFile(yamlPath(directory), `${yaml.slice(0, start)}${yaml.slice(yaml.indexOf('  - act:', start))}`, 'utf8');
+    expect((await store.read(KEY, step())).status).toBe('miss');
+    expect((await store.read(OTHER_KEY, second)).status).toBe('hit');
+    expect(await store.write(KEY, payload())).toBeDefined();
+    expect((await store.read(KEY, step())).status).toBe('hit');
+  });
+
   it('keeps a recording it cannot read when another is written or evicted beside it', async () => {
     const { directory, store } = await makeStore();
     const second = step('web', { callIndex: 1 });
