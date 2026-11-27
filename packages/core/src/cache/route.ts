@@ -274,16 +274,14 @@ function storedSegment(segment: string): string {
  */
 function unparsedLocation(location: string): string {
   const parts = unparsedParts(location);
-  if (parts !== undefined) return `${parts.authority}${routeLocation(parts.path)}`;
-  // A marker that took part of the path with the origin (`<secret:app>welcome?code=...`) leaves no address to read; its query is still one.
-  const at = location.indexOf('?');
-  if (at === -1 || !SECRET_MARKER.test(location.slice(0, at))) return location;
-  const hash = location.indexOf('#', at);
-  const search = location.slice(at + 1, hash === -1 ? undefined : hash);
-  if (search === '') return location;
-  const query = [...new URLSearchParams(search)].map(([key, value]) => `${spellPart(key)}=${value === '' ? '' : PARAM}`).join('&');
-  return `${location.slice(0, at)}?${query}`;
+  const spelled = parts === undefined ? location : `${parts.authority}${routeLocation(parts.path)}`;
+  // A marker that took part of the address (`<secret:app>welcome?code=...`, `...<secret:cb>&state=...`) leaves no structure to
+  // read, so every value a `?`, `&`, `;`, or `#` names reads `:id`, wherever it stands.
+  return SECRET_MARKER.test(spelled) ? spelled.replace(NAMED_VALUE, (_named: string, name: string) => `${name}=${PARAM}`) : spelled;
 }
+
+/** A value a `?`, `&`, `;`, or `#` names (`?code=...`, `&state=...`, `;jsessionid=...`, `#access_token=...`), its name kept. */
+const NAMED_VALUE = /([?&;#][^=?&;#/]*)=[^&;#/]*/g;
 
 /** A `file:` URL's scheme and host, empty for a local file: the path starts at the next slash, its first segment included. */
 const FILE_ORIGIN = /^\s*file:(?:\/\/[^/?#\\]*)?/i;

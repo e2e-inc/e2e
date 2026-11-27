@@ -153,7 +153,12 @@ describe('routeLocation', () => {
     // A port the URL names stays beside the marker.
     expect(routeLocation('<secret:gateway>:8443/callback?code=SyntheticCallbackValue')).toBe('<secret:gateway>:8443/callback?code=:id');
     // A marker that took the slash before the path, or more of it, leaves no address; its query values still read :id.
-    expect(routeLocation('<secret:gateway>about?token=super-secret-token#frag')).toBe('<secret:gateway>about?token=:id');
+    expect(routeLocation('<secret:gateway>about?token=super-secret-token#frag')).toBe('<secret:gateway>about?token=:id#frag');
+    expect(routeLocation('<secret:gateway>checkout;jsessionid=SampleSessionTokenOnly')).toBe('<secret:gateway>checkout;jsessionid=:id');
+    // A marker that took the `?` too: the values after it still read :id.
+    expect(routeLocation('http://127.0.0.1:4280<secret:cb>&state=SyntheticCallbackStateValue')).toBe('http://127.0.0.1:4280<secret:cb>&state=:id/');
+    expect(routeLocation('<secret:app>#access_token=abc&state=x')).toBe('<secret:app>/');
+    expect(routeLocation('<secret:app>done#access_token=abc&state=x')).toBe('<secret:app>done#access_token=:id&state=:id');
     expect(routeLocation('<secret:invite>welcome?code=MockCallbackCode')).toBe('<secret:invite>welcome?code=:id');
     expect(routeLocation('<secret:app> › Delete it?')).toBe('<secret:app> › Delete it?');
     // A device title that opens with a marker is no address.
