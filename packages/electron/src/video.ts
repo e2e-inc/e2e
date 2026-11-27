@@ -84,7 +84,7 @@ export class Recorder {
       void taken.then(() => session.send('Page.screencastFrameAck', { sessionId: frame.sessionId })).catch(() => undefined);
     });
     page.recording = true;
-    // A window the app hides sends no frame on Windows unless it is held drawing.
+    // A window the app hides sends no frame on Windows or Linux unless it is held drawing.
     const release = await page.hold();
     this.source = {
       page,

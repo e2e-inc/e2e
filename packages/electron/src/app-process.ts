@@ -264,7 +264,8 @@ export class AppProcess {
       if (!attaching.delete(info.targetId)) return;
       const page = new PageTarget(info.targetId, app.process.browser.session(sessionId), info.url, info.openerId === undefined ? undefined : app.pages.get(info.openerId));
       app.pages.set(info.targetId, page);
-      if (process.platform === 'win32') page.keepDrawing = () => unthrottle(app, page.targetId);
+      // macOS draws a hidden window for the screencast alone.
+      if (process.platform !== 'darwin') page.keepDrawing = () => unthrottle(app, page.targetId);
       // A window that has loaded nothing has no renderer and never answers: it becomes a window once it does.
       await this.follow(page, report);
       if (current() && !page.isClosed()) this.windows.add(page);
@@ -425,9 +426,9 @@ export class AppProcess {
 /**
  * Turns off the background throttling of one window's renderer, and resolves
  * with what turns it back on; undefined when it was off already, or the app
- * has no inspector to ask. Windows draws nothing of a window the app hid
- * while its renderer is throttled, screencast or not: a screenshot of one
- * never returns, nor does the app's own `webContents.capturePage()`
+ * has no inspector to ask. Windows and Linux draw nothing of a window the
+ * app hid while its renderer is throttled, screencast or not: a screenshot
+ * of one never returns, nor does the app's own `webContents.capturePage()`
  * (measured on Electron 45). With throttling off it draws at once.
  */
 async function unthrottle(app: RunningApp, targetId: string): Promise<(() => Promise<void>) | undefined> {
