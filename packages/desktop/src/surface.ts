@@ -100,6 +100,12 @@ export interface OpenWindow {
 /** What a target launches: a `.app` bundle on disk, or an installed app by bundle id or name. */
 type LaunchTarget = { readonly path: string; readonly label: string } | { readonly bundleId: string; readonly label: string };
 
+/** A window a point was taken in, and the sheet that held its focus then. */
+interface PointWindow {
+  readonly id: string;
+  readonly sheet: string | undefined;
+}
+
 /**
  * A launch whose outcome is unknown: its token, and the driver's answer,
  * which may still name the process it started, or say it started none
@@ -230,7 +236,7 @@ export class DesktopSurface {
    * agent's as core hit-tests it, against the newest observation. `sheet` says whether a sheet held its focus then: one
    * that opened since was not where the point was taken.
    */
-  private pointWindow: { readonly id: string; readonly sheet: string | undefined } | undefined;
+  private pointWindow: PointWindow | undefined;
   /** The newest binding of every node id an observation or a locate handed out, newest last. */
   private readonly bindings = new Map<string, NodeBinding>();
   /** The id handed out for each node identity since the app launched; see `projectSnapshot`. */
@@ -1168,27 +1174,27 @@ export class DesktopSurface {
       );
       if (other !== undefined) throw notActionable(`a ${other.role ?? 'control'} is at the center of node ${binding.id}, so a double-click there would press it; act on that control instead`);
     }
-    this.pointWindow = binding.windowId === undefined ? undefined : { id: binding.windowId, sheet: now?.sheet };
+    // The point is measured in this read, not in the newest screen handed to the harness, which a later point still is.
+    const taken = binding.windowId === undefined ? undefined : { id: binding.windowId, sheet: now?.sheet };
     // Coming forward can reveal a control over the node: the driver checks after the move that none is under a double-click.
-    await this.pointerAt(center, { kind }, operation, kind === 'doubleTap');
+    await this.pointerAt(center, { kind }, operation, kind === 'doubleTap', taken);
   }
 
   /** Physical pointer input at a point in the window: only with `physicalInput`, and only then declared. */
   async performAt(point: ViewportPoint, action: PointerAction, context: OperationContext): Promise<void> {
-    await this.pointerAt(point, action, context, false);
+    await this.pointerAt(point, action, context, false, this.pointWindow);
   }
 
   /**
    * `performAt`, and `content` when the point is on a node with no ref, which takes no click of its own: the driver
    * then refuses a control under the pointer after the move, not only another window.
    */
-  private async pointerAt(point: ViewportPoint, action: PointerAction, context: OperationContext, content: boolean): Promise<void> {
+  private async pointerAt(point: ViewportPoint, action: PointerAction, context: OperationContext, content: boolean, observed: PointWindow | undefined): Promise<void> {
     const operation = withDeadline(context);
     if (action.kind !== 'hover' && action.kind !== 'tap' && action.kind !== 'doubleTap' && action.kind !== 'secondaryTap') {
       throw unsupported(`the desktop engine cannot perform ${action.kind} at a point`);
     }
     // The point is in the observed window's coordinates: find that window where it is now (it may have moved), or the app's own window before any observation.
-    const observed = this.pointWindow;
     const target = observed === undefined ? await this.ownWindow(operation) : (await this.ownWindows(operation)).find((candidate) => candidate.id === observed.id);
     const window = target?.bounds;
     if (target === undefined || window === undefined) throw notActionable('the window the point was taken from is no longer on screen; observe again');
@@ -1509,7 +1515,7 @@ function holds(rect: Rect, point: { readonly x: number; readonly y: number }): b
 }
 
 /** The window a screen was read from, and the sheet that held its focus then: where a point taken in it was taken. */
-function pointIn(screen: ProjectedScreen): { readonly id: string; readonly sheet: string | undefined } | undefined {
+function pointIn(screen: ProjectedScreen): PointWindow | undefined {
   return screen.windowId === undefined ? undefined : { id: screen.windowId, sheet: screen.sheet };
 }
 

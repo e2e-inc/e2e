@@ -1709,6 +1709,20 @@ describe('DesktopSurface: points', () => {
     expect(same.fake.pointerOptions.at(-1)?.target).toEqual({ pid: same.fake.pid, windowId: 'w-8032', sheet: true, sheetId: 's-1' });
   });
 
+  it('keeps the observed sheet for a later point after a hover at a node measured in a newer read', async () => {
+    const row = screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'group', name: 'Row', bounds: { x: 10, y: 10, width: 100, height: 50 } }] });
+    let sheet = false;
+    const list = windows(() => [{ id: 'w-mine', is_focused: true, ...(sheet ? { sheet_focused: true, sheet_id: 's-1' } : {}), bounds: { x: 0, y: 0, width: 200, height: 200 } }]);
+    const { surface, fake } = await launched({ snapshot: [row], listWindows: [list] }, { observe: false, options: { physicalInput: true } });
+    const every = (node: SemanticNode): SemanticNode[] => [node, ...(node.children ?? []).flatMap(every)];
+    const group = every((await surface.observe(operation(), undefined)).root).find((node) => node.role === 'group' && node.name === 'Row');
+    sheet = true;
+    // The hover reads the window again, with the sheet: the point it takes is its own, not the observation's.
+    await surface.perform(group!.ref, { kind: 'hover' }, operation());
+    await expect(surface.performAt({ x: 150, y: 150 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/sheet opened/) });
+    expect(fake.of('pointer').map((call) => call.args[2])).toEqual(['hover']);
+  });
+
   it('taps, double-taps, secondary-taps, and hovers a point in the window where it is now, with no observation first', async () => {
     const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x: 300, y: 200, width: 400, height: 300 } }])] }, { observe: false, options: { physicalInput: true } });
     for (const kind of ['tap', 'doubleTap', 'secondaryTap', 'hover'] as const) await surface.performAt({ x: 20, y: 30 }, { kind }, operation());
