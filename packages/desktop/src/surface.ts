@@ -39,7 +39,7 @@ import {
 } from '@e2e-dev/core/engine';
 import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
 import { toCombo } from './keys.ts';
-import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_TOKEN, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
+import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
 import { launchArgumentList } from './launch-arguments.ts';
 import { handOffClause, type WindowsRead } from './launch-report.ts';
 import { LAUNCH_READY_MS, QUIT, windowReadable } from './launch-wait.ts';
@@ -533,7 +533,7 @@ export class DesktopSurface {
         return;
       }
       // A process carrying the launch's token is its own, whether or not the driver reported it.
-      const carriers = await this.requireDriver().processesCarrying(`${LAUNCH_TOKEN}=${pending.token}`);
+      const carriers = await this.requireDriver().processesCarrying(pending.token);
       if (carriers === null) {
         throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${pending.target} started the app: looking for its token among the processes failed; quitting tries again`, { retryable: false });
       }
@@ -580,7 +580,7 @@ export class DesktopSurface {
     let failed = false;
     while (Date.now() < until && !signal.aborted) {
       await new Promise((resolve) => setTimeout(resolve, LATE_APP_POLL_MS));
-      const carriers = await this.requireDriver().processesCarrying(`${LAUNCH_TOKEN}=${token}`);
+      const carriers = await this.requireDriver().processesCarrying(token);
       if (carriers === null) failed = true;
       else if (carriers.length > 0) return carriers;
     }
@@ -606,7 +606,7 @@ export class DesktopSurface {
       // Gone between the two looks; still there, its start unreadable, it is the app only if it carries the token.
       if (!alive(pid)) return false;
     }
-    const carriers = this.token === undefined ? null : await driver.processesCarrying(`${LAUNCH_TOKEN}=${this.token}`);
+    const carriers = this.token === undefined ? null : await driver.processesCarrying(this.token);
     if (carriers === null) throw new EngineError('ENGINE_FAILURE', `could not tell whether process ${pid} is still the app the engine launched; quitting tries again`, { retryable: false });
     return carriers.includes(pid);
   }

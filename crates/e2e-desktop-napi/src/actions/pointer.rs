@@ -184,7 +184,10 @@ pub(super) fn window_takes_point(target: &PointTarget, x: f64, y: f64) -> Outcom
         Err(error) if error == ax::AX_CANNOT_COMPLETE => return Err(unread(error, "read the app's focused window")),
         _ => None,
     };
-    let holds = focused.as_ref().is_some_and(|focused| windows::holds_focus(focused, &window));
+    let holds = match &focused {
+        Some(focused) => super::holds(focused, &window, "read the app's focused window")?,
+        None => false,
+    };
     let now = match focused.filter(|focused| *focused != window) {
         None => Sheet::None,
         Some(on) => Sheet::Key(on.sheet_key()),

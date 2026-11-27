@@ -29,13 +29,15 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
     // window, a sheet on this one included, or another app must not take the rest of the text with it. A field in a sheet
     // that was there from the start keeps its sheet. Read before the field's own check, so a window a focus handler opens
     // after it shows as a change at the first key, and one it opened before fails that check.
-    let typing_in = Element::application(entry.pid).element("AXFocusedWindow");
-    if typing_in.as_ref().is_some_and(|start| !windows::holds_focus(start, &window)) {
+    let typing_in = element_attribute(&Element::application(entry.pid), "AXFocusedWindow", "type")?;
+    if let Some(start) = &typing_in
+        && !holds(start, &window, "type")?
+    {
         return Err(Failure::refused(codes::ACTION_FAILED, "another window took the keyboard before typing began, so nothing was typed"));
     }
     // Coming forward can run a handler that opens a sheet or another window, and the app can move focus on: the keys
     // would then go there. The field itself must hold the app's focus before the first key.
-    if Element::application(entry.pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element) {
+    if element_attribute(&Element::application(entry.pid), "AXFocusedUIElement", "type")?.as_ref() != Some(&entry.element) {
         return Err(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed"));
     }
     // What an element holds, in characters, as the app answers it: a change says the app took the key sent last.
@@ -44,6 +46,8 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
         _ => None,
     };
     let focused_element = || Element::application(entry.pid).element("AXFocusedUIElement");
+    // The same read for a check a key waits on: a stall fails it, as a retry may get past it, never as focus that moved.
+    let focused_checked = || element_attribute(&Element::application(entry.pid), "AXFocusedUIElement", "type");
     // The element that held the keyboard when the last key went, and its length then; unset before the first key. It is
     // the field typing began in until a Tab, or a code field's next box, takes the keys within the window.
     let sent_to: std::cell::RefCell<Option<(Option<Element>, Option<f64>)>> = std::cell::RefCell::new(None);
@@ -76,23 +80,33 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
         }
         // The element the key will reach, read before the checks below, so nothing reads the app between them and the
         // key: focus that moves while they run is caught by them, not followed. The first key goes only to the field.
-        let target = focused_element();
+        // Past the first key, an unanswered read only shortens the wait for the next key's effect.
+        let target = if last.is_none() { focused_checked()? } else { focused_element() };
         let count = target.as_ref().and_then(&length);
         if last.is_none() && target.as_ref() != Some(&entry.element) {
             return Err(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed"));
         }
-        let app = Element::application(entry.pid);
-        let focused = app.element("AXFocusedWindow");
+        let focused = element_attribute(&Element::application(entry.pid), "AXFocusedWindow", "type")?;
         let held = match &typing_in {
             Some(start) => focused.as_ref() == Some(start),
-            None => focused.is_some_and(|focused| windows::holds_focus(&focused, &window)),
+            None => match &focused {
+                Some(focused) => holds(focused, &window, "type")?,
+                None => false,
+            },
         };
-        let forward = !physical || app.boolean("AXFrontmost") == Some(true);
+        let forward = !physical || frontmost(entry.pid)?;
         if held && forward {
-            // The first key goes only to the field, read once more as the last read before it: the reads above wait on
-            // the app, and a handler that moved focus to another field of the window meanwhile would take the key.
-            if last.is_none() && focused_element().as_ref() != Some(&entry.element) {
-                return Err(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed"));
+            if last.is_none() {
+                // The first key goes only to the field, read once more: the reads above wait on the app, and a handler that
+                // moved focus to another field of the window meanwhile would take the key.
+                if focused_checked()?.as_ref() != Some(&entry.element) {
+                    return Err(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed"));
+                }
+                // That read waits on the app too, and a physical key goes to whatever app is frontmost: the frontmost check
+                // is the last read before it, as for `press`, so another app that came forward meanwhile is still caught.
+                if physical && !frontmost(entry.pid)? {
+                    return Err(Failure::refused(codes::ACTION_FAILED, "another app came forward before typing began, so nothing was typed"));
+                }
             }
             sent_to.replace(Some((target, count)));
             Ok(())
