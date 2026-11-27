@@ -134,6 +134,8 @@ struct Walk {
     focus_unknown: bool,
     /// The window's own title-bar buttons, as it names them (`AXCloseButton`, ...); `None` when it names none.
     chrome: Option<Vec<Element>>,
+    /// The text in the title bar that shows the window's title, which the window's own name already carries.
+    title_text: Option<Element>,
     nodes: usize,
     complete: bool,
     /// Whether the deadline stopped the read.
@@ -609,6 +611,7 @@ impl Walk {
                 }
             }
         };
+        // The text in the title bar is the window's title, which the window's own node carries as its name.
         // The window's own title-bar buttons are window chrome, never the app's controls: the window names them
         // (`chrome`), so a button of the app's content with the same subrole (a tab's close button) stays. A window that
         // names none falls back to the subrole.
@@ -616,7 +619,7 @@ impl Walk {
             Some(chrome) => chrome.contains(element),
             None => roles::window_control_name(read.subrole.as_deref()).is_some(),
         };
-        if !root && chrome {
+        if !root && (chrome || self.title_text.as_ref() == Some(element)) {
             return None;
         }
         let role = if root && read.role == "unknown" { "window" } else { read.role };
@@ -642,6 +645,10 @@ impl Walk {
             .or_else(|| if roles::text(role) { label(text_value.clone()) } else { None })
             .or_else(|| if roles::takes_text(role) { read.placeholder.clone() } else { None });
         let description = read.description.clone().filter(|description| Some(description) != name.as_ref());
+        // A menu's separator is an item with no title that is never enabled: a line, no item a person can choose.
+        if role == "menuitem" && name.is_none() && read.enabled == Some(false) && element.count("AXChildren").is_ok_and(|count| count == 0) {
+            return None;
+        }
 
         let mut states = Vec::new();
         // The app's focused element is the one source: a table's cells report the table's focus as their own. An app
@@ -833,6 +840,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         focused,
         focus_unknown,
         chrome: window_chrome(&window),
+        title_text: window.element("AXTitleUIElement"),
         nodes: 0,
         complete: !focus_unknown,
         timed_out: false,
