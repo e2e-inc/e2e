@@ -9,11 +9,13 @@
  * not edited: each lock entry holds its recording to a digest of what the
  * YAML showed when it was written.
  *
- * `<name>.lock.json` is generated and is never reviewed: the cache key of
- * each recording, the digests that key holds, the key's context, and the
- * provenance a replay never reads (the executor, the model, its verdict, the
- * measured end wait). A repository marks it `linguist-generated`, so a diff
- * folds it away.
+ * `<name>.lock.json` is generated: the cache key of each recording, the
+ * digests that key holds, the key's context, the provenance a replay never
+ * reads (the executor, the model, its verdict), and the measured end wait,
+ * which a replay gives its end checks (at most `MAX_TRACE_END_WAIT_MS`) and
+ * no digest holds. A repository marks it `linguist-generated`, so a diff
+ * folds it away; a lock change with no YAML change beside it is the one to
+ * open.
  *
  * Reading never trusts the YAML more than an entry: the two files are
  * joined back into `trace-1` documents and validated by `readTraceEntry`,

@@ -245,8 +245,10 @@ separate digit boxes are a gap from the first character.
 
 Each test's recordings are one YAML file under `.e2e/cache/`, named for the
 test (`tests/admin/login.e2e.ts`'s `signs in` is `admin-login-signs-in.yml`),
-beside a generated `<test>.lock.json` that holds the cache keys and digests. Don't review or edit the lock. Each step sits under its
-instruction, then under each target it was recorded on:
+beside a generated `<test>.lock.json` that holds the cache keys and digests.
+Don't edit the lock. Review it only when it changes with no YAML change
+beside it: such a change can point a key at another step's recording. Each
+step sits under its instruction, then under each target it was recorded on:
 
 ```yaml title=".e2e/cache/login-form-signs-in.yml"
 test: signs in
@@ -369,8 +371,10 @@ generated lock files in GitHub diffs, add this line to `.gitattributes`:
 **/.e2e/cache/*.lock.json linguist-generated=true
 ```
 
-The reader refuses YAML tags, anchors, and unknown keys, and a lock entry
-edited to point a key at another step's recording.
+The reader refuses YAML tags, anchors, and unknown keys. It also refuses a
+lock entry edited to point a key at another step's recording, unless the
+entry says its step's act or params are redacted or cut, which it cannot
+check against the YAML.
 
 Local runs keep your git diff clean: e2e only rewrites a cache file when a
 step is recorded for the first time, heals after a UI change, gets evicted,
