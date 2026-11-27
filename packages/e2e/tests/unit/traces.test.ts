@@ -26,6 +26,8 @@ function project(): string {
 }
 
 const ENTRY = 'e'.repeat(64);
+/** How a recording file the store wrote opens: enough for the page to find it there. */
+const RECORDING = '# Replay recording of one e2e test.\n';
 
 const failing = reportResult({
   id: '1a2b3c4d5e6f7a8b9c0d',
@@ -72,6 +74,8 @@ describe('writeTracePages', () => {
     const evidence = path.join(dir, 'checkout-applies-the-coupon-1a2b3c4d5e6f7a8b', 'attempt-1', 'screen-at-failure.txt');
     mkdirSync(path.dirname(evidence), { recursive: true });
     writeFileSync(evidence, 'screen');
+    mkdirSync(path.join(root, '.e2e', 'cache'), { recursive: true });
+    writeFileSync(path.join(root, '.e2e', 'cache', 'checkout-applies-the-coupon.yml'), RECORDING);
     const document = reportDocument({ status: 'failed', results: [passing, failing, interrupted] });
     const pages = await writeTracePages(document, new Set([failing.id]), { projectRoot: root, resultsRoot: dir, cacheDir: path.join(root, '.e2e', 'cache') });
     expect(readdirSync(dir)).toEqual(['checkout-applies-the-coupon-1a2b3c4d5e6f7a8b']);
@@ -111,6 +115,8 @@ describe('writeTracePages', () => {
     const root = project();
     const dir = path.join(root, '.e2e', 'results');
     const shared = path.join(project(), 'shared');
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(path.join(shared, 'checkout-applies-the-coupon.yml'), RECORDING);
     await writeTracePages(reportDocument({ status: 'failed', results: [failing] }), new Set([failing.id]), { projectRoot: root, resultsRoot: dir, cacheDir: shared });
     const text = readFileSync(path.join(dir, 'checkout-applies-the-coupon-1a2b3c4d5e6f7a8b', 'trace.md'), 'utf8');
     expect(text).toContain(`(\`${shared.split(path.sep).join('/')}/checkout-applies-the-coupon.yml\`, key`);
@@ -127,6 +133,15 @@ describe('writeTracePages', () => {
     await writeTracePages(reportDocument({ status: 'failed', results: [failing] }), new Set([failing.id]), { projectRoot: root, resultsRoot: dir, cacheDir });
     const text = readFileSync(path.join(dir, 'checkout-applies-the-coupon-1a2b3c4d5e6f7a8b', 'trace.md'), 'utf8');
     expect(text).toContain(`(\`.e2e/cache/${collided}\`, key`);
+  });
+
+  it('names no recording file the store did not write, and gives the key alone', async () => {
+    const root = project();
+    const dir = path.join(root, '.e2e', 'results');
+    await writeTracePages(reportDocument({ status: 'failed', results: [failing] }), new Set([failing.id]), { projectRoot: root, resultsRoot: dir, cacheDir: path.join(root, '.e2e', 'cache') });
+    const text = readFileSync(path.join(dir, 'checkout-applies-the-coupon-1a2b3c4d5e6f7a8b', 'trace.md'), 'utf8');
+    expect(text).toContain(`recording saved (key \`${ENTRY.slice(0, 12)}\`)`);
+    expect(text).not.toContain('checkout-applies-the-coupon.yml');
   });
 
   it('tells a traced passing result as its steps, with no failure to look at', async () => {
@@ -175,7 +190,7 @@ describe('the steps on a trace page', () => {
   it("tell the cache's decision first, then the actions, polls, and app log in the order they happened", async () => {
     const [page] = await pagesOf(failing);
     expect(stepLines(page!.text, 1)).toEqual([
-      `cache: replayed 1 of 3 recorded actions, then the agent took over: a recorded target is not on the screen; at action 2 of 3, tap button "Apply"; recording saved (\`.e2e/cache/checkout-applies-the-coupon.yml\`, key \`${ENTRY.slice(0, 12)}\`)`,
+      `cache: replayed 1 of 3 recorded actions, then the agent took over: a recorded target is not on the screen; at action 2 of 3, tap button "Apply"; recording saved (key \`${ENTRY.slice(0, 12)}\`)`,
       'tap button "Coupon" (12ms)',
       '✗ network error: `POST /api/coupon 500 Internal Server Error`',
     ]);

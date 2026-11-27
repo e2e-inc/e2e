@@ -440,7 +440,8 @@ function cacheLine(cache: StepCacheRecord, cacheFile: string | undefined): strin
     ...(cache.write === undefined ? [] : [CACHE_WRITE_TEXT[cache.write]]),
     ...(cache.notRecorded === 'param-collision' ? ['nothing recorded: a unique() value collides with another param'] : []),
   ];
-  const entry = cache.entry === undefined || cacheFile === undefined ? '' : ` (${code(cacheFile, MAX_PATH_CHARS)}, key ${code(cache.entry.slice(0, 12), MAX_ID_CHARS)})`;
+  const key = cache.entry === undefined ? undefined : `key ${code(cache.entry.slice(0, 12), MAX_ID_CHARS)}`;
+  const entry = key === undefined ? '' : cacheFile === undefined ? ` (${key})` : ` (${code(cacheFile, MAX_PATH_CHARS)}, ${key})`;
   return `${parts.join('; ')}${entry}`;
 }
 
