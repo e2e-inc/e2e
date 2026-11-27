@@ -459,6 +459,26 @@ fn after_scroll<T>(scrolled: bool, outcome: Outcome<T>) -> Outcome<T> {
     outcome.map_err(|failure| if scrolled { failure.delivered() } else { failure })
 }
 
+/// The first of `options` (the items of one title) that is enabled, waited for within the action's budget, as
+/// `enabled` waits for one control; refused, naming the option, when none is enabled in time.
+fn enabled_of(options: &[Element], deadline: Instant, label: &str) -> Outcome<Element> {
+    let refuse_at = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
+    loop {
+        for option in options {
+            match option.attribute("AXEnabled") {
+                Ok(value) if value.boolean() == Some(false) => {}
+                Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_API_DISABLED)) => return Err(unread(error, "select")),
+                _ => return Ok(option.clone()),
+            }
+        }
+        if Instant::now() + POLL >= refuse_at {
+            return Err(Failure::refused(codes::ACTION_FAILED, format!("the option \"{label}\" is disabled")));
+        }
+        go("select")?;
+        sleep(POLL);
+    }
+}
+
 fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
     enabled(element, deadline, "click")?;
@@ -1059,18 +1079,17 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         let (found, stalled) =
             scan(items, "read the list's options", usize::MAX, |candidate| candidate.attribute("AXTitle").map(|title| title.text() == Some(label)))
                 .map_err(unchosen)?;
-        // An enabled option of that title is the one; a disabled one that comes first must not hide it. With none
-        // enabled, the first is waited for below.
-        let chosen = found.iter().find(|candidate| candidate.boolean("AXEnabled") != Some(false)).or(found.first()).cloned();
-        let Some(item) = chosen else {
+        if found.is_empty() {
             return Err(unchosen(if stalled {
                 unread(ax::AX_CANNOT_COMPLETE, "read the list's options")
             } else {
                 Failure::refused(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\""))
             }));
-        };
-        // A disabled option takes the press and ignores it: it is waited for, and refused as disabled, not as missing.
-        enabled(&item, deadline, "select").map_err(unchosen)?;
+        }
+        // An enabled option of that title is the one; a disabled one that comes first must not hide it. A disabled option
+        // takes the press and ignores it: every one of that title is waited for, and the select refused as disabled, not
+        // as missing, only when none is enabled in time.
+        let item = enabled_of(&found, deadline, label).map_err(unchosen)?;
         perform(&item, "AXPress", "choose the option").map_err(|failure| match failure.delivery {
             // Refused before the press (out of time, cancelled, the item gone): nothing was chosen.
             Delivery::NotDelivered => unchosen(failure),
