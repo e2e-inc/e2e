@@ -50,26 +50,32 @@ test('signs in', async ({ app, screen }) => {
 
 ## How it works
 
-- `app.open()` launches the app on an empty user-data directory of the test's
-  own and waits for a window to load its page. `app.restart()` launches it again on the
-  same data, `app.clearState()` on empty data. Every test ends with the app
-  quit.
-- An observation joins Chromium's accessibility tree with one DOM snapshot of
-  the same window. Nothing runs in the app's page to read it.
-- Actions wait until the node is enabled, on screen, and the topmost element
-  at its point, then send trusted mouse and keyboard input. Text goes only to
-  the node that holds focus.
-- The app's windows are the tabs the agent switches between. The `electron`
-  fixture runs code in the main process (`evaluate`), lists the windows, picks
-  the one `screen` reads (`useWindow`), and finds elements by CSS selector
-  (`locator`).
-- A password field reports no value, and screenshots paint password fields
-  and nested documents over. One inside a closed shadow root, which no mask
-  reaches, withholds the screenshot.
-- Not supported yet: video, routes, cookies, waiting for a download,
-  in-memory uploads, `app.back()`, `prompt()`, session save and restore,
-  `toBeInViewport`, computed-style reads, and content inside an `iframe` or
-  `webview`. `docs/electron.mdx` lists every difference from the web.
+- **Launch.** `app.open()` starts the app on an empty user-data directory and
+  waits for a window to load. Every test ends with the app quit.
+- **Read.** Chromium's accessibility tree joined with one DOM snapshot.
+  Nothing runs in the app's page to read it.
+- **Act.** Trusted mouse and keyboard input, once the node is enabled, on
+  screen, and topmost at its point.
+- **Windows.** The agent sees them as tabs. The `electron` fixture has
+  `evaluate` (main process), `windows`, `useWindow`, and `locator` (CSS).
+- **Secrets.** Password fields report no value, and screenshots paint them
+  and nested documents over.
+
+## Not supported yet
+
+| What | Why | Instead |
+| --- | --- | --- |
+| `prompt()` | Electron does not implement it | Build the prompt in the page |
+| In-memory uploads | The DevTools protocol sets a file input from paths only | Write the file to disk and pass its path |
+| Content inside an `iframe` or `webview` | The engine reads the window's own document; a nested one is a separate target it does not attach to yet | A `webview` guest is listed as a window: `electron.useWindow()` |
+| Routes and cookies | They are the browser engine's `browser` fixture, and an Electron app has one session per partition | `session.defaultSession` in `electron.evaluate` |
+| Waiting for a download | The engine places downloads but reports no download events | Read the `downloads` directory in `electron.evaluate` |
+| `app.back()` | The app loads its own pages, so the engine does not navigate | Navigate from `electron.evaluate` |
+| Video | No recorder is built | `app.screenshot()` |
+| Session save and restore, `toBeInViewport`, computed-style reads | Not built | |
+
+[The Electron guide](https://e2e.com/docs/electron) lists every difference
+from the web.
 
 ## License
 
