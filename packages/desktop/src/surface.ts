@@ -7,9 +7,8 @@
  * `physicalInput`.
  */
 
-import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -39,29 +38,18 @@ import {
   type VideoSegment,
   type ViewportPoint,
 } from '@e2e-dev/core/engine';
-import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
+import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type RawWindow } from './driver.ts';
 import { toCombo } from './keys.ts';
-import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_POLL_MS, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
+import { checkBundle, inheritedEnv, LAUNCH_POLL_MS, sleep, sweepStateDirectories } from './launch-ownership.ts';
 import { launchArgumentList } from './launch-arguments.ts';
-import { handOffClause, type WindowsRead } from './launch-report.ts';
+import type { WindowsRead } from './launch-report.ts';
 import { LAUNCH_READY_MS, QUIT, windowReadable } from './launch-wait.ts';
 import { ROOT_ID, locatable, projectSnapshot, withContainerText, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
 import { AppState, installedApp, nativeStateHost, type OwnedBuild, type StateHost } from './state.ts';
 import { WindowVideo } from './video.ts';
-
-/** How long a quit waits for a launch whose outcome was unknown to report the process it started. */
-const PENDING_SETTLE_MS = 3_000;
-
-/** How much of a quit's budget is kept for a killed process to exit. */
-const EXIT_WAIT_MS = 500;
-
-/** How long a quit looks for an app a launch that answered without one may still have started. */
-const LATE_APP_MS = 2_000;
-
-/** How often it looks. */
-const LATE_APP_POLL_MS = 100;
+import { AppProcess, NOT_SENT, type LaunchTarget } from './app-process.ts';
 
 /**
  * How long an open in the foreground waits, once the window can be read, for
@@ -74,17 +62,11 @@ const KEY_WINDOW_MS = 2_000;
 /** How far a swipe scrolls, in screens of the scrolled area, by its momentum: the web engine's strides, so a momentum means the same on every engine. */
 const SWIPE_PAGES = { slow: 0.75, none: 0.5, fast: 1.5 } as const;
 
-/** The cause of an input that was never sent, because the operation's budget ran out first. */
-const NOT_SENT = new Error('the operation ran out of budget before anything was sent');
-
 /** The cause of a read that found the app's windows but could read none of them. */
 const UNREADABLE = new Error('no window of the app could be read');
 
 /** The cause of a screenshot withheld because its secure fields could not be shown masked, which the harness reads as masking it could not prove. */
 const UNMASKED = new Error('the secure fields of the screenshot could not be placed');
-
-/** Launch arguments every launch gets first: no window or document the app saved at its last quit comes back. */
-const FRESH_STATE_ARGUMENTS = ['-ApplePersistenceIgnoreState', 'YES'];
 
 /** The most elements one driver snapshot reads (`MAX_NODES` in `crates/e2e-desktop-napi/src/snapshot.rs`): a larger window is read in part. */
 const MAX_SNAPSHOT_NODES = '8,000';
@@ -107,27 +89,6 @@ export interface OpenWindow {
   readonly active: boolean;
   /** Whether it is a window of the app's own that accessibility reads: not a dialog macOS put over the app, nor one only the window server lists. */
   readonly readable: boolean;
-}
-
-/** What a target launches: a `.app` bundle on disk, or an installed app by bundle id or name. */
-type LaunchTarget = { readonly path: string; readonly label: string } | { readonly bundleId: string; readonly label: string };
-
-/**
- * A launch whose outcome is unknown: its token, and the driver's answer,
- * which may still name the process it started, or say it started none
- * (`not_started`: refused before `open` ran).
- */
-interface PendingLaunch {
-  readonly target: string;
-  readonly token: string;
-  readonly settled: Promise<Launched | 'not_started' | undefined>;
-}
-
-/** What a state directory's launch record keeps: the launch's token, and once the process is known, its id and when it started. */
-interface LaunchRecord {
-  readonly token: string;
-  readonly pid?: number;
-  readonly started?: number;
 }
 
 /** One attempt's bookkeeping. */
@@ -211,30 +172,15 @@ function optionLabel(option: SelectOption): string {
 
 export class DesktopSurface {
   private driver: DesktopDriver | undefined;
-  private home: string | undefined;
   private app: EngineAppInfo = {};
   private projectRoot = process.cwd();
   /** What `app.open()` launches: the target's `appPath` bundle, resolved, else its `bundleId`. */
   private launchTarget: LaunchTarget | undefined;
   /** Whether the app is launched in the foreground: with `desktop({ physicalInput })`, or a run that asked for a visible surface (`--headed`). Physical input stays with `desktop({ physicalInput })` alone, since the engine declares it when it is created. */
   private foreground = false;
-  /** The app's name, for messages and the observed location. */
-  private appName: string | undefined;
-  /** The process the engine launched, which it alone quits; another instance of the same app is never touched. */
-  private pid: number | undefined;
-  /** When that process started, which a later process given the same id does not share. */
-  private started: number | undefined;
-  /** The token the launch put in that process's environment. */
-  private token: string | undefined;
-  /**
-   * A launch whose outcome is unknown (it timed out, or failed after it may
-   * have started the app), so the next quit can still find and end the
-   * process it started.
-   */
-  private pending: PendingLaunch | undefined;
+  /** The app process the engine launched, its launch record, and the launches and quits of it. */
+  private readonly appProcess = new AppProcess({ driver: () => this.driver, requireDriver: () => this.requireDriver(), onGone: () => this.forget() });
   private attempt: Attempt | undefined;
-  /** The launch or quit running now, which the next one waits for. */
-  private lifecycle: Promise<unknown> = Promise.resolve();
   /** The window a test made active with `window.activate()`, which every read and command then uses until it closes or the app quits. */
   private chosenWindow: string | undefined;
   /** A window the agent's own step opened while the test had one chosen, which the agent reads and acts in while it is open (see `follow`). */
@@ -278,12 +224,7 @@ export class DesktopSurface {
   async init(info: EngineInitInfo): Promise<void> {
     this.projectRoot = info.projectRoot;
     this.app = info.app;
-    // An engine handle can serve one host after another: nothing of the last one's app carries over. A launch it could not settle stays in its launch record, which the sweep below takes.
-    this.appName = undefined;
-    this.pid = undefined;
-    this.started = undefined;
-    this.token = undefined;
-    this.pending = undefined;
+    // An engine handle can serve one host after another: nothing of the last one's screen carries over, and `appProcess.open` starts its process over.
     this.forget();
     this.foreground = this.options.physicalInput || info.headed;
     const driver = (this.driver = this.loadDriver());
@@ -291,9 +232,7 @@ export class DesktopSurface {
     // A worker that was killed left its launch record behind, and maybe the app it launched.
     await sweepStateDirectories(driver);
     // A private state directory per worker, named for the process that owns it so a later sweep can tell it was left behind.
-    this.home = await mkdtemp(path.join(tmpdir(), STATE_PREFIX));
-    const started = driver.processStarted(process.pid);
-    await writeFile(path.join(this.home, OWNER_FILE), started === null ? String(process.pid) : `${process.pid}\n${started}`);
+    await this.appProcess.open(driver);
     const status = driver.status();
     this.driverVersion = driver.version;
     if (!status.accessibility) {
@@ -336,19 +275,16 @@ export class DesktopSurface {
     await this.video.abandon({ ...context, runId: '', attemptId: '', origin: 'test' });
     this.attempt = undefined;
     this.forget();
-    await this.quit(context.signal, context.timeoutMs);
+    await this.appProcess.quit(context.signal, context.timeoutMs);
   }
 
   async dispose(context: EngineCleanupContext): Promise<void> {
     let quit = false;
     try {
-      await this.quit(context.signal, context.timeoutMs);
+      await this.appProcess.quit(context.signal, context.timeoutMs);
       quit = true;
     } finally {
-      // An app that would not quit, or a launch whose process was never found, stays named in the launch record, which the next run's sweep quits.
-      const leftRunning = !quit && (this.pid !== undefined || this.pending !== undefined);
-      if (this.home !== undefined) await (leftRunning ? abandon(this.home) : rm(this.home, { recursive: true, force: true })).catch(() => undefined);
-      this.home = undefined;
+      await this.appProcess.close(quit);
       this.driver = undefined;
       this.attempt = undefined;
       this.forget();
@@ -398,95 +334,37 @@ export class DesktopSurface {
     // The budget counts from the call, so time spent waiting for another launch or quit is part of it.
     const operation = withDeadline(context);
     await this.video.follow(undefined, operation);
-    await this.serially(() => this.launchFresh(operation));
+    await this.appProcess.serially(() => this.launchFresh(operation));
     await this.followVideo(operation);
   }
+
+
+
 
   /** `restart` once no other launch or quit of this surface is running. */
   private async launchFresh(operation: OperationContext): Promise<void> {
     const target = this.launchTarget;
     if (target === undefined) throw unsupported("launching the app needs the target's app.bundleId or app.appPath");
-    const driver = this.requireDriver();
-    // A failed launch that left no process is nothing to clean up before a new one.
-    await this.quitNow(operation.signal, operation.timeoutMs, false);
-    if (operation.timeoutMs <= 0) throw new EngineError('OPERATION_TIMEOUT', `launch ${target.label}: the operation's budget ran out before it was sent`, { retryable: false, cause: NOT_SENT });
-    // Marks the process this launch starts, so it is told apart from every other copy by evidence, never by timing.
-    const token = randomUUID();
-    // Written before anything is sent, so the app stays findable by its token if this worker is killed mid-launch.
-    await this.writeRecord({ token });
-    // The write takes time too: a launch sent with no budget left would start the app after the open gave up.
-    if (operation.timeoutMs <= 0) throw new EngineError('OPERATION_TIMEOUT', `launch ${target.label}: the operation's budget ran out before it was sent`, { retryable: false, cause: NOT_SENT });
-    // Started by `call`, which starts nothing once the signal aborted: a cancelled open never launches the app.
-    let started: Promise<Envelope<Launched>> | undefined;
-    // A cut-off launch whose `open` has not run yet starts no app.
-    const inputId = this.requireDriver().inputId();
-    const start = (): Promise<Envelope<Launched>> =>
-      (started = driver.launch({
-        ...('path' in target ? { path: target.path } : { bundleId: target.bundleId }),
-        arguments: [...FRESH_STATE_ARGUMENTS, ...launchArgumentList(this.app)],
-        environment: this.appEnv,
-        token,
-        // In the background unless `physicalInput` or the run's `--headed`: otherwise the app takes the keyboard from whoever is at the Mac.
-        activate: this.foreground,
-        timeoutMs: operation.timeoutMs,
-        claimMs: LAUNCH_READY_MS,
-        inputId,
-      }));
-    let launched: Launched;
-    try {
-      launched = await call(start, { label: `launch ${target.label}`, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs, onCutOff: () => driver.cancelInput(inputId) });
-    } catch (cause) {
-      // A launch the driver refused started nothing; any other may have started the app, which the next quit looks for.
-      if (started !== undefined && !(cause instanceof DriverFailure && cause.notDelivered)) {
-        this.pending = { target: target.label, token, settled: started.then((answer: Envelope<Launched>) => (answer.ok ? answer.data : answer.error.disposition?.delivery === 'not_delivered' ? 'not_started' : undefined), () => undefined) };
-      }
-      throw this.launchFailure(cause, target);
-    }
-    this.appName = launched.app === '' ? target.label : launched.app;
-    this.pid = launched.pid;
-    this.token = token;
-    this.started = launched.started ?? driver.processStarted(launched.pid) ?? undefined;
-    // The process and when it started, so a later run can quit it, and never a later process given the same id.
-    await this.writeRecord({ token, pid: launched.pid, ...(this.started === undefined ? {} : { started: this.started }) });
+    const launched = await this.appProcess.launch(target, { arguments: launchArgumentList(this.app), environment: this.appEnv, activate: this.foreground }, operation);
     this.forget();
     // The readiness wait's own deadline, which the key-window wait after it never passes.
     const readyBy = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
     await windowReadable(operation, {
-      app: this.appName,
+      app: this.appProcess.appName ?? target.label,
       foreground: this.foreground,
       // A checkout's addon built before the driver reported them answers without the list.
       runningBefore: launched.running_before ?? [],
       read: (timeoutMs) => this.readWindows(withDeadline({ ...operation, timeoutMs })),
       readable: (read) => this.readable(read),
       exited: async () => {
-        if (this.pid === undefined || (await this.running(this.pid))) return false;
+        if (this.appProcess.pid === undefined || (await this.appProcess.running(this.appProcess.pid))) return false;
         this.forget();
-        this.dropProcess();
+        this.appProcess.drop();
         return true;
       },
-      screenLocked: () => driver.screenLocked(),
+      screenLocked: () => this.requireDriver().screenLocked(),
     });
     await this.keyWindow(operation, readyBy);
-  }
-
-  /** The engine error for a failed launch, naming what to fix where the driver says what went wrong. */
-  private launchFailure(cause: unknown, target: LaunchTarget): Error {
-    if (cause instanceof DriverFailure && cause.notDelivered) {
-      if (cause.code === 'APP_NOT_FOUND') return new EngineError('ENGINE_FAILURE', `${cause.message}; check the target's app.bundleId or app.appPath`, { retryable: false, cause });
-      if (cause.details.kind === 'not_started') return new EngineError('ENGINE_FAILURE', `launch ${target.label}: ${cause.message}`, { retryable: false, cause });
-    }
-    if (cause instanceof DriverFailure && cause.details.kind === 'unclaimed') {
-      return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${cause.message}, so none can be shown to be its own; the end of the attempt looks for it again${handOffClause('; ', cause.runningBefore)}`, { retryable: false, cause });
-    }
-    return translate(cause, `launch ${target.label}`, true);
-  }
-
-  /** Puts the launch record in the state directory, renamed into place so a worker killed mid-write never leaves half a record. */
-  private async writeRecord(record: LaunchRecord): Promise<void> {
-    if (this.home === undefined) return;
-    const file = path.join(this.home, APP_FILE);
-    await writeFile(`${file}.partial`, JSON.stringify(record));
-    await rename(`${file}.partial`, file);
   }
 
   /**
@@ -504,13 +382,13 @@ export class DesktopSurface {
     if (!this.foreground) return;
     const until = Math.min(deadline, Date.now() + KEY_WINDOW_MS);
     while (Date.now() < until) {
-      if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
+      if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appProcess.appName ?? 'the app'} was cancelled`, { retryable: false });
       const windows = await this.ownWindows(withDeadline({ ...operation, timeoutMs: Math.max(until - Date.now(), 0) })).catch(() => []);
       if (windows.some((window) => window.is_focused === true && window.system !== true)) return;
       await sleep(Math.min(LAUNCH_POLL_MS, Math.max(until - Date.now(), 0)), operation.signal);
     }
     // A cancel during the last read or sleep, or an app that quit while it was waited for, is no app opened, as for `windowReadable`.
-    if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
+    if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appProcess.appName ?? 'the app'} was cancelled`, { retryable: false });
     await this.requireRunning();
   }
 
@@ -543,7 +421,7 @@ export class DesktopSurface {
    * One that already closed is left alone.
    */
   async closeWindow(id: string, operation: OperationContext): Promise<void> {
-    const { pid } = this;
+    const { pid } = this.appProcess;
     if (pid === undefined) return;
     const inputId = this.requireDriver().inputId();
     await this.input((driver, timeoutMs) => driver.closeWindow(pid, id, inputId, timeoutMs), {
@@ -621,136 +499,14 @@ export class DesktopSurface {
   /** `desktop.closeApp()`: the app quit, as at the end of every test. */
   async closeApp(signal: AbortSignal, timeoutMs: number): Promise<void> {
     await this.video.follow(undefined, { signal, timeoutMs, runId: '', attemptId: '', origin: 'test' });
-    await this.quit(signal, timeoutMs);
+    await this.appProcess.quit(signal, timeoutMs);
   }
 
-  /**
-   * Runs launches and quits of this surface one at a time: two at once would
-   * each launch a copy into the one process id and launch record the engine
-   * keeps, and the end of the attempt would quit only one of them.
-   */
-  private serially<T>(run: () => Promise<T>): Promise<T> {
-    const next = this.lifecycle.then(run, run);
-    this.lifecycle = next.catch(() => undefined);
-    return next;
-  }
 
-  /** `quitNow` once no other launch or quit of this surface is running. */
-  private quit(signal: AbortSignal, timeoutMs: number): Promise<void> {
-    return this.serially(() => this.quitNow(signal, timeoutMs));
-  }
 
-  /**
-   * Quits the app the engine launched, forcefully: a test needs it gone, not
-   * asked to save. It is ended by its process id, so another instance of the
-   * same app (the developer's own copy) is left alone, and waited for, so the
-   * next launch cannot find it still running. A process that exited on its
-   * own, or whose id the OS gave to another process since, is not running
-   * any more, and nothing is killed. Until the process is known to be gone,
-   * the engine keeps it as its own, so a quit that failed is tried again. A
-   * failed launch that turns out to have left no process is reported, so the
-   * user can look for a copy by hand, unless `reportMissing` is false, as
-   * before a new launch.
-   */
-  private async quitNow(signal: AbortSignal, timeoutMs: number, reportMissing = true): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    const pending = this.pending;
-    if (this.pid === undefined && pending !== undefined) {
-      // The driver may still report the process the launch started: wait for it, short of the quit's budget by `EXIT_WAIT_MS`, so a process found at the end can still be seen to exit.
-      const wait = Math.min(Math.max(timeoutMs - EXIT_WAIT_MS, 0), PENDING_SETTLE_MS);
-      const settled = await settleWithin(pending.settled, wait, signal);
-      if (signal.aborted) throw new EngineError('CANCELLED', `looking for the process a launch of ${pending.target} started was cancelled`, { retryable: false });
-      // The driver gave the launch up before `open` ran: it started no app, and there is nothing to look for.
-      if (settled === 'not_started') {
-        this.pending = undefined;
-        if (this.home !== undefined) await rm(path.join(this.home, APP_FILE), { force: true }).catch(() => undefined);
-        return;
-      }
-      // A process carrying the launch's token is its own, whether or not the driver reported it.
-      const carriers = await this.requireDriver().processesCarrying(pending.token);
-      if (carriers === null) {
-        throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${pending.target} started the app: looking for its token among the processes failed; quitting tries again`, { retryable: false });
-      }
-      const owned = new Set(carriers);
-      // The process the launch answered with, while it is still that process: its id may be another's by now.
-      if (settled !== 'timeout' && settled !== undefined && (carriers.includes(settled.pid) || (settled.started !== undefined && this.requireDriver().processStarted(settled.pid) === settled.started))) {
-        owned.add(settled.pid);
-      }
-      // A launch that answered without a process may have started the app a moment later: look again, within the budget.
-      if (owned.size === 0 && settled !== 'timeout') {
-        const whole = Date.now() + LATE_APP_MS;
-        for (const pid of await this.lateCarriers(pending.token, Math.min(deadline - EXIT_WAIT_MS, whole), whole, signal, pending.target)) owned.add(pid);
-      }
-      if (!(await killed([...owned], deadline, signal))) {
-        throw new EngineError('ENGINE_FAILURE', `the process a launch of ${pending.target} started did not exit; quitting tries again`, { retryable: false });
-      }
-      // A launch still running may yet start the app: it stays pending.
-      if (owned.size === 0 && settled === 'timeout') {
-        throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${pending.target} started the app: it had not finished; quitting tries again`, { retryable: false });
-      }
-      this.pending = undefined;
-      for (const pid of owned) this.requireDriver().forgetProcess(pid);
-      if (this.home !== undefined) await rm(path.join(this.home, APP_FILE), { force: true }).catch(() => undefined);
-      if (owned.size > 0 || !reportMissing) return;
-      throw new EngineError('ENGINE_FAILURE', `a launch of ${pending.target} failed, and no process it started was found; if the app is running, quit it by hand`, { retryable: false });
-    }
-    const { pid } = this;
-    this.forget();
-    if (pid === undefined) return;
-    if ((await this.running(pid)) && !(await killed([pid], deadline, signal))) throw new EngineError('ENGINE_FAILURE', `the app (process ${pid}) did not exit`, { retryable: false });
-    this.driver?.forgetProcess(pid);
-    this.dropProcess();
-    if (this.home !== undefined) await rm(path.join(this.home, APP_FILE), { force: true }).catch(() => undefined);
-  }
 
-  /**
-   * The processes carrying a launch's token, looked for until one appears or `until` passes; none when none did through
-   * the whole wait, which ends at `whole`. A cancel throws `CANCELLED`, and a scan that failed or a wait cut short of
-   * `whole` `ENGINE_FAILURE`, so the launch stays pending.
-   */
-  private async lateCarriers(token: string, until: number, whole: number, signal: AbortSignal, target: string): Promise<readonly number[]> {
-    // None found is a finding only after a whole wait of scans that answered: a cancel, a scan that failed, or a wait
-    // the budget cut short proves nothing, and the launch's record must stay for the next quit or sweep.
-    let failed = false;
-    while (Date.now() < until && !signal.aborted) {
-      await new Promise((resolve) => setTimeout(resolve, LATE_APP_POLL_MS));
-      const carriers = await this.requireDriver().processesCarrying(token);
-      if (carriers === null) failed = true;
-      else if (carriers.length > 0) return carriers;
-    }
-    if (signal.aborted) throw new EngineError('CANCELLED', `looking for the process a launch of ${target} started was cancelled`, { retryable: false });
-    if (failed) throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${target} started the app: looking for its token among the processes failed; quitting tries again`, { retryable: false });
-    if (until < whole) throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${target} started the app: the quit ran out of time to look for it; quitting tries again`, { retryable: false });
-    return [];
-  }
 
-  /**
-   * Whether the process the engine launched still runs: the id alone does
-   * not show that, since another process can take it over once the app
-   * quits, so it must have started when the launch's did, or else carry the
-   * launch's token. A process that cannot be told either way throws, and
-   * stays the engine's, so a quit tries again and the launch record stays.
-   */
-  private async running(pid: number): Promise<boolean> {
-    if (!alive(pid)) return false;
-    const driver = this.requireDriver();
-    if (this.started !== undefined) {
-      const now = driver.processStarted(pid);
-      if (now !== null) return now === this.started;
-      // Gone between the two looks; still there, its start unreadable, it is the app only if it carries the token.
-      if (!alive(pid)) return false;
-    }
-    const carriers = this.token === undefined ? null : await driver.processesCarrying(this.token);
-    if (carriers === null) throw new EngineError('ENGINE_FAILURE', `could not tell whether process ${pid} is still the app the engine launched; quitting tries again`, { retryable: false });
-    return carriers.includes(pid);
-  }
 
-  /** Forgets the launched process, once it is gone. */
-  private dropProcess(): void {
-    this.pid = undefined;
-    this.started = undefined;
-    this.token = undefined;
-  }
 
   /** Every binding of the screen before: after a launch or a quit, none names a control that still exists. */
   private forget(): void {
@@ -831,26 +587,26 @@ export class DesktopSurface {
     if (screen !== undefined) return screen;
     // Only a dialog macOS put over the app is open: no screen of the app's own, and no empty one either.
     if (candidates === 0 && windows.some((window) => window.system === true)) {
-      throw new EngineError('NODE_STALE', `only a system dialog is over ${this.appName ?? 'the app'}; reading again (activate() on its window from desktop.windows() reads the dialog itself)`, { retryable: true, cause: UNREADABLE });
+      throw new EngineError('NODE_STALE', `only a system dialog is over ${this.appProcess.appName ?? 'the app'}; reading again (activate() on its window from desktop.windows() reads the dialog itself)`, { retryable: true, cause: UNREADABLE });
     }
     if (candidates === 0) return undefined;
     // A locked screen still lists the app's windows, none of them readable: say so rather than that each closed.
     this.unlessLocked();
-    throw new EngineError('NODE_STALE', `no window of ${this.appName ?? 'the app'} could be read through accessibility, or each closed while it was read`, { retryable: true, cause: UNREADABLE });
+    throw new EngineError('NODE_STALE', `no window of ${this.appProcess.appName ?? 'the app'} could be read through accessibility, or each closed while it was read`, { retryable: true, cause: UNREADABLE });
   }
 
   /** One read for `capture`: the app's windows, and the first of those asked for that accessibility can read. */
   private async readWindows(operation: OperationContext, windowId?: string, forMask = false, whole = false): Promise<WindowsRead> {
     const windows = await this.ownWindows(operation, true);
     const target = windowId ?? this.follow(windows, operation);
-    if (windows.length === 0 && this.pid !== undefined) this.unlessLocked();
+    if (windows.length === 0 && this.appProcess.pid !== undefined) this.unlessLocked();
     // A window the list no longer has is closed: its identities go, so windows opened and closed one after another do not pile them up.
     const open = new Set(windows.map((window) => window.id));
     for (const identity of this.ids.keys()) if (!open.has(identity.slice(0, identity.indexOf('|')))) this.ids.delete(identity);
     const candidates = target === undefined ? byPreference(windows) : windows.filter((window) => window.id === target);
     const read = { windows, candidates: candidates.length };
     const failures: DriverFailure[] = [];
-    const { pid } = this;
+    const { pid } = this.appProcess;
     for (const window of candidates) {
       if (pid === undefined || window.accessible === false) continue;
       const interactive = this.options.interactiveOnly && !forMask && !whole;
@@ -885,14 +641,14 @@ export class DesktopSurface {
    */
   private unlessLocked(): void {
     if (this.requireDriver().screenLocked() !== true) return;
-    throw new EngineError('NODE_STALE', `the Mac's screen is locked, so no window of ${this.appName ?? 'the app'} can be read through accessibility; reading again`, { retryable: true, cause: UNREADABLE });
+    throw new EngineError('NODE_STALE', `the Mac's screen is locked, so no window of ${this.appProcess.appName ?? 'the app'} can be read through accessibility; reading again`, { retryable: true, cause: UNREADABLE });
   }
 
   /** Throws `INVALID_STATE` unless the process the engine launched still runs. */
   private async requireRunning(): Promise<void> {
-    const { pid } = this;
-    if (pid === undefined || (await this.running(pid))) return;
-    throw new EngineError('INVALID_STATE', `${this.appName ?? 'the app'} quit (process ${pid}); open it again with app.open()`, { retryable: false, cause: QUIT });
+    const { pid } = this.appProcess;
+    if (pid === undefined || (await this.appProcess.running(pid))) return;
+    throw new EngineError('INVALID_STATE', `${this.appProcess.appName ?? 'the app'} quit (process ${pid}); open it again with app.open()`, { retryable: false, cause: QUIT });
   }
 
   /**
@@ -902,10 +658,10 @@ export class DesktopSurface {
    * `INVALID_STATE`.
    */
   private async ownWindows(operation: Pick<OperationContext, 'signal' | 'timeoutMs'>, strict = false): Promise<readonly RawWindow[]> {
-    const { pid } = this;
+    const { pid } = this.appProcess;
     if (pid === undefined) return [];
     // An id another process took over since the app quit names none of its windows.
-    if (!(await this.running(pid))) {
+    if (!(await this.appProcess.running(pid))) {
       if (strict) await this.requireRunning();
       return [];
     }
@@ -917,7 +673,7 @@ export class DesktopSurface {
         if (strict) {
           await this.requireRunning();
           // The process still runs, so the list failed, not the app: no empty screen, which would let a negative assertion pass.
-          throw new EngineError('NODE_STALE', `the windows of ${this.appName ?? 'the app'} could not be listed while it runs; reading again`, { retryable: true, cause });
+          throw new EngineError('NODE_STALE', `the windows of ${this.appProcess.appName ?? 'the app'} could not be listed while it runs; reading again`, { retryable: true, cause });
         }
         return [];
       }
@@ -955,7 +711,7 @@ export class DesktopSurface {
   }
 
   private snapshotOf(screen: ProjectedScreen): EngineSnapshot {
-    const app = this.appName;
+    const app = this.appProcess.appName;
     const location = app === undefined ? screen.title : screen.title === undefined ? app : `${app} › ${screen.title}`;
     return {
       root: bounded(screen.root),
@@ -1118,8 +874,8 @@ export class DesktopSurface {
         // With `physicalInput` the key goes through the real keyboard to the window in front: the control's window comes forward
         // first, so a control in a window a test made active while another held the keyboard can take focus. The checks
         // below still run before the key.
-        if (this.options.physicalInput && this.pid !== undefined) {
-          const pid = this.pid;
+        if (this.options.physicalInput && this.appProcess.pid !== undefined) {
+          const pid = this.appProcess.pid;
           const focusId = this.requireDriver().inputId();
           await this.input((driver, timeoutMs) => driver.focusWindow(pid, window, focusId, timeoutMs), {
             label: 'focus window',
@@ -1303,7 +1059,7 @@ export class DesktopSurface {
     if (point.x < 0 || point.y < 0 || point.x >= window.width || point.y >= window.height) {
       throw notActionable(`(${point.x}, ${point.y}) is outside the ${window.width}x${window.height} window; a click there would land on another app`);
     }
-    const pid = this.pid;
+    const pid = this.appProcess.pid;
     if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
     // Physical input lands on whatever is frontmost at the point: bring the window forward first.
     // Finding the window can wait on the app: a call given up on must not bring it forward later, over what the user or the next step is doing.
@@ -1447,7 +1203,7 @@ export class DesktopSurface {
     if (target === undefined || !('path' in target)) throw installedApp(what, this.app.bundleId);
     const state = (this.appState ??= new AppState(this.stateHost(() => this.requireDriver())));
     const build = { path: target.path, bundleId: target.label };
-    await state.requireSole(build, what, signal, this.pid);
+    await state.requireSole(build, what, signal, this.appProcess.pid);
     return { build, state };
   }
 
@@ -1456,9 +1212,9 @@ export class DesktopSurface {
     const operation = withDeadline(context);
     const { build, state } = await this.ownedBuild('app.clearState()', operation.signal);
     await this.video.follow(undefined, operation);
-    await this.serially(async () => {
+    await this.appProcess.serially(async () => {
       // Quit first: a running app would write its defaults back from memory.
-      await this.quitNow(operation.signal, operation.timeoutMs, false);
+      await this.appProcess.quitNow(operation.signal, operation.timeoutMs, false);
       await state.reset(build.bundleId, operation.signal);
       await this.launchFresh(operation);
     });
@@ -1475,8 +1231,8 @@ export class DesktopSurface {
   async restoreState(saved: EngineState, context: OperationContext): Promise<void> {
     const operation = withDeadline(context);
     const { build, state } = await this.ownedBuild('restoring a session', operation.signal);
-    await this.serially(async () => {
-      await this.quitNow(operation.signal, operation.timeoutMs, false);
+    await this.appProcess.serially(async () => {
+      await this.appProcess.quitNow(operation.signal, operation.timeoutMs, false);
       await state.restore(build.bundleId, saved, operation.signal);
     });
   }
@@ -1490,7 +1246,7 @@ export class DesktopSurface {
    */
   async back(context: OperationContext): Promise<void> {
     const operation = withDeadline(context);
-    const { pid } = this;
+    const { pid } = this.appProcess;
     if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
     await this.requireRunning();
     await this.keyWindowForMenu(pid, 'app.back()', operation);
@@ -1546,7 +1302,7 @@ export class DesktopSurface {
    * on the real keyboard.
    */
   private async sendKey(combo: string, window: string, label: string, operation: OperationContext, focusedRef?: string): Promise<void> {
-    const pid = this.pid;
+    const pid = this.appProcess.pid;
     if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
     const physical = this.options.physicalInput;
     // As for `tryRef`: a key still unsent once the call is given up is never sent.
@@ -1617,7 +1373,7 @@ export class DesktopSurface {
       );
     }
     // The capture lands unmasked on disk first: in the worker's private directory, removed below.
-    const directory = await mkdtemp(path.join(this.home ?? tmpdir(), 'shot-'));
+    const directory = await mkdtemp(path.join(this.appProcess.home ?? tmpdir(), 'shot-'));
     try {
       const file = path.join(directory, 'window.png');
       const shot = await this.read((driver, timeoutMs) => driver.screenshot({ windowId, path: file, timeoutMs }), { label: 'screenshot', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs }).catch((cause: unknown) =>
@@ -1701,23 +1457,6 @@ function sameNode(candidate: NodeBinding, binding: NodeBinding): boolean {
 function byPreference(windows: readonly RawWindow[]): RawWindow[] {
   const rank = (window: RawWindow): number => (window.is_focused === true ? 0 : window.is_main === true ? 1 : window.visible !== false ? 2 : 3);
   return windows.filter((window) => window.system !== true).toSorted((a, b) => rank(a) - rank(b));
-}
-
-/** The driver's answer within `ms`, or `timeout`; a cancelled wait answers at once. */
-async function settleWithin<T>(promise: Promise<T>, ms: number, signal: AbortSignal): Promise<T | 'timeout'> {
-  let timer: NodeJS.Timeout | undefined;
-  let onAbort: (() => void) | undefined;
-  const limit = new Promise<'timeout'>((resolve) => {
-    timer = setTimeout(() => resolve('timeout'), Math.max(ms, 0));
-    onAbort = () => resolve('timeout');
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
-  try {
-    return await Promise.race([promise, limit]);
-  } finally {
-    clearTimeout(timer);
-    if (onAbort !== undefined) signal.removeEventListener('abort', onAbort);
-  }
 }
 
 /** Roles whose `Click` may be a selection (`AXSelected`), not a press of their own. */

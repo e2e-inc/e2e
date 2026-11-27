@@ -343,7 +343,7 @@ describe('DesktopSurface: launching', () => {
   it('keeps the launch record of a launch whose process was never found, so the next run can quit it', async () => {
     const fake = fakeDriver({ launch: [failure('TIMEOUT', 'delivered_unverified')] });
     const { surface } = await initialized(fake);
-    const home = (surface as unknown as { home: string }).home;
+    const home = (surface as unknown as { appProcess: { home: string } }).appProcess.home;
     try {
       await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
       fake.lookupFails = true;
@@ -1982,7 +1982,7 @@ describe('DesktopSurface: pixels', () => {
     // The unmasked capture goes to the worker's private directory, and is removed.
     const file = last<{ path: string; windowId: string }>(fake, 'screenshot')!;
     expect(file.windowId).toBe('w-mine');
-    expect(file.path.startsWith((surface as unknown as { home: string }).home)).toBe(true);
+    expect(file.path.startsWith((surface as unknown as { appProcess: { home: string } }).appProcess.home)).toBe(true);
     expect(existsSync(file.path)).toBe(false);
     const observed = await surface.observe(operation(), { pixels: true });
     expect(observed.pixels).toMatchObject({ mediaType: 'image/png', width: 420, height: 352, scale: 1 });
@@ -2180,7 +2180,7 @@ describe('DesktopSurface: quitting', () => {
 
   it('removes the launch record once the app quit, and the state directory at dispose', async () => {
     const { surface } = await launched({}, { observe: false });
-    const home = (surface as unknown as { home: string }).home;
+    const home = (surface as unknown as { appProcess: { home: string } }).appProcess.home;
     const record = JSON.parse(readFileSync(path.join(home, 'app.json'), 'utf8')) as { token: string; pid: number; started: number };
     expect(record).toMatchObject({ token: expect.any(String), pid: expect.any(Number), started: expect.any(Number) });
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
@@ -2298,7 +2298,7 @@ describe('DesktopSurface: sweeping what killed workers left', () => {
     fake.startsUnreadable = true;
     const { surface } = await launched(fake, { observe: false });
     const pid = fake.pid;
-    const home = (surface as unknown as { home: string }).home;
+    const home = (surface as unknown as { appProcess: { home: string } }).appProcess.home;
     try {
       fake.lookupFails = true;
       await expect(surface.dispose({ signal, timeoutMs: 5_000 })).rejects.toThrow(/could not tell whether process/);
@@ -2343,7 +2343,7 @@ describe('DesktopSurface: sweeping what killed workers left', () => {
     try {
       const { surface, fake } = await initialized({});
       expect(existsSync(left)).toBe(false);
-      const home = (surface as unknown as { home: string }).home;
+      const home = (surface as unknown as { appProcess: { home: string } }).appProcess.home;
       expect(readFileSync(path.join(home, 'owner'), 'utf8')).toBe(`${process.pid}\n${fake.processStarted(process.pid)}`);
     } finally {
       rmSync(left, { recursive: true, force: true });
