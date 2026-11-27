@@ -1604,8 +1604,9 @@ See [Fail on a stale recording](/cache#fail-on-a-stale-recording).
 #### Commit the replay cache
 
 `e2e init` adds `.e2e/cache/` to `.gitignore`, so committing entries is
-opt-in. Remove that line to share replays with CI and teammates. CI stays
-`read-only` unless `cache: 'read-write'` is set. See
+opt-in. To share replays with CI and teammates, replace that line with
+`.e2e/cache/.*` and `.e2e/cache/*.tmp`, which keep a writer's working files
+out. CI stays `read-only` unless `cache: 'read-write'` is set. See
 [Caching](/cache#commit-the-replay-cache).
 
 ## Run limits
