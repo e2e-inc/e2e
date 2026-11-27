@@ -200,7 +200,7 @@ que o lockfile possa mudar também na CI.
 | `.gitignore` | Acrescenta `node_modules/`, `.e2e/results/`, `.e2e/cache/`, `.e2e/sessions/`, `.e2e/report.json`, `.e2e/ai-trace.json`, `.e2e/timings.json`, `.e2e/junit.xml`, `.e2e/summary.md`, `.e2e/ctrf.json`, `.e2e/logs/` e `.e2e/videos/`. Fazer commit do cache é opcional; veja [faça commit do cache de replay](/cache#commit-the-replay-cache) |
 | `.agents/skills/e2e/`, `.claude/skills/e2e/` | `SKILL.md` e um `references/<topic>.md` por tópico do `e2e guide`. Com os dois escolhidos, o diretório do Claude Code é um link simbólico relativo (`../../.agents/skills/e2e`) para a cópia, o layout que o `npx skills add` produz |
 | `AGENTS.md`, `CLAUDE.md` | Acrescenta `End-to-end tests use e2e; read .agents/skills/e2e/SKILL.md before writing or running one.` ao `AGENTS.md` quando a skill está em `.agents/skills/`, e a mesma linha com `.claude/skills/e2e/SKILL.md` ao `CLAUDE.md` quando ela está em `.claude/skills/`. Criados quando não existem; o resto de um arquivo existente fica inalterado. Nenhum dos dois com `--skills none` |
-| `.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml` | Registra o `e2e mcp` sem mudar outros servidores |
+| `.mcp.json`, `.cursor/mcp.json`, `.codex/config.toml` | Registra o `e2e mcp` com o gerenciador de pacotes do projeto (`npx e2e mcp`, `pnpm exec e2e mcp`, `yarn exec e2e mcp`, `bunx e2e mcp`) sem mudar outros servidores |
 | `.github/workflows/e2e.yml`, `.gitlab-ci.yml` | Com `--ci`: um job para cada plataforma em que os alvos rodam. Na raiz do repositório, também para um projeto em uma subpasta. Veja [Pipeline de CI](#ci-pipeline) |
 
 <a id="nextjs-apps" />
@@ -389,11 +389,12 @@ bunx e2e init my-app --example with-expo
   versão anterior trazia e esta não traz; um arquivo que você adicionou fica.
   Elas nunca adicionam um diretório que o projeto não escolheu. `--skills` e
   `--mcp` indicam os locais exatos em vez disso e deixam os outros como estão.
-- Onde o pnpm cria o link da skill a partir do pacote instalado, no projeto
-  ou na raiz do workspace dele
-  ([Deixe o pnpm criar o link da skill](/coding-agents)), o `init` deixa os
-  links como estão, não escreve nenhuma cópia ao lado deles e avisa sobre uma
-  cópia e um link na mesma pasta.
+- Quando o `init` encontra um link de skill do pnpm no projeto ou na raiz do
+  workspace que ele detecta
+  ([Deixe o pnpm criar o link da skill](/coding-agents)), ele deixa o link
+  como está e não cria cópias novas. Ele pode reparar uma cópia sem
+  `SKILL.md` em outro diretório de skills e avisa sobre uma cópia e um link
+  na mesma pasta quando os agentes podem carregar duas skills ali.
 - Uma cópia em `.claude/skills/e2e/` de uma versão anterior vira o link
   simbólico quando contém só os arquivos distribuídos. Uma cópia com outros
   arquivos continua sendo uma cópia e é atualizada.

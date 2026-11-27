@@ -94,6 +94,8 @@ test('signs in', async ({ app, screen, browser }) => {
 | `wait.until(visibilityOf(...))`, `textToBe(...)`, `urlContains(...)` | `expect(locator).toBeVisible()`, `.toHaveText(...)`, `expect(browser).toHaveURL(/.../)` |
 | `switchTo().frame()`, `switchTo().alert().accept()` | `browser.frameLocator('#frame')`, `browser.onDialog('accept')` antes da ação |
 | `switchTo().window(handle)`, `getWindowHandles()`, `switchTo().newWindow()` | `tab.activate()`, `browser.tabs()`, `browser.newTab()`; `browser.waitForPopup(() => trigger)` para uma aba que o app abre, veja [Abas](/reference/web#tabs) |
+| `getCapabilities().getBrowserName()`, `getBrowserVersion()`, `browser.capabilities` do WebdriverIO | [`browser.name`](/reference/web#name-version), que é `chromium`, `firefox` ou `webkit` e nunca uma marca, e `browser.version` |
+| `getCapabilities().getPlatformName()` | `process.platform` para um navegador na máquina do runner; para um navegador hospedado, `browser.evaluate(() => navigator.platform)` |
 | `executeScript(script, args)` | `browser.evaluate(fn, arg)`, só JSON na entrada e na saída |
 | Page objects | Uma fixture de `test.extend`, ou um objetivo para `agent.act`, veja [Page objects](/page-object-model) |
 

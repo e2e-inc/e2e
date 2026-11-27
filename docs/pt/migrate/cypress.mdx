@@ -98,12 +98,15 @@ describe('todos', () => {
 | `cy.contains('text')`, `cy.contains('li', 'text')` | `screen.getByText('text', { exact: false })`, `screen.getByRole('listitem').filter({ hasText: 'text' })` |
 | `.click()`, `.dblclick()`, `.clear()`, `.check()`, `.uncheck()`, `.focus()`, `.blur()`, `.first()`, `.last()`, `.scrollIntoView()` | Os mesmos |
 | `.rightclick()`, `.eq(n)`, `.selectFile(path)` | `.secondaryTap()`, `.nth(n)`, `.setInputFiles(path)` |
+| `cy.scrollTo('bottom')`, `cy.get('.feed').scrollTo('right')` | `screen.scrollTo('bottom')`, `screen.getByTestId('feed').scrollTo('right')`. Só até uma borda: para uma posição como `cy.scrollTo(0, 500)`, use `browser.evaluate(() => { scrollTo(0, 500); return null; })` |
 | `.type('text')`, `.type('{enter}')`, `.clear().type('text')` | `.pressSequentially('text')` acrescenta o texto com eventos de tecla, `.press('Enter')`, `.fill('text')` |
 | `.select('Pro')` | `.selectOption('Pro')` corresponde ao rótulo; um valor precisa de `{ value: 'pro' }`, um índice de `{ index: 1 }` |
 | `.should('be.visible')`, `be.checked`, `be.disabled`, `be.focused`, `exist` | `await expect(locator).toBeVisible()`, `toBeChecked()`, `toBeDisabled()`, `toBeFocused()`, `toBeAttached()` |
 | `.should($el => ...)` | Use [`expect(fn).toPass()`](/reference/expect#retrying-a-block) para várias asserções. Use [`expect.poll`](/reference/expect#polling-a-value) para um único valor que muda |
 | `have.text`, `contain`, `have.value`, `have.attr`, `have.length`, `not.exist` | `toHaveText`, `toContainText`, `toHaveValue`, `toHaveAttribute`, `toHaveCount(n)`, `toHaveCount(0)` |
 | `cy.url().should('include', p)`, `cy.title()` | `expect(browser).toHaveURL(/p/)`, `expect(browser).toHaveTitle(t)` |
+| `Cypress.browser.name`, `.family`, `Cypress.isBrowser('firefox')`, `Cypress.browser.version` | [`browser.name`](/reference/web#name-version), `browser.name === 'firefox'`, `browser.version`. Chrome, Edge e Electron são todos `chromium`. Para pular, `test.skip(browser.name === 'firefox', reason)` no corpo |
+| `Cypress.platform`, `Cypress.arch` | `process.platform`, `process.arch`. Os testes rodam no Node |
 | `cy.intercept('/api/users', body)` | `browser.route('**/api/users', route => route.fulfill({ json: body }))`, um glob de URL resolvido em relação à URL do app |
 | `cy.intercept('POST', '/api/users', body)` | `browser.route({ method: 'POST', url: '**/api/users' }, route => route.fulfill({ json: body }))` |
 | `cy.on('window:confirm')`, `cy.on('window:alert')` | `await browser.onDialog('accept')` antes da ação, `'dismiss'` para cancelar |
@@ -121,16 +124,16 @@ As lacunas em “Planejado” estão no roadmap, e as lacunas em “Ainda não�
 | Cypress | Use hoje |
 | --- | --- |
 | `.find('css')`, `.filter('css')`, `.not('css')` | Encadeie uma consulta `getBy*` ou escreva um único seletor: `browser.locator('li.active >> .title')` |
-| `.invoke()`, `.its()`, `.then($el => ...)` | `getAttribute()`, `textContent()`, `inputValue()`, senão `browser.evaluate`; envolva em `expect.poll` para tentar novamente |
-| `have.class`, `have.css`, `have.prop`, `be.empty` | `expect(browser).toHaveClass(locator, /regexp/)`, `expect(locator).toBeEmpty()` para um campo vazio ou um nó sem texto (o `be.empty` do Cypress significa nenhum nó filho); senão `expect.poll(() => browser.evaluate(...))` |
-| `.trigger()`, `cy.scrollTo()` | `hover()`, `dragTo()`, `scrollIntoView()`; para outros eventos sintéticos, use `browser.evaluate` |
-| `cy.intercept({ headers })` e outros matchers de cabeçalho | Verifique `route.request.headers` no handler, senão chame `route.fallback()` |
-| `cy.wait('@alias')`, `.its('request.body')`, `@alias.all` | Inicie `browser.waitForResponse(pattern)` antes da ação; leia a requisição em um handler de `browser.route` |
+| `.invoke()`, `.its()`, `.then($el => ...)` | `getAttribute()`, `textContent()`, `inputValue()` ou `browser.evaluate`; envolva em `expect.poll` para tentar novamente |
+| `have.class`, `have.css`, `have.prop`, `be.empty` | `expect(browser).toHaveClass(locator, /regexp/)`, `expect(locator).toBeEmpty()` para um campo vazio ou um nó sem texto (o `be.empty` do Cypress significa nenhum nó filho), ou `expect.poll(() => browser.evaluate(...))` |
+| `.trigger()` | `hover()`, `dragTo()`; para outros eventos sintéticos, use `browser.evaluate` |
+| `cy.intercept({ headers })` e outros matchers de cabeçalho | Verifique `route.request.headers` no handler; caso contrário, chame `route.fallback()` |
+| `cy.wait('@alias')`, `.its('request.body')`, `@alias.all` | Inicie `browser.waitForResponse` ou `browser.waitForRequest` antes da ação, com um padrão ou um predicado, e depois faça o parse da string bruta `postData` em `response.request` ou no `WebRequest` retornado. Para `@alias.all`, registre cada requisição em um handler de `browser.route` |
 | `Cypress.on('uncaught:exception')` | Um erro do app não faz um teste falhar. Para falhar com um erro, colete `window.onerror` em `browser.addInitScript` e depois verifique que a lista está vazia com `browser.evaluate` |
 | `--browser chrome`, `edge`, `electron`, `before:browser:launch` | `web({ browser: 'chromium' })`, ou conecte-se ao seu próprio Chrome com `web({ connect: { cdpEndpoint } })` |
 | `cypress open`, snapshots de viagem no tempo | `npx e2e run --headed --watch`, ou `--step`; a [página de trace](/debugging#traces) mostra cada passo depois da execução |
 | `before()` e `after()` que controlam o app | Preparação pela UI em `beforeEach`, limpeza em `afterEach`; login em um `test.setup` de nível superior que salva uma sessão |
-| `cy.clock()`, `cy.tick()` | Um script de fake timers carregado com `browser.addInitScript({ path })` e controlado por `browser.evaluate` |
+| `cy.clock(now)`, `cy.tick(ms)` | `browser.clock.install({ time })`, depois `browser.clock.pauseAt()` com um horário posterior, o que deixa os timers parados; `browser.clock.runFor(ms)` |
 | `cy.request()` com os cookies do navegador | Envie `browser.cookies(url)` no cabeçalho `cookie` de uma chamada a `request`, veja [Requisições autenticadas](/api-testing#signed-in-requests) |
 
 ### Ainda não

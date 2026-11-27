@@ -112,8 +112,10 @@ teste. Para as assinaturas dos métodos, veja [screen](/reference/screen),
 | `stopApp`, `killApp` | `device.closeApp()`, uma parada forçada; `app.restart()` para encerrar o app e iniciá-lo de novo |
 | `clearKeychain`, `openLink`, `setLocation`, `setAirplaneMode`, `setOrientation`, `setClipboard` | os mesmos em `device`, como `device.openLink(url)`. `clearKeychain` é exclusivo do simulador iOS, e `setAirplaneMode(true)` exige Android 11 ou mais recente. Para `travel`, chame `device.setLocation` em um loop |
 | `back`, `pressKey: Home`, `hideKeyboard`, `setDarkMode` | `app.back()`, `device.home()`, `device.dismissKeyboard()`, `device.setAppearance('dark')` |
+| `pressKey: lock` | [`device.lock()`](/reference/mobile#lock) no Android 11 ou mais recente, ou em um simulador iOS; [`device.unlock()`](/reference/mobile#unlock) para voltar |
 | `pressKey: Remote Dpad Up`, `Down`, `Left`, `Right`, `Remote Dpad Center` | `device.pressRemote('up')`, `'down'`, `'left'`, `'right'`, `'select'` |
 | `pressKey: Remote Media Play Pause`, `Remote Media Stop`, `Remote Media Next`, `Remote Media Previous`, `Remote Media Rewind`, `Remote Media Fast Forward`, `Remote Menu` | `device.pressRemote('play-pause')`, `'stop'`, `'next'`, `'previous'`, `'rewind'`, `'fast-forward'`, `'menu'`; as [teclas do controle remoto](/reference/engine#keys) listam as demais |
+| `pressKey: volume up`, `volume down`, `power` | [`device.pressButton('volume-up')`](/reference/mobile#pressbutton), `'volume-down'`, `'power'`; não funciona em um simulador iOS |
 
 </Accordion>
 <Accordion title="Toques, entrada e gestos de deslizar">
@@ -142,6 +144,7 @@ teste. Para as assinaturas dos métodos, veja [screen](/reference/screen),
 | `assertScreenshot: { path, thresholdPercentage }` | `await expect(screen).toHaveScreenshot(name, { maxDiffPixelRatio })`, veja [Comparação visual](/visual-testing) |
 | `takeScreenshot`, `startRecording`, `stopRecording` | `app.screenshot('label')`, [`app.startRecording()`, `app.stopRecording()`](/reference/app#startrecording) |
 | `assertWithAI`, `assertNoDefectsWithAI`, `extractTextWithAI` | `agent.assert('...', { vision: true })`, `agent.extract('...', { schema })` |
+| `label` em um comando | [`test.step('label', fn)`](/reference/test#test-step) em volta da chamada; os relatórios mostram o rótulo com a chamada abaixo dele |
 | `runFlow: file.yaml`, `onFlowStart`, `onFlowComplete` | uma função ou uma fixture `test.extend`; `beforeEach`, `afterEach` |
 | `runFlow: { when: { visible } }` | `if (await locator.isVisible()) { ... }`, veja [Reescreva os seletores](#rewrite-selectors) |
 | `repeat`, `runScript`, `evalScript`, `${output.x}`, `http.get` | TypeScript no teste: loops, variáveis e a fixture `request`, veja [API](/api-testing) |
@@ -159,9 +162,10 @@ teste. Para as assinaturas dos métodos, veja [screen](/reference/screen),
 - O Maestro toca na primeira de várias correspondências. O e2e falha com
   `LOCATOR_AMBIGUOUS`, então adicione `.first()` quando a primeira
   correspondência for a que você quer.
-- `isVisible()` substitui `optional` e `runFlow: { when }`. Ele lê a tela uma
-  vez e não espera. Ele falha com várias correspondências, então adicione
-  `{ visible: true }` ou `.first()` quando puder existir um gêmeo oculto.
+- `isVisible()` substitui `optional` e `runFlow: { when }`. Ele verifica a
+  tela uma vez, sem esperar, e falha com várias correspondências, então
+  adicione `{ visible: true }` ou `.first()` se puder existir uma duplicata
+  oculta.
 - `below`, `above`, `leftOf` e `rightOf` não têm equivalente, veja
   [Ainda não](#not-yet). `filter({ has })` e o encadeamento não encontram nada
   em uma `View` simples do React Native no iOS, veja [Limitações conhecidas de dispositivos](/mobile#known-device-limitations).
@@ -178,13 +182,11 @@ deixado de fora de propósito.
 | O padrão de conceder tudo, nomes como `bluetooth` e `storage` | `app.permissions: 'all'`, que no Android concede cada permissão de tempo de execução que o app declara, ou aceite o prompt com `device.alert('accept')` |
 | `inputText` e `pressKey: Enter` sem campo, `eraseText: N`, `pressKey: backspace`, `tab` | `fill` ou `press` no localizador do campo; `fill` com um `inputValue()` encurtado para apagar; toque no próximo campo para o Tab |
 | `addMedia` | Em um simulador iOS, `xcrun simctl addmedia` antes de `app.open()`; o Android não foi verificado. Veja “Fotos para um teste com o seletor de fotos” em [A fixture device](/mobile#the-device-fixture) |
-| `label` em um comando | `-`. A chamada nomeia cada passo |
 | `scrollUntilVisible: { centerElement, visibilityPercentage }` | Sem equivalente exato. Depois que a chamada resolver, leia `boundingBox()` e então `screen.swipe({ direction, momentum: 'slow' })` se o nó estiver fora do centro |
 | Logs do dispositivo e relatórios de crash junto de uma falha | `adb logcat` ou `xcrun simctl spawn <udid> log stream`, coletados em uma fixture |
 | `maestro hierarchy` como comando de terminal | Um teste de uma linha que chama `screen.debug()` |
 | `--device-locale` | `app.launchArguments: { AppleLanguages: ['de'], AppleLocale: 'de_DE' }` no iOS, veja [Rode o app em outro idioma](/mobile#run-the-app-in-another-language); no Android, defina o idioma do dispositivo antes da execução |
 | Maestro Cloud | Sua [CI](/ci) com um [provedor de dispositivos hospedados](/mobile#hosted-devices) |
-| `pressKey: lock`, `power`, `volume up`, `volume down` | `client.command.hardwareButton` em [`unstable_raw`](/reference/mobile#unstable_raw): o botão liga/desliga e o volume no Android, o volume em um iPhone físico |
 | `properties` do JUnit, um caminho JUnit com `--output` | Ids em tags ou no título; copie `.e2e/junit.xml` depois da execução |
 
 ### Ainda não

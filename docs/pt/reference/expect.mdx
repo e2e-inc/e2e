@@ -61,8 +61,8 @@ ser satisfeito ou até o próprio tempo limite acabar, sob as regras de
 Um segundo argumento descreve a verificação, em `expect(locator, message)` e
 `expect.soft(locator, message)`. Ele abre cada falha de asserção dos matchers
 abaixo, `.not` incluído, antes do matcher e do localizador, e também o erro
-`LOCATOR_AMBIGUOUS` de um localizador que corresponde a mais de um nó. Uma
-opção inválida ou uma leitura negada falha sem essa mensagem.
+`LOCATOR_AMBIGUOUS` de um localizador que corresponde a mais de um nó. Uma opção
+inválida ou uma leitura recusada pela política falha sem essa mensagem.
 `expect(screen, message)` aceita uma mensagem da mesma forma.
 
 ```ts
@@ -969,14 +969,9 @@ Regras que valem para todos os grupos de matchers.
 
 ### Negação
 
-`.not` inverte um matcher. Um matcher negado só passa depois que a negação
-se manteve:
-
-- Ele passa depois de 1000 ms seguidos em que a negação é verdadeira.
-- Quando `{ timeout }` é menor que 1000 ms, ele passa no prazo se a
-  negação se manteve durante todo o orçamento.
-- A janela conta a partir do momento em que começou a primeira leitura que
-  viu a negação, então uma leitura lenta conta para ela.
+`.not` inverte um matcher. Um matcher negado passa na primeira leitura que
+satisfaz a negação, como no Playwright, e falha quando nenhuma leitura a
+satisfaz antes do tempo limite.
 
 ### Rigor
 
@@ -1090,7 +1085,7 @@ export interface Expect extends ExpectCall {
  * not a boolean, is `INVALID_ARGUMENT` before the first read.
  */
 export interface AsyncExpectation {
-  /** Inverts the matcher. A negated matcher passes after 1000 ms of continuous truth. */
+  /** Inverts the matcher. A negated matcher passes on the first read that satisfies the negation. */
   readonly not: AsyncExpectation;
   /** Waits for visibility; `visible: false` waits for hidden or absent state, as `toBeHidden`. */
   toBeVisible(options?: { visible?: boolean; timeout?: number }): Promise<void>;

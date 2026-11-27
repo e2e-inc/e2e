@@ -177,12 +177,19 @@ web declara `platforms: ['ios', 'android']` nesses testes.
 | `driver.keys('Enter')`, `pressKeyCode(66)` | `.press('Enter')` no campo |
 | `.getText()`, `.getValue()`, `.getAttribute('value')` | `.textContent()`, `.inputValue()` |
 | `.isDisplayed()`, `.isEnabled()`, `.getAttribute('checked')` | `.isVisible()`, `.isEnabled()`, `.isChecked()` |
+| `.getAttribute('label')` | `.getAttribute('label')`. [`getAttribute`](/reference/screen#getattribute) lista o que cada atributo lê |
+| `.getAttribute('resource-id')`, `.getAttribute('name')` no iOS | `.getAttribute('resource-id')`. Um elemento iOS sem identificador não tem esse atributo; leia `label`. Em uma nuvem de dispositivos iOS, `resource-id` e `label` podem retornar, cada um, o valor do outro |
+| `.getAttribute('name')` no Android, `.getAttribute('text')` | `.textContent()`. Em um nó que só tem uma content description, o método lê a descrição |
+| `.getAttribute('class')`, `.getAttribute('type')` no iOS, `.getTagName()` | `.getAttribute('class')`. No iOS, o valor vem sem o prefixo `XCUIElementType`: `Button`, não `XCUIElementTypeButton` |
+| `.getAttribute('content-desc')` | `.getAttribute('content-desc')`, só no Android |
+| `.getAttribute('hint')` | `.getAttribute('placeholder')` |
 | `.isExisting()` | `(await locator.count()) > 0` |
 | `.getLocation()`, `.getSize()` | `.boundingBox()` |
 | `.waitForDisplayed({ timeout })` | `await expect(locator).toBeVisible({ timeout })`, ou `locator.waitFor()` |
 | `.waitForDisplayed({ reverse: true })` | `await expect(locator).toBeHidden()` |
 | `mobile: swipeGesture`, `mobile: swipe`, `driver.swipe({ direction: 'up' })` | `locator.swipe({ direction: 'down' })` ou `screen.swipe(...)`. O e2e nomeia a direção do conteúdo, não a do dedo |
 | `mobile: scrollGesture`, `mobile: scroll` até um elemento, `.scrollIntoView()` | `screen.scrollUntilVisible(locator)` |
+| `UiScrollable` `scrollToEnd()`, `scrollToBeginning()` | `list.scrollTo('bottom')`, `list.scrollTo('top')` |
 | `.dragAndDrop(target)`, um arraste que termina em um elemento | `locator.dragTo(target)` |
 | Um gesto de deslizar com `performActions` entre dois pontos | `screen.swipe({ from: { x, y }, to: { x, y } })` |
 | Um toque em coordenadas | `screen.tapAt({ x, y })`; dentro de um elemento, `.tap({ position: { x, y } })` |
@@ -201,6 +208,8 @@ web declara `platforms: ['ios', 'android']` nesses testes.
 | `driver.background(seconds)` | `device.home()` e depois `device.openApp(id)` |
 | `driver.url('myapp://x')`, `mobile: deepLink` | `device.openLink('myapp://x')` |
 | `driver.back()`, `driver.hideKeyboard()`, `pressKeyCode` para a tecla Home | `app.back()`, `device.dismissKeyboard()`, `device.home()` |
+| `mobile: pressButton` com `volumeUp` ou `volumeDown`, `pressKeyCode` para o botão liga/desliga ou de volume | [`device.pressButton('volume-up')`](/reference/mobile#pressbutton), `'volume-down'`, `'power'`; não funciona em um simulador iOS |
+| `driver.lock()`, `driver.unlock()`, `mobile: lock`, `mobile: unlock` | [`device.lock()`](/reference/mobile#lock), [`device.unlock()`](/reference/mobile#unlock); Android 11 ou posterior, ou um simulador iOS. Para `lock(seconds)`, espere entre as duas chamadas |
 | `driver.isKeyboardShown()` | `device.isKeyboardShown()`. Ele lê a tela como ela está agora: depois de uma ação que abre ou fecha o teclado, verifique o valor repetidamente com `expect.poll` |
 | `driver.getPageSource()` | `screen.tree()`, ou `screen.debug()` para exibir a árvore |
 | `driver.getWindowSize()` | [`device.viewport()`](/reference/mobile#viewport), `{ width, height }` em pixels CSS |
@@ -315,10 +324,9 @@ fica fora do relatório e da ocultação de segredos.
 
 | Appium | Use hoje |
 | --- | --- |
-| `.getAttribute()` para um rótulo, id ou classe, `.isSelected()`, `.getTagName()` | `toHaveAccessibleName` para um rótulo, `toBeSelected` para o estado selecionado. Não há leitura para id, classe ou nome de tag |
+| `.isSelected()` | `toBeSelected` para o estado selecionado |
 | `pressKeyCode(code)`, `driver.keys('Backspace')` | `.press()` aceita `Enter`, `Space` ou um caractere. Use `.clear()` e `.fill()` |
 | `driver.getWindowRect()`, `mobile: deviceInfo` | `device.viewport()` retorna só o tamanho. A posição da janela e as informações completas do dispositivo não têm equivalente |
-| `UiScrollable` `scrollToEnd()`, `scrollToBeginning()` | Repita `locator.swipe({ direction: 'down' })` até `allTextContents()` deixar de mudar; `'up'` para o início |
 | `mobile: selectPickerWheelValue`, seletores de data e hora, valores de slider | Deslize a roda e leia `.inputValue()`, ou use um objetivo `agent.act` |
 | `mobile: pinchOpenGesture`, `mobile: pinch`, `mobile: dragGesture` até coordenadas, `mobile: dragFromToForDuration` | `client.interactions.pinch` ou `.drag` pelo [`unstable_raw`](/reference/mobile#unstable_raw) |
 
@@ -329,7 +337,6 @@ fica fora do relatório e da ocultação de segredos.
 | --- | --- |
 | `driver.getLogs('logcat')`, `'syslog'`, `'crashlog'` | Rode `adb logcat` ou `xcrun simctl spawn <udid> log stream` a partir de um hook |
 | `driver.queryAppState(id)` | Parcial: `device.isAppInstalled(id)` para saber se está instalado, `device.foregroundApp()` para o app em primeiro plano. O estado de execução em segundo plano não tem equivalente |
-| `driver.lock()`, `unlock()`, botões liga/desliga e de volume | `client.command.hardwareButton` pelo [`unstable_raw`](/reference/mobile#unstable_raw) |
 | `driver.openNotifications()`, `mobile: pushNotification` | `screen.swipe({ from, to })` a partir da borda superior; `xcrun simctl push` a partir do Node |
 | `driver.pushFile()`, `pullFile()`, `pullFolder()` | `adb push`, `adb pull` ou `xcrun simctl addmedia` a partir do Node; somente dispositivos locais |
 | `driver.getAlertText()` | `screen.getByRole('alert').textContent()` no iOS, `getByText` no Android |
@@ -345,7 +352,7 @@ fica fora do relatório e da ocultação de segredos.
 | `appium:autoAcceptAlerts`, `appium:autoDismissAlerts` | Defina `app.permissions` ou chame `device.alert('accept')` |
 | Contextos de webview: `getContexts()`, `switchContext()`, seletores CSS, `execute(js)` | Consulte os nós de acessibilidade da webview com `getByText` e `getByRole` |
 | Web mobile: `browserName: 'Safari'` ou `'Chrome'` | Um alvo `web()` em um [viewport de celular](/web#viewports), só para layout |
-| `appium:unlockType`, `unlockKey` | Mantenha o dispositivo desbloqueado |
+| `appium:unlockType`, `unlockKey` | Mantenha o dispositivo desbloqueado. `device.unlock()` não digita PIN nem código de acesso |
 | `driver.getPageSource()` como XML | Não há exportação em XML. `screen.tree()` retorna a árvore como texto, e `client.capture.snapshot()` pelo [`unstable_raw`](/reference/mobile#unstable_raw) retorna os nós da árvore. Mantenha no Appium o que consome XML |
 | `performActions()` com vários dedos ou pontos intermediários | Gestos simples, ou `client.interactions.gesture` pelo [`unstable_raw`](/reference/mobile#unstable_raw) |
 | `mobile: shell`, `getPerformanceData()` | Rode `adb` ou `simctl` a partir do Node com `device.unstable_raw.deviceId`; somente dispositivos locais |

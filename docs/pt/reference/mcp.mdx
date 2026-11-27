@@ -127,7 +127,7 @@ open_session {target: "web", headed: true}
 | `path` | string | não | Onde abrir na URL do app em vez da raiz, como `/settings/members`. A sessão abre nessa página. Incompatível com `test`. |
 | `test` | string | não | Um teste para rodar primeiro, indicado como um argumento posicional do `e2e run`. A sessão fica onde o teste parou. Veja [Rodar um teste](#running-a-test). |
 | `engine` | string ou objeto | não | A engine da sessão em um diretório sem arquivo de configuração, como nome de pacote ou `{package, export, options}`. Veja [Sem uma configuração](#without-a-config). |
-| `app` | objeto | não | O app em teste de uma sessão com `engine`, como `url`, `bundleId` ou `appPath`. |
+| `app` | objeto | não | O app em teste de uma sessão com `engine`, escrito como o [`app`](/reference/config#the-app-under-test) de um alvo. |
 | `attach` | string | não | ID do cabeçalho da pausa de um [teste pausado](#attaching-to-a-held-test). Passe só este campo. |
 
 #### `tools`
@@ -175,9 +175,12 @@ call {tool: "tap", args: {target: "n42"}, session: "<id>"}
 #### `close_session`
 
 Salva uma gravação ainda em andamento, encerra a tentativa e descarta a
-engine. Encerra os processos do app que a sessão iniciou assim que nenhuma
-outra sessão os usar. Use essa ferramenta em uma sessão conectada para se
-desconectar e deixar o teste pausado.
+engine. Encerra processos de app e serviços quando a sessão é a última que os
+usa, com os processos de app encerrados antes dos serviços. A sessão libera o
+slot dela quando a própria limpeza termina, mesmo enquanto outro app ainda está
+sendo encerrado.
+Use essa ferramenta em uma sessão conectada para se desconectar e deixar o
+teste pausado.
 
 ```txt
 close_session {session: "<id>"}
@@ -226,7 +229,7 @@ que mudou na tela.
 
 | Entrada | Faz |
 | --- | --- |
-| Um id de nó | Da observação mais recente. |
+| Um id de nó | Da observação mais recente. Um id que só uma observação anterior listou é encontrado de novo na mais recente pela forma como o nó dele foi lido (papel, nome, test id, placeholder e o texto de um nó sem nome nem test id), quando exatamente um nó ali é lido da mesma forma; caso contrário, a ação falha com `LOCATOR_NOT_FOUND`. |
 | O valor, a tecla, o estado `checked`, a direção, o alvo onde soltar, caminhos relativos ao projeto ou `sample:` em `files`, a URL, `width` e `height`, ou o nome do segredo | O que o verbo precisa. |
 | `modifiers` (opcional) | Em `tap`, `double_tap` e `right_click`, quando a engine declara `tapModifiers`: uma lista de `Shift`, `Control`, `Alt`, `Meta`, `ControlOrMeta`, mantidas pressionadas durante o clique. |
 
@@ -275,7 +278,7 @@ call {tool: "run_code", args: {code: "const rows = screen.getByRole('listitem');
 
 | Entrada | Faz |
 | --- | --- |
-| `code` | O corpo de uma função assíncrona. `screen`, `app`, `expect`, `credentials`, `secrets`, `services`, `console` e a fixture da engine (`browser` ou `device`) estão no escopo. Uma sessão conectada a um teste pausado não tem a fixture da engine. |
+| `code` | O corpo de uma função assíncrona. `screen`, `app`, `expect`, `credentials`, `secrets`, `services`, `console` e a fixture da engine (`browser`, `device`, `desktop` ou `electron`) estão no escopo, inclusive em uma sessão conectada a um teste pausado. |
 | `timeout` | Opcional. Quanto tempo cada ação ou matcher em `screen` espera por padrão, em ms, de 1 a 120000. Sem ele: `5000`, ou o tempo limite da configuração quando for menor. |
 
 ```txt
@@ -365,10 +368,12 @@ Tapped #n31.
 Test line: await screen.getByRole("button", "Sign in").tap();
 ```
 
-- O localizador vem do alvo como a observação mais recente o listou, antes de
-  a ação rodar. Papel e nome, rótulo, placeholder, texto e test id são
-  testados nessa ordem, e prevalece o primeiro que corresponde ao alvo e a
-  nada mais na tela ao vivo, como [`locate`](#locate) o informaria.
+- O localizador vem do alvo como a observação mais recente o listou, antes de a
+  ação rodar. Um id que uma observação anterior listou corresponde ao nó em que
+  a ação age na mais recente (veja [Ações](#actions)). Papel e nome, rótulo,
+  placeholder, texto e test id são testados nessa ordem, e prevalece o primeiro
+  que corresponde ao alvo e a nada mais na tela ao vivo, como
+  [`locate`](#locate) o informaria.
 - Um localizador que também corresponde a nós gêmeos é restringido: aos nós
   que renderizam (`{ visible: true }`), depois dentro de um contêiner
   (`getByRole("listitem").filter({ hasText: "Offer B" })`), depois pela posição
@@ -396,14 +401,19 @@ Test line: await screen.getByRole("button", "Sign in").tap();
 | `drag`, `upload` | `dragTo(locator)`, `setInputFiles(files)` |
 | `scroll_to` até um nó | `scrollIntoView()` |
 | `navigate`, `back` | `app.open(url)`, com uma URL na origem do app escrita como caminho; `app.back()` |
+| `tap_at` onde a engine aceita um ponto solto | `screen.tapAt({ x, y })` em pixels CSS do viewport, com um comentário dizendo que um ponto só vale enquanto o layout não muda |
+| `tap_at`, `hover_at`, `type_at`, `press_at`, `select_at` no controle listado sob o ponto | A linha do controle, como em `tap`, `hover`, `type`, `press` e `select` por id |
+| `drag_at` entre dois controles listados | `dragTo(locator)` |
 
 Sem linha: `type` ou `press` sem alvo, `press` com `times` acima de 1,
 `scroll`, `scroll_to` até um texto, `dismiss_keyboard`, `resize_viewport`
 (defina o tamanho com a fixture embutida da engine, `browser.setViewport` na
-web), `switch_tab`
-e `close_tab` (`browser.tabs()[tab - 1].activate()` e `.close()` na
-web), e um `type` que o
-nó recebeu pelo teclado. As [ferramentas de ponto](#point-tools) não imprimem nada.
+web), `switch_tab` e `close_tab` (`browser.tabs()[tab - 1].activate()` e
+`.close()` na web), um `type` ou `type_at` que o nó recebeu pelo teclado,
+`hover_at` e `drag_at` em pontos soltos (nenhuma chamada de `screen` os
+repete), e `type_at` e `press_at` em um ponto onde nada está listado. Uma
+[ferramenta de ponto](#point-tools) chamada antes da primeira captura de tela
+não faz nada e não imprime nada.
 
 #### `screenshot`
 
@@ -500,7 +510,9 @@ dobrável.
 O servidor vem com o `e2e`. O `e2e init` se oferece para registrá-lo em
 `.mcp.json` (Claude Code), `.cursor/mcp.json` (Cursor) e
 `.codex/config.toml` (Codex). Instale as dependências e inicie o cliente MCP
-no diretório do projeto para que o `npx` (`bunx` em um projeto Bun) use a versão do e2e instalada. Manualmente:
+no diretório do projeto para que o comando use a versão do e2e instalada. O
+init escreve o comando do seu gerenciador de pacotes; veja
+[Servidor MCP](/mcp-server#set-it-up). Manualmente:
 
 <CodeGroup>
 ```bash npm
@@ -569,8 +581,8 @@ opções, ou para indicar um export, escreva `engine` como um objeto:
 | `options` | objeto | As opções que a factory recebe, como em um `e2e.config.ts`. |
 
 - **Só um nome de pacote** chama o export default do pacote sem opções.
-  `@e2e-dev/web`, `@e2e-dev/mobile` e `@e2e-dev/desktop` exportam a própria
-  factory dessa forma. [Sua própria engine](/writing-an-engine#open-it-by-name) pode fazer o mesmo.
+  `@e2e-dev/web`, `@e2e-dev/mobile`, `@e2e-dev/desktop` e
+  `@e2e-dev/electron` exportam a própria factory dessa forma. [Sua própria engine](/writing-an-engine#open-it-by-name) pode fazer o mesmo.
 - **Uma opção pode ser outra chamada de factory.** O servidor lê o valor de
   uma opção como uma chamada quando o valor tem `package` e nenhuma chave além
   de `export` e `options`. O servidor faz essa chamada primeiro e passa o
@@ -596,10 +608,15 @@ opções, ou para indicar um export, escreva `engine` como um objeto:
   projetos: `npm install --prefix ~/.e2e/engines @e2e-dev/web`. Um agente que
   não consegue rodar o comando, como um em um sandbox sem acesso à rede, pede
   que você o rode.
-- **`app`** aceita `url`, `bundleId` e `appPath`, como o
-  [`app`](/reference/config#the-app-under-test) de um alvo. `@e2e-dev/web`
-  precisa de `url`. `@e2e-dev/mobile` e `@e2e-dev/desktop` precisam de
-  `bundleId` ou `appPath`.
+- **`app`** aceita todas as chaves que o
+  [`app`](/reference/config#the-app-under-test) de um alvo aceita, como
+  [`launchArguments`](/reference/config#launcharguments),
+  [`permissions`](/reference/config#permissions) e
+  [`command`](/reference/config#command), e é verificado da mesma forma.
+  `@e2e-dev/web` precisa de `url`. `@e2e-dev/mobile` e `@e2e-dev/desktop`
+  precisam de `bundleId` ou `appPath`. `@e2e-dev/electron` precisa de
+  `appPath`, ou de nenhuma chave para um app empacotado indicado por
+  `options: {executablePath}`.
 - **Arquivos.** A raiz do projeto é o diretório de trabalho do servidor, e a
   sessão escreve `.e2e/` ali.
 - **Testes.** `e2e run` e `open_session {test}` precisam de uma configuração.
@@ -661,7 +678,12 @@ e o servidor termina.
 
 As sessões impõem as mesmas regras que os testes:
 
-- Ids de nó valem só para a observação mais recente.
+- Ids de nó são resolvidos em relação à observação mais recente. Um id que
+  só uma observação anterior listou é encontrado de novo pela forma como o nó
+  dele foi lido, quando exatamente um nó na tela mais recente é lido da mesma
+  forma, como um passo do agente faz; caso contrário, a ação falha com
+  `LOCATOR_NOT_FOUND`. Um preenchimento de segredo então verifica o nó
+  encontrado, como em qualquer preenchimento.
 - As ações individuais preenchem um segredo só por `type_secret`.
   [`run_code`](#run_code) preenche um como um teste faz.
 - Depois que a configuração carrega, os valores de segredos dela são ocultados
@@ -699,6 +721,10 @@ Pressione Enter ou rode `npx e2e run --step next` para retomar o teste e
 encerrar a conexão na hora. Qualquer gravação ainda em andamento é salva em
 segundo plano. O runner registra no log o caminho salvo ou o erro. O servidor
 MCP registra o mesmo resultado se ainda estiver conectado.
+
+[`run_code`](#run_code) recebe a fixture da engine sobre o app do teste
+pausado, como o código de uma sessão normal, então o `activate()` de uma janela
+do desktop ali muda a janela que o teste lê depois de ser retomado.
 
 O relatório e o trace registram os passos do próprio teste. Logs do app e
 atualizações de tela de uma chamada da sessão conectada podem aparecer no trace se

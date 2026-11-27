@@ -1568,6 +1568,12 @@ export type EngineAppDeclaration = EngineAppInfo & {
 export interface EngineAppCheckInfo {
   /** The target declaring the app, for the message of a refusal. */
   readonly targetName: string;
+  /**
+   * The app's `url` names a file on the runner's disk, as the harness reads
+   * the URL. Only an engine that declares `fileApps` is handed one. Refuse
+   * here what cannot read that disk, such as a browser on another machine.
+   */
+  readonly fileApp?: boolean;
 }
 
 /** A permission's state when the app launches: held, refused, or not asked for yet, so the OS asks again. */
@@ -1807,9 +1813,7 @@ depois de uma localização ou leitura concluída, encerra a espera em vez disso
 | uma ação, `waitFor` | `LOCATOR_NOT_FOUND`, com o tempo limite como causa |
 | uma asserção | `ASSERTION_FAILED`, com o tempo limite como causa |
 
-Uma asserção negada passa nesse caso se a negação já tinha se mantido por tempo
-suficiente quando a leitura foi interrompida. [`pollCondition`](#pollcondition)
-faz polling seguindo essas regras.
+[`pollCondition`](#pollcondition) faz polling seguindo essas regras.
 
 #### Classes de erro do runner
 
@@ -1855,7 +1859,7 @@ engine reproduz essa semântica; importe as funções em vez de copiá-las.
 | Exportação | Retorna |
 | --- | --- |
 | [`matchesText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `TextPattern`, `string` |
-| [`resolveExpression`](#resolveexpression) | `SemanticNode[]` |
+| [`resolveExpression`, `expressionSelectors`](#resolveexpression) | `SemanticNode[]`, `readonly string[]` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`, `sameSite`](#site-helpers) | `string`, `boolean` |
 | [`isRefusedLinkScheme`](#isrefusedlinkscheme) | `boolean` |
@@ -1866,7 +1870,8 @@ engine reproduz essa semântica; importe as funções em vez de copiá-las.
 | [`appleUserDefaults`](#appleuserdefaults) | `readonly string[]` |
 | [`rejectUnknownOptions`](#rejectunknownoptions) | `void` |
 | [`obj`](#obj) | `WithoutUndefined<T>` |
-| [`raceAbort`, `withTimeout`, `withinCleanupBudget`](#timing-helpers) | `Promise<T>`, `Promise<T>`, `Promise<void>` |
+| [`raceAbort`, `withTimeout`, `sleep`, `withinCleanupBudget`](#timing-helpers) | `Promise<T>`, `Promise<T>`, `Promise<void>`, `Promise<void>` |
+| [`readPngSize`](#readpngsize) | `{ width, height } \| undefined` |
 | [`isSecret`](#issecret) | `boolean` |
 | [`isProviderRecording`, `stopProviderRecording`](#provider-recordings) | `boolean`, `Promise<VideoSegment>` |
 
@@ -1901,6 +1906,8 @@ export function resolveExpression(
   nodes: readonly SemanticNode[],
   options?: ResolveExpressionOptions,
 ): SemanticNode[];
+
+export function expressionSelectors(expression: LocatorExpression): readonly string[];
 ```
 
 ```ts
@@ -1912,9 +1919,18 @@ async locate(expression) {
 
 - `text` e `label` respondem com a correspondência mais interna quando um
   contêiner repete o texto de um descendente.
+- Uma consulta `text` corresponde ao nome ou ao texto de um nó. Com
+  `textQuery: 'text'`, ela corresponde só ao texto, como faz um navegador,
+  para uma árvore que carrega o texto de todo elemento. Uma consulta de texto
+  com escopo então também responde com o elemento do escopo quando o texto é
+  do próprio elemento.
 - Uma engine cuja árvore é toda a verdade (um dispositivo) chama essa
   função; uma engine de navegador reproduz o comportamento da função.
-- Uma expressão `selector` precisa da opção `selector`.
+- Uma expressão `selector` precisa da opção `selector`, que responde de forma
+  síncrona. Uma engine cuja linguagem de seletores é assíncrona (uma consulta
+  do DevTools, um daemon de dispositivo) primeiro consulta cada seletor que
+  `expressionSelectors(expression)` retorna e depois responde a partir desses
+  resultados.
 - Uma expressão `frame` resulta em `FRAME_NOT_FOUND`.
 - Uma expressão `union` corresponde a qualquer um dos ramos, na ordem do documento, sem nós duplicados.
 
@@ -1968,7 +1984,8 @@ if (isRefusedLinkScheme(new URL(link).protocol)) throw new ConfigurationError('P
 
 #### `pollCondition`
 
-Polling de asserções e a janela de tolerância da negação.
+Polling de asserções: até uma leitura ver a condição se manter ou, quando
+negada, não se manter.
 
 ```ts
 export function pollCondition(options: PollConditionOptions): Promise<void>;
@@ -2062,10 +2079,10 @@ const launchArguments = checkLaunchArguments('device.openApp({ launchArguments }
 // device.openApp({ launchArguments }).env must be a string, number, boolean, or array of strings, got null
 ```
 
-- Uma lista contém strings. Um objeto mapeia um nome não vazio, sem espaços
-  em branco nem caracteres de controle, para uma string, um número finito com
-  magnitude abaixo de 2^53, um booleano ou uma lista de strings. Nada pode
-  conter o caractere NUL.
+- Uma lista contém strings. Um objeto mapeia um nome não vazio para uma
+  string, um número finito com magnitude abaixo de 2^53, um booleano ou uma
+  lista de strings. Um nome não tem caracteres de controle nem espaço em
+  branco, exceto espaços no meio do nome. Nada pode conter o caractere NUL.
 - O nome de um argumento em um objeto não começa com hífen: escreva
   `AppleLocale`, não `-AppleLocale`. A engine adiciona o hífen, então um nome
   com hífen falha.
@@ -2133,6 +2150,7 @@ obj({ a: 1, b: undefined, c: 3 }); // { a: 1, c: 3 }
 ```ts
 export function raceAbort<T>(work: Promise<T> | (() => Promise<T>), signal: AbortSignal, label: string): Promise<T>;
 export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: () => Error): Promise<T>;
+export function sleep(ms: number, signal?: AbortSignal): Promise<void>;
 export function stepTimeout(timeout: unknown, api: string): number | undefined;
 export function withinCleanupBudget(
   promise: Promise<unknown>,
@@ -2149,11 +2167,26 @@ const operation = context.operation(stepTimeout(options?.timeout, 'kiosk.print')
   verificar o cancelamento antes de despachar.
 - `withTimeout` faz uma corrida entre uma promise e um tempo limite e lança o
   erro que `onTimeout` monta.
+- `sleep` espera `ms` e rejeita assim que `signal` aborta, com o erro que
+  abortou o sinal quando esse erro é um erro do runner, ou com `CANCELLED`
+  nos outros casos. Uma espera por uma condição usa `pollCondition` em vez
+  disso.
 - `stepTimeout` transforma a opção `timeout` da própria chamada em um orçamento para
   `context.operation`: `0` espera até o tempo limite do teste, ou até `cleanupTimeout` em `afterEach`, e um valor negativo,
   `NaN` ou infinito resulta em `INVALID_ARGUMENT`.
 - `withinCleanupBudget` nunca rejeita. Resolve quando a promise é concluída,
   inclusive com falha, quando `signal` aborta ou quando `timeoutMs` passa.
+
+#### `readPngSize`
+
+```ts
+export function readPngSize(data: Uint8Array): { readonly width: number; readonly height: number } | undefined;
+```
+
+Lê o tamanho em pixels de um PNG a partir do cabeçalho dele, para
+`ObservationPixels.width` e `height`: o tamanho precisa ser o dos bytes, já
+que as coordenadas do modelo são relativas a eles. Retorna `undefined` para
+bytes que não são um PNG.
 
 #### `isSecret`
 
