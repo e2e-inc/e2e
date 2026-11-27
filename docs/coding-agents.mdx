@@ -147,8 +147,8 @@ When a copy is still there, pnpm links the skill beside it as
 about it: delete the copy, then run `pnpm install --force` to rename the
 link to `e2e`. The commands preserve pnpm's links. You can use `init` to
 restore a missing `SKILL.md` in an existing copy in another skills directory.
-In a project with linked skills, including a workspace member, `init` skips
-creating new copies.
+When `init` finds a pnpm skill link in the project or at the workspace root
+it detects, it skips creating new copies.
 
 </Accordion>
 

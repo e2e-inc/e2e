@@ -1134,6 +1134,32 @@ describe('e2e init', () => {
       expect(output()).toContain('Linked to the installed e2e, not touching: .agents/skills/pnpm-e2e-e2e');
     });
 
+    it('does not repair a partial copy beside a pnpm link in the same skill directory', async () => {
+      pnpmLink('.claude/skills', 'pnpm-e2e-e2e');
+      mkdirSync(path.join(dir, '.claude/skills/e2e'), { recursive: true });
+      writeFileSync(path.join(dir, '.claude/skills/e2e/project-notes.md'), 'mine');
+      expect((await init(dir, { yes: true, skills: ['.claude/skills'], mcp: [] })).exitCode).toBe(0);
+      expect(existsSync(path.join(dir, '.claude/skills/e2e/SKILL.md'))).toBe(false);
+      expect(read('.claude/skills/e2e/project-notes.md')).toBe('mine');
+      expect(read('.claude/skills/pnpm-e2e-e2e/SKILL.md')).toBe('installed');
+      expect(existsSync(path.join(dir, 'CLAUDE.md'))).toBe(false);
+    });
+
+    it('repairs a partial member copy when it detects the pnpm link at the workspace root', async () => {
+      pnpmLink('.agents/skills');
+      writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - app\n');
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'root', private: true }));
+      const member = path.join(dir, 'app');
+      mkdirSync(path.join(member, '.claude/skills/e2e'), { recursive: true });
+      writeFileSync(path.join(member, 'package.json'), JSON.stringify({ name: 'app', private: true }));
+      writeFileSync(path.join(member, '.claude/skills/e2e/project-notes.md'), 'mine');
+      expect((await init(member, { yes: true, skills: ['.claude/skills'], mcp: [] })).exitCode).toBe(0);
+      expect(read('app/.claude/skills/e2e/SKILL.md')).toMatch(/^---\nname: e2e\n/);
+      expect(read('app/.claude/skills/e2e/project-notes.md')).toBe('mine');
+      expect(read('app/CLAUDE.md')).toContain('.claude/skills/e2e/SKILL.md');
+      expect(read('.agents/skills/e2e/SKILL.md')).toBe('installed');
+    });
+
     it('warns about a copy beside a link and still refreshes the copy', async () => {
       writeCopy('.agents/skills', 'stale');
       pnpmLink('.agents/skills', 'pnpm-e2e-e2e');
