@@ -125,6 +125,11 @@ describe('routeLocation', () => {
     expect(routeLocation('file:///srv/app/index.html#/orders/123')).toBe('file:///srv/app/index.html#/orders/:id');
   });
 
+  it('stores a path parameter\'s value as :id, as a query value', () => {
+    expect(routeLocation('https://a.test:8080/x;jsessionid=ABCDEF/y')).toBe('https://a.test:8080/x;jsessionid=:id/y');
+    expect(routeLocation('/cart;mode/items')).toBe('/cart;mode/items');
+  });
+
   it('stores a token in a path segment as :id, a signed token\'s dots included', () => {
     expect(routeLocation('/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fw')).toBe('/reset/:id');
     expect(routeLocation('/docs/v1.2.3')).toBe('/docs/v1.2.3');
@@ -165,6 +170,7 @@ describe('routeLocation', () => {
       'https://<secret:tenant>.example.org/callback?code=abc',
       '<secret:gateway>/orders/123?token=abc',
       '<secret:gateway>:8443/orders/123?token=abc',
+      '/x;jsessionid=ABCDEF/y',
       'file:///srv/app/about.html?tab=summary',
       '/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fw',
     ]) {

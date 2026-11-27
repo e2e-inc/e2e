@@ -260,7 +260,10 @@ export function routeLocation(location: string): string {
  * included, which a route never compares on), else as a URL spells it.
  */
 function storedSegment(segment: string): string {
-  return segment === PARAM || MINTED_VALUE.some((pattern) => pattern.test(segment)) ? PARAM : spellPart(segment);
+  // A path parameter (`;jsessionid=...`) carries a value as a query does.
+  const [name = '', ...parameters] = segment.split(';');
+  const spelled = name === PARAM || MINTED_VALUE.some((pattern) => pattern.test(name)) ? PARAM : spellPart(name);
+  return [spelled, ...parameters.map((parameter) => (parameter.includes('=') ? `${spellPart(parameter.slice(0, parameter.indexOf('=')))}=${PARAM}` : spellPart(parameter)))].join(';');
 }
 
 /**
