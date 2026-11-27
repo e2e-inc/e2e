@@ -19,7 +19,9 @@ pub const TOKEN_VARIABLE: &str = "E2E_DESKTOP_LAUNCH";
 
 /// The argument that carries a launch's token into an app whose environment macOS hides: `-E2EDesktopLaunch=<token>`,
 /// one entry, so no app reads the token as a file or a URL to open.
-pub const TOKEN_ARGUMENT: &str = "-E2EDesktopLaunch";
+pub fn token_argument(token: &str) -> String {
+    format!("-E2EDesktopLaunch={token}")
+}
 
 /// What `launch` was asked to start.
 pub struct LaunchRequest {
@@ -167,7 +169,7 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     command.arg("--env").arg(format!("{TOKEN_VARIABLE}={token}"));
     command.arg(&bundle).arg("--args").args(&request.arguments);
     if hides_environment(&bundle) {
-        command.arg(format!("{TOKEN_ARGUMENT}={token}"));
+        command.arg(token_argument(&token));
     }
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     // The lookup and `codesign` above can take a while: an app the caller gave up on is never started.
@@ -203,7 +205,7 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
         for pid in &fresh {
             let ours = match crate::process::carries(*pid, &marker) {
                 Some(carried) => carried,
-                None => crate::process::token_argument(*pid, &token),
+                None => crate::process::holds_argument(*pid, &token_argument(&token)),
             };
             if ours {
                 return Ok(launched(*pid, &bundle, &bundle_id));
@@ -225,7 +227,12 @@ fn launched(pid: i32, bundle: &str, bundle_id: &str) -> Launched {
 
 #[cfg(test)]
 mod tests {
-    use super::hidden_by;
+    use super::{hidden_by, token_argument};
+
+    #[test]
+    fn spells_the_launch_token_as_one_argument() {
+        assert_eq!(token_argument("8ff2bdfb-142f"), "-E2EDesktopLaunch=8ff2bdfb-142f");
+    }
 
     #[test]
     fn tells_which_signatures_hide_the_environment() {
