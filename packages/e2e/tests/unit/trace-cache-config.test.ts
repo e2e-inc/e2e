@@ -451,6 +451,22 @@ describe('settleStagedTraces', () => {
     expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.recordedFor?.identityDigest).toBeUndefined();
   });
 
+  it("goes on to a custom store's next write when one throws before it returns", async () => {
+    const store = memoryStore();
+    const write = store.write.bind(store);
+    let calls = 0;
+    store.write = (keyHash, recorded) => {
+      calls += 1;
+      if (calls === 1) throw new Error('write unavailable');
+      return write(keyHash, recorded);
+    };
+    const context = contextWith(store);
+    context.staged.push({ kind: 'write', keyHash: KEY_A, trace: trace('first'), stepIndex: 0 });
+    context.staged.push({ kind: 'write', keyHash: KEY_B, trace: trace('second'), stepIndex: 1 });
+    const writes = await settleStagedTraces(context, { lastVerifiedStepIndex: 5, implicatesUnconfirmed: false });
+    expect([...writes]).toEqual([[0, 'not-written'], [1, 'saved']]);
+  });
+
   it('writes what was confirmed and leaves every unconfirmed entry as stored when the failure implicates nothing', async () => {
     const KEY_C = 'c'.repeat(64);
     const store = memoryStore();

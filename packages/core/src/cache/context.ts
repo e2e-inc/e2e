@@ -283,7 +283,14 @@ export async function settleStagedTraces(context: AgentCacheContext, settlement:
 async function writeRecordings(store: CacheStore, writes: readonly { readonly keyHash: string; readonly payload: ActionTrace }[]): Promise<readonly ({ bytes: number } | undefined)[]> {
   if (store instanceof FileCacheStore) return store.writeAll(writes).catch(() => writes.map(() => undefined));
   const answers: ({ bytes: number } | undefined)[] = [];
-  for (const { keyHash, payload } of writes) answers.push(await store.write(keyHash, payload).catch(() => undefined));
+  for (const { keyHash, payload } of writes) {
+    // A store's write may throw before it returns a promise; that write is not written, and the rest still go.
+    try {
+      answers.push(await store.write(keyHash, payload));
+    } catch {
+      answers.push(undefined);
+    }
+  }
   return answers;
 }
 
