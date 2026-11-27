@@ -330,7 +330,14 @@ pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
         }
     }
     let mut clip: Option<Rect> = None;
-    let mut next = element.element("AXParent");
+    // A parent the app did not answer in time may be a scroll area that hides the element: a stall fails, never ends
+    // the walk as if the window were reached.
+    let parent_of = |element: &Element| match element.attribute("AXParent") {
+        Ok(Value::Element(parent)) => Ok(Some(parent)),
+        Err(ax::AX_CANNOT_COMPLETE) => Err(ax::AX_CANNOT_COMPLETE),
+        _ => Ok(None),
+    };
+    let mut next = parent_of(element)?;
     for _ in 0..MAX_ANCESTORS {
         let Some(parent) = next else { break };
         let role = match parent.attribute("AXRole") {
@@ -357,7 +364,7 @@ pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
         if role == "AXWindow" {
             break;
         }
-        next = parent.element("AXParent");
+        next = parent_of(&parent)?;
     }
     let outside_clip = match (frame, clip) {
         (Some((x, y, width, height)), Some(clip)) => outside(Rect { x, y, width, height }, clip),
