@@ -159,6 +159,7 @@ test.describe('controls page', () => {
     await expect(screen.getByText('Background task', { exact: true })).toHaveCount(1);
     // Each element under it is found by its own text, and the one that hides them by all of it.
     await expect(screen.getByText('North gate', { exact: true })).toHaveCount(1);
+    await expect(screen.getByText('North gate', { exact: true })).toHaveAttribute('data-testid', 'north');
     await expect(screen.getByText('North gate South gate', { exact: true })).toHaveCount(1);
   });
 

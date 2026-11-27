@@ -201,7 +201,8 @@ class TreeProjector {
       const hiding = new Set<number>();
       for (const [backend, facts] of this.snapshot.elements()) if (hides(facts)) hiding.add(backend);
       for (const [backend, facts] of this.snapshot.elements()) {
-        const offTree = facts.bounds !== undefined && (hiding.has(backend) || [...this.snapshot.ancestors(facts.index)].some((ancestor) => hiding.has(ancestor)));
+        // Elements only: their text runs fold into them, so a locator answers with the element that holds the text.
+        const offTree = !facts.nodeName.startsWith('#') && facts.bounds !== undefined && (hiding.has(backend) || [...this.snapshot.ancestors(facts.index)].some((ancestor) => hiding.has(ancestor)));
         if (facts.attributes[this.testIdAttribute] !== undefined || offTree) wanted.add(backend);
       }
     }
