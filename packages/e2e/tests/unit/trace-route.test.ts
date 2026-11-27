@@ -143,6 +143,8 @@ describe('routeLocation', () => {
 
   it('keeps the query values out of an address whose whole origin is a secret marker', () => {
     expect(routeLocation('<secret:gateway>/about?token=super-secret-token#frag')).toBe('<secret:gateway>/about?token=:id');
+    // A port the URL names stays beside the marker.
+    expect(routeLocation('<secret:gateway>:8443/callback?code=SyntheticCallbackValue')).toBe('<secret:gateway>:8443/callback?code=:id');
     // A device title that opens with a marker is no address.
     expect(routeLocation('<secret:app> › Settings')).toBe('<secret:app> › Settings');
   });
@@ -162,6 +164,7 @@ describe('routeLocation', () => {
       '/app/#/orders/123?x=abc',
       'https://<secret:tenant>.example.org/callback?code=abc',
       '<secret:gateway>/orders/123?token=abc',
+      '<secret:gateway>:8443/orders/123?token=abc',
       'file:///srv/app/about.html?tab=summary',
       '/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fw',
     ]) {

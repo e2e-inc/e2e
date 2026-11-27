@@ -274,8 +274,8 @@ function unparsedLocation(location: string): string {
   return parts === undefined ? location : `${parts.authority}${routeLocation(parts.path)}`;
 }
 
-/** A secret's marker standing for a whole origin, then the path, query, or fragment. */
-const MARKER_ORIGIN = /^\s*<secret:[A-Za-z0-9_.-]*>(?=[/?#])/;
+/** A secret's marker standing for a whole origin, with the port the URL names if any, then the path, query, or fragment. */
+const MARKER_ORIGIN = /^\s*<secret:[A-Za-z0-9_.-]*>(?::\d+)?(?=[/?#])/;
 
 /**
  * An address the route rule reads as opaque that is still a web address:
