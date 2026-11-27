@@ -13,9 +13,10 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { findAddon, addonFile, replaceAddon, scriptArgs } from './addons.ts';
+import { findAddon, addonFile, replaceAddon, ROOT, scriptArgs } from './addons.ts';
 import { cargo } from './cargo.ts';
 
 /** The oldest macOS an addon runs on. */
@@ -32,7 +33,19 @@ if (target.endsWith('-apple-darwin') && process.platform !== 'darwin') throw new
 
 const crate = addon.crateDir;
 const run = cargo(crate);
-const env = { ...run.env, MACOSX_DEPLOYMENT_TARGET: DEPLOYMENT_TARGET };
+const name = addonFile(addon, platform);
+// Paths the binary would otherwise carry (panic locations, a dylib's install name) name the machine and the user that
+// built it, and make two builds of one commit differ: they are mapped to fixed names.
+const cargoHome = process.env.CARGO_HOME ?? path.join(os.homedir(), '.cargo');
+const rustflags = [
+  process.env.RUSTFLAGS,
+  `--remap-path-prefix=${ROOT}=e2e`,
+  `--remap-path-prefix=${cargoHome}=cargo`,
+  ...(target.includes('-apple-') ? [`-Clink-arg=-Wl,-install_name,@rpath/${name}`] : []),
+]
+  .filter(Boolean)
+  .join(' ');
+const env = { ...run.env, MACOSX_DEPLOYMENT_TARGET: DEPLOYMENT_TARGET, RUSTFLAGS: rustflags };
 // A pinned toolchain installed before (another checkout's, or under a `RUSTUP_TOOLCHAIN` override) may lack this
 // target's standard library; adding one already there is a no-op.
 if (run.toolchain !== undefined) execFileSync('rustup', ['target', 'add', '--toolchain', run.toolchain, target], { cwd: crate, stdio: 'inherit', env });
@@ -40,7 +53,6 @@ execFileSync(run.file, [...run.prefix, 'build', '--release', '--locked', '--targ
 // Where cargo wrote it: `CARGO_TARGET_DIR` or a cargo config can move the target directory off the workspace's `target`.
 const metadata = JSON.parse(execFileSync(run.file, [...run.prefix, 'metadata', '--format-version', '1', '--no-deps'], { cwd: crate, encoding: 'utf8', env })) as { target_directory: string };
 const built = path.join(metadata.target_directory, target, 'release', library(addon.crate, target));
-const name = addonFile(addon, platform);
 replaceAddon(built, path.join(addon.packageDir, name));
 if (values.out !== undefined) {
   mkdirSync(values.out, { recursive: true });
