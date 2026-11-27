@@ -385,6 +385,9 @@ agent takes the same wrong turn, name the destination in the instruction.
   that pages its URL for example, isn't seen as a departure.
 - An instruction that asks to look at a page and return records one on
   purpose.
+- When a replay hands off partway through a detour, a trip inside it is
+  read again on the stored screens, where two records or two query values
+  of one route read alike (`/orders/:id`). Such a trip can be a false hint.
 - An entry recorded by an earlier version has no screens, and neither has
   one recorded on an engine that reports no location. There, only a tap
   or a navigate, then scrolls or hovers, then `back`, counts, and only as a
