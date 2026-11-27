@@ -67,6 +67,15 @@ export const kiosk = createFakeEngine({
 });
 `;
 
+// An engine whose own option shows its surface, as desktop({ headed: true }) does.
+const SHOWN_CONFIG = `import type { E2EConfig } from 'e2e';
+import { createFakeEngine } from '../../helpers/fake-engine.ts';
+
+export default {
+  targets: [{ name: 'shown', platform: 'kiosk', engine: createFakeEngine({ headed: true }).engine }],
+} satisfies E2EConfig;
+`;
+
 // A third config: two targets, one a custom engine with fewer verbs, and
 // project tools scoped by platform.
 const CUSTOM_CONFIG = `import type { E2EConfig } from 'e2e';
@@ -161,6 +170,7 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
       'protected.config.ts': PROTECTED_CONFIG,
       'kiosk.ts': KIOSK,
       'custom.config.ts': CUSTOM_CONFIG,
+      'shown.config.ts': SHOWN_CONFIG,
     });
     transport = new StdioClientTransport({
       command: process.execPath,
@@ -582,6 +592,13 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
         await other.close();
       }
     }
+  });
+
+  it('says headed for an engine that declares it shows its surface, though nothing asked for it', async () => {
+    const opened = await invoke('open_session', { config: 'shown.config.ts' });
+    expect(opened.isError, opened.text).toBe(false);
+    expect(opened.text).toMatch(/^Session \S+ open on target "shown" \(platform kiosk, engine fake 1\.0\.0\), headed; /);
+    expect((await invoke('close_session')).isError).toBe(false);
   });
 
   it('opens a session on a named engine in a directory with no config, and says how to get one otherwise', async () => {

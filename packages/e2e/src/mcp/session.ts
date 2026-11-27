@@ -63,6 +63,7 @@ interface LiveSession {
   readonly target: ResolvedTarget;
   /** Where the session's config came from, as the opening summary says it. */
   readonly origin: string;
+  /** Whether the session shows its UI: asked for, or declared by the engine (`Engine.headed`). */
   readonly headed: boolean;
   readonly attempt: StandaloneAttempt;
   readonly step: InteractiveStep;
@@ -447,7 +448,9 @@ export class SessionHost {
     // An engine session has one target, whatever `--target` names in a config.
     const named = 'file' in source ? (options.target ?? this.options.defaultTarget) : undefined;
     const { config, target } = await allocateTargetPorts(loaded, selectTarget(loaded, named, 'pass target to open_session, or start e2e mcp --target <name>'));
-    usage.resolved(target.platform, target.engine);
+    // What the session line and the usage report say; the engine is still handed what was asked.
+    const shown = headed || target.engine?.headed === true;
+    usage.resolved(target.platform, target.engine, shown);
     this.sessions.claimEngine(id, target.name, target.engine);
     // Selected before anything boots: a name that selects no test, or several, costs no engine.
     if (options.path !== undefined && options.test !== undefined) {
@@ -557,7 +560,7 @@ export class SessionHost {
           'file' in source
             ? `config ${source.file}, read with the e2e mcp server's environment, not your shell's.`
             : `no config file: one target on ${source.engine.package}, every other setting at its default. e2e run and open_session {test} need an e2e.config.ts (npx e2e init writes one).`,
-        headed,
+        headed: shown,
         attempt,
         step,
         screen,

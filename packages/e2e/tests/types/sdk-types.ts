@@ -272,6 +272,8 @@ engineApp.launchArgumentValues?.['AppleLanguages'] satisfies string | number | b
 // An engine says it opens a file app, and is told at the check when the target's app is one.
 ({ fileApps: true }) satisfies Pick<import('../../src/engine/index.ts').Engine, 'fileApps'>;
 ({ targetName: 'web', fileApp: true }) satisfies import('../../src/engine/index.ts').EngineAppCheckInfo;
+// An engine whose own option shows its surface says so.
+({ headed: true }) satisfies Pick<import('../../src/engine/index.ts').Engine, 'headed'>;
 // @ts-expect-error the declaration is a boolean, not a list of schemes
 ({ fileApps: ['file:'] }) satisfies Pick<import('../../src/engine/index.ts').Engine, 'fileApps'>;
 

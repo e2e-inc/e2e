@@ -858,6 +858,13 @@ export interface Engine {
    * harness refuses a file `app.url` at config load.
    */
   readonly fileApps?: boolean;
+  /**
+   * The engine shows its surface whatever the run asks, because an option of
+   * its own turned that on. The harness then reports a session on it as
+   * headed without `--headed`. An engine that follows the run's `headed`
+   * leaves this out.
+   */
+  readonly headed?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**

@@ -33,6 +33,7 @@ const KNOWN_KEYS = [
   'grantsAllPermissions',
   'launchArgumentValues',
   'fileApps',
+  'headed',
   'keyboard',
   'fixtures',
   'isolation',
@@ -310,6 +311,7 @@ export function defineEngine<
   }
   if (spec.launchArgumentValues !== undefined && typeof spec.launchArgumentValues !== 'boolean') throw invalid(name, 'launchArgumentValues must be a boolean');
   if (spec.fileApps !== undefined && typeof spec.fileApps !== 'boolean') throw invalid(name, 'fileApps must be a boolean');
+  if (spec.headed !== undefined && typeof spec.headed !== 'boolean') throw invalid(name, 'headed must be a boolean');
   if (spec.isolation !== undefined && spec.isolation !== 'attempt' && spec.isolation !== 'worker') {
     throw invalid(name, `isolation must be 'attempt' or 'worker', got ${JSON.stringify(spec.isolation)}`);
   }
@@ -334,6 +336,7 @@ export function defineEngine<
   if (spec.grantsAllPermissions === true) handle['grantsAllPermissions'] = true;
   if (spec.launchArgumentValues === true) handle['launchArgumentValues'] = true;
   if (spec.fileApps === true) handle['fileApps'] = true;
+  if (spec.headed === true) handle['headed'] = true;
   if (spec.isolation === 'worker') handle['isolation'] = 'worker';
   if (spec.pointerActions !== undefined) {
     handle['pointerActions'] = declaredKinds(name, 'pointerActions', spec.pointerActions, POINTER_ACTION_KINDS);

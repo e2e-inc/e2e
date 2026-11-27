@@ -137,6 +137,10 @@
       "description": "The engine opens an app whose url is a file: URL, read from the disk of the machine the harness runs on; without it the harness refuses a file app.url at config load.",
       "type": "boolean"
     },
+    "headed": {
+      "description": "The engine shows its surface whatever the run asks, because an option of its own turned that on; a session on it is reported as headed without --headed.",
+      "type": "boolean"
+    },
     "isolation": {
       "description": "What one attempt leaves for the next: present only as worker, when the engine's fixtures, app, and screen outlive an attempt.",
       "const": "worker"

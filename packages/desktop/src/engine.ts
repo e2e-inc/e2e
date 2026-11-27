@@ -51,6 +51,8 @@ export function desktop(options: DesktopOptions = {}): DesktopEngine<'macos', 'a
     platform,
     workers: 1,
     launchArgumentValues: true,
+    // With its own `headed` the app comes forward and input is physical, whatever the run asked.
+    ...(headed ? { headed: true } : {}),
     prepare: () => {
       requireMacOS();
       return surface.prepare();
