@@ -236,8 +236,10 @@ export function addressKey(location: string): string {
     const parts = unparsedParts(location);
     return parts === undefined ? routeIdentity(route) : JSON.stringify([parts.authority, addressKey(parts.path)]);
   }
-  // Two documents that route the same fragment (`/#/menu`, `/about#/menu`) are two pages.
-  return route.document === undefined ? routeIdentity(route) : JSON.stringify([route.document, routeIdentity(route)]);
+  // Two documents that route the same fragment (`/#/menu`, `/about#/menu`) are two pages; an empty segment of either path is none.
+  if (route.document === undefined) return routeIdentity(route);
+  const document = route.document.split('/').filter((raw) => raw !== '').map((raw) => segmentOf(raw, false));
+  return JSON.stringify([document, routeIdentity(route)]);
 }
 
 /**

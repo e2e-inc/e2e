@@ -188,6 +188,8 @@ describe('findDetours by recorded locations', () => {
     expect(findDetours(flow([tap('About', '/#/menu', 'link'), tap('Home', '/about#/menu', 'link')], { endPath: '/#/menu' }))).toEqual([
       { from: 0, to: 2, at: '/#/menu', via: '/about#/menu', evidence: 'locations' },
     ]);
+    // A trailing slash on the document path is no other document, as an empty path segment is none.
+    expect(findDetours(flow([tap('Menu', '/docs#/menu', 'link'), tap('Menu', '/docs/#/menu', 'link')], { endPath: '/docs#/menu' }))).toEqual([]);
   });
 
   it('does not read a cut recording\'s end location as where its last kept action led', () => {
