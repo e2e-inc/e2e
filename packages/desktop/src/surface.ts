@@ -75,8 +75,13 @@ const QUIT = new Error('the app quit');
 /** The cause of a screenshot withheld because its secure fields could not be shown masked, which the harness reads as masking it could not prove. */
 const UNMASKED = new Error('the secure fields of the screenshot could not be placed');
 
-/** Launch arguments every launch gets first: no window or document the app saved at its last quit comes back. */
-const FRESH_STATE_ARGUMENTS = ['-ApplePersistenceIgnoreState', 'YES'];
+/**
+ * Launch arguments every launch gets first: no window or document the app saved at its last quit comes back, and a
+ * document-based app with iCloud Documents autosaves a new document on this Mac, not into iCloud Drive, where each
+ * run would leave one behind and sync it. First, because the last of a repeated user default wins: the target's own
+ * `app.launchArguments` override these.
+ */
+const FRESH_STATE_ARGUMENTS = ['-ApplePersistenceIgnoreState', 'YES', '-NSDocumentSaveNewDocumentsToCloud', 'NO'];
 
 /** The most elements one driver snapshot reads (`MAX_NODES` in `crates/e2e-desktop-napi/src/snapshot.rs`): a larger window is read in part. */
 const MAX_SNAPSHOT_NODES = '8,000';
