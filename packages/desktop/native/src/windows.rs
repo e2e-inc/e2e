@@ -196,7 +196,8 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
         let Some(id) = *id else {
             // Only a window counts: an app's AXWindows can hold other elements that never get an id (Finder's desktop, an
             // app's own AXApplication element), and they are no window the list leaves out.
-            if element.text("AXRole").as_deref() == Some("AXWindow") {
+            let role = element.attribute("AXRole");
+            if may_be_window(role.as_ref().map(|role| role.text()).map_err(|error| *error)) {
                 unresolved += 1;
             }
             continue;
@@ -256,6 +257,15 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
     Ok(out)
 }
 
+/// Whether an accessibility window entry with no window server id is a window the list leaves out: its role says so, or
+/// the app did not answer the role in time, which may hide one, so a stall never reads as an app with no window.
+fn may_be_window(role: Result<Option<&str>, ax::AXError>) -> bool {
+    match role {
+        Ok(role) => role == Some("AXWindow"),
+        Err(error) => error == ax::AX_CANNOT_COMPLETE,
+    }
+}
+
 /// Refuses a window list that holds none of the app's accessibility windows while some had no window server id yet: the
 /// app has a window, and a list without it would read as an app with none, which a negative assertion could take as
 /// proof. A retryable stall: the id is there a moment later.
@@ -294,7 +304,17 @@ pub fn open_menus(pid: i32) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{complete, system_dialog};
+    use super::{complete, may_be_window, system_dialog};
+    use crate::ax;
+
+    #[test]
+    fn counts_an_entry_whose_role_the_app_did_not_answer_as_a_window() {
+        assert!(may_be_window(Ok(Some("AXWindow"))));
+        assert!(!may_be_window(Ok(Some("AXApplication"))), "an app's own element in its windows");
+        assert!(!may_be_window(Ok(None)));
+        assert!(may_be_window(Err(ax::AX_CANNOT_COMPLETE)), "a stall may hide a window");
+        assert!(!may_be_window(Err(ax::AX_FAILURE)), "a role the element does not have");
+    }
 
     #[test]
     fn refuses_a_window_list_that_left_out_every_window_it_could_not_name() {
