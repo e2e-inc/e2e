@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { CaptureSnapshotResult } from 'agent-device';
+import { formatPinnedRef, type CaptureSnapshotResult } from 'agent-device';
 import {
   EngineError,
   KEY_NAMES,
@@ -48,6 +48,7 @@ import {
   type ViewportPoint,
   type ViewportSize,
   ConfigurationError,
+  readPngSize,
   TestError,
 } from '@e2e-dev/core/engine';
 import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
@@ -81,7 +82,6 @@ import {
   invalidState,
   notActionable,
   logicalScreenSize,
-  readPngSize,
   sanitizeFilename,
   screenLocation,
   type RawScreenshotResult,
@@ -1366,7 +1366,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   private actionTarget(entry: NodeBinding, control = false): { ref: string } {
     const ref = control ? entry.controlRef : entry.ref;
     if (ref === '') throw notActionable(`node ${entry.id} has no agent-device ref to act on`);
-    return { ref: entry.refsGeneration === undefined ? `@${ref}` : `@${ref}~s${entry.refsGeneration}` };
+    return { ref: entry.refsGeneration === undefined ? `@${ref}` : formatPinnedRef(ref, entry.refsGeneration) };
   }
 
   /**

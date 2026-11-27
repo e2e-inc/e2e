@@ -359,12 +359,12 @@ impl Element {
         self.read_frame().ok().flatten()
     }
 
-    /// `frame`, failing with `AX_CANNOT_COMPLETE` when the app did not answer in time: a stall is no proof the element
-    /// has no frame. Any other error reads as none.
+    /// `frame`, failing with `AX_CANNOT_COMPLETE` when the app did not answer in time, and with `AX_INVALID_ELEMENT` when
+    /// the element is gone: neither is proof the element has no frame. Any other error reads as none.
     pub fn read_frame(&self) -> Result<Option<(f64, f64, f64, f64)>, AXError> {
         let values = match self.attributes(&["AXPosition", "AXSize"]) {
             Ok(values) => values,
-            Err(AX_CANNOT_COMPLETE) => return Err(AX_CANNOT_COMPLETE),
+            Err(error @ (AX_CANNOT_COMPLETE | AX_INVALID_ELEMENT)) => return Err(error),
             Err(_) => return Ok(None),
         };
         Ok(match (&values[0], &values[1]) {

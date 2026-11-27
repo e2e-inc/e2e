@@ -77,7 +77,8 @@ fn stops_a_stepper_that_steps_past_the_value_or_does_not_move() {
     );
     let failure = past.expect_err("2 does not divide 3");
     assert_eq!(failure.delivery, crate::failure::Delivery::Unknown);
-    assert!(failure.message.contains("stepped back to 0"), "{}", failure.message);
+    assert!(failure.message.contains("stepped back to where it started"), "{}", failure.message);
+    assert!(!failure.message.contains('3'), "names no value: {}", failure.message);
     assert_eq!(value.get(), 0.0);
     let count = Cell::new(0);
     let stuck = step_to(
@@ -529,6 +530,109 @@ fn stops_watching_for_a_gone_element_in_time_to_answer() {
 }
 
 #[test]
+fn fails_a_stepper_value_read_that_stalled_or_went_away_before_any_step() {
+    use super::shown_number;
+    use crate::ax::{AX_CANNOT_COMPLETE, AX_FAILURE, AX_INVALID_ELEMENT, Value};
+    use crate::failure::{Delivery, codes};
+    assert_eq!(shown_number(Ok(Value::Number(4.0)), "set value").unwrap(), Some(4.0));
+    assert_eq!(shown_number(Ok(Value::Text("four".into())), "set value").unwrap(), None);
+    assert_eq!(shown_number(Err(AX_FAILURE), "set value").unwrap(), None);
+    let stall = shown_number(Err(AX_CANNOT_COMPLETE), "set value").expect_err("a stall");
+    assert_eq!((stall.code, stall.delivery), (codes::APP_UNRESPONSIVE, Delivery::NotDelivered));
+    let gone = shown_number(Err(AX_INVALID_ELEMENT), "set value").expect_err("gone");
+    assert_eq!((gone.code, gone.delivery), (codes::STALE_REF, Delivery::NotDelivered));
+}
+
+#[test]
+fn reads_a_stall_as_one_and_any_other_failure_as_no_answer() {
+    use super::stalled;
+    use crate::ax::{AX_CANNOT_COMPLETE, AX_FAILURE, AX_INVALID_ELEMENT, AX_NO_VALUE};
+    assert_eq!(stalled(Ok(3)), Ok(Some(3)));
+    assert_eq!(stalled::<i32>(Err(AX_CANNOT_COMPLETE)), Err(AX_CANNOT_COMPLETE));
+    for none in [AX_FAILURE, AX_INVALID_ELEMENT, AX_NO_VALUE] {
+        assert_eq!(stalled::<i32>(Err(none)), Ok(None), "{none}");
+    }
+    // The stall reaches the engine as one it may retry.
+    let failure = super::unread(AX_CANNOT_COMPLETE, "type");
+    assert_eq!((failure.code, failure.delivery), (crate::failure::codes::APP_UNRESPONSIVE, crate::failure::Delivery::NotDelivered));
+    assert_eq!(failure.details, Some(serde_json::json!({ "retryable": true })));
+}
+
+#[test]
+fn names_no_value_in_any_stepper_failure() {
+    let digitless = |failure: crate::failure::Failure| {
+        assert!(!failure.message.chars().any(|c| c.is_ascii_digit()), "names a value: {}", failure.message);
+    };
+    // Wraps: one step up from 42 goes to 0.
+    let value = Cell::new(42.0);
+    digitless(
+        step_to(
+            43.0,
+            Some(42.0),
+            later(),
+            |_| {
+                value.set(0.0);
+                Ok(())
+            },
+            || Some(value.get()),
+        )
+        .expect_err("wraps"),
+    );
+    // Steps past and back: 40, 42, 44 past 43, then back to 40.
+    let value = Cell::new(40.0);
+    digitless(
+        step_to(
+            43.0,
+            Some(40.0),
+            later(),
+            |up| {
+                value.set(value.get() + if up { 2.0 } else { -2.0 });
+                Ok(())
+            },
+            || Some(value.get()),
+        )
+        .expect_err("past"),
+    );
+    // Steps past and cannot go back.
+    let value = Cell::new(40.0);
+    digitless(
+        step_to(
+            43.0,
+            Some(40.0),
+            later(),
+            |up| {
+                if up {
+                    value.set(value.get() + 2.0)
+                }
+                Ok(())
+            },
+            || Some(value.get()),
+        )
+        .expect_err("stuck past"),
+    );
+    // Already showed the target up to rounding, and the step to tell it left it changed.
+    let summed = 0.1 + 0.1 + 0.1;
+    let value = Cell::new(summed);
+    digitless(
+        step_to(
+            0.3,
+            Some(summed),
+            later(),
+            |up| {
+                if !up {
+                    value.set(value.get() - 0.1)
+                }
+                Ok(())
+            },
+            || Some(value.get()),
+        )
+        .expect_err("left changed"),
+    );
+    // Out of time before the first step.
+    digitless(step_to(43.0, Some(40.0), Instant::now(), |_| Ok(()), || Some(40.0)).expect_err("no time"));
+}
+
+#[test]
 fn takes_only_a_finite_number() {
     assert_eq!(super::finite(" 3 "), Ok(3.0));
     for text in ["NaN", "inf", "-infinity", "three"] {
@@ -552,4 +656,62 @@ fn stops_when_a_press_changes_nothing_or_the_state_cannot_be_read() {
     assert_eq!(presses.get(), 1);
     let unreadable = press_to_state(1, None, || Ok(()), || None);
     assert!(!unreadable.unwrap());
+}
+
+#[test]
+fn lets_a_scroll_area_scroll_itself_only_with_a_scroll_bar_for_the_axis() {
+    let pages = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+    let swiftui = pages(&["AXScrollDownByPage", "AXScrollUpByPage", "AXScrollLeftByPage", "AXScrollRightByPage"]);
+    // A SwiftUI scroll area offers every page action: only its scroll bar for the axis says it scrolls along it.
+    assert!(!super::scroll::scrolls_itself("scrollarea", false, &swiftui, "down"));
+    assert!(super::scroll::scrolls_itself("scrollarea", true, &swiftui, "down"));
+    assert!(super::scroll::scrolls_itself("scrollarea", true, &[], "left"));
+    // Any other role scrolls itself by the page action for the direction.
+    assert!(super::scroll::scrolls_itself("list", false, &pages(&["AXScrollDownByPage"]), "down"));
+    assert!(!super::scroll::scrolls_itself("list", false, &pages(&["AXScrollDownByPage"]), "right"));
+    assert!(!super::scroll::scrolls_itself("list", false, &[], "up"));
+}
+
+#[test]
+fn confirms_no_secure_fill_by_a_field_that_went_away_or_did_not_answer() {
+    use crate::ax::{AX_ATTRIBUTE_UNSUPPORTED, AX_CANNOT_COMPLETE, AX_INVALID_ELEMENT, Value};
+    assert_eq!(super::secure_count(Ok(Value::Number(8.0))), Ok(Some(8)));
+    // A field that counts none is taken at the write's word.
+    assert_eq!(super::secure_count(Err(AX_ATTRIBUTE_UNSUPPORTED)), Ok(None));
+    assert_eq!(super::secure_count(Err(AX_CANNOT_COMPLETE)), Err(()));
+    assert_eq!(super::secure_count(Err(AX_INVALID_ELEMENT)), Err(()));
+}
+
+/// A node of a fake accessibility tree, for the text gathering that names a row.
+#[derive(Clone)]
+struct Fake {
+    role: &'static str,
+    label: Option<&'static str>,
+    children: Vec<Fake>,
+}
+
+fn fake(role: &'static str, label: Option<&'static str>, children: Vec<Fake>) -> Fake {
+    Fake { role, label, children }
+}
+
+fn gathered(row: &Fake) -> Option<String> {
+    let mut texts = Vec::new();
+    super::gather_texts(row, 0, &mut texts, &|node: &Fake| Ok(node.children.clone()), &|node: &Fake| Ok(node.role), &|node: &Fake| {
+        Ok(node.label.map(str::to_owned))
+    })
+    .expect("read");
+    crate::snapshot::content_name(&texts)
+}
+
+#[test]
+fn names_a_row_from_the_texts_under_its_texts_as_the_snapshot_does() {
+    // An untitled heading over "Paid": the snapshot walks into it, and so does the row's name.
+    let row = fake("row", None, vec![fake("statictext", Some("Invoice"), vec![]), fake("heading", None, vec![fake("statictext", Some("Paid"), vec![])])]);
+    assert_eq!(gathered(&row).as_deref(), Some("Invoice Paid"));
+    // A titled text comes after the texts inside it, in the snapshot's order.
+    let titled = fake("row", None, vec![fake("heading", Some("Total"), vec![fake("statictext", Some("42"), vec![])])]);
+    assert_eq!(gathered(&titled).as_deref(), Some("42 Total"));
+    // A scroll bar's parts are not read.
+    let scrolled = fake("row", None, vec![fake("statictext", Some("Notes"), vec![]), fake("scrollbar", None, vec![fake("statictext", Some("50%"), vec![])])]);
+    assert_eq!(gathered(&scrolled).as_deref(), Some("Notes"));
 }

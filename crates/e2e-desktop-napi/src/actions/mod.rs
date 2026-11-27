@@ -104,7 +104,7 @@ fn cancelled() -> bool {
 
 /// The failure for a read that failed before anything was sent: nothing reached the app. A read the app did not answer
 /// in time is a stall, which a retry may get past.
-fn unread(error: AXError, what: &str) -> Failure {
+pub(crate) fn unread(error: AXError, what: &str) -> Failure {
     match error {
         ax::AX_CANNOT_COMPLETE => {
             Failure::refused(codes::APP_UNRESPONSIVE, format!("{what}: the app did not answer in time")).with_details(serde_json::json!({ "retryable": true }))
@@ -113,6 +113,27 @@ fn unread(error: AXError, what: &str) -> Failure {
         ax::AX_API_DISABLED => Failure::refused(codes::PERM_DENIED, format!("{what}: {}", ax::describe(error))),
         _ => Failure::refused(codes::ACTION_FAILED, format!("{what}: {}", ax::describe(error))),
     }
+}
+
+/// A read whose only failure that counts is a stall: the app did not answer in time, which says nothing about the
+/// answer and passes up as `AX_CANNOT_COMPLETE`. Any other failure reads as no answer.
+pub(crate) fn stalled<T>(read: Result<T, AXError>) -> Result<Option<T>, AXError> {
+    match read {
+        Ok(value) => Ok(Some(value)),
+        Err(ax::AX_CANNOT_COMPLETE) => Err(ax::AX_CANNOT_COMPLETE),
+        Err(_) => Ok(None),
+    }
+}
+
+/// The element an attribute names, such as the app's focused element or key window. A read the app did not answer in
+/// time fails as a stall, which a retry may get past, never as focus that moved; any other failure reads as none.
+pub(crate) fn element_attribute(element: &Element, name: &str, what: &str) -> Outcome<Option<Element>> {
+    Ok(stalled(element.attribute(name)).map_err(|error| unread(error, what))?.and_then(|value| value.element().cloned()))
+}
+
+/// Whether `focused`, the app's focused window, holds `window`'s focus (`windows::holds_focus`). A stall fails as one.
+pub(crate) fn holds(focused: &Element, window: &Element, what: &str) -> Outcome<bool> {
+    windows::holds_focus(focused, window).map_err(|error| unread(error, what))
 }
 
 /// Whether an attribute can be set. A stall fails, so a busy app does not read as one whose control takes no input;
@@ -308,10 +329,28 @@ pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
     go("bring the window forward")?;
     let _ = window.set_bool("AXMain", true);
     let deadline = Instant::now() + Duration::from_millis(1_500);
-    let forward = until(deadline, || {
-        app.boolean("AXFrontmost") == Some(true) && app.element("AXFocusedWindow").is_some_and(|focused| windows::holds_focus(&focused, window))
+    let mut last = Ok(false);
+    until(deadline, || {
+        last = forward(&app, window);
+        last == Ok(true)
     });
-    if forward { Ok(()) } else { Err(Failure::refused(codes::ACTION_FAILED, "the window could not be brought forward")) }
+    match last {
+        Ok(true) => Ok(()),
+        // An app that did not answer in time may have come forward: no proof it did not, and a retry may get past it.
+        Err(error) => Err(unread(error, "bring the window forward")),
+        Ok(false) => Err(Failure::refused(codes::ACTION_FAILED, "the window could not be brought forward")),
+    }
+}
+
+/// Whether the app is frontmost with `window` holding its focus. A stall fails as `AX_CANNOT_COMPLETE`.
+fn forward(app: &Element, window: &Element) -> Result<bool, AXError> {
+    if stalled(app.attribute("AXFrontmost"))?.and_then(|value| value.boolean()) != Some(true) {
+        return Ok(false);
+    }
+    match stalled(app.attribute("AXFocusedWindow"))?.and_then(|value| value.element().cloned()) {
+        Some(focused) => windows::holds_focus(&focused, window),
+        None => Ok(false),
+    }
 }
 
 /// Waits a moment for a menu an action opened to show, so the next read finds it; an action that opens none waits it out and is still done.
@@ -356,7 +395,20 @@ fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<bool> {
         return Err(Failure::refused(codes::ACTION_FAILED, "the element is off screen and cannot be scrolled into view; scroll its list first"));
     }
     perform(element, "AXScrollToVisible", "scroll into view")?;
-    if until(deadline, || placement(element) == Ok(Placement::Shown)) {
+    // A list can replace a row's element as it scrolls the row in: the element is gone then, and no wait shows it.
+    let mut gone = false;
+    let shown = until(deadline, || match placement(element) {
+        Ok(Placement::Shown) => true,
+        Err(ax::AX_INVALID_ELEMENT) => {
+            gone = true;
+            true
+        }
+        _ => false,
+    });
+    if gone {
+        return Err(Failure::unconfirmed(codes::STALE_REF, "the list replaced the element as it scrolled it into view"));
+    }
+    if shown {
         return Ok(true);
     }
     Err(Failure::unconfirmed(codes::ACTION_FAILED, "the element is still off screen after it was scrolled into view"))
@@ -426,18 +478,32 @@ fn click_shown(entry: &Entry, deadline: Instant) -> Outcome<()> {
 fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
     // The app's focused element is the one source, as the snapshot reads it: a table's cell reports the table's focus as
     // its own `AXFocused`.
-    let holds = || match element.pid() {
-        Some(pid) => Element::application(pid).element("AXFocusedUIElement").as_ref() == Some(element),
-        None => element.boolean("AXFocused") == Some(true),
+    let holds = || -> Result<bool, AXError> {
+        Ok(match element.pid() {
+            Some(pid) => {
+                stalled(Element::application(pid).attribute("AXFocusedUIElement"))?.and_then(|value| value.element().cloned()).as_ref() == Some(element)
+            }
+            None => stalled(element.attribute("AXFocused"))?.and_then(|value| value.boolean()) == Some(true),
+        })
     };
-    if holds() {
+    // A stall before the write is no proof the element lacks focus: nothing is sent, and a retry may get past it.
+    if holds().map_err(|error| unread(error, "focus"))? {
         return Ok(());
     }
     go("focus")?;
     // A focus write that failed after the app took it (a focus handler that replaced the element) may have run its
     // handlers: only a refusal shows nothing was sent, as for `set_value`.
     element.set_bool("AXFocused", true).map_err(|error| write_failed(error, "focus"))?;
-    if until(deadline, holds) { Ok(()) } else { Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus")) }
+    let mut last = Ok(false);
+    until(deadline, || {
+        last = holds();
+        last == Ok(true)
+    });
+    match last {
+        Ok(true) => Ok(()),
+        Err(_) => Err(Failure::unconfirmed(codes::APP_UNRESPONSIVE, "focus: the app did not answer in time after the element was focused")),
+        Ok(false) => Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus")),
+    }
 }
 
 /// Runs `work` as the action `input_id` names: until it returns, every input it sends first checks that the action was
@@ -521,7 +587,7 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option
         // The control a locator's key is for must hold the app's focus, read after the window check: a sheet that opened
         // during it took the focus, and its default button would take the key.
         if let Some(entry) = &control
-            && Element::application(pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element)
+            && element_attribute(&Element::application(pid), "AXFocusedUIElement", "press")?.as_ref() != Some(&entry.element)
         {
             return Err(Failure::refused(codes::ACTION_FAILED, "the control lost keyboard focus before the key was sent, so nothing was sent"));
         }
@@ -552,7 +618,9 @@ fn frontmost(pid: i32) -> Outcome<bool> {
 /// Refuses unless `window` is the app's key window, or holds the focused sheet or alert: a key or text sent to the app
 /// goes to its key window, and would land in another one.
 fn key_window(pid: i32, window: &Element) -> Outcome<()> {
-    if Element::application(pid).element("AXFocusedWindow").is_some_and(|focused| windows::holds_focus(&focused, window)) {
+    if let Some(focused) = element_attribute(&Element::application(pid), "AXFocusedWindow", "read the app's key window")?
+        && holds(&focused, window, "read the app's key window")?
+    {
         return Ok(());
     }
     Err(Failure::refused(codes::ACTION_FAILED, "the window is not the app's key window, so a key sent to the app would land elsewhere")

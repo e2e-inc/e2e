@@ -667,6 +667,8 @@ screen.getByRole('grid').getByRole('rowgroup').getByRole('gridcell');
 screen.getByRole('carousel');
 // @ts-expect-error a Playwright role the vocabulary does not carry stays out
 screen.getByRole('generic');
+// @ts-expect-error static text is `text` in a device or desktop tree, which getByText finds; it is not a role
+screen.getByRole('text', 'Words');
 // @ts-expect-error img is an alias getByRole accepts, never a Role an engine emits
 'img' satisfies Role;
 'image' satisfies Role;
@@ -1944,6 +1946,7 @@ void host.openSession({
   onStep: (step) => {
     step satisfies StepProgress;
     if (step.phase === 'end') step.status satisfies StepRecord['status'];
+    if (step.phase === 'end') step.cache?.mode satisfies 'self-finalized' | 'agent-concluded' | 'missed' | undefined;
   },
 } satisfies OpenSessionOptions);
 // @ts-expect-error every hosted session requires options with a name

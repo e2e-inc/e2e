@@ -99,8 +99,8 @@ export interface DesktopDriver {
   screenLocked(): boolean | null;
   /** When a process started, in microseconds since the epoch; null when it is not running. */
   processStarted(pid: number): number | null;
-  /** Every process whose environment holds `marker` (`NAME=value`); null when the processes cannot be listed. */
-  processesCarrying(marker: string): Promise<readonly number[] | null>;
+  /** Every process that carries the launch `token`, in its environment or its arguments; null when the processes cannot be listed. */
+  processesCarrying(token: string): Promise<readonly number[] | null>;
   /** Drops the refs of a process that quit. */
   forgetProcess(pid: number): void;
   launch(options: {

@@ -82,11 +82,11 @@ pub fn process_started(pid: i32) -> Option<f64> {
     process::started(pid).map(|micros| micros as f64)
 }
 
-/// Every process whose environment holds `marker` (`NAME=value`); `null` when the processes cannot be listed. It reads
+/// Every process that carries the launch `token`; `null` when the processes cannot be listed. It reads
 /// every process, which takes tens of milliseconds, so it runs on a blocking thread, off the JavaScript thread.
 #[napi]
-pub async fn processes_carrying(marker: String) -> Option<Vec<i32>> {
-    spawn_blocking(move || process::carrying(&marker)).await.ok().flatten()
+pub async fn processes_carrying(token: String) -> Option<Vec<i32>> {
+    spawn_blocking(move || process::carrying(&token)).await.ok().flatten()
 }
 
 /// Drops the refs of a process that quit.
