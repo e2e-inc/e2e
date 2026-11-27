@@ -1,0 +1,500 @@
+---
+title: Regras de segurança
+description: Cada regra que o runner aplica à entrada do modelo, às chamadas de ferramenta, aos segredos, à ocultação, às sessões, ao cache de replay, aos artefatos e às conexões de rede.
+"og:image": "https://e2e.com/docs/images/og/reference/security.png?v=888009ffe4"
+"twitter:image": "https://e2e.com/docs/images/og/reference/security.png?v=888009ffe4"
+---
+
+O guia [Segurança](/security) explica a fronteira de confiança. Esta página
+lista as regras por trás dela, do jeito que o código as aplica.
+
+## Referência
+
+| Seção | Cobre |
+| --- | --- |
+| [Entrada do modelo](#model-input) | O que o modelo lê em cada passo |
+| [Chamadas de ferramenta](#tool-calls) | Ferramentas embutidas e do projeto, ids de nós |
+| [Negações de política](#policy-denials) | Chamadas que falham com `POLICY_DENIED` |
+| [Navegação](#navigation) | Esquemas de URL por ponto de entrada |
+| [Credenciais de requisição](#request-credentials) | `headers`, `basicAuth` |
+| [Verificação de site](#site-check) | Frames filhos |
+| [Preenchimentos de segredo](#secret-fills) | `type_secret`, `fill(secret)` |
+| [Capturas de tela depois de um preenchimento de segredo](#screenshots-after-a-secret-fill) | O que o mascaramento cobre |
+| [Segredos nas opções da engine](#secrets-in-engine-options) | `basicAuth` e outras opções da engine |
+| [Ocultação](#redaction) | Entrada do modelo, relatórios, downloads, saída |
+| [Onde a ocultação termina](#where-redaction-stops) | Valores transformados, vídeo, `command.log` |
+| [Downloads](#downloads) | Arquivos que o app serviu |
+| [Sessões](#sessions) | Estado de autenticação salvo |
+| [Confiança no cache](#cache-trust) | Arquivos do cache de replay e `cache.store` |
+| [Artefatos](#artifacts) | Arquivos sob o diretório de saída |
+| [Conexões de saída](#outbound-connections) | Destinos aos quais o runner se conecta |
+| [MCP e explore](#mcp-and-explore) | Sessões MCP, os logins do explorador |
+
+### Entrada do modelo
+
+O modelo lê o conteúdo do app como evidência citada, mantida separada da
+política do runner e do contexto confiável do projeto. O conteúdo do app não
+pode conceder ferramentas, credenciais nem um orçamento maior.
+[Como os passos do agente funcionam](/agent-steps) explica um passo por inteiro.
+
+| No prompt | Forma |
+| --- | --- |
+| Sua instrução e seus parâmetros | Citados dentro de `<instruction>` e marcados como dados. Um parâmetro `Secret` mostra apenas o nome e a finalidade do segredo. |
+| A tela | Uma árvore de acessibilidade com ids de nós, papéis, nomes, texto, test ids, destinos de links e estados, cortada em um limite de tamanho. Sem seletores. A query string e o fragmento de um link aparecem apenas como `?…` e `#…`. Campos seguros aparecem como `value=<secure>`, a menos que [um script da página esconda um deles](#where-redaction-stops). |
+| A localização | A URL atual, ocultada, sem userinfo. Um julgamento a recebe como um caminho na origem do app e, fora dela, como a URL inteira, cortada em um limite de tamanho. Em um dispositivo, o app e o título da tela. |
+| Uma captura de tela | Quando é necessária ou pedida, e só se a engine provar que os campos seguros estão mascarados. |
+| Passos anteriores | `agent.act` recebe registros limitados do mesmo teste ou grupo serial. Os julgamentos usam apenas a tela atual, a localização da tela, a instrução com seus parâmetros e o contexto do agente. |
+
+### Chamadas de ferramenta
+
+- As ferramentas embutidas têm schemas fechados e só aparecem quando a engine
+  dá suporte a elas. Uma ferramenta que declara campos rejeita uma chave que
+  ela não declara. Uma ferramenta sem campos descarta as chaves extras e roda.
+- As ferramentas do projeto precisam usar `defineTool` com um `execute` e não
+  podem reutilizar o nome de uma ferramenta embutida. Uma ferramenta do
+  projeto mantém o schema passado a `defineTool`, então é esse schema que
+  decide se ela remove ou rejeita uma chave não declarada.
+- Só ferramentas do projeto somente leitura podem pedir uma observação.
+- Uma chamada a uma ferramenta que o passo não oferece, ou com um argumento
+  não declarado em uma ferramenta embutida que declara campos, nunca roda. O
+  modelo lê a recusa como o resultado da chamada e tenta de novo.
+- O runner nunca avalia o texto do modelo como código, seletores, comandos de
+  shell ou configuração. A única exceção é o
+  [`run_code`](/reference/mcp#run_code) do servidor MCP: ele roda o JavaScript
+  de um agente de código no processo Node do servidor, sem confinamento, com a
+  autoridade de um arquivo de teste. O agente já consegue escrever um teste e
+  rodá-lo. No que `run_code` retorna, o valor exato de cada segredo configurado
+  é ocultado. Isso evita acidentes e não é uma fronteira: o código pode ler todo
+  segredo e toda credencial configurados, do arquivo de configuração, do
+  ambiente ou do app, e pode retornar um deles de forma alterada. Não conecte
+  aos arquivos e segredos do projeto um agente em que você não confia, e saiba
+  que um cliente que confina o shell do agente pode, mesmo assim, rodar este
+  servidor fora desse confinamento. `run_code` vem ativado por padrão, e nenhuma
+  flag o desativa: um cliente que aprova a ferramenta `call` do servidor aprova
+  `run_code` junto com ela.
+
+| Falha com | Quando |
+| --- | --- |
+| `CONFIG_LOAD_FAILED` | Um `defineTool` sem um `execute`, no carregamento da configuração. |
+| `INVALID_CONFIG` | Uma ferramenta não criada com `defineTool`, ou uma com o nome de uma ferramenta embutida ou do harness. |
+| `LOCATOR_NOT_FOUND` | Um id de nó que não está na tela atual. A ação falha, e o modelo lê a falha e age de novo. |
+
+### Negações de política
+
+Estas chamadas falham com `POLICY_DENIED`.
+
+| Negado | Por quê |
+| --- | --- |
+| Navegação para qualquer esquema que não seja `http:` nem `https:`, exceto `about:blank` | `file:`, `data:`, `javascript:` e esquemas que envolvem outros, como `view-source:file:`, carregariam conteúdo local ou inline. |
+| Uma chamada de `request` para qualquer esquema que não seja `http:` nem `https:`, `about:blank` incluído | Ela envia uma requisição HTTP; nenhum outro esquema tem uma resposta para ler. |
+| Em um alvo cujo `app.url` é um arquivo: navegação para um arquivo fora do diretório desse arquivo, ou para um diretório | O agente escolhe as URLs de navegação, e uma página pode dizer a ele qual escolher. Ele poderia abrir qualquer arquivo que você pode ler e depois levar esse arquivo a um endereço http(s). A listagem de um diretório tem um link para o diretório pai. |
+| Em um alvo assim: a observação de um passo do agente depois que a própria página foi para um arquivo fora do diretório, ou para um diretório | Um link ou um script em uma página local pode levar o navegador até lá, o que uma URL digitada não consegue. A tela é retida e não chega ao modelo, ao trace nem às evidências da falha. |
+| Uma URL malformada | Nada é corrigido. |
+| Um `Secret` que chega a um destino JSON | Referências não carregam valor, e nenhum valor pode ser serializado. |
+| Ler um valor, texto ou atributo de um campo seguro, com um getter ou um matcher `toHaveValue`, `toHaveText`, `toContainText` ou `toHaveAttribute` | Faça a asserção sobre o resultado, não sobre o segredo. Um valor retido vem ocultado, e não vazio nem ausente. |
+| `type_secret` com um nome não declarado | Só os segredos nos parâmetros do passo podem ser preenchidos. |
+| `type_secret` em um nó desabilitado ou não editável | Os destinos são `textbox`, `searchbox` e `combobox`. |
+| Uma senha em um campo que não é de senha | A finalidade precisa corresponder. Um segredo genérico preenche qualquer campo editável. O código de `run_code` não está sujeito a essa regra. |
+| Uma ferramenta do projeto que faz alterações e pede uma observação | Observe em uma chamada separada. |
+| `vision: 'only'` quando os pixels são retidos | Não há nada a que recorrer. |
+| `browser.setCookies` com uma URL de cookie que não é `http:` nem `https:` | Só uma origem web guarda cookies. |
+| `toHaveScreenshot()` quando a engine não consegue provar que todo campo seguro está mascarado | A captura de tela não é mantida. |
+| Um `upload` do agente, de um executor ou do MCP de um arquivo fora da raiz do projeto, de um arquivo oculto ou de um arquivo sob um diretório oculto | Só os arquivos do projeto, e os arquivos de exemplo que o e2e traz (`sample:photo.png` e os demais), podem sair do computador por um formulário. |
+| Um `screenshot` do MCP cujo `path` fica fora da raiz do projeto, é oculto ou fica sob um diretório oculto | Uma sessão só escreve arquivos do projeto, e nunca sobre `.git` ou `.e2e`. |
+
+### Navegação
+
+| Ponto de entrada | Aceita | Recusa |
+| --- | --- | --- |
+| `app.open`, `browser.goto`, o verbo `navigate` do agente | `http:`, `https:` e o `about:blank` exato | Todos os outros esquemas |
+| A fixture [`request`](/reference/request) | `http:` e `https:`, sem credenciais na URL | Todos os outros esquemas, `about:blank` incluído |
+| `app.open(path)` em um alvo de dispositivo com `app.linkBase` | O link resultante da junção, ou um link absoluto: o esquema personalizado de um app, ou `http:` e `https:` | `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:` |
+| `device.openLink` | Qualquer URL absoluta: o esquema personalizado de um app, ou `http:` e `https:` | `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:` |
+| `device.openApp`, a ferramenta `open_app` | Um id de app | Um link |
+| O navegador que `e2e login` abre | `http:` e `https:` | Todos os outros esquemas; em vez disso, o link é impresso para você mesmo abrir |
+
+- O runner não verifica de novo os redirecionamentos nem se conecta a páginas
+  de popup. Registre `browser.onDialog` para tratar os diálogos do navegador.
+- Em um alvo de arquivo, um link ou um script na página pode, mesmo assim,
+  levar o navegador a qualquer arquivo que o navegador consegue ler. Ali não
+  se captura nenhuma observação para o modelo, nenhuma tela do trace nem texto
+  da tela de falha. As leituras do seu próprio teste (`textContent()`,
+  `screen.tree()`, `app.screenshot()`) continuam funcionando, já que o código
+  de teste é confiável.
+- Nenhuma captura de tela de um app de arquivo é enviada a um modelo nem
+  mantida automaticamente. `agent.assert` e uma falha não mantêm nenhuma, e
+  `vision: 'only'` é `POLICY_DENIED`. Uma página local pode embutir outro
+  arquivo em um frame, que a árvore deixa de fora e os pixels mostrariam.
+- Um [`video`](/reference/config#video) que você ativa grava o navegador aonde
+  quer que ele vá, inclusive um arquivo fora do diretório.
+- O diretório do arquivo do app é todo o escopo legível. Na raiz de um
+  projeto, isso inclui `.env` e `.git`.
+
+<Warning>
+Não há lista de origens permitidas. O agente pode seguir o app até outros
+sites e usar os segredos do passo neles.
+</Warning>
+
+### Credenciais de requisição
+
+A engine de navegador restringe as credenciais de requisição configuradas a
+origens exatas: o esquema, o host e a porta de `app.url`, mais as origens
+extras que `credentialOrigins` lista.
+
+| Opção | Vai para |
+| --- | --- |
+| `headers` | Toda requisição que começa em uma origem permitida |
+| `basicAuth` | A resposta a um desafio `401` de uma origem permitida |
+
+- Outra porta no mesmo host, um subdomínio e um host irmão sob um domínio
+  compartilhado como `vercel.app` são outras origens. Uma requisição que
+  começa ali não leva `headers`, e um `401` vindo dali não recebe resposta,
+  exceto nos casos que os próximos itens descrevem.
+- Os `headers` seguem a origem em que a requisição começa. Uma requisição
+  para uma origem permitida os mantém em todos os redirecionamentos, para
+  qualquer origem. Uma requisição que começa em outro lugar não recebe
+  nenhum, mesmo quando é redirecionada para uma origem permitida.
+- `basicAuth` responde à origem que envia o `401`. Um redirecionamento para
+  outra origem, como de `http:` para `https:` ou do domínio raiz para `www`,
+  não recebe resposta, a menos que você liste a origem onde ele termina.
+- No WebKit, `basicAuth` responde a um `401` de qualquer origem quando uma
+  origem permitida está na porta padrão do próprio esquema
+  (`https://staging.example.com`) ou tem um host IPv6. O WebKit não consegue
+  restringir uma credencial a uma origem assim.
+- Uma origem extra é uma origem `http:` ou `https:` sem caminho, query string
+  nem fragmento, como `https://api.example.com`. Qualquer outra coisa, um `*`
+  no host e a porta `0` são `INVALID_CONFIG` no carregamento da configuração.
+
+### Verificação de site
+
+A engine de navegador compara nomes de host para decidir o que conta como o
+site do alvo. As observações deixam de fora frames filhos de outros sites e
+frames `data:`.
+
+A verificação aproxima o domínio registrável sem uma lista de sufixos
+públicos. Um domínio de hospedagem compartilhado como `vercel.app` conta como
+um único site.
+
+### Preenchimentos de segredo
+
+Um `Secret` é uma referência opaca, sem nenhum método que exponha o valor em
+texto simples. Três destinos aceitam uma referência assim: o `fill` de um
+localizador, os parâmetros de um passo do agente e uma opção da engine que
+declare aceitar essa referência.
+
+```ts title="tests/stripe.e2e.ts"
+import { secrets, test } from 'e2e';
+
+test('connect Stripe', async ({ screen, agent }) => {
+  await screen.getByLabel('Secret key').fill(secrets.get('stripe-key'));
+  await agent.act('Connect Stripe with the given key', {
+    params: { apiKey: secrets.get('stripe-key') },
+  });
+});
+```
+
+| Preenchimento | Verificações antes de o valor ser resolvido |
+| --- | --- |
+| Guiado pelo modelo (`type_secret`) | O passo declarou o segredo. O segredo está configurado. O campo escolhido está habilitado, é editável e está na observação mais recente. Uma senha vai para um campo de senha. O replay repete essas verificações. |
+| `fill(secret)` determinístico | Nenhuma sobre o campo: foi o código de teste que o escolheu. Mesmo assim, o valor é registrado para a ocultação. |
+
+O runner resolve o valor no host e o passa para a engine. O modelo nunca vê
+nem escolhe esse valor.
+
+### Capturas de tela depois de um preenchimento de segredo
+
+Um preenchimento de segredo não desativa as capturas de tela. O modelo, as
+ferramentas de pixels e os artefatos que o runner mantém recebem as mesmas
+capturas de tela mascaradas antes e depois de um preenchimento.
+
+<Warning>
+Uma captura de tela mascara apenas campos seguros. Um segredo genérico
+preenchido em um campo comum aparece na imagem, assim como um valor que o app
+mostra em qualquer outro lugar, como atrás de um botão de mostrar senha. O
+provedor do modelo também recebe a imagem. Use credenciais de teste e trate
+as capturas de tela como [vídeos](#where-redaction-stops).
+</Warning>
+
+### Segredos nas opções da engine
+
+Um segredo em uma opção da engine, como
+`web({ basicAuth: { password: secrets.get(name) } })`, não é um preenchimento.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { secrets } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [
+    {
+      engine: web({
+        basicAuth: { username: 'preview', password: secrets.get('previewPassword') },
+      }),
+      app: { url: 'https://staging.example.com' },
+    },
+  ],
+  secrets: { previewPassword: () => process.env.PREVIEW_PASSWORD ?? '' },
+} satisfies E2EConfig;
+```
+
+- O runner resolve esse segredo no host quando cada tentativa começa.
+- O runner registra o valor para a ocultação, junto com o que a engine deriva
+  dele. Para basic auth, isso é o `user:password` em base64 no cabeçalho
+  `Authorization`.
+- O valor é ocultado dos relatórios, de `screen-at-failure.txt`, das páginas
+  de trace, do que o modelo e uma sessão do `e2e mcp` leem e dos downloads de
+  texto.
+- As capturas de tela e os pixels do modelo continuam ativados. Uma página
+  que mostra a senha na tela não é mascarada nos pixels.
+
+### Ocultação
+
+O runner substitui todo valor de segredo registrado por `<secret:name>`:
+
+- na entrada do modelo, incluindo resultados de ferramentas do projeto, campos de texto estruturados e mensagens de erro de ferramentas ou da engine,
+- nos relatórios e nas páginas de trace, incluindo os motivos para pular testes e os resultados de ferramentas do trace de IA,
+- nos downloads de texto,
+- no que o seu código imprime durante `e2e run`: testes, o código de nível
+  superior da configuração e dos arquivos de teste, filtros de testes e
+  reporters.
+
+Ele também oculta um valor passado como string simples em vez de uma
+referência de `secrets.get()`: títulos de testes e de `describe`, rótulos de
+passos (uma URL de `app.open`, o texto de um localizador), um `fill`, uma
+instrução de `agent.act` ou `agent.assert`, as strings nos parâmetros de
+`agent.act`, `agentContext`, o `system` do agente embutido e um objetivo de
+`e2e explore`.
+
+| Regra | Detalhe |
+| --- | --- |
+| Formas que correspondem | Como escrito, com escape de JSON, com escape de HTML e codificado em porcentagem, em qualquer combinação de maiúsculas e minúsculas (então o `text-transform` do CSS não esconde o valor), e com os espaços em branco colapsados. |
+| Texto cortado | Um texto cortado em um limite de tamanho é mascarado quando termina com pelo menos os 8 primeiros caracteres de um valor, ou com a metade de um valor de menos de 16 caracteres, como escrito ou com os espaços em branco colapsados. |
+| Tela observada | Toda string (nomes, texto, valores, test ids, atributos, seletores, caminhos de frame) é ocultada uma vez, antes que o modelo, a árvore de um executor, um descritor do cache de replay ou uma âncora final a leia. |
+| Títulos | Ocultados quando o runner coleta o arquivo de teste. O id do teste, `--grep`, os reporters e os nomes de arquivo de artefatos e de páginas de falha veem `<secret:name>`. Dois títulos que diferem apenas pelo valor de um segredo são um caminho de título duplicado. |
+| Executores | O `ctx.step` de um executor personalizado e o prompt do agente embutido carregam o marcador, então só uma referência consegue digitar o valor real. |
+| Saída da configuração | A saída impressa enquanto a configuração carrega aparece depois que ela termina de carregar. Se o carregamento falhar, a saída é retida. |
+| Tamanho mínimo | Um valor estático com menos de 6 caracteres é `INVALID_CONFIG`. Um provedor que retorna um valor assim faz o preenchimento falhar. |
+| Asserções | Não são afetadas. A ocultação reescreve apenas o que o runner relata. |
+| Entradas do cache | Valores de segredo e as partes cortadas deles nunca entram nelas. |
+
+### Chaves de provedor
+
+As chaves com que o seu provedor de modelo ou o seu agente de código se
+autentica são ocultadas do terminal, dos relatórios, das páginas de trace e do
+que a execução envia ao modelo, seja da tela, dos resultados de ferramentas, da
+prosa do próprio modelo ou de um texto `system` do agente embutido ou de `acp()`
+escrito por uma configuração. Um provedor ou proxy que repete uma chave
+rejeitada na própria mensagem de erro não consegue colocá-la em um relatório.
+Cada chave aparece como `<secret:NAME>`.
+
+| Origem | Nome no marcador |
+| --- | --- |
+| A variável de chave de cada [provedor de modelo](/models), como `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AI_GATEWAY_API_KEY` e `OPENROUTER_API_KEY`, mais `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CODEX_API_KEY`, `LLM_API_KEY`, `OPENCODE_API_KEY` e `VERCEL_OIDC_TOKEN`, no ambiente da execução ou de um agente `acp()` | A variável |
+| Um [login de assinatura](/subscriptions) que a execução envia | `<provider>.access-token`, `<provider>.refresh-token` |
+| O login que `codex()` encontra em `auth.json` sob o `CODEX_HOME` do agente, ou em `.codex` no diretório home do agente | `codex.api-key`, `codex.id-token`, `codex.access-token`, `codex.refresh-token` |
+| A chave de API em um `DEFAULT_AUTH_REQUEST` explícito que `codex()` envia ao próprio adaptador | `codex.api-key` |
+| Uma chave que você registra com [`registerProviderKey`](/executors#provider-keys) | O nome que você dá |
+
+| Regra | Detalhe |
+| --- | --- |
+| Só chaves inteiras | Uma chave corresponde como um todo, nas formas acima. Cortada em um limite de tamanho, ela corresponde quando pelo menos metade dela está presente, e nunca menos de 16 caracteres. Qualquer outra parte de uma chave não é uma correspondência: as chaves de um mesmo provedor começam de forma parecida. |
+| Tamanho | Um valor com menos de 20 caracteres é deixado como está, para que um placeholder de um servidor de modelos local, como `ollama`, não reescreva palavras comuns. Declare uma chave real mais curta sob [`secrets`](/reference/config#secrets). Um valor com mais de 8.192 caracteres também é deixado como está, assim como um mais curto para o qual a ocultação não consegue montar um padrão, como milhares de caracteres de pontuação: nenhum dos dois é uma chave ou um token que um provedor emite. |
+| Saída | A execução retém o fim de uma linha inacabada que ainda pode virar uma chave, como faz com um segredo. Um prompt impresso sem quebra de linha aparece junto com a próxima saída, e se perde se o teste depois bloquear o processo até que ele seja interrompido. |
+| Chaves carregadas durante um teste | O worker lê de novo as variáveis de provedor da lista antes de registrar um passo e antes de registrar um passo que falhou. Uma chave carregada em `beforeEach` passa a ser coberta nos passos seguintes. |
+| Downloads | Um app pode servir uma chave do runner passada por `inheritEnv`. Para cobrir uma chave fornecida apenas por `command.env`, declare também o valor dela sob `secrets`. Veja [Downloads](#downloads) para os limites da varredura. |
+| Erros | Quando um passo lança `MODEL_PROVIDER_FAILED`, `CONTEXT_OVERFLOW` ou `MODEL_OUTPUT_INVALID`, o erro capturado tem o texto ocultado e omite a causa bruta do SDK do provedor. Compare por `error.code`. |
+| Sessões | Uma chave de provedor nunca é adicionada aos segredos salvos de uma [sessão](#sessions). O que o app guarda no próprio estado, como o armazenamento do navegador, é salvo como o app o escreveu, criptografado. |
+| Uma chave que também é um segredo | Continua sendo um segredo seu: aparece com o nome do segredo, e as partes do valor também correspondem, como em qualquer segredo. |
+
+Estas chaves não são ocultadas:
+
+- uma chave passada no código, como `createOpenAI({ apiKey })`, a menos que
+  você a registre ou a declare sob [`secrets`](/reference/config#secrets),
+- uma chave em outra variável, como a de um provedor personalizado,
+- uma chave escrita no título de um teste ou de um `describe`, em um motivo
+  para pular ou em um objetivo de `e2e explore`. O runner e os workers dele
+  constroem ids de teste a partir desses textos e não precisam conhecer as
+  mesmas chaves. Declare a chave sob `secrets`,
+- `command.log`, como para todo segredo: o runner mantém a saída do seu app
+  como foi escrita, e o seu app recebe o que `inheritEnv` e `command.env` dão
+  a ele,
+- um login que um agente de código guarda no chaveiro do sistema operacional,
+  e o próprio arquivo de login do Claude Code,
+- o raciocínio do modelo e os argumentos das chamadas de ferramenta do próprio
+  modelo quando são enviados de volta a ele: um provedor assina o raciocínio
+  e recusa um raciocínio alterado, e uma chamada é reenviada como foi feita. A
+  prosa do modelo é ocultada,
+- uma chave de serviço em JSON ou um arquivo de chave, como
+  `AICORE_SERVICE_KEY` e `GOOGLE_APPLICATION_CREDENTIALS`,
+- no que o Node imprime quando `NODE_DEBUG` inclui `child_process` ou `net`,
+  todo token e toda senha que não seja um segredo da execução nem uma chave de
+  provedor acima. A execução [avisa](/reference/environment#diagnostics) e
+  continua.
+
+### Onde a ocultação termina
+
+A ocultação compara strings. Passam sem ocultação:
+
+- um valor transformado, como os quatro últimos caracteres dele,
+- um valor codificado por inteiro, como um hash, ou base64 fora de um
+  [download](#downloads) de texto e do `redact` de um filtro de testes,
+- um valor em outra forma de normalização Unicode, como acentos decompostos
+  onde o segredo tem acentos compostos,
+- um texto que remove os espaços em branco de dentro do valor. Um texto que
+  aumenta esses espaços também passa, exceto na tela observada, onde um campo
+  cuja forma colapsada contém o valor fica colapsado e mascarado,
+- um valor espalhado por vários nós, como um caractere por célula em um
+  teclado de PIN,
+- um sim ou não sobre um valor: no `e2e mcp`, uma contagem de `locate` diz se
+  a tela corresponde ao texto que o agente passou, `exact: false` incluído,
+  como faz uma asserção em um teste,
+- uma conversão de maiúsculas e minúsculas que muda o tamanho (`ß` mostrado
+  como `SS`), para a regra de texto cortado,
+- um valor que um provedor de segredo retorna, nos títulos, no que um filtro
+  de teste vê ou envia e em um briefing de `e2e explore --changed-since`, já
+  que os três são ocultados antes de qualquer provedor rodar,
+- a saída de console de testes que rodam no próprio processo do runner,
+  quando um host que incorpora o runner passa a configuração ou os testes em
+  memória,
+- na engine web, um campo de senha que um script da página esconde do e2e,
+  por exemplo substituindo `Element.prototype.matches`. O e2e lê esse campo
+  como um campo comum: a tela observada e `inputValue` mostram o valor dele, e
+  um `toHaveValue` que falha imprime esse valor. `getAttribute` e
+  `toHaveAttribute` fazem o mesmo quando o atributo HTML `value` contém o
+  valor. O valor de um segredo configurado continua sendo `<secret:name>`. As
+  capturas de tela continuam mascarando o campo, a menos que ele esteja em uma
+  shadow root fechada e a página também substitua `querySelectorAll`,
+- uma captura de tela, inclusive uma enviada ao modelo: ela mascara apenas
+  campos seguros, então um valor que o app mostra em outro lugar aparece na
+  imagem,
+- vídeo: ele não mascara nada e recebe o rótulo `redaction: "incomplete"`. Uma
+  gravação que um serviço de navegadores ou dispositivos hospedados mantém
+  fica com esse serviço, e o relatório guarda apenas a URL dela,
+- em um briefing de `e2e explore --changed-since`, uma sequência de menos de
+  8 caracteres de um valor, como uma última linha curta de uma chave de várias
+  linhas que o git imprime em uma linha própria,
+- `command.log`: o runner captura a saída do seu app como foi escrita.
+
+### Downloads
+
+O runner varre downloads de texto UTF-8 (`.txt`, `.csv`, `.json`, `.html` ou
+`.htm`) quando a sessão conhece um segredo do app ou uma [chave de provedor](#provider-keys).
+Quando só chaves de provedor são conhecidas, ele varre arquivos de até 16 MiB.
+A varredura roda depois que o arquivo é salvo, então uma leitura logo após
+`waitForDownload` pode ver os bytes originais. A varredura substitui por
+`<secret:name>`:
+
+- toda ocorrência inteira de um valor,
+- para um segredo, qualquer sequência de 8 ou mais caracteres dele, com os
+  espaços em branco colapsados ou não, então um texto sem relação que
+  compartilhe 8 caracteres com um valor também é mascarado; uma chave de
+  provedor só corresponde inteira,
+- uma sequência em base64 ou base64url que decodifica para qualquer um dos dois.
+
+Uma varredura bem-sucedida com um segredo do app rotula o download com
+`redaction: "complete"`. Uma varredura só de chaves de provedor mantém o rótulo
+`redaction: "incomplete"` mesmo quando substitui uma chave. Varreduras puladas
+ou que falharam deixam o download como o app o serviu e o rotulam como
+`incomplete`.
+
+### Sessões
+
+Uma sessão salva guarda o estado de autenticação. Ela também carrega, no mesmo
+texto cifrado, os valores de segredo que o teste de preparação resolveu a
+partir de um provedor. O teste que restaura a sessão oculta esses valores. O
+envelope guarda os nomes dos segredos, sem criptografia, mas autenticados.
+
+| Propriedade | Valor |
+| --- | --- |
+| Local | `sessions/<runId>/` sob o [diretório de saída](/reference/config#output) (padrão `.e2e/sessions/<runId>/`), modo de diretório `0700`, arquivos `0600` |
+| Cifra | AES-256-GCM, um IV novo de 12 bytes a cada salvamento |
+| Chave | 32 bytes aleatórios gerados por execução e mantidos em memória. Os workers recebem a chave por IPC, nunca pelo disco ou pelo ambiente. |
+| Vinculada a | Id da execução, alvo, nome e versão da engine, plataforma e identidade do app, todos autenticados como dados adicionais |
+| Tempo de vida | No máximo 24 horas, menos se o estado salvo declarar uma expiração anterior |
+| Limpeza | O diretório é removido quando a execução termina |
+
+O runner recusa uma sessão inválida, expirada, ausente ou que não corresponde.
+Veja os [erros de sessão](/reference/errors).
+
+### Confiança no cache
+
+As entradas do cache reproduzem ações sem um modelo e não são assinadas.
+
+| Regra | Detalhe |
+| --- | --- |
+| Validação | Toda entrada é validada antes do uso. Uma entrada inválida é um cache miss. |
+| Nome do arquivo | Um hash da chave esperada. Um arquivo maior que 1 MiB é recusado. |
+| Chave | Guarda o contexto do agente apenas como um hash do texto ocultado desse contexto. |
+| Conteúdo | Ações e um resumo ocultado. O replay roda apenas as ações. Os outros valores digitados são armazenados tal como foram digitados. |
+| Preenchimentos de segredo | Armazenam um nome e autorizam o preenchimento de novo no replay. |
+| Agente | Uma entrada gravada por um agente nunca é reproduzida para outro. |
+| Tela inicial | Uma entrada que não começa com uma navegação só é reproduzida na rota onde foi gravada: o mesmo caminho e a mesma query string, com os ids gerados ignorados. Uma rota na própria origem do app corresponde em qualquer deploy que compartilhe `app.identity`. Uma rota em outra origem mantém essa origem. Veja [Cache](/cache). |
+| CI | Um modo de cache que você não definiu vira `read-only`, a menos que você configure um `cache.store`. |
+| Git | `e2e init` ignora `.e2e/cache/`. Se você [fizer commit das gravações](/cache#commit-the-replay-cache), revise as ações e os valores digitados delas. |
+| `cache.store` | Recebe toda entrada gravada e fornece toda entrada reproduzida. O que volta é validado de novo. |
+
+### Artefatos
+
+Por padrão, uma execução escreve sob `.e2e/`. A opção
+[`output`](/reference/config#output) ou `--output` muda esse local. O cache de
+replay fica em `cache.dir`, e `command.log` vai para o caminho relativo ao
+projeto que você configurar.
+
+| Caminho | Conteúdo | Ocultação |
+| --- | --- | --- |
+| `report.json` | O registro da execução. Erros, trechos de raciocínio e resumos de ações passam pela ocultação. | completa |
+| `results/<test>/trace.md` | Páginas de trace, escritas a partir do relatório ocultado. | completa |
+| `results/.../*.png` | Capturas de tela, com os campos seguros mascarados. | completa |
+| `results/.../*.webm`, `*.mp4` | Vídeo, ativado com `video` ou `--video`. | incompleta |
+| `results/.../downloads/*` | Arquivos que o app serviu. Veja [Downloads](#downloads). | completa ou incompleta |
+| `results/.../screen-at-failure.txt` | A árvore ocultada no momento da falha. | completa |
+| `ai-trace.json` | Toda chamada ao modelo, exceto as de um filtro de testes. Ativado com `--ai-trace`. Os prompts são os prompts ocultados que o modelo viu. Os bytes de imagens inline são substituídos pelo tamanho das imagens. | como o prompt |
+| `sessions/<runId>/` | Sessões criptografadas, apagadas na limpeza. | criptografada |
+| `videos/<session>/*.webm`, `*.mp4` | Vídeos que uma sessão do `e2e mcp` gravou com `start_recording`, mantidos até você apagá-los. Nunca são entregues ao `artifacts.store`. | nenhuma |
+| `cache.dir` (padrão `.e2e/cache/`) | Entradas do cache de replay. | sem segredos por construção |
+| O caminho em `command.log` | O stdout e o stderr do seu app, literalmente. Precisa estar dentro da raiz do projeto. | nenhuma |
+
+Um `artifacts.store` recebe os bytes de cada artefato à medida que eles são
+produzidos, depois da ocultação dos downloads, com o rótulo `redaction` que o
+relatório registra.
+
+### Conexões de saída
+
+| Destino | Quando |
+| --- | --- |
+| `eu.i.posthog.com` | Uma requisição de telemetria por invocação da CLI ou por `run()` ou `explore()` de `e2e/runner` que retorna um relatório, mais no máximo uma por sessão que o `e2e mcp` atende, a menos que você desative ([Telemetria](/telemetry)). Uma requisição por relatório de `e2e feedback` enviado: nenhuma com `--dry-run` ou `E2E_TELEMETRY_DEBUG`, para um bug sem `--repro`, ou com `E2E_TELEMETRY_DISABLED` ou `DO_NOT_TRACK`. |
+| O seu provedor de modelo | Passos do agente que chamam um modelo. Testes determinísticos e passos reproduzidos por inteiro não fazem nenhuma chamada ao modelo. |
+| Os endpoints de login e de lista de modelos de um provedor de assinatura | `e2e login` e `e2e models` ([Assinaturas](/subscriptions)). |
+| O `readyUrl` do app | Verificações de prontidão de um app que o runner inicia. |
+| O download de navegador do Playwright | Uma vez, quando falta o navegador. |
+| O endpoint do DevTools em `web({ connect })` | Toda execução desse alvo. |
+| A API do GitHub | Apenas a partir do reporter `@e2e-dev/github`. |
+| O provedor do `model` que você passa | Apenas a partir de [`decisionFilter()`](/filters): o diff do que os commits mudam (um arquivo que só a árvore de trabalho muda, apenas pelo nome), os arquivos de teste e os arquivos de preparação que salvam as próprias sessões, ocultados como acontece com um [download de texto](#downloads), exceto um valor que um provedor de segredo retorna. |
+| `registry.npmjs.org` | No máximo uma requisição por dia a partir de um comando da CLI rodado em um terminal, para verificar se há uma versão mais nova do e2e. Pulada na CI, quando o stderr passa por um pipe, em `e2e mcp` e `e2e upgrade`, e com `E2E_UPDATE_CHECK_DISABLED`, `NO_UPDATE_NOTIFIER`, `E2E_TELEMETRY_DISABLED` ou `DO_NOT_TRACK`. Uma requisição por `e2e feedback` que você roda, pulada com `--allow-outdated` e com `E2E_TELEMETRY_DISABLED` ou `DO_NOT_TRACK`. Uma requisição por pacote `e2e` ou `@e2e-dev/*` que o projeto lista com uma versão do registry, a cada vez que você roda `e2e upgrade`, feita a `npm_config_registry` no lugar deste endereço quando o gerenciador de pacotes define essa variável; depois, o gerenciador de pacotes instala a partir do próprio registry. |
+| `api.limrun.com` (ou `LIMRUN_BASE_URL`) e os dispositivos dele | Apenas a partir de [`limrun()`](/integrations/limrun). Ele se autentica com `LIMRUN_API_KEY`. |
+| A API do Kernel e os navegadores hospedados dela | Apenas a partir de [`kernel()`](/integrations/kernel). |
+| `api.notte.cc` (ou `NOTTE_API_URL`) e os navegadores hospedados dele | Apenas a partir de [`notte()`](/integrations/notte). Ele se autentica com `NOTTE_API_KEY`. Para cada tentativa, ele inicia uma sessão, se conecta pela URL CDP da sessão, lê os downloads de volta do armazenamento de arquivos da sessão e encerra a sessão quando a tentativa termina. O link do console da sessão vai para o log; a URL do visualizador da sessão, que carrega um token, nunca vai. |
+| O hub CDP do TestMu AI e os navegadores hospedados dele | Apenas a partir de [`testmuBrowsers()`](/integrations/testmu#run-web-targets-in-browsers). O nome de usuário e a chave de acesso trafegam apenas na URL CDP, nunca em uma linha de log. |
+| `mobile-hub.lambdatest.com`, `mobile-api.lambdatest.com` (ou `TESTMU_API_ENDPOINT`) e `manual-api.lambdatest.com` | Apenas a partir de [`testmu()`](/integrations/testmu#run-mobile-targets-on-devices). Ele se autentica com `LT_USERNAME` e `LT_ACCESS_KEY`. Para cada sessão, o agent-device procura o dispositivo no catálogo da API, faz upload de um `app` local para `manual-api.lambdatest.com` e roda a sessão no hub Appium do TestMu AI. O provedor só pede à API o vídeo da sessão quando uma tentativa grava um. |
+| `hub-cloud.browserstack.com` e `api-cloud.browserstack.com` (ou `BROWSERSTACK_API_ENDPOINT`) | Apenas a partir de [`browserstack()`](/integrations/browserstack). Ele se autentica com `BROWSERSTACK_USERNAME` e `BROWSERSTACK_ACCESS_KEY`. Para cada sessão, o agent-device procura o dispositivo na API do App Automate, faz upload de um `app` local e roda a sessão no hub Appium da BrowserStack. Com uma URL `https` em `app`, o provedor faz a API buscar o build uma vez por execução, e só pede à API o vídeo da sessão quando uma tentativa grava um. |
+| `backend.revyl.ai` (ou `REVYL_API_URL`) | Apenas a partir de [`revyl()`](/integrations/revyl) e [`revylBrowsers()`](/integrations/revyl#run-web-targets-in-browsers). Os dois se autenticam com `REVYL_API_KEY`. Para cada worker, `revyl()` faz o plugin Revyl do agent-device iniciar um dispositivo Revyl, que baixa por conta própria o build da URL `https` em `app`, e encerra o dispositivo quando a execução o libera. Para cada tentativa, `revylBrowsers()` inicia uma sessão web da Revyl, se conecta por uma URL CDP de uso único que a Revyl repassa ao navegador da sessão e encerra a sessão quando a tentativa termina. Para uma tentativa que grava vídeo, ele baixa a gravação da sessão pela URL de armazenamento assinada que a Revyl retorna. A URL CDP nunca vai para o log. |
+| `api.e2b.app` e os sandboxes dele (ou `E2B_DOMAIN`, `E2B_API_URL`, `E2B_SANDBOX_URL`) | Apenas a partir de [`e2b()`](/integrations/e2b#run-android-targets) e [`e2bBrowsers()`](/integrations/e2b#run-web-targets-in-browsers). Ele se autentica com `E2B_API_KEY`. A engine alcança o agent-device ou o Chromium de cada sandbox por um túnel em `127.0.0.1` ([Como os sandboxes ficam privados](/integrations/e2b#how-the-sandboxes-stay-private)), e `e2b()` envia o `.apk` por esse túnel. Cada sandbox Android baixa o Node de `nodejs.org` se o Node não estiver presente e instala o agent-device pelo npm. |
+| A API do Expo e os daemons do agent-device dos simuladores | Apenas a partir de [`expoSimulators()`](/integrations/eas), ou do alias descontinuado dele, `easSimulators()`. Ele se autentica com `EXPO_TOKEN`, ou recorre ao login do eas-cli em `~/.expo/state.json`. Em um runner de CI, defina `EXPO_TOKEN` ou mantenha esse login fora do diretório home do runner. |
+| `mcr.microsoft.com` | Apenas a partir de [`smol()`](/integrations/smol), para baixar a imagem do Playwright. As máquinas então têm acesso irrestrito à rede e alcançam todas as portas do loopback do seu computador por `host.smolvm.internal`, não só as de `hostPorts` ([Configure o provedor](/integrations/smol#set-up-the-provider)). |
+| O registry de pacotes | Quando `e2e init` instala as dependências. |
+| O app em teste | Toda execução, mais o que quer que o próprio app carregue. |
+
+<Note>
+Não há envio de relatórios de crash.
+`--ai-trace` escreve um arquivo local e não faz upload dele. O código dos seus
+testes, os plugins e o app podem fazer outras conexões.
+</Note>
+
+### MCP e explore
+
+| Comando | Regra |
+| --- | --- |
+| `e2e mcp` | Usa stdio e a mesma autorização de ações de uma execução de teste. Quatro sessões abertas por padrão ([`--max-sessions`](/reference/mcp), de 1 a 16). Fecha sessões inativas. `open_session {engine}` carrega os pacotes instalados que o agente indica e chama as exportações que ele indica. Esse código roda com a autoridade total do servidor, como os imports de uma configuração. `engine` indica apenas pacotes, nunca um caminho ou uma URL, e o servidor não instala nada. |
+| `e2e explore` | Oferece toda credencial configurada a todo passo. O explorador vê nomes de contas e nomes de usuário. As senhas continuam sendo referências e precisam de uma engine que dê suporte a preenchimentos sensíveis; sem uma engine assim, o explorador as pula. Sem credenciais, ele pode fazer login com credenciais de teste inventadas, digitadas como texto simples. |
+| `e2e explore --changed-since` | Envia ao modelo as mensagens de commit, os nomes dos arquivos alterados e os patches commitados desde a base, cortados para caber no contexto do modelo. Em um job `pull_request` ou `pull_request_target` do GitHub Actions, ou em um pipeline de merge request do GitLab, ele também envia o título e a descrição do pull request. Um arquivo que nenhum commit alterou, como um que a CI escreveu, e as edições locais posteriores de um arquivo commitado vão só pelo nome e nunca são lidos. Os valores de segredo que a configuração fornece como strings, e as sequências de 8 ou mais caracteres desses valores, são ocultados de tudo isso. O valor de um provedor de segredo, e um segredo commitado no repositório que a configuração não declara, chegam ao modelo. |

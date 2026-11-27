@@ -113,6 +113,12 @@ translation moves or goes with it in the same change.
 | semantic tree | árvore semântica |
 | flaky, flaky test | instável, teste instável |
 | harness | harness (keep in English, o harness) |
+| hosted attempt (`openHost`), one-shot attempt | tentativa hospedada, tentativa avulsa |
+| policy denial | negação de política |
+| transport, manifest (engine protocol) | transporte, manifesto |
+| signal (engine protocol) | sinal |
+| outbound connection | conexão de saída |
+| crash reporting | envio de relatórios de crash |
 | simulator, emulator | simulador, emulador (simulador iOS, emulador Android) |
 | real device | dispositivo real |
 | lease (a device or browser) | reserva, reservar (`DeviceLease` in code) |
