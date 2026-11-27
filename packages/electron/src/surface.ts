@@ -468,7 +468,7 @@ export class ElectronSurface {
     }
     const source = functionSource(fn, 'window.evaluate');
     // Its message is the test's, never read for a pattern.
-    const run = window.page.evaluateInPage(source, payload).catch((cause: unknown) => {
+    const run = window.page.evaluateInPage(source, payload === undefined ? undefined : (JSON.parse(payload) as unknown)).catch((cause: unknown) => {
       throw cause instanceof PageEvaluateError ? new TestError('EVALUATE_FAILED', `window.evaluate: ${cause.message}`, { cause }) : cause;
     });
     // A cancelled step never awaits it.

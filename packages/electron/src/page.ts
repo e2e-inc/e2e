@@ -200,9 +200,20 @@ export class PageTarget implements InputTarget {
    * and its result returned by value. Rejects with `PageEvaluateError` when
    * the code throws.
    */
-  async evaluateInPage(source: string, argument: string | undefined): Promise<unknown> {
-    const expression = `(async () => (${plainData.toString()})(await (${source})(${argument ?? ''})))()`;
-    const { result, exceptionDetails } = await this.session.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true });
+  async evaluateInPage(source: string, arg: unknown): Promise<unknown> {
+    const { session } = this;
+    // The argument travels as a protocol value, never as text in the code that runs.
+    const { result: scope } = await session.send('Runtime.evaluate', { expression: 'globalThis' });
+    if (scope.objectId === undefined) throw new Error('the page has no global object to run code on');
+    const { result, exceptionDetails } = await session.send('Runtime.callFunctionOn', {
+      objectId: scope.objectId,
+      functionDeclaration: `async function (arg) { return (${plainData.toString()})(await (${source})(arg)); }`,
+      arguments: arg === undefined ? [] : [{ value: arg }],
+      returnByValue: true,
+      awaitPromise: true,
+      userGesture: true,
+    });
+    void session.send('Runtime.releaseObject', { objectId: scope.objectId }).catch(() => undefined);
     if (exceptionDetails !== undefined) throw new PageEvaluateError(thrown(exceptionDetails).split('\n')[0] ?? exceptionDetails.text);
     // NaN, an infinity, and -0 have no JSON: the protocol names them instead.
     return result.unserializableValue === undefined ? result.value : Number(result.unserializableValue);
