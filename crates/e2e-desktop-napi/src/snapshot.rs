@@ -620,9 +620,10 @@ impl Walk {
             .or_else(|| read.description.clone())
             .or_else(|| if roles::text(role) { label(text_value.clone()) } else { None })
             .or_else(|| if roles::takes_text(role) { read.placeholder.clone() } else { None });
-        // A heading keeps a description that is also its name: the engine reads a level the app gives no other way from it
+        // A heading with no AXHeadingLevel keeps a description that is also its name: the engine reads its level from it
         // (`heading level 2`).
-        let description = read.description.clone().filter(|description| role == "heading" || Some(description) != name.as_ref());
+        let level_in_description = role == "heading" && read.heading_level.is_none();
+        let description = read.description.clone().filter(|description| level_in_description || Some(description) != name.as_ref());
 
         let mut states = Vec::new();
         // The app's focused element is the one source: a table's cells report the table's focus as their own.
