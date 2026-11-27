@@ -23,26 +23,20 @@ describe('the project\'s electron package', () => {
     writeFileSync(path.join(electron, 'package.json'), JSON.stringify({ name: 'electron', version: '45.5.0', main: 'index.js' }));
     writeFileSync(path.join(electron, 'index.js'), '');
     writeFileSync(path.join(override, 'electron'), '');
-    expect(describeExecutable(project, undefined).status).toBe('warn');
-    process.env['ELECTRON_OVERRIDE_DIST_PATH'] = override;
-    try {
-      expect(resolveExecutable(project, undefined)).toBe(path.join(override, 'electron'));
-      expect(describeExecutable(project, undefined).status).toBe('pass');
-    } finally {
-      delete process.env['ELECTRON_OVERRIDE_DIST_PATH'];
-    }
+    expect(describeExecutable(project, undefined, {}).status).toBe('warn');
+    // The run's environment, which a host may hand a worker other than this process's own.
+    const env = { ELECTRON_OVERRIDE_DIST_PATH: override };
+    expect(resolveExecutable(project, undefined, env)).toBe(path.join(override, 'electron'));
+    expect(describeExecutable(project, undefined, env).status).toBe('pass');
+    expect(process.env['ELECTRON_OVERRIDE_DIST_PATH']).toBeUndefined();
   });
 
   it('names the variable, and downloads nothing, when ELECTRON_OVERRIDE_DIST_PATH points where no binary is', async () => {
     const project = path.join(root, 'project');
-    process.env['ELECTRON_OVERRIDE_DIST_PATH'] = path.join(root, 'nowhere');
-    try {
-      expect(() => resolveExecutable(project, undefined)).toThrow(/ELECTRON_OVERRIDE_DIST_PATH/);
-      await expect(ensureElectronBinary(project, undefined, () => undefined, new AbortController().signal)).rejects.toThrow(/ELECTRON_OVERRIDE_DIST_PATH/);
-      expect(describeExecutable(project, undefined)).toMatchObject({ status: 'fail', message: expect.stringContaining('ELECTRON_OVERRIDE_DIST_PATH') });
-    } finally {
-      delete process.env['ELECTRON_OVERRIDE_DIST_PATH'];
-    }
+    const env = { ELECTRON_OVERRIDE_DIST_PATH: path.join(root, 'nowhere') };
+    expect(() => resolveExecutable(project, undefined, env)).toThrow(/ELECTRON_OVERRIDE_DIST_PATH/);
+    await expect(ensureElectronBinary(project, undefined, env, () => undefined, new AbortController().signal)).rejects.toThrow(/ELECTRON_OVERRIDE_DIST_PATH/);
+    expect(describeExecutable(project, undefined, env)).toMatchObject({ status: 'fail', message: expect.stringContaining('ELECTRON_OVERRIDE_DIST_PATH') });
   });
 });
 
@@ -62,19 +56,19 @@ describe('app.appPath', () => {
 
 describe('executablePath', () => {
   it('starts a regular file it may execute', async () => {
-    expect(resolveExecutable(root, 'run.sh')).toBe(path.join(root, 'run.sh'));
-    expect(describeExecutable(root, 'run.sh').status).toBe('pass');
+    expect(resolveExecutable(root, 'run.sh', {})).toBe(path.join(root, 'run.sh'));
+    expect(describeExecutable(root, 'run.sh', {}).status).toBe('pass');
   });
 
   it('refuses a directory, such as an .app bundle, and a file it may not execute, in doctor as at launch', async () => {
     // Windows has no execute permission: any file it can read is one it may start.
     const refused = process.platform === 'win32' ? ['MyApp.app', 'missing'] : ['MyApp.app', 'package.json', 'missing'];
     for (const name of refused) {
-      expect(() => resolveExecutable(root, name)).toThrow(/not an executable file/);
-      expect(describeExecutable(root, name)).toMatchObject({ status: 'fail', message: expect.stringContaining('not an executable file') });
+      expect(() => resolveExecutable(root, name, {})).toThrow(/not an executable file/);
+      expect(describeExecutable(root, name, {})).toMatchObject({ status: 'fail', message: expect.stringContaining('not an executable file') });
     }
-    expect(() => resolveExecutable(root, 'MyApp.app')).toThrow(path.join(root, 'MyApp.app', 'Contents', 'MacOS', 'MyApp'));
+    expect(() => resolveExecutable(root, 'MyApp.app', {})).toThrow(path.join(root, 'MyApp.app', 'Contents', 'MacOS', 'MyApp'));
     // Checked once in prepare, so a wrong path is one error for the run.
-    await expect(ensureElectronBinary(root, 'missing', () => undefined, new AbortController().signal)).rejects.toThrow(/not an executable file/);
+    await expect(ensureElectronBinary(root, 'missing', {}, () => undefined, new AbortController().signal)).rejects.toThrow(/not an executable file/);
   });
 });

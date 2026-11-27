@@ -92,11 +92,11 @@ export class ElectronSurface {
   // --- run and worker lifecycle ---
 
   async prepare(info: EnginePrepareInfo): Promise<void> {
-    await ensureElectronBinary(info.projectRoot, this.options.executablePath, info.log, info.signal);
+    await ensureElectronBinary(info.projectRoot, this.options.executablePath, info.env, info.log, info.signal);
   }
 
   doctor(info: EngineDoctorInfo): Promise<readonly EngineDoctorCheck[]> {
-    const executable = describeExecutable(info.projectRoot, this.options.executablePath);
+    const executable = describeExecutable(info.projectRoot, this.options.executablePath, info.env);
     const checks: EngineDoctorCheck[] = [{ id: 'electron', status: executable.status, message: executable.message }];
     const problem = info.app.appPath === undefined ? undefined : appPathProblem(info.projectRoot, info.app.appPath);
     if (problem !== undefined) checks.push({ id: 'electron-app', status: 'fail', message: problem });
@@ -107,7 +107,7 @@ export class ElectronSurface {
     this.projectRoot = info.projectRoot;
     this.appInfo = info.app;
     this.runEnv = info.env;
-    this.executable = resolveExecutable(info.projectRoot, this.options.executablePath);
+    this.executable = resolveExecutable(info.projectRoot, this.options.executablePath, info.env);
     // Checked once here, so a wrong path is one error rather than every test's launch failing.
     const problem = info.app.appPath === undefined ? undefined : appPathProblem(info.projectRoot, info.app.appPath);
     if (problem !== undefined) throw new ConfigurationError('INVALID_CONFIG', problem);
