@@ -125,6 +125,12 @@ describe('routeLocation', () => {
     expect(routeLocation('file:///srv/app/index.html#/orders/123')).toBe('file:///srv/app/index.html#/orders/:id');
   });
 
+  it('stores a token in a path segment as :id, a signed token\'s dots included', () => {
+    expect(routeLocation('/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fw')).toBe('/reset/:id');
+    expect(routeLocation('/docs/v1.2.3')).toBe('/docs/v1.2.3');
+    expect(routeLocation('/settings/notifications')).toBe('/settings/notifications');
+  });
+
   it('spells a fragment route with its document path, so the location names a page the app serves', () => {
     expect(routeLocation('/#/list')).toBe('/#/list');
     expect(routeLocation('/app/#/orders/123?x=abc')).toBe('/app/#/orders/:id?x=:id');
@@ -160,6 +166,7 @@ describe('routeLocation', () => {
       '/app/#/orders/123?x=abc',
       'https://<secret:tenant>.example.org/callback?code=abc',
       'file:///srv/app/about.html?tab=summary',
+      '/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fw',
     ]) {
       expect(routeLocation(routeLocation(location))).toBe(routeLocation(location));
     }

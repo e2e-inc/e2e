@@ -250,8 +250,8 @@ end-state checks. Recordings never store prompts, transcripts, screenshots,
 DOM trees, or secret values (secret fills store only the secret's name).
 
 A stored screen keeps the route but not its values: every query value, and
-every path segment that reads as an id, is stored as `:id`. A path segment
-of letters only reads as a route word and is stored as it is.
+every path segment that reads as an id or a token, is stored as `:id`. A
+path segment of letters only reads as a route word and is stored as it is.
 
 <Warning>
 Non-secret typed values are stored verbatim. Review cache diffs before

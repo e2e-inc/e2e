@@ -229,7 +229,8 @@ export function addressKey(location: string): string {
 
 /**
  * A location as a recording keeps it: each path segment the app minted per
- * record as `:id`, and every non-empty query value as `:id`, its key kept.
+ * record, or shaped like a token, as `:id`, and every non-empty query value
+ * as `:id`, its key kept.
  * A query value is often a token or a code (a magic link, an OAuth
  * callback), and one of letters only reads as a word to the route rule, so
  * no query value is written to an entry or a report. A path segment of
@@ -245,10 +246,19 @@ export function routeLocation(location: string): string {
   const route = routeOf(location);
   if (route.kind === 'opaque') return unparsedLocation(location);
   // An app that routes in the fragment is spelled with its document path and `#`, so the location names a page it serves.
-  const document = route.document === undefined ? '' : `${route.document.split('/').map((raw) => (raw === '' ? raw : spellPart(segmentOf(raw, true)))).join('/')}#`;
-  const path = `/${route.segments.map(spellPart).join('/')}`;
+  const document = route.document === undefined ? '' : `${route.document.split('/').map((raw) => (raw === '' ? raw : storedSegment(decodeSegment(raw)))).join('/')}#`;
+  const path = `/${route.segments.map(storedSegment).join('/')}`;
   const query = route.query.map(([key, value]) => `${spellPart(key)}=${value === '' ? '' : PARAM}`).join('&');
   return `${route.origin ?? ''}${document}${path}${query === '' ? '' : `?${query}`}`;
+}
+
+/**
+ * A path segment as a recording keeps it: `:id` when it is shaped like a
+ * value minted per record or a token (`MINTED_VALUE`: a signed token's dots
+ * included, which a route never compares on), else as a URL spells it.
+ */
+function storedSegment(segment: string): string {
+  return segment === PARAM || MINTED_VALUE.some((pattern) => pattern.test(segment)) ? PARAM : spellPart(segment);
 }
 
 /**
