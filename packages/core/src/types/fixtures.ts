@@ -44,11 +44,12 @@ export type SuiteFixtures = WorkerFixtures;
  * everything after is its teardown. The fixtures it destructures in its
  * first parameter are the ones it depends on, set up before it; one that
  * needs none writes `async ({}, use) => {}`. The third parameter is `TestInfo`
- * for a test fixture and `WorkerInfo` for a worker fixture. The body, its
- * hooks, and the fixtures that name it run while `use` is pending; it resolves
- * once they are done, whether or not the body failed.
+ * for a test fixture and `WorkerInfo` for a worker fixture; `Info` defaults to
+ * `WorkerInfo`, which both receive, so a fixture typed without it fits either
+ * scope. The body, its hooks, and the fixtures that name it run while `use`
+ * is pending; it resolves once they are done, whether or not the body failed.
  */
-export type FixtureFn<Fixtures, Value, Info = TestInfo> = (
+export type FixtureFn<Fixtures, Value, Info = WorkerInfo> = (
   fixtures: Fixtures,
   use: (value: Value) => Promise<void>,
   info: Info,

@@ -15,7 +15,7 @@ import { resultId } from '@e2e-dev/core/lib/internal/ids';
 import { packageVersion } from '@e2e-dev/core/lib/internal/package-version';
 import type { RunEventFact, RunEventOf, RunEventResult, SetupStep } from '../run/events.ts';
 import type { AppLogRecord, StepRecord } from '@e2e-dev/core/lib/run/steps';
-import { cleanupErrorsOf, expectedFailureOf, failureBeforeSkip, type ArtifactRecord, type AttemptRecord, type AttemptStatus, type FailureEvidence, type ResultStatus, type SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
+import { cleanupErrorsOf, expectedFailureOf, failureBeforeSkip, memberRan, verdictAttempt, type ArtifactRecord, type AttemptRecord, type AttemptStatus, type FailureEvidence, type ResultStatus, type SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
 import type { Reporter, ReporterSummary } from '../run-types.ts';
 import { annotationLabel, shownAnnotations, type Annotated } from './annotations.ts';
 import { builtin } from './builtin-id.ts';
@@ -177,7 +177,7 @@ function passingRunSteps(
 function attemptDetails(attempts: readonly AttemptRecord[], passed: boolean, configured: ConfiguredModel | undefined): ResultDetails {
   const steps = attempts.map((attempt) => attempt.steps);
   // A retry the run interrupted tells nothing; the failure before it is the verdict.
-  const told = attempts.findLast((attempt) => attempt.status !== 'interrupted') ?? attempts.at(-1);
+  const told = verdictAttempt(attempts);
   return {
     durationMs: attempts.reduce((total, attempt) => total + attempt.durationMs, 0),
     usage: stepsUsage(steps),
@@ -259,7 +259,8 @@ function serialMemberDetails(group: SerialGroupRecord, testId: string, passed: b
     appLog: appLogSummary(own?.appLog ?? []),
     cleanupErrors: cleanupErrorsOf(group.attempts),
     skipReason: neverRan ? undefined : own.skip?.reason,
-    annotated: neverRan ? undefined : own,
+    // A member that skipped itself ran, and may have pushed annotations first.
+    annotated: own !== undefined && memberRan(own) ? own : undefined,
     replays: replayNotices(steps, configured),
   };
 }

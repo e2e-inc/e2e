@@ -241,10 +241,11 @@ test.each([
 ])('ships %s for %s', async (speed, price, { screen }) => {});
 ```
 
-- The body gets the row first and the fixtures last. When every row is an
-  array, each row is spread, so `[speed, price]` arrives as
-  `(speed, price, fixtures)`. When any row is not an array, every row
-  arrives whole, as `(row, fixtures)`, as in Vitest and Jest.
+- The body gets the row first, then the fixtures, then
+  [`TestInfo`](#test-info). When every row is an array, each row is spread,
+  so `[speed, price]` arrives as `(speed, price, fixtures, testInfo)`. When
+  any row is not an array, every row arrives whole, as
+  `(row, fixtures, testInfo)`, as in Vitest and Jest.
 - The body names the [fixtures](#fixtures) it uses by destructuring the
   parameter after the row, and e2e sets up only those. A body that uses none
   can leave the parameter out.
@@ -291,7 +292,7 @@ test.each([
 #### `test.for`
 
 [`test.each`](#test-each), except an array row is not spread: the body
-always takes `(row, fixtures)`. Titles are formatted the same way.
+always takes `(row, fixtures, testInfo)`. Titles are formatted the same way.
 
 ```ts
 test.for([
@@ -464,7 +465,10 @@ test('checks out', { annotation: { type: 'issue', description: 'https://example.
   far.
 - `testInfo.timeout` reflects changes made by `test.setTimeout()` and
   `test.slow()`, and `testInfo.duration` reports elapsed milliseconds.
-- `testInfo.outputDir` is the attempt's artifact directory;
+- `testInfo.file`, `line`, and `column` name where the test is declared,
+  which may be a module the test file imports.
+- `testInfo.outputDir` is the attempt's artifact directory (a directory of
+  its own inside the group's for a member of a [`serial`](#serial) group);
   `testInfo.outputPath(...segments)` resolves a path inside it and refuses
   paths that escape `outputDir`.
 - `testInfo.annotations` starts with the annotations declared on enclosing
@@ -475,6 +479,7 @@ test('checks out', { annotation: { type: 'issue', description: 'https://example.
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | Calling `test.info()` inside `beforeAll`, `afterAll`, a worker-scoped fixture, or a hosted session without a running test; or passing a path that escapes `outputDir` to `testInfo.outputPath()`. |
+| `CANCELLED` | Calling `test.info()` from work its test left running, such as a body that continues past its timeout. |
 | `COLLECTION_ERROR` | Calling `test.info()` outside a running test (such as at file top level or inside `describe`). |
 
 #### `test.only`
@@ -1729,13 +1734,16 @@ export type SuiteFixtures = WorkerFixtures;
  * Defines one fixture: everything before `await use(value)` is its setup,
  * everything after is its teardown. The fixtures it destructures in its
  * first parameter are the ones it depends on, set up before it; one that
- * needs none writes `async ({}, use) => {}`. The body, its hooks, and the
- * fixtures that name it run while `use` is pending; it resolves once they
- * are done, whether or not the body failed.
+ * needs none writes `async ({}, use) => {}`. The third parameter is `TestInfo`
+ * for a test fixture and `WorkerInfo` for a worker fixture; `Info` defaults to
+ * `WorkerInfo`, which both receive, so a fixture typed without it fits either
+ * scope. The body, its hooks, and the fixtures that name it run while `use`
+ * is pending; it resolves once they are done, whether or not the body failed.
  */
-export type FixtureFn<Fixtures, Value> = (
+export type FixtureFn<Fixtures, Value, Info = WorkerInfo> = (
   fixtures: Fixtures,
   use: (value: Value) => Promise<void>,
+  info: Info,
 ) => Promise<void>;
 
 /**
@@ -1744,15 +1752,16 @@ export type FixtureFn<Fixtures, Value> = (
  * anything names it.
  */
 export type TestFixtureDefinition<Fixtures, Value> =
-  | FixtureFn<Fixtures, Value>
-  | readonly [FixtureFn<Fixtures, Value>, { readonly scope?: 'test'; readonly auto?: boolean }];
+  | FixtureFn<Fixtures, Value, TestInfo>
+  | readonly [FixtureFn<Fixtures, Value, TestInfo>, { readonly scope?: 'test'; readonly auto?: boolean }];
 /**
  * A worker fixture: its function and `{ scope: 'worker' }`. It sees worker
- * fixtures only. With `auto: true` it is set up once per worker, before the
- * first test or suite hook of its chain, whether or not anything names it.
+ * fixtures and `WorkerInfo` only. With `auto: true` it is set up once per
+ * worker, before the first test or suite hook of its chain, whether or not
+ * anything names it.
  */
 export type WorkerFixtureDefinition<Worker, Value> = readonly [
-  FixtureFn<Worker, Value>,
+  FixtureFn<Worker, Value, WorkerInfo>,
   { readonly scope: 'worker'; readonly auto?: boolean },
 ];
 /**
@@ -1804,10 +1813,12 @@ export type FixtureOverrides<Sees, WorkerSees, Base = Sees, Worker = WorkerSees>
  * The override of a worker fixture with options receives worker fixtures
  * (`WorkerSees`) only, whatever its scope: TypeScript can't type the
  * function of a tuple by the `scope` beside it. A function without options
- * is a test fixture, so it receives every fixture (`Sees`).
+ * is a test fixture, so it receives every fixture (`Sees`). The same holds
+ * for its info argument: typed `WorkerInfo`, it is the test's `TestInfo` at
+ * run time when the override's scope is `test`, which extends `WorkerInfo`.
  */
 export type FixtureOverride<Base, Worker, K extends keyof Base, Sees, WorkerSees> = K extends keyof Worker
-  ? FixtureFn<Sees, Base[K]> | readonly [FixtureFn<WorkerSees, Base[K]>, { readonly scope?: FixtureScope; readonly auto?: boolean }]
+  ? FixtureFn<Sees, Base[K], TestInfo> | readonly [FixtureFn<WorkerSees, Base[K], WorkerInfo>, { readonly scope?: FixtureScope; readonly auto?: boolean }]
   : TestFixtureDefinition<Sees, Base[K]>;
 /** The names in `Overrides` that are test fixtures: every override not declared with `scope: 'worker'`. */
 export type TestOverrides<Overrides> = {
@@ -1897,19 +1908,24 @@ export interface TestInfo extends WorkerInfo {
  * parameter (`async ({ app, screen }) => {}`), and the runner sets up only
  * those; a body that takes the whole object (`async (fixtures) => {}`) or a
  * rest property is a `COLLECTION_ERROR`. The same holds for a hook and for
- * the first parameter of a `test.extend()` fixture. The optional second
- * parameter receives `TestInfo`.
+ * the first parameter of a `test.extend()` fixture. The second parameter
+ * receives `TestInfo`; a body may leave it out.
  */
 export type TestFn<Fixtures = TestFixtures> = (fixtures: Fixtures, testInfo: TestInfo) => void | Promise<void>;
 
-/** A setup test body; `session.save` is the extra fixture, and the optional second parameter receives `TestInfo`. */
+/** A setup test body; `session.save` is the extra fixture, and the second parameter receives `TestInfo`. */
 export type SetupFn<Fixtures = TestFixtures> = (
   fixtures: Fixtures & SetupFixtures,
   testInfo: TestInfo,
 ) => void | Promise<void>;
 
-/** A hook body: `beforeEach` and `afterEach` get the test's fixtures and `TestInfo`, `beforeAll` and `afterAll` its worker fixtures and `WorkerInfo`. */
-export type TestHookFn<Fixtures = TestFixtures, Info = TestInfo> = (fixtures: Fixtures, info: Info) => void | Promise<void>;
+/**
+ * A hook body: `beforeEach` and `afterEach` get the test's fixtures and
+ * `TestInfo`, `beforeAll` and `afterAll` its worker fixtures and `WorkerInfo`.
+ * `Info` defaults to `WorkerInfo`, which both receive, so a hook typed without
+ * it fits all four.
+ */
+export type TestHookFn<Fixtures = TestFixtures, Info = WorkerInfo> = (fixtures: Fixtures, info: Info) => void | Promise<void>;
 
 /** @deprecated use `TestHookFn<WorkerFixtures, WorkerInfo>`. */
 export type SuiteHookFn = TestHookFn<WorkerFixtures, WorkerInfo>;

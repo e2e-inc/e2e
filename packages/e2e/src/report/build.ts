@@ -17,7 +17,7 @@ import { projectRelativePath } from '@e2e-dev/core/lib/internal/source';
 import type { VcsInfo } from '../internal/vcs.ts';
 import { summarizeResults } from './summary.ts';
 import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
-import { expectedFailureOf, someSkippedAfterFailure } from '@e2e-dev/core/lib/run/records';
+import { expectedFailureOf, someSkippedAfterFailure, verdictAttempt } from '@e2e-dev/core/lib/run/records';
 import { describeTarget, type TargetProvenance } from '@e2e-dev/core/lib/run/provision';
 import type { EngineSpiVersion } from '@e2e-dev/core/lib/engine/contract';
 import type {
@@ -696,7 +696,7 @@ function resultAnnotations(
   result: ResultRecord,
   serialGroupsById: ReadonlyMap<string, SerialGroupRecord>,
 ): readonly TestAnnotation[] {
-  if (result.serialGroupId === undefined) return shownAnnotations(result.attempts.at(-1), result.test.annotations);
+  if (result.serialGroupId === undefined) return shownAnnotations(verdictAttempt(result.attempts), result.test.annotations);
   const group = serialGroupsById.get(result.serialGroupId);
   const verdict = group?.attempts
     .filter((attempt) => !attempt.cutRetry)

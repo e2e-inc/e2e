@@ -955,17 +955,22 @@ export interface SetupOptions extends Omit<TestOptions, 'session' | 'only' | 'sk
  * parameter (`async ({ app, screen }) => {}`), and the runner sets up only
  * those; a body that takes the whole object (`async (fixtures) => {}`) or a
  * rest property is a `COLLECTION_ERROR`. The same holds for a hook and for
- * the first parameter of a `test.extend()` fixture. The optional second
- * parameter receives `TestInfo`.
+ * the first parameter of a `test.extend()` fixture. The second parameter
+ * receives `TestInfo`; a body may leave it out.
  */
 export type TestFn<Fixtures = TestFixtures> = (fixtures: Fixtures, testInfo: TestInfo) => void | Promise<void>;
-/** A setup test body; `session.save` is the extra fixture, and the optional second parameter receives `TestInfo`. */
+/** A setup test body; `session.save` is the extra fixture, and the second parameter receives `TestInfo`. */
 export type SetupFn<Fixtures = TestFixtures> = (
   fixtures: Fixtures & SetupFixtures,
   testInfo: TestInfo,
 ) => void | Promise<void>;
-/** A hook body: `beforeEach` and `afterEach` get the test's fixtures and `TestInfo`, `beforeAll` and `afterAll` its worker fixtures and `WorkerInfo`. */
-export type TestHookFn<Fixtures = TestFixtures, Info = TestInfo> = (fixtures: Fixtures, info: Info) => void | Promise<void>;
+/**
+ * A hook body: `beforeEach` and `afterEach` get the test's fixtures and
+ * `TestInfo`, `beforeAll` and `afterAll` its worker fixtures and `WorkerInfo`.
+ * `Info` defaults to `WorkerInfo`, which both receive, so a hook typed without
+ * it fits all four.
+ */
+export type TestHookFn<Fixtures = TestFixtures, Info = WorkerInfo> = (fixtures: Fixtures, info: Info) => void | Promise<void>;
 /** @deprecated use `TestHookFn<WorkerFixtures, WorkerInfo>`. */
 export type SuiteHookFn = TestHookFn<WorkerFixtures, WorkerInfo>;
 /** A `describe` body. An async body is a type error. */

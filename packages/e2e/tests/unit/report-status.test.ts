@@ -329,3 +329,18 @@ describe('run limits', () => {
     });
   });
 });
+
+describe('result annotations', () => {
+  it('come from the verdict attempt, not a retry the run interrupted', () => {
+    const failed = failedResult(productFailure);
+    const verdictAttempt: AttemptRecord = { ...failed.attempts[0]!, annotations: [{ type: 'attempt', description: 'first' }] };
+    const interrupted: AttemptRecord = {
+      ...failedAttempt(productFailure),
+      index: 1,
+      status: 'interrupted',
+      annotations: [{ type: 'attempt', description: 'interrupted' }],
+    };
+    const document = build({ results: [{ ...failed, attempts: [verdictAttempt, interrupted] }] });
+    expect(document.run.results[0]!.annotations).toEqual([{ type: 'attempt', description: 'first' }]);
+  });
+});

@@ -10,7 +10,7 @@ import type { ModuleRegistration } from '../collect/registry.ts';
 import type { Selection, TestTargetPair } from '../collect/select.ts';
 import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import { isAbandonedRejection } from '@e2e-dev/core/lib/internal/abandoned';
-import { classifyError, ConfigurationError, InfrastructureError, serializeError } from '@e2e-dev/core/lib/internal/errors';
+import { classifyError, ConfigurationError, serializeError } from '@e2e-dev/core/lib/internal/errors';
 import type { DebugTrace } from '@e2e-dev/core/lib/internal/debug';
 import type { InMemoryAttempts } from './execute.ts';
 import type { SessionStore } from '@e2e-dev/core/lib/run/sessions';
@@ -47,8 +47,45 @@ export interface InProcessRunnerOptions {
   readonly envFor: (targetName: string) => Readonly<Record<string, string | undefined>>;
 }
 
-/** Number of live in-process runners; `runner.ts` caps in-process runs at 1 so `process.env` never interleaves. */
-let liveInProcessRunners = 0;
+/**
+ * The slots of live in-process runners, oldest first. One run caps its
+ * in-process workers at 1, but two programmatic runs in one process may be
+ * live at once, and `process.env` holds one value: it names the newest live
+ * runner's slots, and the values from before the first are back once the
+ * last ends. `testInfo` carries each attempt's own slots either way.
+ */
+const liveSlots: WorkerSlots[] = [];
+let envBeforeInProcessRuns: Readonly<Record<'TEST_WORKER_INDEX' | 'TEST_PARALLEL_INDEX', string | undefined>> | undefined;
+
+function claimWorkerEnv(slots: WorkerSlots): void {
+  envBeforeInProcessRuns ??= {
+    TEST_WORKER_INDEX: process.env['TEST_WORKER_INDEX'],
+    TEST_PARALLEL_INDEX: process.env['TEST_PARALLEL_INDEX'],
+  };
+  liveSlots.push(slots);
+  writeWorkerEnv(slots);
+}
+
+function releaseWorkerEnv(slots: WorkerSlots): void {
+  const index = liveSlots.indexOf(slots);
+  if (index !== -1) liveSlots.splice(index, 1);
+  const newest = liveSlots.at(-1);
+  if (newest !== undefined) {
+    writeWorkerEnv(newest);
+    return;
+  }
+  if (envBeforeInProcessRuns === undefined) return;
+  for (const [name, value] of Object.entries(envBeforeInProcessRuns)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+  envBeforeInProcessRuns = undefined;
+}
+
+function writeWorkerEnv(slots: WorkerSlots): void {
+  process.env['TEST_WORKER_INDEX'] = String(slots.workerIndex);
+  process.env['TEST_PARALLEL_INDEX'] = String(slots.parallelIndex);
+}
 
 class InProcessRunner implements UnitRunner {
   readonly exit: Promise<void>;
@@ -71,27 +108,13 @@ class InProcessRunner implements UnitRunner {
   };
   private readonly onException = (cause: unknown): void => this.fail(cause);
 
-  private readonly prevWorkerIndex: string | undefined;
-  private readonly prevParallelIndex: string | undefined;
-
   constructor(
     private readonly targetName: string,
     private readonly slots: WorkerSlots,
     private readonly events: UnitRunnerEvents,
     private readonly options: InProcessRunnerOptions,
   ) {
-    if (liveInProcessRunners > 0) {
-      throw new InfrastructureError(
-        'WORKER_PROTOCOL',
-        'cannot run more than one in-process worker at a time: process.env worker indices cannot overlap',
-      );
-    }
-    liveInProcessRunners += 1;
-    // Safe only while at most one in-process runner is live (`runner.ts` caps in-process runs at 1 worker).
-    this.prevWorkerIndex = process.env['TEST_WORKER_INDEX'];
-    this.prevParallelIndex = process.env['TEST_PARALLEL_INDEX'];
-    process.env['TEST_WORKER_INDEX'] = String(slots.workerIndex);
-    process.env['TEST_PARALLEL_INDEX'] = String(slots.parallelIndex);
+    claimWorkerEnv(slots);
     let finish = (): void => undefined;
     this.exit = new Promise<void>((resolve) => {
       finish = resolve;
@@ -181,11 +204,7 @@ class InProcessRunner implements UnitRunner {
   private end(detail: string): void {
     if (this.exited) return;
     this.exited = true;
-    liveInProcessRunners = Math.max(0, liveInProcessRunners - 1);
-    if (this.prevWorkerIndex === undefined) delete process.env['TEST_WORKER_INDEX'];
-    else process.env['TEST_WORKER_INDEX'] = this.prevWorkerIndex;
-    if (this.prevParallelIndex === undefined) delete process.env['TEST_PARALLEL_INDEX'];
-    else process.env['TEST_PARALLEL_INDEX'] = this.prevParallelIndex;
+    releaseWorkerEnv(this.slots);
     process.off('unhandledRejection', this.onRejection);
     process.off('uncaughtException', this.onException);
     this.events.onExit(detail);

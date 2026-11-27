@@ -74,5 +74,14 @@ describe('AttemptVerdict', () => {
     expect(attempt.failure).toBeUndefined();
     expect(attempt.settle()).toBe('passed');
     expect(attempt.errors()).toHaveLength(1);
+    expect(attempt.error()).toBeUndefined();
+  });
+
+  it('names only the verdict as its error', () => {
+    const attempt = verdict();
+    attempt.note(new Error('cleanup boom'), 'cleanup');
+    attempt.fail(new TestError('ASSERTION_FAILED', 'body'), 'body');
+    expect(attempt.error()).toMatchObject({ code: 'ASSERTION_FAILED', phase: 'body' });
+    expect(attempt.errors().map((error) => error.phase)).toEqual(['body', 'cleanup']);
   });
 });

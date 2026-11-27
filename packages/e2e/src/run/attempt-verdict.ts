@@ -101,6 +101,12 @@ export class AttemptVerdict {
     return this.#failure === undefined ? undefined : this.#options.serialize(this.#failure.error, this.#failure.phase);
   }
 
+  /** The verdict's error, if the attempt failed; an error kept beside a passing verdict is not one. */
+  error(): TestInfoError | undefined {
+    const primary = this.serializedFailure();
+    return primary === undefined ? undefined : toTestInfoError(primary);
+  }
+
   /** The verdict's error first, then every one beside it. */
   errors(): TestInfoError[] {
     const primary = this.serializedFailure();
@@ -136,6 +142,8 @@ export interface AttemptTestInfoHandle {
 export function createAttemptTestInfo(options: AttemptTestInfoOptions): AttemptTestInfoHandle {
   const { pair, verdict, startedMs, timeout } = options;
   const annotations: TestAnnotation[] = pair.test.annotations.map((entry) => ({ ...entry }));
+  // The declaration site, which may be a module the collected file imports; line and column belong to it.
+  const source = pair.test.source;
   let finalDurationMs: number | undefined;
 
   const testInfo = createTestInfo({
@@ -143,9 +151,9 @@ export function createAttemptTestInfo(options: AttemptTestInfoOptions): AttemptT
     testId: pair.test.id,
     title: pair.test.title,
     titlePath: pair.test.titlePath,
-    file: path.resolve(options.projectRoot, pair.test.file),
-    line: pair.test.source?.line ?? 1,
-    column: pair.test.source?.column ?? 1,
+    file: path.resolve(options.projectRoot, source?.file ?? pair.test.file),
+    line: source?.line ?? 1,
+    column: source?.column ?? 1,
     tags: pair.test.tags,
     agent: pair.agent,
     retry: options.retry,
@@ -156,6 +164,7 @@ export function createAttemptTestInfo(options: AttemptTestInfoOptions): AttemptT
     getDuration: () => finalDurationMs ?? Math.max(0, Date.now() - startedMs),
     getExpectedStatus: () => (verdict.expectedFailure === undefined ? 'passed' : 'failed'),
     getStatus: () => verdict.status(),
+    getError: () => verdict.error(),
     getErrors: () => verdict.errors(),
   });
 

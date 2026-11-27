@@ -1,8 +1,10 @@
 ---
-'@e2e-dev/core': patch
-'e2e': patch
+'@e2e-dev/core': minor
+'e2e': minor
 '@e2e-dev/html-reporter': patch
 ---
+
+**Breaking:** the `TestFn` and `SetupFn` types take `TestInfo` as their second parameter, so code that calls a body of these types passes it on: a wrapper that called `body(fixtures)` now calls `body(fixtures, testInfo)`. Test bodies, hooks, and fixtures need no change, and `FixtureFn` and `TestHookFn` written without their info type still fit test and worker slots alike.
 
 Add `test.info()` and the `testInfo` / `workerInfo` parameters to tests, hooks, and fixtures, along with `TEST_WORKER_INDEX` and `TEST_PARALLEL_INDEX` environment variables and test annotations (`{ annotation }` and `testInfo.annotations`).
 

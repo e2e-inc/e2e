@@ -248,6 +248,15 @@ export function isFailedStatus(status: AttemptStatus | ResultStatus): status is 
 }
 
 /**
+ * The attempt a result's verdict comes from: the last one the run did not
+ * interrupt, since an interrupted retry decides nothing. The last attempt
+ * when every one was interrupted.
+ */
+export function verdictAttempt<Attempt extends { readonly status: AttemptStatus }>(attempts: readonly Attempt[]): Attempt | undefined {
+  return attempts.findLast((attempt) => attempt.status !== 'interrupted') ?? attempts.at(-1);
+}
+
+/**
  * Whether a serial member's record is a run of its body: every record but a
  * skip the runner wrote for a member it never started. A member that skipped
  * itself started its body.

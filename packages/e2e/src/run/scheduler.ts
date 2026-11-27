@@ -1292,12 +1292,12 @@ class Scheduler {
       const { finished, running } = worker.attempts.get(key) ?? { finished: [], running: undefined };
       if (hung !== undefined && key === hung.pair) {
         this.markSessionsFailed(state, pair);
-        this.report(finishedResult(pair, [...finished, hungAttempt(hung)]));
+        this.report(finishedResult(pair, [...finished, hungAttempt(hung, pair)]));
         continue;
       }
       if (interrupted) {
         if (appExited && running !== undefined) {
-          this.report(finishedResult(pair, [...finished, interruptedAttempt(active?.pair === key ? active : undefined, running)]));
+          this.report(finishedResult(pair, [...finished, interruptedAttempt(active?.pair === key ? active : undefined, running, pair)]));
           continue;
         }
         this.report(
@@ -1348,6 +1348,7 @@ class Scheduler {
               error: crash,
               secondaryErrors: [],
               cleanup: 'forced',
+              ...declaredAnnotations(pair),
             },
           ],
         }),
@@ -1409,7 +1410,7 @@ function hangError(hung: WatchedAttempt): SerializedError {
  * attempts: a body that blocked the event loop once does so again, so it is
  * not retried.
  */
-function hungAttempt(hung: WatchedAttempt): AttemptRecord {
+function hungAttempt(hung: WatchedAttempt, pair: TestTargetPair): AttemptRecord {
   return {
     id: hung.id,
     index: hung.index,
@@ -1421,11 +1422,12 @@ function hungAttempt(hung: WatchedAttempt): AttemptRecord {
     error: hangError(hung),
     secondaryErrors: [],
     cleanup: 'forced',
+    ...declaredAnnotations(pair),
   };
 }
 
 /** An interrupted attempt synthesized when an app exit stops its worker. */
-function interruptedAttempt(active: WatchedAttempt | undefined, index: number): AttemptRecord {
+function interruptedAttempt(active: WatchedAttempt | undefined, index: number, pair: TestTargetPair): AttemptRecord {
   return {
     id: active?.id ?? uuidv7(),
     index,
@@ -1436,5 +1438,15 @@ function interruptedAttempt(active: WatchedAttempt | undefined, index: number): 
     artifacts: [],
     secondaryErrors: [],
     cleanup: 'forced',
+    ...declaredAnnotations(pair),
   };
+}
+
+/**
+ * The annotations of an attempt whose worker died before it recorded its
+ * own: the declared ones, already redacted at collection. Runtime pushes
+ * died with the worker.
+ */
+function declaredAnnotations(pair: TestTargetPair): Pick<AttemptRecord, 'annotations'> {
+  return pair.test.annotations.length === 0 ? {} : { annotations: [...pair.test.annotations] };
 }

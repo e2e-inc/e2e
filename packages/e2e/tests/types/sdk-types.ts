@@ -49,11 +49,14 @@ import {
   type StepTurn,
   type StoredArtifactLink,
   type Target,
+  type FixtureFn,
   type TestAnnotation,
   type TestConfigInfo,
   type TestFilter,
   type TestFilterCandidate,
   type TestFilterContext,
+  type TestFn,
+  type TestHookFn,
   type TestInfo,
   type TestInfoError,
   type TestInfoStatus,
@@ -2164,5 +2167,29 @@ const infoExtended = test.extend<{ logFile: string }, { workerPort: number }>({
   }, { scope: 'worker' }],
 });
 void infoExtended;
+// Callback types written without an info argument still fit every slot.
+const untypedWorkerFixture: FixtureFn<WorkerFixtures, string> = async ({}, use) => {
+  await use('x');
+};
+const untypedTestFixture: FixtureFn<TestFixtures, string> = async ({}, use, info) => {
+  void (info satisfies WorkerInfo);
+  await use('y');
+};
+void test.extend<{ testThing: string }, { workerThing: string }>({
+  testThing: untypedTestFixture,
+  workerThing: [untypedWorkerFixture, { scope: 'worker' }],
+});
+const untypedHook: TestHookFn<WorkerFixtures> = async () => {};
+beforeAll(untypedHook);
+afterAll(untypedHook);
+beforeEach(untypedHook);
+afterEach(untypedHook);
+// Breaking in this release: a `TestFn` is called with its `TestInfo`.
+function wrapBody(body: TestFn): TestFn {
+  return async (fixtures, testInfo) => {
+    await body(fixtures, testInfo);
+  };
+}
+void wrapBody;
 const annCheck: TestAnnotation = { type: 'owner', description: 'team' };
 void annCheck;

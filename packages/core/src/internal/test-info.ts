@@ -3,7 +3,8 @@
 import path from 'node:path';
 import type { ResolvedConfig, ResolvedTarget } from '../config/resolve.ts';
 import { currentAttempt } from '../expect/attempt.ts';
-import { outlivesTest } from '../expect/poll-scope.ts';
+import { leftRunning, outlivesTest } from '../expect/poll-scope.ts';
+import { markAbandonedRejection } from './abandoned.ts';
 import type {
   TestAnnotation,
   TestConfigInfo,
@@ -41,10 +42,17 @@ function isTestInfoErrorPhase(value: string): value is TestInfoErrorPhase {
 
 /**
  * Returns `TestInfo` for the currently running test attempt. Refuses calls
- * outside a running test, in a suite hook (`beforeAll`/`afterAll`), in a
- * worker-scoped fixture, or in a hosted session that runs no e2e test.
+ * outside a running test, from work a test left running (a body past its
+ * timeout), in a suite hook (`beforeAll`/`afterAll`), in a worker-scoped
+ * fixture, or in a hosted session that runs no e2e test.
  */
 export function currentTestInfo(): TestInfo {
+  // The published attempt may already be the next test's.
+  if (leftRunning()) {
+    const error = new TestError('CANCELLED', 'test.info() was called after its test ended');
+    markAbandonedRejection(error);
+    throw error;
+  }
   if (outlivesTest()) {
     throw new TestError(
       'INVALID_ARGUMENT',
@@ -193,6 +201,7 @@ export interface CreateTestInfoOptions {
   readonly getDuration: () => number;
   readonly getExpectedStatus: () => 'passed' | 'failed';
   readonly getStatus: () => TestInfoStatus | undefined;
+  readonly getError: () => TestInfoError | undefined;
   readonly getErrors: () => readonly TestInfoError[];
 }
 
@@ -231,7 +240,7 @@ export function createTestInfo(options: CreateTestInfoOptions): TestInfo {
       return options.getStatus();
     },
     get error(): TestInfoError | undefined {
-      return options.getErrors()[0];
+      return options.getError();
     },
     get errors(): readonly TestInfoError[] {
       return Object.freeze([...options.getErrors()]);

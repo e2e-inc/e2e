@@ -1,5 +1,6 @@
 /** Test-target execution engine. */
 
+import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type { TargetSession } from '@e2e-dev/core/lib/engine/surface';
 import { isCiMode, type ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
@@ -581,17 +582,12 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       memory: shared?.memory ?? new Map<string, unknown>(),
     };
 
+    const ownSegment = resultSegment({ id: resultId(pair.test.id, this.target.name, pair.agent, pair.repeat), file: pair.test.file, titlePath: pair.test.titlePath });
     const artifacts = createAttemptArtifacts({
       artifactsRoot: this.artifactsRoot,
       // Serial members share the group's session, and therefore its artifact
       // directory; registering under their own would not resolve on disk.
-      segments:
-        shared?.artifactSegments ??
-        attemptSegments(
-          this.rerunDir,
-          resultSegment({ id: resultId(pair.test.id, this.target.name, pair.agent, pair.repeat), file: pair.test.file, titlePath: pair.test.titlePath }),
-          attemptIndex,
-        ),
+      segments: shared?.artifactSegments ?? attemptSegments(this.rerunDir, ownSegment, attemptIndex),
       attemptId,
       currentStepId: () => steps.currentStepId,
       ...(this.config.artifactStore === undefined ? {} : { store: this.config.artifactStore }),
@@ -824,7 +820,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         projectRoot: this.config.projectRoot,
         pair,
         retry: attemptIndex,
-        outputDir: artifacts.dir,
+        outputDir: shared === undefined ? artifacts.dir : memberOutputDir(artifacts.dir, ownSegment),
         startedMs,
         timeout,
         verdict,
@@ -1103,4 +1099,14 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     }
     return record;
   }
+}
+
+/**
+ * A serial member's `testInfo.outputDir`: a directory of its own inside the
+ * group attempt's, so members writing the same file name keep both.
+ */
+function memberOutputDir(groupDir: string, ownSegment: string): string {
+  const dir = path.join(groupDir, ownSegment);
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }

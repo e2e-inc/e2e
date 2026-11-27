@@ -369,6 +369,82 @@ describe('reporter rendering of annotations', () => {
     expect(output.split('\n').some((line) => line.trimEnd().endsWith(' smoke'))).toBe(true);
   });
 
+  it('prints the runtime annotations of a serial member that skipped itself', () => {
+    const chunks: string[] = [];
+    const reporter = new ListReporter({ write: (line) => chunks.push(line) }, { live: false, colors: false });
+    const declared = [{ type: 'flow', description: 'wizard' }];
+    reporter.handle({
+      type: 'serial-group',
+      group: {
+        id: 'g1',
+        serialId: 'wizard',
+        declarationIndex: 0,
+        file: 'tests/a.e2e.ts',
+        titlePath: ['wizard'],
+        targetId: 'web',
+        platform: 'web',
+        agent: 'default',
+        repeat: 0,
+        memberTestIds: ['m1'],
+        status: 'passed',
+        attempts: [
+          {
+            id: 'group-attempt-0',
+            cutRetry: false,
+            index: 0,
+            status: 'passed',
+            startedAt: '2026-11-24T12:00:00.000Z',
+            durationMs: 10,
+            members: [
+              {
+                id: 'member-m1',
+                index: 0,
+                testId: 'm1',
+                status: 'skipped',
+                skip: { cause: 'explicit', reason: 'not today' },
+                startedAt: '2026-11-24T12:00:00.000Z',
+                durationMs: 10,
+                steps: [],
+                secondaryErrors: [],
+                annotations: [...declared, { type: 'pushed', description: 'before-skip' }],
+              },
+            ],
+            artifacts: [],
+            secondaryErrors: [],
+            cleanup: 'complete',
+          },
+        ],
+      },
+    });
+    reporter.handle({
+      type: 'test-finished',
+      result: {
+        test: {
+          kind: 'test',
+          title: 'step',
+          titlePath: ['wizard', 'step'],
+          declarationIndex: 0,
+          sessions: [],
+          tags: [],
+          annotations: declared,
+          source: { file: 'tests/a.e2e.ts', line: 1, column: 1 },
+          file: 'tests/a.e2e.ts',
+          id: 'm1',
+          serialId: 'wizard',
+        },
+        target: { name: 'web', platform: 'web' },
+        agent: 'default',
+        repeat: 0,
+        status: 'skipped',
+        skip: { cause: 'explicit', reason: 'not today' },
+        selected: true,
+        serialGroupId: 'g1',
+        attempts: [],
+      },
+    });
+    expect(chunks.join('')).toContain('pushed: before-skip');
+  });
+
   it('preserves annotations across foldLastRun (both carried passes and rerun results)', () => {
     const previous = sampleReport();
     const rerun = sampleReport();

@@ -91,7 +91,7 @@ export interface TestInfo extends WorkerInfo {
   readonly title: string;
   /** Enclosing describe titles outermost first, followed by the test title. */
   readonly titlePath: readonly string[];
-  /** Absolute path of the test file. */
+  /** Absolute path of the file that declares the test; `line` and `column` are in it. */
   readonly file: string;
   /** 1-based line number where the test was declared. */
   readonly line: number;
