@@ -3,15 +3,10 @@ title: Electron
 description: Test an Electron app through Chromium's accessibility tree, window by window.
 ---
 
-`@e2e-dev/electron` runs tests on Electron apps. It launches the app, reads
-each window through Chromium's accessibility tree over the DevTools protocol,
-and drives it with trusted input. Tests use the same `agent`, `screen`, and
+`@e2e-dev/electron` tests Electron apps. It launches your app, reads each
+window through Chromium's accessibility tree over the DevTools protocol, and
+drives it with trusted input. Tests use the same `agent`, `screen`, and
 `expect` APIs as browser tests.
-
-<Note>
-  The Electron engine is new. It is tested on macOS and Linux, and not yet on
-  Windows.
-</Note>
 
 ## Set up
 
@@ -31,24 +26,17 @@ bun add --dev e2e @e2e-dev/electron electron
 ```
 </CodeGroup>
 
-The engine starts the `electron` package installed in the project. Electron 45
-and later download their binary on first use; the engine does this one time
-per run, before the first test. To check the setup, run `npx e2e doctor`.
-
-A packaged app on an older Electron works too, back to Electron 22. Before
-Electron 25, a screenshot is withheld while the app shows a modal `<dialog>`
-or a fullscreen element, which would paint over the masks.
+The engine launches the `electron` package installed in your project. On
+Electron 45 and newer, it downloads the binary once per run before the first
+test. Packaged apps work back to Electron 22. Run `npx e2e doctor` to check
+your setup.
 
 ## Point at your app
 
-Set the target's `app.appPath` to the app's directory or main script, relative
-to the project root. `app.launchArguments` go after it on every launch, where
-the app reads them in `process.argv`. The engine's own `--inspect=0`,
-`--remote-debugging-pipe`, `--force-color-profile=srgb`, and
-`--user-data-dir=<directory>` are there too, and `--no-sandbox` on Linux, so
-an app that parses its arguments strictly must allow them. Screenshots are in
-sRGB on every display; pass your own `--force-color-profile` in `args` to
-change that.
+Set `app.appPath` to your app's directory or main script, relative to the
+project root. Extra flags in `app.launchArguments` are appended to every
+launch. In the config below, set `ADA_PASSWORD` to at least 6 characters
+before running.
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -68,19 +56,12 @@ export default {
 } satisfies E2EConfig;
 ```
 
-To test a packaged app, set `electron({ executablePath })` to its binary, such as
-`'dist/mac/MyApp.app/Contents/MacOS/MyApp'` (not the `.app` directory),
-and leave out `appPath`. The example's `ADA_PASSWORD` must be set, to at
-least 6 characters, for the config to load.
-
 ## Write a test
 
 Import `test` from `@e2e-dev/electron`. `app.open()` launches the app and
-waits for a window to load its page; with a splash screen still loading, that
-is the app's next window. Every test starts on an empty user-data
-directory and ends with the app quit. `app.restart()` launches it again on
-the same data, and `app.clearState()` on empty data. `app.open()` while the
-app runs relaunches it on the same data, as `app.restart()` does.
+waits for a window to load. Every test starts with an empty user-data
+directory and quits the app when it ends. Call `app.restart()` to relaunch on
+the same data, or `app.clearState()` to relaunch on empty data.
 
 ```ts title="tests/sign-in.e2e.ts"
 import { test } from '@e2e-dev/electron';
@@ -103,74 +84,214 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
 });
 ```
 
-Roles and names are the ones Chromium computes, so `getByRole`, `getByLabel`,
-`getByText`, `getByPlaceholder`, and `getByTestId` work as on the web, apart
-from the differences in the table below.
-`getByLabel` matches a field's accessible name: a field whose `aria-label`
-overrides its `<label>` is found by the `aria-label` only.
-`getByTestId` reads `data-testid`; set another attribute with
-`electron({ testIdAttribute })`.
+`getByRole`, `getByLabel`, `getByText`, `getByPlaceholder`, and `getByTestId`
+(`data-testid` by default) work as they do on the web.
 
-The `electron` fixture has these methods:
+## The electron fixture
 
 | Method | What it does |
 | --- | --- |
-| `evaluate(fn, arg?)` | Runs `fn` in the main process with the `electron` module, typed by your project's `electron` package, and returns its serializable result. `fn` is sent as text, so pass values as `arg`. A secret is refused as `arg` |
-| `windows()` | Lists the open windows, in the order they opened: each one's `index`, `title` (the document's), `windowTitle` (the OS window's, when it differs), `url`, and `shown`, true for the window `screen` reads |
-| `useWindow(which, { timeout }?)` | Makes `screen` read a window: an index, or `{ title, url }`. A string matches the whole title or URL; use a RegExp for part of one. `title` matches the document's title or the OS window's. It waits for the window to open, up to `timeout` or the action timeout |
-| `locator(selector)` | A locator for a CSS selector in the window's document |
+| `evaluate(fn, arg?)` | Runs `fn` in the main process with the `electron` module and returns its JSON-serializable result |
+| `windows()` | Lists open windows in open order (`index`, `title`, `windowTitle`, `url`, `shown`) |
+| `useWindow(which, { timeout }?)` | Switches `screen` to a window by index or `{ title, url }`, waiting for it to open |
+| `waitForDownload(trigger, { timeout }?)` | Runs `trigger` and waits for the [download](#downloads) it starts |
+| `locator(selector)` | Queries the current window by CSS selector |
 
-`evaluate` returns what survives serialization: a `BrowserWindow` comes back
-as a plain object, and a function or a `Map` as `undefined` or `{}`. Return
-plain data, and pass `arg` as JSON. `require` is not in scope inside `fn`; use the `electron` module
-it receives, or `process.getBuiltinModule('node:fs')`.
+## Work with several windows
+
+`screen` reads one window at a time, starting with the first window that
+loads. A new window doesn't take over automatically; switch to it with
+`electron.useWindow()`. If the active window closes, `screen` falls back to
+the window shown before it.
+
+```ts
+await screen.getByRole('button', 'Open settings').tap();
+await electron.useWindow({ title: 'Settings' });
+await expect(screen.getByRole('heading', 'Settings')).toBeVisible();
+
+const windows = await electron.windows();
+expect(windows.find((w) => w.shown)?.title).toBe('Settings');
+
+await electron.useWindow(0);
+```
+
+`useWindow` matches an index, or `{ title, url }` using an exact string or a
+`RegExp`. `title` checks both the document title and the OS window title. The
+agent sees windows as tabs and switches between them on its own.
+
+## Run code in the main process
+
+Use `electron.evaluate()` for main-process APIs that aren't reachable from a
+window, such as triggering a menu item or stubbing a native dialog:
+
+```ts
+// Trigger a menu item
+await electron.evaluate(({ Menu }) => {
+  Menu.getApplicationMenu()?.getMenuItemById('open-settings')?.click();
+});
+
+// Stub a native file dialog
+await electron.evaluate(({ dialog }, filePath) => {
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
+}, '/tmp/report.csv');
+```
+
+`fn` is sent as text, so it can't close over variables from the test: pass
+values as `arg` (plain JSON only; secrets are refused) and return plain data.
+`require` isn't in scope inside `fn`; use the `electron` argument or
+`process.getBuiltinModule('node:fs')`.
+
+## Handle alert and confirm dialogs
+
+By default, an unhandled `alert()` or `confirm()` is dismissed (`confirm()`
+returns `false`) and fails the test's next step. Set `dialogs` to answer
+every dialog automatically:
+
+```ts title="e2e.config.ts"
+engine: electron({ dialogs: 'accept' }), // or 'dismiss'
+```
+
+## Upload files
+
+`setInputFiles` attaches files by path, resolved from the project root, or
+from memory. Call it on a file `<input>` or on a button that opens a file
+chooser, and pass `[]` to clear an input:
+
+```ts
+await screen.getByTestId('attachment').setInputFiles('fixtures/report.csv');
+await screen.getByRole('button', 'Choose file').setInputFiles('fixtures/report.csv');
+await screen.getByTestId('attachment').setInputFiles({
+  name: 'note.txt',
+  mimeType: 'text/plain',
+  buffer: Buffer.from('written in the test'),
+});
+await screen.getByTestId('attachment').setInputFiles([]);
+```
+
+## Downloads
+
+`electron.waitForDownload()` runs the step that starts a download and waits
+for the file. It is copied into the test's artifacts:
+
+```ts
+const file = await electron.waitForDownload(() => screen.getByRole('link', 'Export').tap());
+expect(file.suggestedFilename).toBe('report.csv');
+// file.absolutePath is the saved file
+```
+
+Downloads never land in your own Downloads folder: the app saves them inside
+the test's user-data directory.
+
+## Record video
+
+Run with `--video on`, or set `video` in the config, to record every test.
+The video follows the window `screen` reads, through `app.restart()` too, and
+is saved as one `.webm` with the test's results. To record part of a test,
+call `app.startRecording()` and `app.stopRecording()`.
+
+Encoding needs ffmpeg. The engine uses the one on your `PATH`, or downloads
+one on the first recording. Set `E2E_FFMPEG_PATH` to use your own.
+
+## Test a packaged app
+
+To test a packaged build, point `executablePath` at the binary (not the
+`.app` directory on macOS) and omit `app.appPath`:
+
+```ts title="e2e.config.ts"
+{
+  name: 'electron-packaged',
+  engine: electron({
+    executablePath: 'dist/mac/MyApp.app/Contents/MacOS/MyApp',
+  }),
+}
+```
+
+- If the build disables the `EnableNodeCliInspectArguments` fuse, `screen`,
+  `expect`, and the agent still work, but `electron.evaluate()` fails and
+  `useWindow({ title })` matches document titles only.
+- On macOS, an unsigned build that reads the keychain (`safeStorage`) can
+  hang on a system prompt. Pass `args: ['--use-mock-keychain']`.
+
+## Run in CI on Linux
+
+Electron needs a display server to open windows. On Linux CI, run e2e under
+`xvfb-run`:
+
+<CodeGroup>
+```bash npm
+xvfb-run --auto-servernum npx e2e run
+```
+
+```bash pnpm
+xvfb-run --auto-servernum pnpm exec e2e run
+```
+
+```bash bun
+xvfb-run --auto-servernum bunx e2e run
+```
+</CodeGroup>
+
+The engine adds `--no-sandbox` on Linux automatically.
 
 ## What differs from the web
 
-| Area | On an Electron target |
+| Area | On Electron |
 | --- | --- |
-| Windows | `screen` reads one window: the one `useWindow()` picked, else the first. When that window closes, it reads the window shown before it, else the newest still open. A window the app opens does not take over. The agent sees the windows as tabs and switches between them. A DevTools window is not listed, and neither is a window or view that has loaded no page yet; each `WebContentsView` is a window of its own. A `<webview>` guest is listed as a window too. The order of several views in one window can change between launches; pick them by title or URL. A window whose renderer crashed fails reads with `APP_NOT_OPEN` after waiting up to 2 seconds for a reload; reload it with `electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.reload())` |
-| Text queries | `getByText` matches an element's text, as on the web, but not a `<textarea>`'s content. `getByLabel` matches any element's accessible name, such as a heading or a button with the same words, a fieldset by its legend, or an image by its alt text; narrow it with `getByRole('textbox', name)`. Each run of text is a match of its own, so `getByText('Line one Line two')` finds text split by a `<br>`. |
-| Role states | `getByRole(role, { expanded: false })`, and `checked`, `selected`, or `pressed` set to `false`, also match elements that have no such state |
-| Dialogs | An `alert()` or `confirm()` nothing answers is dismissed, so `confirm()` returns `false`, and the test's next step fails with `unhandled confirm dialog`, as on the web without a handler. Set `electron({ dialogs: 'accept' })` or `'dismiss'` to answer every dialog; each one is then a line in the attempt's log. Electron does not support `prompt()`: it throws in the page. A `beforeunload` guard does not stop the engine from quitting the app |
-| Keyboard | Keys reach the page over the DevTools protocol. Menu accelerators and the main process's `before-input-event` don't see them; reach a menu item with `electron.evaluate`. There is no `keyboard` fixture to hold a key down. A key pressed on an element that takes no focus goes to the element that has it |
-| Clipboard | The app uses the OS clipboard: a test's copy overwrites yours, a paste reads it, and tests in parallel workers share it. Run clipboard tests with `workers: 1` |
-| Input | Input reaches one page's content directly, past the OS: a button in a `-webkit-app-region: drag` area, or under a view laid over the window, takes a tap a user's click would not reach |
-| Theme | `prefers-color-scheme` follows the app's `nativeTheme` and the OS, as when a user runs it |
-| Locale | The app runs in the OS locale, so text Chromium supplies, such as an `<input type="submit">` with no value, follows it. Pass `args: ['--lang=en-US']` for the web's English |
-| Long press | Holds for 800 ms by default, where the web holds for 500 ms |
-| Packaged apps | A packaged app built with the `EnableNodeCliInspectArguments` fuse off opens no inspector in its main process. `screen`, `expect`, and the agent work on it, but `electron.evaluate` fails, `windows()` reports no `windowTitle`, and `useWindow({ title })` matches the document's title only. On macOS, an unsigned build that reads the keychain (`safeStorage`) waits on a prompt and opens no window: pass `electron({ args: ['--use-mock-keychain'] })` |
-| Headed | Electron has no headless mode. Windows show unless the app hides them, and `--headed` changes nothing. On Linux CI, run under a virtual display such as `xvfb-run` |
-| Reading | The agent's screen and role queries leave out content under `aria-hidden` or `inert`; text and test-id queries still find it, and an action on an inert element fails. Content that is not rendered (`display: none`, `hidden`, a closed `<details>`) is left out, where the web reads it as hidden: a test id or `electron.locator()` still finds such an element. An element with no size reads as hidden, and role queries skip it, so an empty `role="alert"`, or an option of a closed `<select>`, is not found by role; `electron.locator('select option')` finds the options. Text reads as rendered, `text-transform` applied, so `getByText` matches the rendered case (the text of a label for a checkbox or radio reads as written), and the children of a flex or grid container read with no space between them. An element's box is its whole box, though a scroll container shows only part of it. A `<summary>` reads as a button, and open shadow content is in document order. Nested documents (`iframe`, `webview`) are not read: the frame is a node with nothing under it |
-| Selectors | `electron.locator()` matches in the window's document and in each open shadow root, one root at a time: a selector does not cross a shadow boundary. It never enters a frame |
-| Uploads | `setInputFiles` takes file paths, on a file input or on a button whose click opens a file chooser. In-memory files are not supported |
-| Downloads | A file the app downloads is saved in a `Downloads` directory inside the attempt's user-data directory, and deleted with it, unless the app's own `will-download` handler sets a path. In an app that opens no inspector, this covers the default session only, not a `partition`. A test can read it at `electron.evaluate(({ app: main }) => main.getPath('downloads'))`, but cannot wait for one |
-| Not supported | Video recording, `browser`-only APIs (routes, downloads, cookies), `app.back()`, session save and restore, `toBeInViewport`, and a project tool's [computed-style reads](/tools#read-a-nodes-computed-style). A test cannot read the app's console |
-| Workers | No limit. A single-instance lock is per user-data directory, so it does not stop parallel tests. An app that sets its own data directory with `app.setPath('userData', …)` keeps its data across tests, `app.clearState()` does not empty it, and its lock fails on a second worker: set `workers: 1` |
-| Secrets | A password field shows no value, and reading it (`inputValue`, `toHaveValue`) fails with `POLICY_DENIED`. Screenshots paint every password field and nested document (`iframe`, `webview`, `embed`, `object`) black. A password field or nested document inside a closed shadow root is out of every mask's reach: the agent gets no screenshot, and `app.screenshot()` fails with `POLICY_DENIED`, as it does when such an element appears or moves while a screenshot is taken. A mask is a box drawn over the element before the capture, with animations stopped: what the app paints outside that box, such as a CSS reflection, or styles that hide the masks, show in the image. A text input drawn as a password field with `-webkit-text-security` is not a password field, and its value is read |
-| Debugging port | The engine drives the app's windows over a pipe that no other process can reach. The main process listens on a loopback inspector port for the whole test, with no authentication: any process on the machine can connect to it while a test runs |
+| Launch arguments | The engine adds `--inspect=0`, `--remote-debugging-pipe`, `--force-color-profile=srgb`, `--user-data-dir=...`, and `--no-sandbox` on Linux. Strict argument parsers must allow them |
+| Parallel workers | Each test gets its own user-data directory, so tests run in parallel. If your app overrides `app.setPath('userData', ...)`, set `workers: 1` |
+| Clipboard | The app uses your OS clipboard, so a test's copy overwrites yours. Set `workers: 1` for clipboard tests |
+| Theme and locale | `prefers-color-scheme` follows `nativeTheme` and the OS. Chromium UI strings follow the OS locale; pass `args: ['--lang=en-US']` to pin English |
+| Long press | Holds for 800 ms by default, compared to 500 ms on the web |
+| CSS selectors | `electron.locator()` searches the window document and open shadow roots one root at a time, and never enters frames |
+| Crashed renderers | A crashed window fails reads until you reload it with `electron.evaluate()` or restart the app |
 
-<Warning>
-  An Electron app loads its own pages, often `file:` ones, and a link or a
-  script in one can take a window to any file the user can read. While a
-  window shows a local file outside the app's own directory, the agent gets
-  no observation of it, the trace and failure evidence keep no screen of it,
-  and `app.screenshot()` and `screen.tree()` fail with `POLICY_DENIED`. A
-  test's own locators still read it. The app's directory is what its main
-  process reports as `app.getAppPath()`.
-</Warning>
+## Security
+
+- **Isolated environment:** the app doesn't inherit the runner's environment,
+  so model keys and CI tokens stay out. It only gets minimal OS variables
+  (`PATH`, `HOME`, locale, temp, display); pass anything your app needs with
+  `electron({ env })`.
+- **Password fields:** password values can't be read and are painted black in
+  screenshots. If a password field sits inside a closed shadow root where
+  masks can't reach, screenshots of that window are withheld.
+- **Local file boundary:** if a window navigates to a `file:` path outside
+  your app's directory, the agent gets no observation and screenshots are
+  refused.
+- **Inspector port:** window automation runs over a private pipe, while the
+  main process listens on an unauthenticated loopback port for
+  `electron.evaluate()` during each test.
+
+## Limits
+
+### Not on Electron
+
+- **`prompt()`:** Electron doesn't implement `window.prompt()` and throws in
+  the page.
+- **Headless mode:** Electron always opens windows unless your app hides
+  them, and `--headed` has no effect. Use `xvfb-run` on Linux CI.
+- **Menu accelerators:** keyboard events go straight to the page, so menu
+  shortcuts and `before-input-event` don't receive them. Trigger menu items
+  with `electron.evaluate()`.
+
+### Not supported yet
+
+- Content inside an `iframe` or `webview` (a `webview` guest is listed as a window, so `electron.useWindow()` reaches it)
+- Routes and cookies (use `session.defaultSession` in `electron.evaluate()` instead)
+- Session save and restore
+- A `keyboard` fixture to hold a key down
+- Reading the app's console from a test
 
 ## Options
 
 | Option | Type | Default | What it sets |
 | --- | --- | --- | --- |
-| `executablePath` | `string` | the project's `electron` | The binary to start, such as a packaged app's |
-| `args` | `string[]` | `[]` | Electron and Chromium switches, passed before the app path. Not `--user-data-dir`, `--inspect`, `--inspect-brk`, `--remote-debugging-port`, or `--remote-debugging-pipe`, which the engine sets; `app.launchArguments` cannot set them either |
-| `env` | `Record<string, string>` | `{}` | Variables added to the app's environment. The app does not get the run's environment, which holds provider keys and tokens: only what a process needs to start and draw (`PATH`, `HOME`, the locale, the temp directory, the display, and the Windows system variables). Pass anything else the app reads here. Not `ELECTRON_RUN_AS_NODE` or `NODE_OPTIONS` |
-| `launchTimeout` | `number` | `30000` | How long `app.open()` waits for a window to load, in milliseconds. The config's own `launchTimeout` bounds something else: the engine's start |
-| `testIdAttribute` | `string` | `'data-testid'` | The attribute `getByTestId` reads |
-| `settle` | `number \| false` | `100` | How long the engine waits after an agent action before the agent reads the screen |
-| `dialogs` | `'accept' \| 'dismiss'` | unset | How every `alert()` and `confirm()` the app opens is answered. Unset, one is dismissed and fails the test's next step |
+| `executablePath` | `string` | project's `electron` | Binary to start, such as a [packaged app](#test-a-packaged-app) |
+| `args` | `string[]` | `[]` | Electron and Chromium switches before the app path (not `--user-data-dir`, `--inspect*`, or `--remote-debugging-*`) |
+| `env` | `Record<string, string>` | `{}` | Extra environment variables for the app (not `ELECTRON_RUN_AS_NODE` or `NODE_OPTIONS`); see [Security](#security) |
+| `launchTimeout` | `number` | `30000` | How long `app.open()` waits for a window to load, in milliseconds |
+| `testIdAttribute` | `string` | `'data-testid'` | Attribute `getByTestId` reads |
+| `settle` | `number \| false` | `100` | Wait time in milliseconds after an agent action before the next read (`false` skips it) |
+| `dialogs` | `'accept' \| 'dismiss'` | unset | Automatic answer for `alert()` and `confirm()`; see [Dialogs](#handle-alert-and-confirm-dialogs) |
 
 ## Next
 

@@ -57,22 +57,30 @@ test('signs in', async ({ app, screen }) => {
 - **Act.** Trusted mouse and keyboard input, once the node is enabled, on
   screen, and topmost at its point.
 - **Windows.** The agent sees them as tabs. The `electron` fixture has
-  `evaluate` (main process), `windows`, `useWindow`, and `locator` (CSS).
+  `evaluate` (main process), `windows`, `useWindow`, `waitForDownload`, and
+  `locator` (CSS).
+- **Video.** The shown window's screencast, encoded to one `.webm` by ffmpeg,
+  which the engine downloads on the first recording when the machine has none.
 - **Secrets.** Password fields report no value, and screenshots paint them
   and nested documents over.
 
-## Not supported yet
+## Limits
 
-| What | Why | Instead |
-| --- | --- | --- |
-| `prompt()` | Electron does not implement it | Build the prompt in the page |
-| In-memory uploads | The DevTools protocol sets a file input from paths only | Write the file to disk and pass its path |
-| Content inside an `iframe` or `webview` | The engine reads the window's own document; a nested one is a separate target it does not attach to yet | A `webview` guest is listed as a window: `electron.useWindow()` |
-| Routes and cookies | They are the browser engine's `browser` fixture, and an Electron app has one session per partition | `session.defaultSession` in `electron.evaluate` |
-| Waiting for a download | The engine places downloads but reports no download events | Read the `downloads` directory in `electron.evaluate` |
-| `app.back()` | The app loads its own pages, so the engine does not navigate | Navigate from `electron.evaluate` |
-| Video | No recorder is built | `app.screenshot()` |
-| Session save and restore, `toBeInViewport`, computed-style reads | Not built | |
+Not on Electron, because the platform has no such thing:
+
+| What | Instead |
+| --- | --- |
+| `prompt()` | Electron does not implement it. Build the prompt in the page |
+| Headless mode | On Linux CI, run under a virtual display such as `xvfb-run` |
+| Menu accelerators from key presses | Call the menu item from `electron.evaluate` |
+
+Not supported yet:
+
+| What | Until then |
+| --- | --- |
+| Content inside an `iframe` or `webview` | A `webview` guest is listed as a window: `electron.useWindow()` |
+| Routes and cookies | `session.defaultSession` in `electron.evaluate` |
+| Session save and restore | |
 
 [The Electron guide](https://e2e.com/docs/electron) lists every difference
 from the web.
