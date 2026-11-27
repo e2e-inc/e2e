@@ -69,7 +69,7 @@ Entries live under `.e2e/cache/` by default, one file per key. `e2e cache
 ls` lists them, `show <entry>` prints one action by action, `check` lists
 every detour to read before you commit (it exits 0), `stats` sums them,
 `clear` deletes them; with a custom `cache.store` these file-store commands
-refuse (exit 2). `--no-cache` turns the cache
+refuse (exit 2), except `show` given a file path, which reads that file. `--no-cache` turns the cache
 off for one run; `--strict-cache` fails a step whose committed recording no
 longer replays (`REPLAY_STALE`) instead of calling the model.
 
