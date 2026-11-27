@@ -218,7 +218,9 @@ screen looks: `run_code` reads the accessibility tree, not pixels.
 Pass only `attach` to `open_session`, with the ID from the pause header,
 from the test run's directory and the same e2e version:
 `open_session {attach: "k3f9"}`. The session has the normal tools on that
-target, and its `test_lines` belong at the pause point of the held test.
+target, `run_code` with the engine's fixture (`desktop`, `browser`,
+`device`) included, and its `test_lines` belong at the pause point of the
+held test.
 `close_session` detaches and leaves the test held; Enter, or
 `npx e2e run --step next`, resumes the test and ends the attachment.
 

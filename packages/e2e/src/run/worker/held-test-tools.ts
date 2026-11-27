@@ -15,7 +15,7 @@ import { abortError, cancelledError, Deadline, withAbort, withTimeout } from '@e
 import { LocatorEngine } from '@e2e-dev/core/lib/locator/engine';
 import { createAttemptArtifacts, type AttemptArtifacts } from '@e2e-dev/core/lib/run/artifacts';
 import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
-import { createApp } from '@e2e-dev/core/lib/run/fixtures';
+import { createApp, createEngineFixtures } from '@e2e-dev/core/lib/run/fixtures';
 import { outputLayout } from '@e2e-dev/core/lib/run/output';
 import { sessionRecordings } from '@e2e-dev/core/lib/run/recordings';
 import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
@@ -479,29 +479,27 @@ export class HeldTestTools {
         }
       },
       runCode: {
-        // A held test's attempt only builds `app` and `services`, so the code doesn't get an engine fixture.
-        engineFixtures: [],
+        engineFixtures: Object.keys(this.options.target.engine?.fixtures ?? {}),
         attempt: (requestSignal) => {
           const statementBudget = new AttemptBudget(requestSignal ?? signal, new Deadline(Number.POSITIVE_INFINITY));
+          // The code's calls are the session's, not the held test's steps: they record here, and a step hold never stops them.
           const steps = new StepRecorder(this.attemptId, { redact });
           const locator = this.locator(statementBudget);
+          const target = this.options.target;
+          const runId = this.options.runId;
+          const attemptId = this.attemptId;
 
           return {
             agentRuntime: { ...runtime, engine: locator, steps },
             budget: statementBudget,
             session,
-            runId: this.options.runId,
-            attemptId: this.attemptId,
-            fixtures: {
-              app: createApp({
-                config,
-                steps,
-                target: this.options.target,
-                session,
-                artifacts,
-              }, locator),
-              services: this.options.services,
-            },
+            runId,
+            attemptId,
+            // The engine's fixtures over the held test's session, as a standalone session's code gets them, each built on first touch.
+            fixtures: Object.defineProperties(
+              { app: createApp({ config, steps, target, session, artifacts }, locator), services: this.options.services },
+              Object.getOwnPropertyDescriptors(createEngineFixtures({ config, target, session, steps, budget: statementBudget, runId, attemptId, artifacts })),
+            ),
           };
         },
       },

@@ -270,7 +270,7 @@ call {tool: "run_code", args: {code: "const rows = screen.getByRole('listitem');
 
 | Input | Does |
 | --- | --- |
-| `code` | The body of an async function. `screen`, `app`, `expect`, `credentials`, `secrets`, `services`, `console`, and the engine's fixture (`browser` or `device`) are in scope. A session attached to a held test doesn't have an engine fixture. |
+| `code` | The body of an async function. `screen`, `app`, `expect`, `credentials`, `secrets`, `services`, `console`, and the engine's fixture (`browser`, `device`, or `desktop`) are in scope, in a session attached to a held test too. |
 | `timeout` | Optional. How long each action or matcher on `screen` waits by default, in ms, 1 through 120000. Without it: `5000`, or the config's timeout when shorter. |
 
 ```txt
@@ -692,6 +692,10 @@ Press Enter or run `npx e2e run --step next` to resume the test and end the
 attachment right away. Any recording still running saves in the background.
 The runner logs the saved path or the error. The MCP server logs the same
 result if it's still connected.
+
+[`run_code`](#run_code) gets the engine's fixture over the held test's app,
+as a normal session's code does, so `desktop.useWindow()` there changes the
+window the test reads after it resumes.
 
 The report and trace record the test's own steps. App logs and screen
 updates from an attached call can appear in the trace if they arrive after
