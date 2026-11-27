@@ -286,8 +286,9 @@ export class FileCacheStore implements CacheStore {
 
   /**
    * Where a recording goes among a test's `recordings` when its step has
-   * none there yet: before the first recording of a step read after it, so
-   * a step added to the middle of a test lands in the middle of its file.
+   * none there yet: before the recording of the first step read after it
+   * that the file holds, so a step added to the middle of a test lands in
+   * the middle of its file, even one a person reordered.
    * At the end when the step was not read through this store (a retry
    * records without reading) or no later step is in the file.
    */
@@ -296,9 +297,12 @@ export class FileCacheStore implements CacheStore {
     const order = this.readOrder.get(testId) ?? [];
     const at = order.indexOf(identity);
     if (at < 0) return recordings.length;
-    const later = new Set(order.slice(at + 1));
-    const index = recordings.findIndex((recording) => later.has(stepIdentity(recording.trace.recordedFor)!));
-    return index < 0 ? recordings.length : index;
+    // The next step the attempt read that the file holds, wherever a person moved it in the file.
+    for (const later of order.slice(at + 1)) {
+      const index = recordings.findIndex((recording) => stepIdentity(recording.trace.recordedFor) === later);
+      if (index >= 0) return index;
+    }
+    return recordings.length;
   }
 
   /**

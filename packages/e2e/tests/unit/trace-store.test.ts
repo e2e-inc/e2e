@@ -295,6 +295,19 @@ describe('FileCacheStore', () => {
     expect(acts).toEqual(['- act: open the cart', '- act: add a mug', '- act: check out']);
   });
 
+  it('puts a new step before the next step the test ran, in a file a person reordered', async () => {
+    const { directory, store } = await makeStore();
+    const named = (instruction: string) => step('web', { instruction, instructionDigest: instructionDigest(instruction) });
+    const [a, b, c, added] = [named('open the cart'), named('add a mug'), named('check out'), named('apply the coupon')];
+    // The file holds c, a, b: the order a person left it in.
+    for (const [index, recorded] of [c, a, b].entries()) await store.write(String(index).repeat(64), payload('web', { recordedFor: recorded }));
+    const next = new FileCacheStore({ directory, maxBytes: MAX_CACHE_WIRE_BYTES, writable: true });
+    for (const [key, read] of [['1'.repeat(64), a], ['9'.repeat(64), added], ['2'.repeat(64), b], ['0'.repeat(64), c]] as const) await next.read(key, read);
+    await next.write('9'.repeat(64), payload('web', { recordedFor: added }));
+    const acts = (await readFile(yamlPath(directory), 'utf8')).match(/- act: .*/gu);
+    expect(acts).toEqual(['- act: check out', '- act: open the cart', '- act: apply the coupon', '- act: add a mug']);
+  });
+
   it('evicts a recording of a test whose file name is cut', async () => {
     const { directory, store } = await makeStore();
     const longFile = step('web', { testId: 'tests/this-is-a-very-long-test-file-name-that-describes-a-whole-scenario-in-great-detail-indeed.e2e.ts::buys%20a%20mug' });
