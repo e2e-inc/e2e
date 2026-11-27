@@ -587,6 +587,25 @@ describe('withContainerText', () => {
     );
     const [tasks] = resolveExpression({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'tasks', exact: true } } }, [locatable(screen)]);
     expect(withContainerText(tasks!).text).toBe('Buy milk');
+    // Taken from the whole tree, the fold line is there, hidden, and adds nothing either.
+    expect(withContainerText(byTestId(screen.root, 'tasks')!).text).toBe('Buy milk');
+  });
+
+  it("keeps a field's own text, whatever hint the app lists under it", () => {
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Inbox',
+          children: [{ role: 'textfield', ref_id: '@s:e1', name: 'Note', native_id: { kind: 'ax_identifier', value: 'note' }, value: 'typed', children: [{ role: 'statictext', value: 'Hint' }] }],
+        },
+      },
+      minter(),
+    );
+    const note = byTestId(root, 'note')!;
+    expect(withContainerText(note).text).toBe(note.text);
+    expect(withContainerText(note).text ?? '').not.toContain('Hint');
   });
 
   it("leaves out a field's value, as an input's text content on the web is empty", () => {

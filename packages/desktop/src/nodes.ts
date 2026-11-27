@@ -475,14 +475,19 @@ export function locatable(screen: ProjectedScreen): SemanticNode {
 /** Roles whose own text is what they show, whatever nodes the app lists under them: static text and a heading. */
 const OWN_TEXT_ROLES = new Set(['text', 'heading']);
 
+/** Roles of fields, which show a value, not text: their own text stands, whatever nodes the app lists under them. */
+const FIELD_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'spinbutton', 'slider']);
+
 /**
  * A located node with the text its descendants show as its own, as a web
  * element's text content is its children's: `textContent()`, `toHaveText`,
  * and `toContainText` on a list, a tree, a group, or a row read what the
  * rows and labels in it show, one line each. A node with no children, static
  * text, and a heading keep their own text, and so does a container none of
- * whose descendants shows text. A field shows its value, not text, as an input's text
- * content on the web is empty. Only `locate` answers it: an
+ * whose descendants shows text. A field keeps its own text: it shows its
+ * value, not text, as an input's text content on the web is empty, and a
+ * hint the app lists under it is not its text. A hidden node, such as the
+ * line that counts a list's folded rows, adds nothing. Only `locate` answers it: an
  * observation would list every line twice, and a text query still matches the
  * innermost node that shows the text.
  */
@@ -493,8 +498,8 @@ export function withContainerText(node: SemanticNode): SemanticNode {
 
 /** The text a node shows: its descendants', a line each, else its own. */
 function shownText(node: SemanticNode): string | undefined {
-  const children = node.children ?? [];
-  if (children.length === 0 || OWN_TEXT_ROLES.has(node.role ?? '')) return node.text;
+  const children = (node.children ?? []).filter((child) => child.states?.hidden !== true);
+  if (children.length === 0 || OWN_TEXT_ROLES.has(node.role ?? '') || FIELD_ROLES.has(node.role ?? '')) return node.text;
   const lines = children.map(shownText).filter((line): line is string => line !== undefined && line.trim() !== '');
   return lines.length === 0 ? node.text : lines.join('\n');
 }
