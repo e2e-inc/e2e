@@ -63,6 +63,7 @@ export function recordingName(testId: string): string {
   let partial = false;
   if (parts.length < 2) {
     words = [kebab(testId)];
+    partial = dropsWords(testId);
   } else {
     const [file, ...titles] = parts;
     const base = file!.split('/').pop() ?? '';
