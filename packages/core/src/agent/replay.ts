@@ -12,7 +12,7 @@
  * divergence.
  */
 
-import { isRelocatableDescriptor, MAIN_LIST_SHARE, relocateDescriptor, relocationGroupSize, type RelocationFailure, type RelocationResult } from '../cache/relocate.ts';
+import { isRelocatableDescriptor, MAIN_LIST_SHARE, relocateDescriptor, trackRelocationGroup, type RelocationFailure, type RelocationResult } from '../cache/relocate.ts';
 import {
   isNodeAction,
   isTapActionName,
@@ -482,7 +482,8 @@ interface Ends {
  * still loading is waited for whatever the destination shows. Each end keeps
  * its twin refusal on later looks, as `relocate` does. A coordinate source
  * that can be placed on this look lets an unresolved destination wait.
- * If the source loses a candidate during that wait, the drag stops.
+ * If the source loses a candidate during that wait, or either recovered
+ * endpoint lacks a visible box, the drag stops.
  * Returns the last look judged; nothing when no look could be read.
  */
 async function relocateEnds(
@@ -494,9 +495,7 @@ async function relocateEnds(
 ): Promise<Ends | undefined> {
   const refused = new Set<TraceTargetDescriptor>();
   let latest: Ends | undefined;
-  let sourceCandidateCount: number | undefined;
-  const countSourceCandidates = (descriptor: TraceTargetDescriptor, screen: SemanticScreen): number =>
-    relocationGroupSize(descriptor, screen.nodes, (id) => visibleBox(screen.nodes.get(id)) !== undefined);
+  let sourceGroup: ReturnType<typeof trackRelocationGroup>;
   const judge = (descriptor: TraceTargetDescriptor, screen: SemanticScreen): { readonly relocated: Relocated; readonly wait: boolean } => {
     const result = relocateDescriptor(descriptor, screen.nodes);
     if (result.kind === 'found') {
@@ -511,14 +510,17 @@ async function relocateEnds(
   const settled = await pollSettled<Ends>(host, (screen) => {
     const from = source === undefined ? undefined : judge(source, screen);
     const to = destination === undefined ? undefined : judge(destination, screen);
-    if (source !== undefined && sourceCandidateCount !== undefined) {
-      const count = countSourceCandidates(source, screen);
-      const unplaceableMatch = from?.relocated.kind === 'found' && visibleBox(from.relocated.node) === undefined;
-      if (count < sourceCandidateCount || unplaceableMatch) {
+    if (sourceGroup !== undefined) {
+      const count = sourceGroup.countIn(screen.nodes);
+      const unplaceableSource = from?.relocated.kind === 'found' && visibleBox(from.relocated.node) === undefined;
+      if (count < sourceGroup.count || unplaceableSource) {
         const lostSource: Relocated = { kind: 'failed', failure: 'target-ambiguous', candidates: [], screen, twinLeft: true };
         return { screen, ends: [lostSource, to?.relocated], refused: true };
       }
-      sourceCandidateCount = count;
+      if (to?.relocated.kind === 'found' && visibleBox(to.relocated.node) === undefined) {
+        return { screen, ends: [from?.relocated, { kind: 'failed', failure: 'target-not-found' }], refused: false };
+      }
+      sourceGroup.count = count;
     }
     const unresolved = (descriptor: TraceTargetDescriptor | undefined, judged: typeof from) =>
       descriptor !== undefined && refused.has(descriptor) && judged?.relocated.kind === 'failed';
@@ -526,9 +528,9 @@ async function relocateEnds(
     if (from?.relocated.kind === 'failed') {
       const waitingForDestination = to?.wait === true && shouldWaitForDestination?.(from.relocated, to.relocated) === true;
       if (from.wait || waitingForDestination) {
-        if (waitingForDestination && sourceCandidateCount === undefined && source !== undefined
+        if (waitingForDestination && sourceGroup === undefined && source !== undefined
           && from.relocated.failure === 'target-ambiguous') {
-          sourceCandidateCount = countSourceCandidates(source, screen);
+          sourceGroup = trackRelocationGroup(source, screen.nodes, (node) => visibleBox(node) !== undefined);
         }
         return undefined;
       }

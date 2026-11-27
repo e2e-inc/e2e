@@ -752,6 +752,9 @@ describe('replayTrace: bare-point drags', () => {
     { label: 'refuses a positioned source when the group drops to its recorded count', twinX: 220, placeable: false, change: 'positioned' },
     { label: 'keeps waiting for a positioned source when its destination is already visible', twinX: 220, placeable: true, change: 'source-wait-only' },
     { label: 'uses a recovered test ID when the same source group remains', twinX: 220, placeable: true, change: 'regain-id' },
+    { label: 'stops when the source no longer shares the originally matched test ID', twinX: 220, placeable: false, change: 'test-id-group-shrinks' },
+    { label: 'drags when the originally matched test ID group stays intact', twinX: 220, placeable: true, change: 'test-id-group-holds' },
+    { label: 'refuses a late destination that appears hidden', twinX: 220, placeable: false, change: 'hidden-destination' },
     { label: 'refuses a recovered test ID on a hidden source', twinX: 220, placeable: false, change: 'hidden-id' },
     { label: 'stops when the source becomes hidden and its twin moves into the point', twinX: 220, placeable: false, change: 'source-hides' },
     { label: 'stops when the source loses its box and its twin moves into the point', twinX: 220, placeable: false, change: 'source-loses-box' },
@@ -759,11 +762,12 @@ describe('replayTrace: bare-point drags', () => {
     const card: SemanticNode = { ref: { id: 'c', revision: 'r1' }, role: 'button', name: 'Card', rect: { x: 0, y: 0, width: 200, height: 100 } };
     const twin: SemanticNode = { ...card, ref: { id: 'twin', revision: 'r1' }, rect: { x: twinX, y: 0, width: 200, height: 100 } };
     const lane: SemanticNode = { ref: { id: 'l', revision: 'r1' }, role: 'region', name: 'Done', rect: { x: 450, y: 0, width: 200, height: 100 } };
+    const sharedTestId = change === 'test-id-group-shrinks' || change === 'test-id-group-holds';
     const sourceTarget = {
       role: 'button',
       name: 'Card',
       ...(change === 'positioned' || change === 'source-wait-only' ? { position: { index: 0, of: 2 } } : {}),
-      ...(change === 'regain-id' || change === 'hidden-id' ? { testId: 'card-primary' } : {}),
+      ...(change === 'regain-id' || change === 'hidden-id' || sharedTestId ? { testId: 'card-primary' } : {}),
     };
     const drag: RecordedAction = {
       name: 'dragAt',
@@ -778,6 +782,7 @@ describe('replayTrace: bare-point drags', () => {
     const movedCard = { ...card, rect: { x: 25, y: 0, width: 200, height: 100 } };
     const before = change === 'three-to-two' || change === 'positioned' ? [card, twin, third] : [card, twin];
     if (change === 'source-wait-only') before.push(third, lane);
+    if (sharedTestId) before.splice(0, 2, { ...card, testId: 'card-primary' }, { ...twin, testId: 'card-primary' });
     let after = [movedCard, twin, lane];
     if (change === 'source-leaves') after = [twin, lane];
     if (change === 'twin-moves') after = [{ ...card, ref: twin.ref }, lane];
@@ -785,6 +790,12 @@ describe('replayTrace: bare-point drags', () => {
     if (change === 'positioned') after = [{ ...card, ref: twin.ref }, third, lane];
     if (change === 'regain-id') after = [{ ...movedCard, testId: 'card-primary' }, twin, lane];
     if (change === 'hidden-id') after = [card, twin, { ...third, testId: 'card-primary', states: { hidden: true } }, lane];
+    if (sharedTestId) after = [
+      { ...movedCard, testId: change === 'test-id-group-shrinks' ? 'updated-card-id' : 'card-primary' },
+      { ...twin, testId: 'card-primary' },
+      lane,
+    ];
+    if (change === 'hidden-destination') after = [movedCard, twin, { ...lane, states: { hidden: true } }];
     if (change === 'source-hides') after = [{ ...card, states: { hidden: true } }, { ...card, ref: twin.ref }, lane];
     if (change === 'source-loses-box') after = [{ ref: card.ref, role: 'button', name: 'Card' }, { ...card, ref: twin.ref }, lane];
     host.capture = async () => screen(host.looks.length === 1 ? before : after);
@@ -795,7 +806,11 @@ describe('replayTrace: bare-point drags', () => {
       expect(drags).toEqual([{ from: { x: 125, y: 50 }, to: { x: 550, y: 50 } }]);
       expect(host.looks).toEqual(['held-still', 'raw']);
     } else {
-      expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
+      expect(outcome).toMatchObject({
+        completed: false,
+        executed: 0,
+        stopReason: change === 'hidden-destination' ? 'target-not-found' : 'target-ambiguous',
+      });
       expect(drags).toEqual([]);
       expect(host.looks).toEqual(change === undefined ? ['held-still'] : ['held-still', 'raw']);
     }

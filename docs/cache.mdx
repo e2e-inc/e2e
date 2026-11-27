@@ -140,9 +140,10 @@ model calls:
    ID, and surrounding context. e2e waits for controls to appear and stops
    if a match is ambiguous. If the recorded drag point identifies the source
    among same-named controls, replay keeps waiting for the drop target.
-   Replay stops if the number of visible, placeable source candidates drops
-   during that wait, or if the recovered match has no visible, usable box.
-   Replay hands off when live fallback is available.
+   During that wait, replay stops if fewer visible, placeable controls
+   match the source identity used to start the wait, or if a recovered
+   endpoint has no visible, usable box. Replay hands off when live
+   fallback is available.
 3. **Check the end state** (final route plus the controls that appeared,
    disappeared, or changed state).
 4. **Finish with zero model calls**, or hand off to the live agent with a

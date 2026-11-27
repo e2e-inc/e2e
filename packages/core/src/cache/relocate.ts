@@ -308,17 +308,21 @@ function tierMatches(tier: DescriptorTier, candidates: readonly DescribedNode[])
 }
 
 /**
- * Counts the source group on the same tier across observations. Prefer the
- * semantic or placed shape tier so a recovered test id does not shrink it.
- * The caller supplies the same eligibility check it uses to place the source.
+ * Tracks the tier that first matched, even when a stronger or weaker tier
+ * matches on a later observation. The caller defines which nodes can be used.
  */
-export function relocationGroupSize(
+export function trackRelocationGroup(
   descriptor: TraceTargetDescriptor,
   nodes: ReadonlyMap<string, RedactedNode>,
-  eligible: (id: string) => boolean,
-): number {
-  const tier = descriptorTiers(descriptor).findLast((candidate) => candidate.kind !== 'shape' || isPlaced(descriptor));
-  return tier === undefined ? 0 : tierMatches(tier, candidatesWithin(descriptor.within, nodes)).filter(eligible).length;
+  eligible: (node: RedactedNode | undefined) => boolean,
+): { count: number; readonly countIn: (current: ReadonlyMap<string, RedactedNode>) => number } | undefined {
+  const { ids, tier } = matchingIds(descriptor, nodes);
+  if (tier === undefined) return undefined;
+  return {
+    count: ids.filter((id) => eligible(nodes.get(id))).length,
+    countIn: (current) =>
+      tierMatches(tier, candidatesWithin(descriptor.within, current)).filter((id) => eligible(current.get(id))).length,
+  };
 }
 
 /**
