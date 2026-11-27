@@ -513,7 +513,8 @@ async function relocateEnds(
     const to = destination === undefined ? undefined : judge(destination, screen);
     if (source !== undefined && sourceCandidateCount !== undefined) {
       const count = countSourceCandidates(source, screen);
-      if (count < sourceCandidateCount) {
+      const unplaceableMatch = from?.relocated.kind === 'found' && visibleBox(from.relocated.node) === undefined;
+      if (count < sourceCandidateCount || unplaceableMatch) {
         const lostSource: Relocated = { kind: 'failed', failure: 'target-ambiguous', candidates: [], screen, twinLeft: true };
         return { screen, ends: [lostSource, to?.relocated], refused: true };
       }
@@ -523,8 +524,9 @@ async function relocateEnds(
       descriptor !== undefined && refused.has(descriptor) && judged?.relocated.kind === 'failed';
     latest = { screen, ends: [from?.relocated, to?.relocated], refused: unresolved(source, from) || unresolved(destination, to) };
     if (from?.relocated.kind === 'failed') {
-      if (from.wait || (to?.wait === true && shouldWaitForDestination?.(from.relocated, to.relocated) === true)) {
-        if (sourceCandidateCount === undefined && source !== undefined && shouldWaitForDestination !== undefined
+      const waitingForDestination = to?.wait === true && shouldWaitForDestination?.(from.relocated, to.relocated) === true;
+      if (from.wait || waitingForDestination) {
+        if (waitingForDestination && sourceCandidateCount === undefined && source !== undefined
           && from.relocated.failure === 'target-ambiguous') {
           sourceCandidateCount = countSourceCandidates(source, screen);
         }

@@ -750,7 +750,9 @@ describe('replayTrace: bare-point drags', () => {
     { label: 'stops when only the unrelated twin leaves', twinX: 220, placeable: false, change: 'twin-leaves' },
     { label: 'stops when the source count drops from three to two', twinX: 220, placeable: false, change: 'three-to-two' },
     { label: 'refuses a positioned source when the group drops to its recorded count', twinX: 220, placeable: false, change: 'positioned' },
+    { label: 'keeps waiting for a positioned source when its destination is already visible', twinX: 220, placeable: true, change: 'source-wait-only' },
     { label: 'uses a recovered test ID when the same source group remains', twinX: 220, placeable: true, change: 'regain-id' },
+    { label: 'refuses a recovered test ID on a hidden source', twinX: 220, placeable: false, change: 'hidden-id' },
     { label: 'stops when the source becomes hidden and its twin moves into the point', twinX: 220, placeable: false, change: 'source-hides' },
     { label: 'stops when the source loses its box and its twin moves into the point', twinX: 220, placeable: false, change: 'source-loses-box' },
   ])('$label', async ({ twinX, placeable, change }) => {
@@ -760,8 +762,8 @@ describe('replayTrace: bare-point drags', () => {
     const sourceTarget = {
       role: 'button',
       name: 'Card',
-      ...(change === 'positioned' ? { position: { index: 0, of: 2 } } : {}),
-      ...(change === 'regain-id' ? { testId: 'card-primary' } : {}),
+      ...(change === 'positioned' || change === 'source-wait-only' ? { position: { index: 0, of: 2 } } : {}),
+      ...(change === 'regain-id' || change === 'hidden-id' ? { testId: 'card-primary' } : {}),
     };
     const drag: RecordedAction = {
       name: 'dragAt',
@@ -775,12 +777,14 @@ describe('replayTrace: bare-point drags', () => {
     const third: SemanticNode = { ...twin, ref: { id: 'third', revision: 'r1' }, rect: { x: 700, y: 0, width: 200, height: 100 } };
     const movedCard = { ...card, rect: { x: 25, y: 0, width: 200, height: 100 } };
     const before = change === 'three-to-two' || change === 'positioned' ? [card, twin, third] : [card, twin];
+    if (change === 'source-wait-only') before.push(third, lane);
     let after = [movedCard, twin, lane];
     if (change === 'source-leaves') after = [twin, lane];
     if (change === 'twin-moves') after = [{ ...card, ref: twin.ref }, lane];
     if (change === 'twin-leaves') after = [movedCard, lane];
     if (change === 'positioned') after = [{ ...card, ref: twin.ref }, third, lane];
     if (change === 'regain-id') after = [{ ...movedCard, testId: 'card-primary' }, twin, lane];
+    if (change === 'hidden-id') after = [card, twin, { ...third, testId: 'card-primary', states: { hidden: true } }, lane];
     if (change === 'source-hides') after = [{ ...card, states: { hidden: true } }, { ...card, ref: twin.ref }, lane];
     if (change === 'source-loses-box') after = [{ ref: card.ref, role: 'button', name: 'Card' }, { ...card, ref: twin.ref }, lane];
     host.capture = async () => screen(host.looks.length === 1 ? before : after);
