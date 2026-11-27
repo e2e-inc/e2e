@@ -513,6 +513,8 @@ describe('SessionTestLines', () => {
         "Put them in that test where it stopped, in place of the line that failed or after its last step. Keep the test's checks together at its end, with one that checks its outcome. See topic writing-tests, Structure.",
       ].join('\n'),
     );
+    session.lines.ran(['await browser.frameLocator("iframe").getByRole("button", "Save").tap();']);
+    expect(session.lines.draft()).toContain("Include browser in the test's fixtures.");
     expect(session.tools.test_lines?.description).toContain('Use these lines to continue the existing test');
     expect(session.tools.test_lines?.description).not.toMatch(/split the draft into tests/i);
   });

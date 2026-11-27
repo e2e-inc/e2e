@@ -256,6 +256,8 @@ export default { targets: [{ name: 'web', engine: web(), app: { url: ${JSON.stri
       expect(target, observed.text).toBeDefined();
       const tapped = await invoke(client, 'call', { tool: 'tap', args: { target } });
       expect(tapped.text).toContain('Test line: await browser.frameLocator(');
+      const draft = await invoke(client, 'call', { tool: 'test_lines' });
+      expect(draft.text).toContain("Include browser in the test's fixtures.");
       expect((await invoke(client, 'call', { tool: 'run_code', args: { code: 'await browser.frameLocator("iframe").getByRole("button").count();' } })).isError).toBe(true);
       expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
       expect(await held.exited).toBe(0);

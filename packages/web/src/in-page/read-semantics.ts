@@ -1626,9 +1626,9 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   };
 
   /**
-   * The selector used to re-enter one iframe. Unanchored is fine here: it is
-   * resolved against the document it was just read from, within this
-   * observation, and never stored. This is the one place a selector is
+   * The selector used to re-enter one iframe in its parent document. The MCP
+   * recorder can also print it in a test line and warns on positional paths.
+   * This is the one place a selector is
    * derived: each `namedSelectorOf` probe is a document-wide query, and no
    * runner consumes a per-node selector, so neither read mode pays for one.
    */
