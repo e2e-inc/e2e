@@ -8,7 +8,6 @@ use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::number::CFNumber;
-use core_foundation::string::CFString;
 use core_foundation_sys::array::{CFArrayGetCount, CFArrayGetValueAtIndex};
 use core_foundation_sys::base::CFTypeRef;
 use core_foundation_sys::dictionary::{CFDictionaryGetValue, CFDictionaryRef};
@@ -89,7 +88,7 @@ fn string(dictionary: CFDictionaryRef, key: CFStringRefStatic) -> Option<String>
     if value.is_null() {
         return None;
     }
-    Some(unsafe { CFString::wrap_under_get_rule(value as _) }.to_string())
+    Some(crate::ax::text_of(value as _))
 }
 
 fn bounds(dictionary: CFDictionaryRef) -> Option<Rect> {
