@@ -1432,6 +1432,7 @@ describe('DesktopSurface: acting', () => {
           available_actions: ['Scroll'],
           children: [
             { role: 'row', ref_id: '@s:row', available_actions: ['RightClick'], children: [{ role: 'cell', ref_id: '@s:cell', available_actions: ['ScrollTo'], children: [{ role: 'group', children: [text('Medium')] }] }] },
+            { role: 'row', ref_id: '@s:row2', available_actions: ['RightClick'], children: [{ role: 'cell', ref_id: '@s:cell2', available_actions: ['Click'], children: [text('High')] }] },
             { role: 'button', ref_id: '@s:button', name: 'Archive', available_actions: ['Click'], children: [{ role: 'image', native_id: { kind: 'ax_identifier', value: 'icon' } }] },
             text('Loose'),
             {
@@ -1463,7 +1464,17 @@ describe('DesktopSurface: acting', () => {
       expect(last(fake, 'act')).toMatchObject({ ref: '@s:row', action: 'rightClick' });
     });
 
-    it('refuses text with no row or button around it: never the list, a field, the window, or past three levels', async () => {
+    it("taps a cell's own click from its text, and still opens the row's menu past it", async () => {
+      const { surface, fake } = await launched({ snapshot: [read] }, { observe: false });
+      const [high] = await surface.locate(testId('High'), operation());
+      await surface.perform(high!.ref, { kind: 'tap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:cell2', action: 'click' });
+      const [again] = await surface.locate(testId('High'), operation());
+      await surface.perform(again!.ref, { kind: 'secondaryTap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:row2', action: 'rightClick' });
+    });
+
+    it('refuses text with no row or button around it, never the list, the window, or past three levels, and taps the field a hint is in', async () => {
       const { surface, fake } = await launched({ snapshot: [read] }, { observe: false });
       for (const id of ['Loose', 'Status', 'Deep']) {
         const [node] = await surface.locate(testId(id), operation());

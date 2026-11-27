@@ -366,8 +366,10 @@ export function projectSnapshot(
     };
     bindings.set(id, binding);
     // A press on a child can go to this node, and on through it to what is around it only while it has no ref of its own: a
-    // row, a button, a list, or a scroll area ends the way up, and a cell that takes no press passes it on to its row.
-    const passes = node.ref_id === undefined || (node.role === 'cell' && node.available_actions?.includes('Click') !== true);
+    // row, a button, a list, or a scroll area ends the way up. A cell that does not take both a click and a right click
+    // passes it on to its row: the press goes to the first node up that takes it, so a tap still stops at a cell's own click.
+    const cellActions = node.available_actions ?? [];
+    const passes = node.ref_id === undefined || (node.role === 'cell' && !(cellActions.includes('Click') && cellActions.includes('RightClick')));
     const aroundChildren = id === ROOT_ID ? [] : (passes ? [binding, ...around] : [binding]).slice(0, MAX_PRESS_LEVELS);
     const kept: RawNode[] = [];
     const underHidden = new Map<RawNode, 'scrolled' | 'other'>();
