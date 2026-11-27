@@ -245,6 +245,14 @@ export function addressKey(location: string): string {
  * the live addresses before an entry is written (`cache/detours.ts`).
  */
 export function routeLocation(location: string): string {
+  // A marker can take part of an address and leave a value outside its query (`<secret:app>welcome?code=...`,
+  // `/<secret:cb>&state=...`, `<secret:app>checkout;jsessionid=...`): every named value reads `:id` before the address is read.
+  if (SECRET_MARKER.test(location)) return spelledLocation(location.replace(NAMED_VALUE, (_named: string, query?: string, parameter?: string) => `${query ?? parameter}=${PARAM}`));
+  return spelledLocation(location);
+}
+
+/** `routeLocation` of a location whose named values a marker could have left loose are masked already. */
+function spelledLocation(location: string): string {
   const route = routeOf(location);
   if (route.kind === 'opaque') return unparsedLocation(location);
   // An app that routes in the fragment is spelled with its document path and `#`, so the location names a page it serves.
@@ -274,14 +282,16 @@ function storedSegment(segment: string): string {
  */
 function unparsedLocation(location: string): string {
   const parts = unparsedParts(location);
-  const spelled = parts === undefined ? location : `${parts.authority}${routeLocation(parts.path)}`;
-  // A marker that took part of the address (`<secret:app>welcome?code=...`, `...<secret:cb>&state=...`) leaves no structure to
-  // read, so every value a `?`, `&`, `;`, or `#` names reads `:id`, wherever it stands.
-  return SECRET_MARKER.test(spelled) ? spelled.replace(NAMED_VALUE, (_named: string, name: string) => `${name}=${PARAM}`) : spelled;
+  return parts === undefined ? location : `${parts.authority}${spelledLocation(parts.path)}`;
 }
 
-/** A value a `?`, `&`, `;`, or `#` names (`?code=...`, `&state=...`, `;jsessionid=...`, `#access_token=...`), its name kept. */
-const NAMED_VALUE = /([?&;#][^=?&;#/]*)=[^&;#/]*/g;
+/**
+ * A value a `?`, `&`, or `#` names (`?code=...`, `&state=...`,
+ * `#access_token=...`), which runs to the next `&` or `#`, a `/` included,
+ * or one a `;` names in a path (`;jsessionid=...`), which ends with its
+ * segment; its name kept.
+ */
+const NAMED_VALUE = /([?&#][^=?&;#/]*)=[^&#]*|(;[^=?&;#/]*)=[^&;#/?]*/g;
 
 /** A `file:` URL's scheme and host, empty for a local file: the path starts at the next slash, its first segment included. */
 const FILE_ORIGIN = /^\s*file:(?:\/\/[^/?#\\]*)?/i;

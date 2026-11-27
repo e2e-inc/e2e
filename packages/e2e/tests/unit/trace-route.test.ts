@@ -158,6 +158,11 @@ describe('routeLocation', () => {
     // A marker that took the `?` too: the values after it still read :id.
     expect(routeLocation('http://127.0.0.1:4280<secret:cb>&state=SyntheticCallbackStateValue')).toBe('http://127.0.0.1:4280<secret:cb>&state=:id/');
     expect(routeLocation('<secret:app>#access_token=abc&state=x')).toBe('<secret:app>/');
+    // A query value runs past a `/`; a path parameter ends with its segment.
+    expect(routeLocation('<secret:app>welcome?sig=Ab3/xY9+Qz7Lm2Pq=&state=ok')).toBe('<secret:app>welcome?sig=:id&state=:id');
+    expect(routeLocation('<secret:app>checkout;jsessionid=AbC123/next?code=Xy9')).toBe('<secret:app>checkout;jsessionid=:id/next?code=:id');
+    // A marker in a path that still parses can leave a value loose in it.
+    expect(routeLocation('https://app.test/<secret:cb>&code=CallbackCodeWord')).not.toContain('CallbackCodeWord');
     expect(routeLocation('<secret:app>done#access_token=abc&state=x')).toBe('<secret:app>done#access_token=:id&state=:id');
     expect(routeLocation('<secret:invite>welcome?code=MockCallbackCode')).toBe('<secret:invite>welcome?code=:id');
     expect(routeLocation('<secret:app> › Delete it?')).toBe('<secret:app> › Delete it?');
