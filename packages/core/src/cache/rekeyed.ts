@@ -12,8 +12,9 @@
  *
  * Only the file store can be looked through. A step's recordings are all
  * in its test's pair, so a strict miss reads that pair alone, under its lock:
- * another test's writer, live or dead, never holds it up. A read that fails
- * finds nothing, and the next miss reads again.
+ * only a writer of a test whose name has the same stem (its lock, `lockPath`
+ * in `store.ts`) can hold it up. A read that fails finds nothing, and the
+ * next miss reads again.
  */
 
 import type { ResolvedCacheConfig } from '../config/resolve.ts';
