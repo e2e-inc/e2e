@@ -788,7 +788,17 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     // field answers a gone element): only a refusal says nothing was sent.
     written.map_err(|error| if moved_focus || !refuses(error) { refused(error, "set value").delivered() } else { refused(error, "set value") })?;
     if secure {
-        return Ok(());
+        // A secure field shows no value, but counts its characters: the count says the text landed whole (one a
+        // formatter cut short does not), with no secret read. A field that counts none is taken at the write's word.
+        let count = || match element.attribute("AXNumberOfCharacters") {
+            Ok(Value::Number(count)) => Some(count as usize),
+            _ => None,
+        };
+        let wanted = text.encode_utf16().count();
+        if count().is_none() || until(deadline, || count() == Some(wanted)) {
+            return Ok(());
+        }
+        return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the secure field did not take the whole text set"));
     }
     let expected = if numeric { finite(text).map(ax::format_number).unwrap_or_else(|_| text.to_owned()) } else { text.to_owned() };
     if until(deadline, || value_text(element).as_deref() == Some(expected.as_str())) {
