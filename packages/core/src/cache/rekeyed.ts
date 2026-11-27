@@ -10,27 +10,18 @@
  * (`TraceProvenance`), and a step whose own key misses while the store holds
  * a recording made for exactly that step is stale, not new.
  *
- * Only the file store can be listed. The listing is read once per worker
- * and target, on the first strict miss that asks, and kept: every entry
- * written since has a key the run derives, so it is a hit rather than a
- * candidate here. A listing that fails is not kept, so the next miss lists
- * again.
+ * Only the file store can be looked through. A step's recordings are all
+ * in its test's pair, so a strict miss reads that pair alone, under its lock:
+ * another test's writer, live or dead, never holds it up. A read that fails
+ * finds nothing, and the next miss reads again.
  */
 
 import type { ResolvedCacheConfig } from '../config/resolve.ts';
 import { FileCacheStore, MAX_CACHE_WIRE_BYTES, RECORDING_EXTENSION } from './store.ts';
 import type { TraceKeyContext, TraceProvenance } from './trace.ts';
 
-/** One listed entry: its key and the file it is in. */
-interface Listed {
-  readonly keyHash: string;
-  readonly file: string;
-}
-
 export class StoredRecordings {
   private readonly store: FileCacheStore;
-  /** Key hashes and the file holding each, by `stepKey` of the step each entry was recorded for. */
-  private listing: Promise<ReadonlyMap<string, readonly Listed[]>> | undefined;
 
   constructor(store: FileCacheStore) {
     this.store = store;
@@ -39,7 +30,7 @@ export class StoredRecordings {
   /**
    * The key hash of an entry recorded for `step` under a key other than
    * `keyHash`, with the key context it recorded, or undefined when there is none or the store cannot be
-   * listed. `step` is in the form an entry stores it (`recordedProvenance`).
+   * read. `step` is in the form an entry stores it (`recordedProvenance`).
    * Only an entry that records the whole step counts: one written before the
    * params, occurrence, and agent were recorded could belong to another call
    * of the same instruction, and a read-write run that replays it completes
@@ -52,48 +43,22 @@ export class StoredRecordings {
   ): Promise<{ readonly keyHash: string; readonly file: string; readonly keyedBy?: TraceKeyContext } | undefined> {
     const key = stepKey(step);
     if (key === undefined) return undefined;
-    let listing: ReadonlyMap<string, readonly Listed[]>;
-    try {
-      this.listing ??= this.list().catch((cause: unknown) => {
-        this.listing = undefined;
-        throw cause;
-      });
-      listing = await this.listing;
-    } catch {
-      // A listing that failed (a test's lock held past the wait, say) is tried again by the next step.
-      return undefined;
-    }
-    for (const candidate of listing.get(key) ?? []) {
-      if (candidate.keyHash === keyHash) continue;
-      // Listed once: an entry evicted since is no evidence.
-      const read = await this.store.read(candidate.keyHash, step).catch(() => undefined);
-      if (read?.status === 'hit') {
-        const keyedBy = read.entry.payload.keyedBy;
-        return { keyHash: candidate.keyHash, file: candidate.file, ...(keyedBy === undefined ? {} : { keyedBy }) };
-      }
+    // A read that failed (the test's lock held past the wait, say) is tried again by the next step.
+    const file = await this.store.recordingsOf(step.testId).catch(() => undefined);
+    if (file === undefined || file.parsed.status !== 'ok') return undefined;
+    for (const recording of file.parsed.recordings) {
+      if (recording.status !== 'hit' || recording.keyHash === keyHash || recording.entry.payload.truncated === true) continue;
+      const { recordedFor, keyedBy } = recording.entry.payload;
+      if (recordedFor === undefined || stepKey(recordedFor) !== key) continue;
+      return { keyHash: recording.keyHash, file: `${file.name}${RECORDING_EXTENSION}`, ...(keyedBy === undefined ? {} : { keyedBy }) };
     }
     return undefined;
-  }
-
-  /** Every replayable entry that records its whole step, by `stepKey`. */
-  private async list(): Promise<ReadonlyMap<string, readonly Listed[]>> {
-    const steps = new Map<string, Listed[]>();
-    for (const file of await this.store.list()) {
-      if (file.parsed.status !== 'ok') continue;
-      for (const recording of file.parsed.recordings) {
-        if (recording.status !== 'hit' || recording.entry.payload.truncated === true) continue;
-        const recordedFor = recording.entry.payload.recordedFor;
-        const key = recordedFor === undefined ? undefined : stepKey(recordedFor);
-        if (key !== undefined) steps.set(key, [...(steps.get(key) ?? []), { keyHash: recording.keyHash, file: `${file.name}${RECORDING_EXTENSION}` }]);
-      }
-    }
-    return steps;
   }
 }
 
 /**
- * The listing `cache.strict` checks a run's misses against, for the file
- * store only. Undefined when strict is off, the cache is off, or a custom
+ * What `cache.strict` checks a run's misses against, for the file store
+ * only. Undefined when strict is off, the cache is off, or a custom
  * `cache.store` replaced the file store, which `CacheStore` gives no way to
  * list.
  */

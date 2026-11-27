@@ -224,6 +224,16 @@ export class FileCacheStore implements CacheStore {
   }
 
   /**
+   * The pair holding `testId`'s recordings, read under its lock, or
+   * undefined when there is none. Not part of `CacheStore`: `cache.strict`
+   * looks there for a step's recording under another key (`rekeyed.ts`).
+   */
+  async recordingsOf(testId: string): Promise<ListedRecordingFile | undefined> {
+    const base = recordingName(testId);
+    return this.locked(base, () => this.locate(base, testId));
+  }
+
+  /**
    * Deletes the files of one pair the store wrote, under its test's lock and
    * as they are then: a write that landed since the pair was listed goes
    * whole, never half, so no lone YAML is left behind. Returns how many

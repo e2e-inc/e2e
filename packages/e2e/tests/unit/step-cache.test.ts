@@ -1,6 +1,6 @@
 /** StepTraceSession: store resilience, staging anchors, replay postconditions, the write-side decision. */
 
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -1407,8 +1407,8 @@ describe('cache.strict and a step whose key changed under its recording', () => 
   });
 
   /** A file store holding one entry under `OLD_KEY`, and a context whose own key finds nothing in it. */
-  async function rekeyedContext(payload: ActionTrace, strict = true): Promise<AgentCacheContext> {
-    const directory = await tempDir('e2e-rekeyed-');
+  async function rekeyedContext(payload: ActionTrace, strict = true, directory?: string): Promise<AgentCacheContext> {
+    directory ??= await tempDir('e2e-rekeyed-');
     const store = new FileCacheStore({ directory, maxBytes: MAX_CACHE_WIRE_BYTES, writable: true });
     await store.write(OLD_KEY, payload);
     return {
@@ -1430,18 +1430,30 @@ describe('cache.strict and a step whose key changed under its recording', () => 
     expect(session.cacheInfo).toMatchObject({ mode: 'missed', reason: 'no-entry' });
   });
 
-  it('lists the store again on the next miss after a listing fails', async () => {
+  it("reads the test's file again on the next miss after a read fails", async () => {
     const context = await rekeyedContext(recordedPayload(exampleStep));
-    const list = vi
-      .spyOn(FileCacheStore.prototype, 'list')
+    const read = vi
+      .spyOn(FileCacheStore.prototype, 'recordingsOf')
       .mockRejectedValueOnce(Object.assign(new Error('too many open files'), { code: 'EMFILE' }));
     try {
       await expect(makeSession(context, makeHost(['/'])).begin()).resolves.toBeUndefined();
       await expect(makeSession(context, makeHost(['/'])).begin()).rejects.toMatchObject({ code: 'REPLAY_STALE' });
-      expect(list).toHaveBeenCalledTimes(2);
+      expect(read).toHaveBeenCalledTimes(2);
     } finally {
-      list.mockRestore();
+      read.mockRestore();
     }
+  });
+
+  it("is not held up by the lock another test's writer left", async () => {
+    const directory = await tempDir('e2e-rekeyed-');
+    const other = new FileCacheStore({ directory, maxBytes: MAX_CACHE_WIRE_BYTES, writable: true });
+    await other.write('c'.repeat(64), recordedPayload({ ...exampleStep, testId: 'tests/other.e2e.ts::step' }));
+    // That test's writer died holding its lock moments ago: fresh, so it reads as held.
+    await writeFile(join(directory, '.other-step.writing'), 'c'.repeat(32), 'utf8');
+    const context = await rekeyedContext(recordedPayload(exampleStep), true, directory);
+    const started = Date.now();
+    await expect(makeSession(context, makeHost(['/'])).begin()).rejects.toMatchObject({ code: 'REPLAY_STALE' });
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 
   it('runs live against an entry recorded before the occurrence fields were, which could be another call of the instruction', async () => {
