@@ -29,9 +29,10 @@ pub(super) fn enabled_of(options: &[Element], deadline: Instant, label: &str) ->
     }
 }
 
-/// How deep `row_label` reads into a row for its text. A row deeper than this has a label it cannot read whole, which
-/// counts as a read the app did not answer: never a match, and never proof the option is missing.
-pub(super) const ROW_TEXT_DEPTH: usize = 16;
+/// How deep `row_label` reads into a row for its text: as deep as a snapshot may read (`desktop({ maxDepth })` allows up
+/// to 50), so a row a locator names by its whole text is selected by that text too. A row deeper than this has a label it
+/// cannot read whole, which counts as a read the app did not answer: never a match, and never proof the option is missing.
+pub(super) const ROW_TEXT_DEPTH: usize = 50;
 
 /// The name a list's row shows, as the snapshot names it: its own title or description (a text item's value), else,
 /// with none, every text inside it in reading order, joined by spaces.
