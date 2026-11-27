@@ -53,12 +53,17 @@ test.describe('TaskBoard (SwiftUI)', () => {
     await screen.getByRole('button', 'New Task').tap();
     const estimate = screen.getByTestId('new-estimate');
     await estimate.fill('3');
-    for (const value of ['2.5', '40']) {
-      const refused = await estimate.fill(value, { timeout: 5_000 }).then(
-        () => false,
-        () => true,
+    // 2.5 steps past the value and back. 40 is outside the stepper's range: refused before any step.
+    const refusals = [
+      ['2.5', 'goes past the value'],
+      ['40', 'outside the range'],
+    ] as const;
+    for (const [value, reason] of refusals) {
+      const error = await estimate.fill(value, { timeout: 5_000 }).then(
+        () => undefined,
+        (caught: unknown) => caught,
       );
-      expect(refused, value).toBe(true);
+      expect(error, value).toMatchObject({ code: 'ACTION_FAILED', message: expect.stringContaining(reason) });
       await expect(estimate).toHaveValue('3');
     }
   });
