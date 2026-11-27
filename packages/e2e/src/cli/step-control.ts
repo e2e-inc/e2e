@@ -687,8 +687,8 @@ export async function serveSteps(options: RunOptions, version: string, signals: 
    */
   const onEvent: RunEventSink = (event) => {
     if (event.type === 'step' && event.progress.phase === 'end' && !printsAtEnd(event.progress.kind)) {
-      const { api, label, kind, status, durationMs, modelCalls, cache, error, identity } = event.progress;
-      print(stepLine(plain, { api, label, kind, actor: identity?.actor, outcome: { status, durationMs, modelCalls, ...(cache === undefined ? {} : { cache }) } }));
+      const { api, label, kind, status, durationMs, modelCalls, error, identity } = event.progress;
+      print(stepLine(plain, { api, label, kind, actor: identity?.actor, outcome: { status, durationMs, modelCalls } }));
       if (error !== undefined) print(bounded(`${error.code}: ${error.message}`).replace(/^/gm, '  '));
     }
     return options.onEvent?.(event);

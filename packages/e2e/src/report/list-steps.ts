@@ -68,23 +68,21 @@ const F_RUNNING = '◌';
 const DEPTH_INDENT = '  ';
 
 /**
- * The cache misses a step line names: the ones the test's author can end.
- * `no-entry` and `retry` are the cache working as meant, and a hand-off
- * repairs its recording on the next passing run.
+ * ` · not replayed: truncated` for a step whose recording was cut short. It
+ * is the one miss no later run ends: the step records again, and is cut
+ * short again, until the test changes. Any other miss or hand-off is told
+ * by the summary row and the trace page.
  */
-const NAMED_MISSES: ReadonlySet<string> = new Set(['truncated', 'wrong-context', 'invalid-entry']);
-
-/** ` · not replayed: truncated` for a step whose recording can never replay as things stand, else nothing. */
 function missNotice(pc: Colors, outcome: StepOutcome): string {
   const { cache } = outcome;
-  if (cache?.mode !== 'missed' || cache.reason === undefined || !NAMED_MISSES.has(cache.reason)) return '';
-  return `${pc.dim(' · ')}${pc.yellow(`not replayed: ${cache.reason}`)}`;
+  if (cache?.mode !== 'missed' || cache.reason !== 'truncated') return '';
+  return `${pc.dim(' · ')}${pc.yellow('not replayed: truncated')}`;
 }
 
 /**
  * One listed step: outcome glyph, api, quoted label, then duration, model
- * calls, a cache miss the author can end, and a non-passed status. A
- * `test.step` is its title alone, with nothing after it while it runs.
+ * calls, a truncated recording, and a non-passed status. A `test.step` is
+ * its title alone, with nothing after it while it runs.
  */
 export function stepLine(pc: Colors, step: Pick<ListedStep, 'api' | 'label' | 'kind' | 'actor' | 'outcome'>, options: StepLineOptions = {}): string {
   const { outcome } = step;
@@ -92,14 +90,20 @@ export function stepLine(pc: Colors, step: Pick<ListedStep, 'api' | 'label' | 'k
   const titled = step.kind === 'step';
   const call = titled ? '' : `${pc.dim(withActor(step.actor, step.api))} `;
   const head = `${DEPTH_INDENT.repeat(options.depth ?? 0)}${glyph} ${options.context ?? ''}${call}`;
+  // A title takes no quotes.
+  const chrome = titled ? LABEL_CHROME - 2 : LABEL_CHROME;
+  const roomBeside = (tail: string): number | undefined =>
+    options.maxWidth === undefined ? undefined : options.maxWidth - visibleWidth(head) - visibleWidth(tail) - chrome;
   let tail = '';
   if (outcome !== undefined) {
     const calls = outcome.modelCalls > 0 ? ` · ${outcome.modelCalls} model call${outcome.modelCalls === 1 ? '' : 's'}` : '';
-    tail = `${pc.dim(`${formatTime(outcome.durationMs)}${calls}`)}${missNotice(pc, outcome)}${outcome.status === 'passed' ? '' : pc.dim(` ${outcome.status}`)}`;
+    const notice = missNotice(pc, outcome);
+    const status = outcome.status === 'passed' ? '' : pc.dim(` ${outcome.status}`);
+    tail = `${pc.dim(`${formatTime(outcome.durationMs)}${calls}`)}${notice}${status}`;
+    // On a narrow row the notice outranks the model calls, which the summary counts.
+    if (notice !== '' && (roomBeside(tail) ?? MIN_STEP_LABEL_COLUMNS) < MIN_STEP_LABEL_COLUMNS) tail = `${pc.dim(formatTime(outcome.durationMs))}${notice}${status}`;
   }
-  // A title takes no quotes.
-  const chrome = titled ? LABEL_CHROME - 2 : LABEL_CHROME;
-  const room = options.maxWidth === undefined ? undefined : options.maxWidth - visibleWidth(head) - visibleWidth(tail) - chrome;
+  const room = roomBeside(tail);
   return `${head}${titled ? fitLabel(step.label, room) : quotedLabel(step.label, room)}${tail === '' ? '' : ` ${tail}`}`;
 }
 
