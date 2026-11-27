@@ -364,8 +364,17 @@ E2E_CACHE_DIR=~/.cache/my-app/e2e npx e2e run
 <span id="commit-your-traces" />
 
 `e2e init` adds `.e2e/cache/` to `.gitignore`. To share recordings across
-your team and CI, remove that line and commit `.e2e/cache/`. CI defaults to
-`read-only`, so it replays committed entries without modifying them. Review
+your team and CI, replace that line with these two, which keep out the files
+a writer works with (a lock, a record of a write in progress, a temporary
+file a crash left), and commit `.e2e/cache/`:
+
+```text title=".gitignore"
+.e2e/cache/.*
+.e2e/cache/*.tmp
+```
+
+CI defaults to `read-only`, so it replays committed entries without
+modifying them. Review
 the `.yml` files in the pull request that records them. To fold the
 generated lock files in GitHub diffs, add this line to `.gitattributes`:
 
