@@ -137,7 +137,8 @@ export interface Device {
    * Installs an iOS `.app` bundle or Android `.apk` on the device. Relative paths
    * resolve against the project root. With no path, installs the target's
    * `app.appPath`. With a remote agent-device daemon from a device provider,
-   * an absolute path can also name a build on that daemon. The engine installs
+   * a path absolute on the runner can also name a build on that daemon. It
+   * reports the install error if the build is missing. The engine installs
    * nothing on its own, so call this once per device in a fixture or test.
    * `reinstall: true` removes the app first so it starts with no data; a
    * plain install replaces the binary and keeps its data. Resolves to the
