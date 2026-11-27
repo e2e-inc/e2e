@@ -52,15 +52,16 @@ fn key_character(text: &str) -> Option<char> {
     }
 }
 
-/// Every item of the app's own menus whose key equivalent is `combo`: its path of titles, and whether it is enabled.
-/// The Apple menu, the menu bar's first, is the system's (Force Quit, Log Out) and is left out. `None` when the menu
-/// bar could not be read whole (a menu that did not answer, no time left, more items than a walk reads): what was not
-/// read may hold an enabled item with the same key.
-fn triggered(pid: i32, combo: &Combo, deadline: Instant) -> Option<Vec<(Vec<String>, bool)>> {
-    let Some(bar) = Element::application(pid).element("AXMenuBar") else { return Some(Vec::new()) };
+/// The first disabled item of the app's own menus whose key equivalent is `combo`, as its path of titles: the one a
+/// refusal names. `None` when no item has the key, when an item that has it is enabled, and when the menu bar could
+/// not be read whole (a menu that did not answer, no time left, more items than a walk reads): what was not read may
+/// hold an enabled item with the same key. The Apple menu, the menu bar's first, is the system's (Force Quit, Log Out)
+/// and is left out.
+fn disabled_item(pid: i32, combo: &Combo, deadline: Instant) -> Option<Vec<String>> {
+    let bar = Element::application(pid).element("AXMenuBar")?;
     // The answer must reach the caller before its deadline, with time left to send the key.
     let stop = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
-    let mut found = Vec::new();
+    let mut disabled = None;
     let mut read_items = 0;
     // Each entry: the item's element, and the titles above it.
     let mut pending: Vec<(Element, Vec<String>)> = below(&bar).ok()?.into_iter().skip(1).rev().map(|menu| (menu, Vec::new())).collect();
@@ -75,7 +76,10 @@ fn triggered(pid: i32, combo: &Combo, deadline: Instant) -> Option<Vec<(Vec<Stri
         if let Some(key) = &item.key
             && combo.triggers(key)
         {
-            found.push((path.clone(), item.enabled));
+            if item.enabled {
+                return None;
+            }
+            disabled.get_or_insert_with(|| path.clone());
         }
         // Most items open no menu: one count says so, where reading the children takes two requests.
         if path.len() >= MAX_DEPTH || element.count("AXChildren") == Ok(0) {
@@ -88,14 +92,7 @@ fn triggered(pid: i32, combo: &Combo, deadline: Instant) -> Option<Vec<(Vec<Stri
             }
         }
     }
-    Some(found)
-}
-
-/// The item to name in a refusal: the first the shortcut triggers, when it triggers some and the app has none of them
-/// enabled.
-fn all_disabled(items: &[(Vec<String>, bool)]) -> Option<&[String]> {
-    let (path, _) = items.first()?;
-    if items.iter().any(|(_, enabled)| *enabled) { None } else { Some(path) }
+    disabled
 }
 
 /// Refuses a Command shortcut sent into the event queue of an app in the background when the menu item it triggers is
@@ -109,8 +106,7 @@ pub(super) fn refuse_disabled_shortcut(pid: i32, combo: &Combo, deadline: Instan
     if !combo.command() || Element::application(pid).boolean("AXFrontmost") == Some(true) {
         return Ok(());
     }
-    let items = triggered(pid, combo, deadline).unwrap_or_default();
-    let Some(path) = all_disabled(&items) else { return Ok(()) };
+    let Some(path) = disabled_item(pid, combo, deadline) else { return Ok(()) };
     Err(Failure::refused(
         codes::ACTION_FAILED,
         format!(
@@ -122,16 +118,7 @@ pub(super) fn refuse_disabled_shortcut(pid: i32, combo: &Combo, deadline: Instan
 
 #[cfg(test)]
 mod tests {
-    use super::{all_disabled, key_character};
-
-    #[test]
-    fn refuses_only_when_every_item_the_shortcut_triggers_is_disabled() {
-        let item = |title: &str, enabled: bool| (vec!["Edit".to_owned(), title.to_owned()], enabled);
-        assert_eq!(all_disabled(&[]), None);
-        assert_eq!(all_disabled(&[item("Find", true)]), None);
-        assert_eq!(all_disabled(&[item("Find", false), item("Find Again", true)]), None);
-        assert_eq!(all_disabled(&[item("Find", false), item("Find Again", false)]).map(|path| path.join(" > ")), Some("Edit > Find".to_owned()));
-    }
+    use super::key_character;
 
     #[test]
     fn reads_a_key_equivalents_character_in_lowercase() {

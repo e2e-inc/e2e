@@ -275,8 +275,7 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
         };
     }
     let mut characters = last.chars();
-    let mut base = None;
-    let key = match (characters.next(), characters.next()) {
+    let (key, base) = match (characters.next(), characters.next()) {
         (Some(character), None) => {
             if character.is_ascii_uppercase() {
                 flags |= CGEventFlags::CGEventFlagShift;
@@ -306,13 +305,12 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
             };
             // With Shift the key types its shifted character; one with none on the US layout is left to the app to work out.
             let typed = if flags.contains(CGEventFlags::CGEventFlagShift) { shifted(lower) } else { Some(lower) };
-            base = Some(lower);
-            Key { code, character: typed }
+            (Key { code, character: typed }, Some(lower))
         }
         _ => {
             let name = last.to_ascii_lowercase();
             let code = named_key(&name).ok_or_else(|| Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("\"{last}\" is not a key")))?;
-            Key { code, character: if name == "space" { Some(' ') } else { None } }
+            (Key { code, character: if name == "space" { Some(' ') } else { None } }, None)
         }
     };
     Ok(Combo { key, flags, base })
@@ -553,22 +551,36 @@ mod tests {
 
     #[test]
     fn matches_a_menu_items_key_equivalent() {
-        use super::KeyEquivalent;
+        use super::{Combo, Key, KeyEquivalent};
         let item = |character: Option<char>, code: Option<u16>, modifiers: u32| KeyEquivalent { character, code, modifiers };
-        // Named keys and Shift combos read no keyboard layout, so they parse on any Mac.
-        let up = parse_combo("ctrl+up").unwrap();
-        assert!(up.triggers(&item(Some('\u{f700}'), Some(126), KeyEquivalent::CONTROL | KeyEquivalent::NO_COMMAND)));
-        assert!(!up.triggers(&item(Some('\u{f700}'), Some(126), KeyEquivalent::NO_COMMAND)));
-        assert!(!up.triggers(&item(Some('\u{f701}'), Some(125), KeyEquivalent::CONTROL | KeyEquivalent::NO_COMMAND)));
-        let f5 = parse_combo("f5").unwrap();
-        assert!(f5.triggers(&item(Some('\u{f708}'), Some(96), KeyEquivalent::NO_COMMAND)));
-        assert!(!f5.triggers(&item(None, None, 0)));
-        let shift_d = parse_combo("shift+d").unwrap();
-        assert!(shift_d.triggers(&item(Some('d'), None, KeyEquivalent::SHIFT | KeyEquivalent::NO_COMMAND)));
-        assert!(!shift_d.triggers(&item(Some('d'), None, KeyEquivalent::NO_COMMAND)));
+        // Built by hand: parsing a Command combo reads the machine's keyboard layout, which a test cannot count on.
+        let command = |base: char, code: u16, extra: CGEventFlags| Combo {
+            key: Key { code, character: Some(base) },
+            flags: CGEventFlags::CGEventFlagCommand | extra,
+            base: Some(base),
+        };
+        let select_all = command('a', 0, CGEventFlags::CGEventFlagNull);
+        assert!(select_all.command());
+        assert!(select_all.triggers(&item(Some('a'), None, 0)));
+        assert!(!select_all.triggers(&item(Some('a'), None, KeyEquivalent::SHIFT)));
+        assert!(!select_all.triggers(&item(Some('a'), None, KeyEquivalent::NO_COMMAND)));
+        assert!(!select_all.triggers(&item(Some('b'), None, 0)));
+        let shift_d = command('d', 2, CGEventFlags::CGEventFlagShift);
+        assert!(shift_d.triggers(&item(Some('d'), None, KeyEquivalent::SHIFT)));
+        assert!(!shift_d.triggers(&item(Some('d'), None, 0)));
         // An item named by the character Shift types: `?` is Shift-/.
-        assert!(parse_combo("shift+/").unwrap().triggers(&item(Some('?'), None, KeyEquivalent::NO_COMMAND)));
-        assert!(!parse_combo("a").unwrap().command());
+        let help = command('/', 44, CGEventFlags::CGEventFlagShift);
+        assert!(help.triggers(&item(Some('?'), None, 0)));
+        assert!(!help.triggers(&item(Some('?'), None, KeyEquivalent::OPTION)));
+        // A named key is matched by its key code.
+        let command_up = Combo { key: Key { code: 126, character: None }, flags: CGEventFlags::CGEventFlagCommand, base: None };
+        assert!(command_up.triggers(&item(Some('\u{f700}'), Some(126), 0)));
+        assert!(!command_up.triggers(&item(Some('\u{f701}'), Some(125), 0)));
+        // An item that takes no Command says so in its bits, and only a combo without Command is its key.
+        let f5 = parse_combo("f5").unwrap();
+        assert!(!f5.command());
+        assert!(f5.triggers(&item(Some('\u{f708}'), Some(96), KeyEquivalent::NO_COMMAND)));
+        assert!(!f5.triggers(&item(Some('\u{f708}'), Some(96), 0)));
     }
 
     #[test]
