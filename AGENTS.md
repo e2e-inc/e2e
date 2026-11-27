@@ -368,10 +368,10 @@ the way a user would.
   `npm`, `pnpm`, and `bun` blocks, which the site syncs site-wide, enforced
   by `scripts/check-docs-package-managers.ts`).
   `docs/ja/`, `docs/zh/`, `docs/cs/`, `docs/es/`, `docs/pt/`, `docs/hi/`,
-  `docs/fr/`, and `docs/pl/` hold the Japanese, Simplified Chinese, Czech,
-  Spanish, Brazilian Portuguese, Hindi, French, and Polish translations, one
-  page per English page at the same path, with the tab and group labels in
-  `docs/<language>/navigation.json`. Translations are best
+  `docs/fr/`, `docs/pl/`, and `docs/id/` hold the Japanese, Simplified Chinese,
+  Czech, Spanish, Brazilian Portuguese, Hindi, French, Polish, and Indonesian
+  translations, one page per English page at the same path, with the tab and
+  group labels in `docs/<language>/navigation.json`. Translations are best
   effort: keep the English pages current in every change, and leave the
   translations to lag behind, since no contributor is expected to update a
   language they don't speak. `scripts/check-docs-translations.ts` warns on a
