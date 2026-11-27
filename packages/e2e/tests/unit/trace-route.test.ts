@@ -108,7 +108,8 @@ describe('routeLocation', () => {
 
   it('keeps a secret marker readable', () => {
     expect(routeLocation('/invite/<secret:token>/accept')).toBe('/invite/<secret:token>/accept');
-    expect(routeLocation('/invite/x<secret:token>y')).toBe('/invite/x<secret:token>y');
+    // A marker beside other text may have taken punctuation with it: the location is its markers alone.
+    expect(routeLocation('/invite/x<secret:token>y')).toBe('<secret:token>');
     expect(routeLocation('/invite?code=<secret:token>')).toBe('/invite?code=:id');
     expect(routeLocation('https://idp.test/invite/<secret:token>')).toBe('https://idp.test/invite/<secret:token>');
   });
@@ -152,19 +153,18 @@ describe('routeLocation', () => {
     expect(routeLocation('<secret:gateway>/about?token=super-secret-token#frag')).toBe('<secret:gateway>/about?token=:id');
     // A port the URL names stays beside the marker.
     expect(routeLocation('<secret:gateway>:8443/callback?code=SyntheticCallbackValue')).toBe('<secret:gateway>:8443/callback?code=:id');
-    // A marker that took the slash before the path, or more of it, leaves no address; its query values still read :id.
-    expect(routeLocation('<secret:gateway>about?token=super-secret-token#frag')).toBe('<secret:gateway>about?token=:id#frag');
-    expect(routeLocation('<secret:gateway>checkout;jsessionid=SampleSessionTokenOnly')).toBe('<secret:gateway>checkout;jsessionid=:id');
-    // A marker that took the `?` too: the values after it still read :id.
-    expect(routeLocation('http://127.0.0.1:4280<secret:cb>&state=SyntheticCallbackStateValue')).toBe('http://127.0.0.1:4280<secret:cb>&state=:id/');
+    // A marker that took a delimiter with it leaves no boundary to read the rest by: only the markers are kept.
+    expect(routeLocation('<secret:gateway>about?token=super-secret-token#frag')).toBe('<secret:gateway>');
+    expect(routeLocation('<secret:gateway>checkout;jsessionid=SampleSessionTokenOnly')).toBe('<secret:gateway>');
+    expect(routeLocation('http://127.0.0.1:4280<secret:cb>&state=SyntheticCallbackStateValue')).toBe('<secret:cb>');
+    expect(routeLocation('http://127.0.0.1:4280<secret:callback>color=Lavender')).toBe('<secret:callback>');
+    expect(routeLocation('<secret:app>welcome?sig=Ab3/xY9+Qz7Lm2Pq=&state=ok')).toBe('<secret:app>');
+    expect(routeLocation('<secret:invite>welcome?code=MockCallbackCode')).toBe('<secret:invite>');
+    // A fragment after an origin marker is dropped as any fragment is.
     expect(routeLocation('<secret:app>#access_token=abc&state=x')).toBe('<secret:app>/');
-    // A query value runs past a `/`; a path parameter ends with its segment.
-    expect(routeLocation('<secret:app>welcome?sig=Ab3/xY9+Qz7Lm2Pq=&state=ok')).toBe('<secret:app>welcome?sig=:id&state=:id');
-    expect(routeLocation('<secret:app>checkout;jsessionid=AbC123/next?code=Xy9')).toBe('<secret:app>checkout;jsessionid=:id/next?code=:id');
-    // A marker in a path that still parses can leave a value loose in it.
+    // A marker between delimiters can still leave a value loose in a path that parses; it reads :id, past a `/` too.
     expect(routeLocation('https://app.test/<secret:cb>&code=CallbackCodeWord')).not.toContain('CallbackCodeWord');
-    expect(routeLocation('<secret:app>done#access_token=abc&state=x')).toBe('<secret:app>done#access_token=:id&state=:id');
-    expect(routeLocation('<secret:invite>welcome?code=MockCallbackCode')).toBe('<secret:invite>welcome?code=:id');
+    expect(routeLocation('https://app.test/<secret:cb>&sig=Ab3/xY9+Qz7Lm2Pq=')).not.toContain('xY9');
     expect(routeLocation('<secret:app> › Delete it?')).toBe('<secret:app> › Delete it?');
     // A device title that opens with a marker is no address.
     expect(routeLocation('<secret:app> › Settings')).toBe('<secret:app> › Settings');
