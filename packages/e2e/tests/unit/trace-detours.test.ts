@@ -173,6 +173,12 @@ describe('findDetours by recorded locations', () => {
     expect(findDetours({ ...stored, detours: [{ from: 0, to: 3 }] })).toEqual(found);
   });
 
+  it('tells two documents that route the same fragment apart', () => {
+    expect(findDetours(flow([tap('About', '/#/menu', 'link'), tap('Home', '/about#/menu', 'link')], { endPath: '/#/menu' }))).toEqual([
+      { from: 0, to: 2, at: '/#/menu', via: '/about#/menu', evidence: 'locations' },
+    ]);
+  });
+
   it('does not read a cut recording\'s end location as where its last kept action led', () => {
     // Actions past the cap (typing, then the way back) ran but were not kept.
     expect(findDetours(flow([tap('Edit', '/'), scroll('/edit')], { endPath: '/', truncated: true }))).toEqual([]);

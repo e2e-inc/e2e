@@ -224,7 +224,9 @@ export function spelledAsRoute(location: string): boolean {
  * as a route drops it, and the query's order does not count.
  */
 export function addressKey(location: string): string {
-  return routeIdentity(routeOf(location, false));
+  const route = routeOf(location, false);
+  // Two documents that route the same fragment (`/#/menu`, `/about#/menu`) are two pages.
+  return route.kind === 'url' && route.document !== undefined ? JSON.stringify([route.document, routeIdentity(route)]) : routeIdentity(route);
 }
 
 /**
