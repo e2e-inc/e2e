@@ -151,8 +151,10 @@ export class StepTraceSession {
   private info: StepCacheInfo | undefined;
   private recordedBy: RecordedModel | undefined;
   private prefix: ReplayedPrefix | undefined;
-  /** The actions a replay that handed off ran, and the entry's spans it ran to their end: this step's recording keeps them. */
-  private replayed: { readonly executed: number; readonly spans: readonly Pick<TraceDetour, 'from' | 'to'>[] } | undefined;
+  /** How many actions a replay that handed off ran, the entry's spans it ran to their end (this step's recording keeps them), and the actions it gave the entry's locations. */
+  private replayed:
+    | { readonly executed: number; readonly spans: readonly Pick<TraceDetour, 'from' | 'to'>[]; readonly kept: ReadonlySet<number> }
+    | undefined;
   private startPath: string | undefined;
   private startedMs = Date.now();
   /** When the replay handed the step to the executor, if it did. */
@@ -487,10 +489,10 @@ export class StepTraceSession {
       return undefined;
     }
     // The replayed actions are this step's recording now; the ones it ran without looking keep where they were recorded.
-    this.recorder?.keepLocations(trace.actions.slice(0, outcome.executed));
+    const kept = this.recorder?.keepLocations(trace.actions.slice(0, outcome.executed)) ?? new Set<number>();
     // So are the detours they made: the report names them, and this step's recording keeps them (`findDetoursAfterReplay`).
     const ran = this.prefixDetours(trace, outcome.executed);
-    if (trace.detours !== undefined) this.replayed = { executed: outcome.executed, spans: ran.map(({ from, to }) => ({ from, to })) };
+    if (trace.detours !== undefined) this.replayed = { executed: outcome.executed, spans: ran.map(({ from, to }) => ({ from, to })), kept };
     this.handOff(outcome, stopReason, detail, this.describeDetours(ran));
     return undefined;
   }
@@ -678,7 +680,7 @@ export class StepTraceSession {
     // value and a placeholder for each `unique()` value, so it no longer
     // tells two records apart the way this run's did. After a hand-off, the
     // replayed actions keep the spans their entry found.
-    const detours = this.replayed === undefined ? findDetours(trace) : findDetoursAfterReplay(trace, this.replayed.spans, this.replayed.executed);
+    const detours = this.replayed === undefined ? findDetours(trace) : findDetoursAfterReplay(trace, this.replayed.spans, this.replayed.executed, this.replayed.kept);
     const located = trace.actions.some((action) => action.at !== undefined);
     const staged = located ? { ...templated, detours: detours.map(({ from, to }) => ({ from, to })) } : templated;
     // Settled with every value the process has learned by then, a closed session's included (`processSecrets`).
@@ -713,7 +715,9 @@ export class StepTraceSession {
     if (spans === undefined) return findDetours(ran);
     const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to <= executed) });
     const cut = spans.filter(({ from, to }) => from < executed && executed < to);
-    const inCut = cut.length === 0 ? [] : findDetours(ran).filter(({ from, to }) => cut.some((span) => span.from <= from && to <= span.to));
+    // Every place here is the entry's, spelled as it stores them.
+    const stored = new Set(Array.from({ length: executed + 1 }, (_, index) => index));
+    const inCut = cut.length === 0 ? [] : findDetours({ ...ran, stored }).filter(({ from, to }) => cut.some((span) => span.from <= from && to <= span.to));
     return [...finished, ...inCut].toSorted((a, b) => a.from - b.from);
   }
 

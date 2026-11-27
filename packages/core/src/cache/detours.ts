@@ -30,11 +30,16 @@
  */
 
 import { bound } from '../internal/text.ts';
-import { addressKey, routeLocation, spelledAsRoute } from './route.ts';
+import { addressKey, routeLocation } from './route.ts';
 import type { ActionTrace, RecordedAction } from './trace.ts';
 
-/** What the detour check reads of a trace. */
-type DetourInput = Pick<ActionTrace, 'actions' | 'startPath' | 'endPath' | 'truncated' | 'detours'>;
+/**
+ * What the detour check reads of a trace, and which of its places (before
+ * each action, then the end) hold a location as an entry stores it: one a
+ * replay copied from its entry onto an action it ran without looking, or
+ * every place of an entry read for the actions a hand-off ran.
+ */
+type DetourInput = Pick<ActionTrace, 'actions' | 'startPath' | 'endPath' | 'truncated' | 'detours'> & { readonly stored?: ReadonlySet<number> };
 
 /** One stretch of a recording that left a screen and came back to it with nothing typed, chosen, or set on the way. */
 export interface TraceDetour {
@@ -137,15 +142,21 @@ export function findDetours(trace: DetourInput): TraceDetour[] {
  * The detours of a recording made again after a replay ran its first
  * `executed` actions and handed off: the spans the entry kept for those
  * actions, and the ones this run found that end after them, joined where
- * they overlap. The entry already judged the replayed actions: one the
- * replay ran without looking carries the location its recording had
- * (`TraceRecorder.keepLocations`), which reads `:id` for a record id and a
- * query value, so comparing again would lose a trip between two records
- * the entry found, or find one to a record the flow never went back to.
+ * they overlap. The entry already judged the replayed actions. The ones the
+ * replay ran without looking carry the location their recording had
+ * (`kept`, from `TraceRecorder.keepLocations`), which reads `:id` for a
+ * record id and a query value, so comparing again would lose a trip
+ * between two records the entry found, or find one to a record the flow
+ * never went back to.
  */
-export function findDetoursAfterReplay(trace: DetourInput, replayed: readonly Pick<TraceDetour, 'from' | 'to'>[], executed: number): TraceDetour[] {
+export function findDetoursAfterReplay(
+  trace: DetourInput,
+  replayed: readonly Pick<TraceDetour, 'from' | 'to'>[],
+  executed: number,
+  kept: ReadonlySet<number>,
+): TraceDetour[] {
   const spans: { from: number; to: number }[] = [];
-  const found = findDetours(trace).filter(({ to }) => to > executed);
+  const found = findDetours({ ...trace, stored: kept }).filter(({ to }) => to > executed);
   for (const { from, to } of [...replayed, ...found].toSorted((a, b) => a.from - b.from)) {
     const last = spans.at(-1);
     if (last !== undefined && from < last.to) last.to = Math.max(last.to, to);
@@ -187,11 +198,10 @@ function places(trace: DetourInput): (string | undefined)[] {
   return [...trace.actions.map((action, index) => action.at ?? (index === 0 ? trace.startPath : undefined)), end];
 }
 
-/** How a place compares: its address, its spelling as an entry keeps it, and whether it is spelled so already. */
+/** How a place compares: its address, and its spelling as an entry keeps it. */
 interface PlaceKeys {
   readonly address: string;
   readonly spelling: string;
-  readonly spelled: boolean;
 }
 
 /**
@@ -201,10 +211,9 @@ interface PlaceKeys {
  * its own, so a replay that stops between two of them still has the first
  * whole (`prefixDetours` in `agent/step-cache.ts`).
  *
- * A place spelled as an entry keeps it (the location a recording kept,
- * copied onto an action a replay ran before a hand-off) has no record ids
- * or query values left to compare, so it is the same place as any other
- * with that spelling.
+ * A stored place (`DetourInput.stored`) has no record ids or query values
+ * left to compare, so it is the same place as any other with its spelling.
+ * Every other place compares by its address, a live `:id` in it included.
  */
 function byLocations(trace: DetourInput): TraceDetour[] {
   const where = places(trace);
@@ -213,15 +222,16 @@ function byLocations(trace: DetourInput): TraceDetour[] {
   const keysOf = (place: string): PlaceKeys => {
     let read = keys.get(place);
     if (read === undefined) {
-      read = { address: addressKey(place), spelling: routeLocation(place), spelled: spelledAsRoute(place) };
+      read = { address: addressKey(place), spelling: routeLocation(place) };
       keys.set(place, read);
     }
     return read;
   };
-  const samePlace = (first: string, second: string): boolean => {
-    const a = keysOf(first);
-    const b = keysOf(second);
-    return a.address === b.address || ((a.spelled || b.spelled) && a.spelling === b.spelling);
+  const stored = trace.stored ?? new Set<number>();
+  const samePlace = (first: number, second: number): boolean => {
+    const a = keysOf(where[first]!);
+    const b = keysOf(where[second]!);
+    return a.address === b.address || ((stored.has(first) || stored.has(second)) && a.spelling === b.spelling);
   };
   const { actions } = trace;
   const detours: TraceDetour[] = [];
@@ -240,7 +250,7 @@ function byLocations(trace: DetourInput): TraceDetour[] {
       if (changesState(actions[to - 1]!)) break;
       const place = where[to];
       if (place === undefined) continue;
-      if (!samePlace(home, place)) {
+      if (!samePlace(from, to)) {
         via ??= place;
       } else if (via === undefined) {
         left = to;

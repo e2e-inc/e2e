@@ -135,15 +135,22 @@ describe('findDetours by recorded locations', () => {
     expect(lettersOnly).toEqual([{ from: 0, to: 2, at: '/orders/:id?tab=:id', via: '/callback?code=:id', evidence: 'locations' }]);
   });
 
-  it('compares a location kept as a route by its route, since its record ids are gone', () => {
+  it('compares a stored location by its spelling, since its record ids are gone', () => {
     // After a hand-off, an action the replay ran without looking keeps the recording's location, spelled as a route.
     const stayed = flow([tap('Details', '/orders/789'), { name: 'back', summary: 'go back', at: '/orders/:id' }, tap('Notes', '/orders/789'), type('Note', 'hi', '/orders/789')], { endPath: '/orders/789' });
-    expect(findDetours(stayed)).toEqual([]);
+    expect(findDetours({ ...stayed, stored: new Set([1]) })).toEqual([]);
     const trip = flow([tap('Invoices', '/orders/:id'), back('/invoices'), tap('Ship', '/orders/789')], { endPath: '/orders/789' });
-    expect(findDetours(trip)).toEqual([{ from: 0, to: 2, at: '/orders/:id', via: '/invoices', evidence: 'locations' }]);
+    expect(findDetours({ ...trip, stored: new Set([0]) })).toEqual([{ from: 0, to: 2, at: '/orders/:id', via: '/invoices', evidence: 'locations' }]);
     // A kept query value reads :id too, so the live one compares by that spelling.
     const query = flow([tap('Invoices', '/orders/:id?tab=:id'), back('/invoices'), tap('Ship', '/orders/789?tab=notes')], { endPath: '/orders/789?tab=notes' });
-    expect(findDetours(query)).toEqual([{ from: 0, to: 2, at: '/orders/:id?tab=:id', via: '/invoices', evidence: 'locations' }]);
+    expect(findDetours({ ...query, stored: new Set([0]) })).toEqual([{ from: 0, to: 2, at: '/orders/:id?tab=:id', via: '/invoices', evidence: 'locations' }]);
+  });
+
+  it('compares a live address that holds a literal :id by its address', () => {
+    // A view whose own value is `:id` (an unfilled route parameter, say) is no stored location.
+    expect(findDetours(flow([tap('Privacy', '/?view=:id', 'link'), back('/?view=privacy')], { endPath: '/?view=%3Aid' }))).toEqual([
+      { from: 0, to: 2, at: '/?view=:id', via: '/?view=:id', evidence: 'locations' },
+    ]);
   });
 
   it('is no return to another record on the same route', () => {
@@ -220,8 +227,8 @@ describe('findDetoursAfterReplay', () => {
       [tap('Privacy', '/?view=account', 'link'), back('/?view=:id'), tap('Save', '/?view=account'), tap('Help', '/?view=account', 'link'), back('/help')],
       { endPath: '/?view=account' },
     );
-    expect(findDetours(trace)).toEqual([{ from: 3, to: 5, at: '/?view=:id', via: '/help', evidence: 'locations' }]);
-    expect(findDetoursAfterReplay(trace, [{ from: 0, to: 2 }], 3)).toEqual([
+    expect(findDetours({ ...trace, stored: new Set([1]) })).toEqual([{ from: 3, to: 5, at: '/?view=:id', via: '/help', evidence: 'locations' }]);
+    expect(findDetoursAfterReplay(trace, [{ from: 0, to: 2 }], 3, new Set([1]))).toEqual([
       { from: 0, to: 2, at: '/?view=:id', via: '/?view=:id', evidence: 'locations' },
       { from: 3, to: 5, at: '/?view=:id', via: '/help', evidence: 'locations' },
     ]);
@@ -230,7 +237,7 @@ describe('findDetoursAfterReplay', () => {
       [tap('About', '/', 'link'), back('/about'), tap('About', '/', 'link'), back('/about'), tap('Increment', '/')],
       { endPath: '/' },
     );
-    expect(findDetoursAfterReplay(again, [{ from: 0, to: 2 }], 2)).toEqual([
+    expect(findDetoursAfterReplay(again, [{ from: 0, to: 2 }], 2, new Set())).toEqual([
       { from: 0, to: 2, at: '/', via: '/about', evidence: 'locations' },
       { from: 2, to: 4, at: '/', via: '/about', evidence: 'locations' },
     ]);
@@ -242,9 +249,10 @@ describe('findDetoursAfterReplay', () => {
       [tap('All orders', '/orders/1', 'link'), tap('Order 2', '/orders', 'link'), back('/orders/:id'), tap('Export', '/orders')],
       { endPath: '/exports' },
     );
-    expect(findDetours(trace)[0]).toMatchObject({ from: 0, to: 2 });
-    expect(findDetoursAfterReplay(trace, [{ from: 1, to: 3 }], 3)).toEqual([{ from: 1, to: 3, at: '/orders', via: '/orders/:id', evidence: 'locations' }]);
+    expect(findDetours({ ...trace, stored: new Set([2]) })[0]).toMatchObject({ from: 0, to: 2 });
+    expect(findDetoursAfterReplay(trace, [{ from: 1, to: 3 }], 3, new Set([2]))).toEqual([{ from: 1, to: 3, at: '/orders', via: '/orders/:id', evidence: 'locations' }]);
   });
+
 });
 
 describe('findDetours on an entry recorded without locations', () => {

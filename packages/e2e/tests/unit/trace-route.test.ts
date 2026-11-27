@@ -1,7 +1,7 @@
 /** Routes: a location reduced to the screen it names, across the URL shapes apps use. */
 
 import { describe, expect, it } from 'vitest';
-import { appLocation, appNavigation, routeLocation, sameRoute, spelledAsRoute } from '@e2e-dev/core/lib/cache/route';
+import { appLocation, appNavigation, routeLocation, sameRoute } from '@e2e-dev/core/lib/cache/route';
 
 /** Whether every location names the same screen as the first. */
 const alike = (first: string, ...others: string[]) => others.every((other) => sameRoute(first, other));
@@ -145,19 +145,6 @@ describe('routeLocation', () => {
     expect(routeLocation('<secret:gateway>/about?token=super-secret-token#frag')).toBe('<secret:gateway>/about?token=:id');
     // A device title that opens with a marker is no address.
     expect(routeLocation('<secret:app> › Settings')).toBe('<secret:app> › Settings');
-  });
-
-  it('tells a location spelled as an entry keeps it from one the app showed', () => {
-    expect(spelledAsRoute(routeLocation('/orders/123/edit'))).toBe(true);
-    expect(spelledAsRoute(routeLocation('/callback?code=482913'))).toBe(true);
-    expect(spelledAsRoute(routeLocation('/settings?tab=notes'))).toBe(true);
-    expect(spelledAsRoute('/orders/123/edit')).toBe(false);
-    expect(spelledAsRoute('/settings?tab=notes')).toBe(false);
-    expect(spelledAsRoute(routeLocation('/settings'))).toBe(false);
-    expect(spelledAsRoute('com.example / :id')).toBe(false);
-    // A fragment-routed document whose own path held the record id.
-    expect(spelledAsRoute(routeLocation('/records/42#/home'))).toBe(true);
-    expect(spelledAsRoute('/records/42#/home')).toBe(false);
   });
 
   it('keeps a location that is not a web address as it is', () => {

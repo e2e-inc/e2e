@@ -101,13 +101,18 @@ export class TraceRecorder {
    * before a `back` on the route it ends on). Position for position: a
    * replay records the recording's actions in order before it hands off, so
    * a recording made again after a hand-off keeps the trip it repeated.
+   * Returns the positions it gave one, whose locations read as an entry
+   * stores them (`DetourInput.stored` in `cache/detours.ts`).
    */
-  keepLocations(replayed: readonly RecordedAction[]): void {
+  keepLocations(replayed: readonly RecordedAction[]): ReadonlySet<number> {
+    const kept = new Set<number>();
     replayed.forEach((recorded, index) => {
       const own = this.actions[index];
       if (own === undefined || own.name !== recorded.name || own.at !== undefined || recorded.at === undefined) return;
       this.actions[index] = { ...own, at: recorded.at };
+      kept.add(index);
     });
+    return kept;
   }
 
   /**
