@@ -46,7 +46,8 @@ export interface Addon extends AddonSpec {
 
 /** The addon a script was asked for, or an error naming the ones there are. */
 export function findAddon(name: string | undefined): Addon {
-  const spec = name === undefined ? undefined : ADDONS[name];
+  // Own keys only: `constructor` and the like are not addons.
+  const spec = name !== undefined && Object.hasOwn(ADDONS, name) ? ADDONS[name] : undefined;
   if (name === undefined || spec === undefined) throw new Error(`name an addon first: one of ${Object.keys(ADDONS).join(', ')}`);
   return {
     ...spec,

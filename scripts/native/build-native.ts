@@ -26,7 +26,7 @@ const addon = findAddon(positionals[0]);
 const host = `${process.platform}-${process.arch}`;
 const target = values.target ?? Object.keys(addon.targets).find((triple) => addon.targets[triple] === host);
 if (target === undefined) throw new Error(`no ${addon.name} addon build for ${host}; name a target, one of ${Object.keys(addon.targets).join(', ')}`);
-const platform = addon.targets[target];
+const platform = Object.hasOwn(addon.targets, target) ? addon.targets[target] : undefined;
 if (platform === undefined) throw new Error(`no ${addon.name} addon build for ${target}; one of ${Object.keys(addon.targets).join(', ')}`);
 if (target.endsWith('-apple-darwin') && process.platform !== 'darwin') throw new Error(`${target} builds on macOS only`);
 
