@@ -311,9 +311,16 @@ pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
     let frame = element.frame();
     if let Some((_, _, width, height)) = frame
         && (width <= 0.0 || height <= 0.0)
-        && element.count("AXChildren").unwrap_or(0) == 0
     {
-        return Ok(Placement::Collapsed);
+        // A count the app did not answer in time is no proof the control holds nothing.
+        let empty = match element.count("AXChildren") {
+            Ok(count) => count == 0,
+            Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+            Err(_) => true,
+        };
+        if empty {
+            return Ok(Placement::Collapsed);
+        }
     }
     let mut clip: Option<Rect> = None;
     let mut next = element.element("AXParent");
