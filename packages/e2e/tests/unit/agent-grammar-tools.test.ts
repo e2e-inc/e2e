@@ -324,6 +324,17 @@ describe('observe matches the act rules on checking a commit', () => {
   });
 });
 
+describe('type tells the model a slider takes its number', () => {
+  it('names sliders and spin buttons in the type tool, with and without keyboard input to the focused field', () => {
+    for (const verbs of [['type'], ['type', 'typeText']] as const) {
+      const { context } = fakeExecutorContext({ verbs: [...verbs] });
+      const description = grammarTools(context, { secretsListedByCaller: true })['type']?.description;
+      expect(description).toContain('A slider or spin button (stepper) takes its new number the same way');
+      expect(description).toContain('step it with arrow keys only if the value it shows then is not that number');
+    }
+  });
+});
+
 describe('the loop guard waits longer on the built-in observe only', () => {
   beforeAll(() => loadAiSdk());
 
