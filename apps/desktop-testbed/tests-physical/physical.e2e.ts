@@ -4,9 +4,7 @@ import { expect } from 'e2e';
 test.describe('physical input', () => {
   test.beforeEach(async ({ app, screen, desktop }) => {
     await app.open();
-    await screen.getByRole('button', 'Controls…').tap();
-    await expect.poll(async () => (await desktop.windows()).map((window) => window.title).toSorted()).toEqual(['Controls', 'Sign In']);
-    await desktop.useWindow((await desktop.windows()).find((window) => window.title === 'Controls'));
+    await desktop.waitForWindow(() => screen.getByRole('button', 'Controls…').tap());
   });
 
   test('double-clicks a control with the real pointer', async ({ screen }) => {
@@ -32,8 +30,9 @@ test.describe('physical input', () => {
   });
 
   test('presses a key into a field of a window another holds the keyboard from', async ({ screen, desktop }) => {
-    // The Controls window holds the keyboard; the Sign In window is picked, and the press must bring it forward first.
-    await desktop.useWindow((await desktop.windows()).find((window) => window.title === 'Sign In'));
+    // The Controls window holds the keyboard; the Sign In window is made active, and the press must bring it forward first.
+    const signIn = await desktop.window({ title: 'Sign In' });
+    await signIn.activate();
     await screen.getByTestId('username').press('x');
     await expect(screen.getByTestId('username')).toHaveValue('x');
   });

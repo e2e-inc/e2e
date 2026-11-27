@@ -133,6 +133,8 @@ export interface DesktopDriver {
   checkCombo(combo: string): Promise<Envelope<unknown>>;
   /** `inputId` names the call, so `cancelInput` stops it before it changes the focus. */
   focusWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
+  /** Closes a window as its close button does, and answers once it left the app's windows. `inputId` names the call, so `cancelInput` stops it before the button is pressed. */
+  closeWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
   /**
    * `inputId` names the pointer input, so `cancelInput` stops what it has yet to send. With `target`, the window the
    * point was taken in, no click goes once another window or app took the focus from it, or its sheet changed: `sheet`
