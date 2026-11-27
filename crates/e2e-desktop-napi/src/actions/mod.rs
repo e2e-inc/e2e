@@ -1151,4 +1151,39 @@ mod tests {
         assert_eq!(super::secure_count(Err(AX_CANNOT_COMPLETE)), Err(()));
         assert_eq!(super::secure_count(Err(AX_INVALID_ELEMENT)), Err(()));
     }
+
+    /// A node of a fake accessibility tree, for the text gathering that names a row.
+    #[derive(Clone)]
+    struct Fake {
+        role: &'static str,
+        label: Option<&'static str>,
+        children: Vec<Fake>,
+    }
+
+    fn fake(role: &'static str, label: Option<&'static str>, children: Vec<Fake>) -> Fake {
+        Fake { role, label, children }
+    }
+
+    fn gathered(row: &Fake) -> Option<String> {
+        let mut texts = Vec::new();
+        super::gather_texts(row, 0, &mut texts, &|node: &Fake| Ok(node.children.clone()), &|node: &Fake| Ok(node.role), &|node: &Fake| {
+            Ok(node.label.map(str::to_owned))
+        })
+        .expect("read");
+        crate::snapshot::content_name(&texts)
+    }
+
+    #[test]
+    fn names_a_row_from_the_texts_under_its_texts_as_the_snapshot_does() {
+        // An untitled heading over "Paid": the snapshot walks into it, and so does the row's name.
+        let row = fake("row", None, vec![fake("statictext", Some("Invoice"), vec![]), fake("heading", None, vec![fake("statictext", Some("Paid"), vec![])])]);
+        assert_eq!(gathered(&row).as_deref(), Some("Invoice Paid"));
+        // A titled text comes after the texts inside it, in the snapshot's order.
+        let titled = fake("row", None, vec![fake("heading", Some("Total"), vec![fake("statictext", Some("42"), vec![])])]);
+        assert_eq!(gathered(&titled).as_deref(), Some("42 Total"));
+        // A scroll bar's parts are not read.
+        let scrolled =
+            fake("row", None, vec![fake("statictext", Some("Notes"), vec![]), fake("scrollbar", None, vec![fake("statictext", Some("50%"), vec![])])]);
+        assert_eq!(gathered(&scrolled).as_deref(), Some("Notes"));
+    }
 }
