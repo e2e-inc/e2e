@@ -510,7 +510,6 @@ impl Walk {
             .clone()
             .or(labelled)
             .or_else(|| read.description.clone())
-            .or_else(|| roles::window_control_name(read.subrole.as_deref()).map(str::to_owned))
             .or_else(|| if roles::text(role) { label(text_value.clone()) } else { None })
             .or_else(|| if roles::takes_text(role) { read.placeholder.clone() } else { None });
         let description = read.description.clone().filter(|description| Some(description) != name.as_ref());
