@@ -141,13 +141,14 @@ export function findDetours(trace: DetourInput): TraceDetour[] {
 /**
  * The detours of a recording made again after a replay ran its first
  * `executed` actions and handed off: the spans the entry kept for those
- * actions, and the ones this run found that end after them, joined where
- * they overlap. The entry already judged the replayed actions. The ones the
+ * actions, and the ones this run found that end after them and cross none
+ * of those. The entry already judged the replayed actions. The ones the
  * replay ran without looking carry the location their recording had
  * (`kept`, from `TraceRecorder.keepLocations`), which reads `:id` for a
  * record id and a query value, so comparing again would lose a trip
  * between two records the entry found, or find one to a record the flow
- * never went back to.
+ * never went back to; a span of this run that crosses one of the entry's
+ * rests on such a comparison.
  */
 export function findDetoursAfterReplay(
   trace: DetourInput,
@@ -155,13 +156,10 @@ export function findDetoursAfterReplay(
   executed: number,
   kept: ReadonlySet<number>,
 ): TraceDetour[] {
-  const spans: { from: number; to: number }[] = [];
-  const found = findDetours({ ...trace, stored: kept }).filter(({ to }) => to > executed);
-  for (const { from, to } of [...replayed, ...found].toSorted((a, b) => a.from - b.from)) {
-    const last = spans.at(-1);
-    if (last !== undefined && from < last.to) last.to = Math.max(last.to, to);
-    else spans.push({ from, to });
-  }
+  const found = findDetours({ ...trace, stored: kept }).filter(
+    ({ from, to }) => to > executed && !replayed.some((span) => from < span.to && span.from < to),
+  );
+  const spans = [...replayed, ...found].map(({ from, to }) => ({ from, to })).toSorted((x, y) => x.from - y.from);
   // This run's places are live addresses: named as an entry spells them, as `byLocations` names its own.
   return recorded({ ...trace, detours: spans }, routeLocation);
 }

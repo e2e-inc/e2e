@@ -253,6 +253,14 @@ describe('findDetoursAfterReplay', () => {
     expect(findDetoursAfterReplay(trace, [{ from: 1, to: 3 }], 3, new Set([2]))).toEqual([{ from: 1, to: 3, at: '/orders', via: '/orders/:id', evidence: 'locations' }]);
   });
 
+  it('adds no span that crosses one the entry found, which would claim a return that never happened', () => {
+    // The replay ran order 1, the list, order 2 (`back` without looking), the list; the agent then opened order 2 again and ended there.
+    const trace = flow(
+      [tap('All orders', '/orders/1', 'link'), tap('Order 2', '/orders', 'link'), back('/orders/:id'), tap('Order 2', '/orders', 'link')],
+      { endPath: '/orders/2' },
+    );
+    expect(findDetoursAfterReplay(trace, [{ from: 1, to: 3 }], 3, new Set([2]))).toEqual([{ from: 1, to: 3, at: '/orders', via: '/orders/:id', evidence: 'locations' }]);
+  });
 });
 
 describe('findDetours on an entry recorded without locations', () => {
