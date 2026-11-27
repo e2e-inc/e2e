@@ -294,7 +294,9 @@ export function projectSnapshot(
     const isText = TEXT_ROLES.has(node.role);
     const name = label(node.name ?? (isText ? node.value : undefined));
     // A control shows its name (a button's title) as its text, as on a device; an input's name is a label, not what it holds.
-    const text = isText ? label(node.value ?? node.name) : INPUT_ROLES.has(node.role) ? undefined : name;
+    // A heading's text is its name: a web view reports the heading's level as its value.
+    const shown = node.role === 'heading' ? (node.name ?? node.value) : (node.value ?? node.name);
+    const text = isText ? label(shown) : INPUT_ROLES.has(node.role) ? undefined : name;
     // A checkbox's value is its state ("0", "1"), already in `checked`; a secure field's is never reported.
     // A snapshot may leave out the value of an empty text field; it is the empty string, as inputValue() reads it, so getByDisplayValue('') finds the field.
     const value = secure || isText || CHECKABLE_ROLES.has(node.role) ? undefined : node.role === 'textfield' ? (node.value ?? '') : node.value;

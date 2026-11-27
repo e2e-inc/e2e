@@ -202,9 +202,11 @@ screen.getByText('Welcome back', { exact: false });
 ```
 
 On a device or a desktop app, `getByText` matches the text a node shows. A
-node that shows none, such as an icon button, matches by its accessible
-name. So a value named by the label beside it (`5` named `Words`) answers
-`getByText('5')` and `getByLabel('Words')`, never `getByText('Words')`.
+node with no text of its own, such as an icon button or a text field,
+matches by its accessible name. So a text that an app gives another
+accessible name (`5` named `Words`, or an Android text with a content
+description) answers `getByText('5')` and `getByLabel('Words')`, never
+`getByText('Words')`.
 
 ##### Echoed text
 

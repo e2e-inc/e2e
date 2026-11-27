@@ -388,6 +388,12 @@ describe('projectSnapshot', () => {
     expect(byTestId(root, 'username')?.text).toBeUndefined();
   });
 
+  it("reads a heading's text from its name, not from the level a web view reports as its value", () => {
+    const { root } = projectSnapshot({ snapshot_id: 's', tree: { role: 'window', name: 'W', children: [{ role: 'heading', name: 'Settings', value: '2' }] } }, minter());
+    expect(root.children?.[0]).toMatchObject({ role: 'heading', name: 'Settings', text: 'Settings' });
+    expect(resolveExpression({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Settings', exact: true } } }, [root])).toHaveLength(1);
+  });
+
   it("finds a value by its text and by its label, and the label's text only once", () => {
     const { root } = projectSnapshot(
       {
