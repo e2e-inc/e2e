@@ -2178,7 +2178,7 @@ function secureBounds(projected: ProjectedSnapshot): readonly Rect[] | undefined
  * logical points; the image may be at device scale, so they are scaled by
  * the image-to-viewport ratio. Returns `turned` when the image is portrait
  * and the viewport landscape, or the reverse: an iOS simulator's simctl
- * capture is portrait whatever the orientation, and the engine does not
+ * capture can come back portrait in landscape, and the engine does not
  * read which way the image is turned (agent-device's `displayRotation`,
  * reported only when the simulator answers in time), so the bounds have no
  * place on it.
