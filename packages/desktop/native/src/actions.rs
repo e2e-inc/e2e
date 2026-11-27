@@ -405,13 +405,12 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
     // A tap on a text field puts the keyboard there. AppKit's password field also offers AXConfirm, which the action
     // choice below would send in its place, leaving the keyboard in the field before.
-    let (_, tapped_role) = role_of(element, "click")?;
-    if tapped_role == "textfield" && settable(element, "AXFocused", "click")? {
+    let (ax_role, role) = role_of(element, "click")?;
+    if role == "textfield" && settable(element, "AXFocused", "click")? {
         return focus(element, deadline);
     }
     let names = action_names(element, "click")?;
     if let Some(action) = ["AXPress", "AXOpen", "AXConfirm"].into_iter().find(|name| names.iter().any(|candidate| candidate == name)) {
-        let (ax_role, _) = role_of(element, "click")?;
         let opens_menu = ax_role == "AXPopUpButton" || ax_role == "AXMenuButton";
         let before = windows::open_menus(entry.pid);
         perform(element, action, "click")?;
@@ -420,7 +419,6 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
         }
         return Ok(());
     }
-    let (_, role) = role_of(element, "click")?;
     if matches!(role, "row" | "cell" | "treeitem" | "option" | "tab") && settable(element, "AXSelected", "click")? {
         go("select")?;
         element.set_bool("AXSelected", true).map_err(|error| refused(error, "select"))?;
