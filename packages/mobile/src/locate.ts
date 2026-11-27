@@ -5,7 +5,7 @@
  * polling, strictness, and staleness stay with the runner.
  */
 
-import { EngineError, matchesText, type LocatorExpression, type SemanticQuery, type TextPattern } from '@e2e-dev/core/engine';
+import { EngineError, matchesText, shownText, type LocatorExpression, type SemanticQuery, type TextPattern } from '@e2e-dev/core/engine';
 import { isWithin, type ProjectedNode } from './nodes.ts';
 import type { MobilePlatform } from './options.ts';
 import { compileSelector } from './selector.ts';
@@ -153,8 +153,7 @@ function matchesQuery(entry: ProjectedNode, query: SemanticQuery, withoutPackage
       return placeholder !== undefined && matchesText(placeholder, query.value);
     }
     case 'text': {
-      // As `resolveExpression` reads it: what the node shows, or its name when it shows nothing.
-      const shown = node.text ?? node.name;
+      const shown = shownText(node);
       return shown !== undefined && matchesText(shown, query.value);
     }
     case 'displayValue':

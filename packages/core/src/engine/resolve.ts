@@ -27,19 +27,31 @@ export interface ResolveExpressionOptions {
 }
 
 /**
+ * The text a `text` query reads a node by: its `text`, or its `name` when it
+ * has no text of its own (`text` omitted, empty, or all whitespace). So a
+ * value named by the label beside it (a `5` named `Words`) is found by `5`,
+ * and an icon button by its name.
+ */
+export function shownText(node: Pick<SemanticNode, 'name' | 'text'>): string | undefined {
+  return node.text !== undefined && /\S/u.test(node.text) ? node.text : node.name;
+}
+
+/**
  * Resolves one expression to the nodes it currently matches, in document
  * order. `nodes` are the tree's top-level nodes (an observation root's
  * children, or the root itself); every node under them is a candidate.
  *
  * Query kinds: `role` compares the role exactly, then the name, the requested
  * states, and the heading level, and never matches a hidden node; `label`
- * matches the name and `text` the visible text (the name of a node that has
- * none), and both answer with the innermost match, since a container echoing
- * a descendant's text is not a second match; `placeholder`, `displayValue`, and `testId` compare their
- * one field. `visible` drops hidden nodes from any kind. `scope` searches
- * strict descendants of the scope's matches; `filter` keeps a match whose
- * own or descendants' name, text, or value matches `hasText`, and whose
- * descendants answer `has`; `index` picks `first`, `last`, or a position.
+ * matches the name and `text` what the node shows (`shownText`), and both
+ * answer with the innermost match, since a container echoing a descendant's
+ * text is not a second match; `placeholder`, `displayValue`, and `testId`
+ * compare their one field. `visible` drops hidden nodes from any kind.
+ * `scope` searches strict descendants of the scope's matches; `filter` keeps
+ * a match whose own or descendants' name, text, or value matches `hasText`,
+ * so it also keeps a node a `text` query skips (one that shows other text
+ * under that name), and whose descendants answer `has`; `index` picks
+ * `first`, `last`, or a position.
  * `frame` is `FRAME_NOT_FOUND`: a semantic tree has no nested documents.
  */
 export function resolveExpression(
@@ -290,9 +302,8 @@ function compileKindMatcher(query: SemanticQuery): (node: SemanticNode) => boole
     }
     case 'text': {
       const matches = compileTextMatcher(query.value);
-      // A node is found by what it shows; its name stands in only when it shows nothing, so a value named by its label ("Words": 5) is not a second match for the label.
       return (node) => {
-        const shown = node.text ?? node.name;
+        const shown = shownText(node);
         return shown !== undefined && matches(shown);
       };
     }
