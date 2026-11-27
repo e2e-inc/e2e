@@ -265,6 +265,7 @@ The engine adds `--no-sandbox` on Linux automatically.
 | Theme and locale | `prefers-color-scheme` follows `nativeTheme` and the OS. Chromium UI strings follow the OS locale; add `--lang=en-US` to `app.launchArguments` to pin English |
 | Long press | Holds for 800 ms by default, compared to 500 ms on the web |
 | CSS selectors | `electron.locator()` searches the window document and open shadow roots one root at a time, and never enters frames |
+| `aria-owns` | An element `aria-owns` names reads under its owner, as Chromium's tree puts it, so query results, `.or()`, and `first()` order it there, not in document order |
 | Crashed renderers | A crashed window fails reads until you reload it with `electron.evaluate()` or restart the app |
 
 ## Security
