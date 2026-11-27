@@ -880,15 +880,28 @@ fn row_texts(element: &Element, depth: usize, texts: &mut Vec<String>) -> Result
 }
 
 /// The pop-up button's menu, if it is already open.
-fn current_menu(button: &Element) -> Option<Element> {
-    button.elements("AXChildren", 4).unwrap_or_default().into_iter().find(|child| child.text("AXRole").as_deref() == Some("AXMenu"))
+/// `Err` when the app did not answer in time: a stall is no proof the menu is closed.
+fn current_menu(button: &Element) -> Result<Option<Element>, AXError> {
+    let children = match button.elements("AXChildren", 4) {
+        Ok(children) => children,
+        Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+        Err(_) => return Ok(None),
+    };
+    for child in children {
+        match child.attribute("AXRole") {
+            Ok(role) if role.text() == Some("AXMenu") => return Ok(Some(child)),
+            Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+            _ => {}
+        }
+    }
+    Ok(None)
 }
 
 /// The open menu of a pop-up button, once it shows.
 fn open_menu(button: &Element, deadline: Instant) -> Option<Element> {
     let mut menu = None;
     until(deadline, || {
-        menu = current_menu(button);
+        menu = current_menu(button).ok().flatten();
         menu.is_some()
     });
     menu
@@ -985,7 +998,7 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
     if ax_role == "AXPopUpButton" {
         // A menu the user or a tap already opened on this button is the list: a press would close it. With it open, the
         // option shown is chosen from it too, so the menu does not stay open over the window.
-        let already_open = current_menu(element);
+        let already_open = current_menu(element).map_err(|error| unread(error, "read the list's menu"))?;
         if already_open.is_none() && value_text(element).as_deref() == Some(label) {
             return Ok(());
         }
