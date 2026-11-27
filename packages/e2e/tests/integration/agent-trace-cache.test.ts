@@ -1521,6 +1521,14 @@ describe('trace cache: a hand-off after a trip between two views of one page', (
     const replayed = await runExisting(project, options(replay));
     expect(replay.calls).toBe(0);
     expect(step(replayed).cache).toMatchObject({ mode: 'self-finalized', detour });
+    // A read-only replay, which records nothing, confirms the return on the addresses it saw too.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      actions: payload.actions.map((action, index) => (index === 2 && action.name === 'tap' ? { ...action, target: { ...action.target, name: 'No Such Button' } } : action)),
+    }));
+    const readOnly = await runExisting(project, { ...options({ calls: 0, prefixes: [] }), config: { ...options({ calls: 0, prefixes: [] }).config, cache: 'read-only' as const } });
+    expect(readOnly.exitCode).toBe(0);
+    expect(step(readOnly).cache).toMatchObject({ mode: 'agent-concluded', replayedActions: 2, detour });
   }, 240_000);
 });
 

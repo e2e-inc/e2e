@@ -146,6 +146,12 @@ export class StepTraceSession {
   /** The claimed key and the step it names, which an entry records as its provenance. */
   private readonly claim: ClaimedKey;
   private readonly recorder: TraceRecorder | undefined;
+  /**
+   * Where the actions ran, folded as the recording folds them: the step's
+   * recorder, or in a mode that writes nothing one kept for that alone, so
+   * a hand-off can confirm a return on the addresses its replay saw.
+   */
+  private readonly placed: TraceRecorder;
   private readonly options: StepCacheOptions;
   private readonly redaction: NodeRedaction;
   private info: StepCacheInfo | undefined;
@@ -205,6 +211,7 @@ export class StepTraceSession {
         maxActions: options.maxActions,
       });
     }
+    this.placed = this.recorder ?? new TraceRecorder({ ...this.redaction, maxActions: options.maxActions });
   }
 
   /** How the cache participated, for the step's report detail. */
@@ -219,19 +226,19 @@ export class StepTraceSession {
 
   /** Records one committed grammar action into the step trace, with the location it ran at when known. */
   record(action: RecordableAction, at?: string): void {
-    this.recorder?.record(action, at);
+    this.placed.record(action, at);
     this.countAfterEndMismatch();
   }
 
   /** Records one mutating project-tool call as a replay-ending gap. */
   recordGap(toolName: string, at?: string): void {
-    this.recorder?.recordGap(toolName, at);
+    this.placed.recordGap(toolName, at);
     this.countAfterEndMismatch();
   }
 
   /** Records a fill whose value was this run's data as a replay-ending gap, with the rule that said so. */
   recordDerivedGap(reason: DerivedReason, at?: string): void {
-    this.recorder?.recordDerivedGap(reason, at);
+    this.placed.recordDerivedGap(reason, at);
     this.countAfterEndMismatch();
   }
 
@@ -489,7 +496,7 @@ export class StepTraceSession {
       return undefined;
     }
     // Where the replay saw its actions run, before the ones it ran without looking take where they were recorded.
-    const places = this.recorder?.locations ?? [];
+    const places = this.placed.locations;
     // The replayed actions are this step's recording now; the ones it ran without looking keep where they were recorded.
     const kept = this.recorder?.keepLocations(trace.actions.slice(0, outcome.executed)) ?? new Set<number>();
     // So are the detours they made: the report names them, and this step's recording keeps them (`findDetoursAfterReplay`).
