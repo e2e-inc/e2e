@@ -287,12 +287,7 @@ pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Out
     if secure {
         // A secure field shows no value, but counts its characters: the count says the text landed whole (one a
         // formatter cut short does not), with no secret read. A field that counts none is taken at the write's word.
-        // `Err` for a read the app did not answer in time, which is no proof the field counts none: it is read again.
-        let count = || match element.attribute("AXNumberOfCharacters") {
-            Ok(Value::Number(count)) => Ok(Some(count as usize)),
-            Err(ax::AX_CANNOT_COMPLETE) => Err(()),
-            _ => Ok(None),
-        };
+        let count = || secure_count(element.attribute("AXNumberOfCharacters"));
         let wanted = text.encode_utf16().count();
         if count() == Ok(None) || until(deadline, || count() == Ok(Some(wanted))) {
             return Ok(());
@@ -307,6 +302,17 @@ pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Out
         Err(_) => false,
     };
     if until(deadline, shown) { Ok(()) } else { Err(Failure::unconfirmed(codes::ACTION_FAILED, "the value did not change to the text set")) }
+}
+
+/// What a secure field's character count answers: `Ok(None)` for a field that counts none, which is taken at the write's
+/// word. `Err` for a read the app did not answer in time, or for a field gone since the write (a change handler that
+/// replaced it): neither is proof the field counts none, so the fill is not confirmed by it, as a plain field's is not.
+pub(super) fn secure_count(answer: Result<Value, AXError>) -> Result<Option<usize>, ()> {
+    match answer {
+        Ok(Value::Number(count)) => Ok(Some(count as usize)),
+        Err(ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT) => Err(()),
+        _ => Ok(None),
+    }
 }
 
 /// Selects all the text of a field through accessibility. A select-all key (Cmd+A) sent to an app in the background

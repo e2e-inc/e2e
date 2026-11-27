@@ -1140,4 +1140,14 @@ mod tests {
         assert!(!super::scroll::scrolls_itself("list", false, &pages(&["AXScrollDownByPage"]), "right"));
         assert!(!super::scroll::scrolls_itself("list", false, &[], "up"));
     }
+
+    #[test]
+    fn confirms_no_secure_fill_by_a_field_that_went_away_or_did_not_answer() {
+        use crate::ax::{AX_ATTRIBUTE_UNSUPPORTED, AX_CANNOT_COMPLETE, AX_INVALID_ELEMENT, Value};
+        assert_eq!(super::secure_count(Ok(Value::Number(8.0))), Ok(Some(8)));
+        // A field that counts none is taken at the write's word.
+        assert_eq!(super::secure_count(Err(AX_ATTRIBUTE_UNSUPPORTED)), Ok(None));
+        assert_eq!(super::secure_count(Err(AX_CANNOT_COMPLETE)), Err(()));
+        assert_eq!(super::secure_count(Err(AX_INVALID_ELEMENT)), Err(()));
+    }
 }
