@@ -444,7 +444,7 @@ async function stop(app: RunningApp, graceMs: number): Promise<void> {
   }
   if ((await answerWithin(process.exited, graceMs)) !== undefined) return;
   process.killNow();
-  // Its files in the user-data directory are deleted next: wait, briefly, until it has let go of them.
+  // Its user-data directory is deleted next: wait, briefly, until it has let go of its files.
   await answerWithin(process.exited, EXIT_WAIT_MS);
 }
 

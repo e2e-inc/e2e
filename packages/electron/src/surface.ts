@@ -84,9 +84,11 @@ export class ElectronSurface {
   private readonly windowList = new Windows();
   private readonly dialogs = new DialogRouter();
   private readonly app: AppProcess;
-  private readonly appData = new AppData();
 
-  constructor(private readonly options: ResolvedElectronOptions) {
+  constructor(
+    private readonly options: ResolvedElectronOptions,
+    private readonly appData = new AppData(),
+  ) {
     this.app = new AppProcess(options, this.windowList, this.dialogs);
     this.windowList.onShown = (window) => this.recorder?.follow(window?.page);
   }
@@ -121,7 +123,7 @@ export class ElectronSurface {
     this.artifactCounter = 0;
     this.recordings = 0;
     this.dialogs.reset();
-    // The app's data lives here for the whole attempt: `app.restart()` keeps it, `app.clearState()` empties it.
+    // The app's data lives here until the attempt ends or `app.clearState()` replaces it: `app.restart()` keeps it.
     this.userDataDir = this.appData.create();
     return Promise.resolve();
   }
@@ -145,11 +147,12 @@ export class ElectronSurface {
   }
 
   async dispose(context: EngineCleanupContext): Promise<void> {
-    try {
-      await this.endAttempt(context);
-    } finally {
-      await this.appData.close();
-    }
+    // The attempt's own failure is the one reported: app data still held is told only when nothing else went wrong.
+    const ended = await this.endAttempt(context).then(() => undefined, (cause: unknown) => ({ cause }));
+    const closed = this.appData.close(context.timeoutMs);
+    if (ended === undefined) return await closed;
+    await closed.catch(() => undefined);
+    throw ended.cause;
   }
 
   // --- the app ---
@@ -162,7 +165,7 @@ export class ElectronSurface {
     });
   }
 
-  /** `app.clearState()`: quits the app, empties its data, and launches it again. */
+  /** `app.clearState()`: quits the app and launches it again on new, empty data. */
   reset(operation: OperationContext): Promise<void> {
     return this.app.serialized(async () => {
       await this.app.quit(operation, DISCARD_CLOSE_MS);

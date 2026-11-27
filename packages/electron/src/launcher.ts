@@ -100,6 +100,7 @@ export class ElectronProcess {
       const done = (exit: ProcessExit): void => {
         if (this.exit !== undefined) return;
         // A helper the app started can outlive it, holding the pipes open: the whole group goes, and the pipes with it.
+        // Not on Windows, which has no group to kill once its root is gone.
         this.killGroup();
         this.exit = exit;
         running.delete(this);
