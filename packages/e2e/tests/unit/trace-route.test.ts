@@ -123,6 +123,8 @@ describe('routeLocation', () => {
   it('keeps the query values out of a file app\'s location, and spells its path as a route', () => {
     expect(routeLocation('file:///srv/app/about.html?tab=summary')).toBe('file:///srv/app/about.html?tab=:id');
     expect(routeLocation('file:///srv/app/index.html#/orders/123')).toBe('file:///srv/app/index.html#/orders/:id');
+    expect(routeLocation('file:///index.html')).toBe('file:///index.html');
+    expect(routeLocation('file:///')).toBe('file:///');
   });
 
   it('stores a path parameter\'s value as :id, as a query value', () => {
@@ -176,6 +178,7 @@ describe('routeLocation', () => {
       '<secret:gateway>:8443/orders/123?token=abc',
       '/x;jsessionid=ABCDEF/y',
       '<secret:invite>welcome?code=MockCallbackCode',
+      'file:///index.html',
       'file:///srv/app/about.html?tab=summary',
       '/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fw',
     ]) {

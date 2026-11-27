@@ -285,6 +285,9 @@ function unparsedLocation(location: string): string {
   return `${location.slice(0, at)}?${query}`;
 }
 
+/** A `file:` URL's scheme and host, empty for a local file: the path starts at the next slash, its first segment included. */
+const FILE_ORIGIN = /^\s*file:(?:\/\/[^/?#\\]*)?/i;
+
 /** A secret's marker standing for a whole origin, with the port the URL names if any, then the path, query, or fragment. */
 const MARKER_ORIGIN = /^\s*<secret:[A-Za-z0-9_.-]*>(?::\d+)?(?=[/?#])/;
 
@@ -298,7 +301,11 @@ const MARKER_ORIGIN = /^\s*<secret:[A-Za-z0-9_.-]*>(?::\d+)?(?=[/?#])/;
  * device screen title).
  */
 function unparsedParts(location: string): { readonly authority: string; readonly path: string } | undefined {
-  const authority = /^\s*(?:https?|file):/i.test(location) ? (URL_ORIGIN_PREFIX.exec(location)?.[0] ?? '') : MARKER_ORIGIN.exec(location)?.[0];
+  const authority = /^\s*file:/i.test(location)
+    ? (FILE_ORIGIN.exec(location)?.[0] ?? '')
+    : /^\s*https?:/i.test(location)
+      ? (URL_ORIGIN_PREFIX.exec(location)?.[0] ?? '')
+      : MARKER_ORIGIN.exec(location)?.[0];
   if (authority === undefined) return undefined;
   const rest = location.slice(authority.length);
   return { authority, path: rest.startsWith('/') ? rest : `/${rest}` };
