@@ -602,10 +602,8 @@ export class ElectronSurface {
     const attempt = this.attempt;
     if (attempt === undefined) throw invalidState('a screenshot is taken inside a test');
     return await withBudget(operation, 'screenshot', async () => {
-      const left = this.leftApp(window);
-      if (left !== undefined) throw new ConfigurationError('POLICY_DENIED', left);
       this.artifactCounter += 1;
-      return await screenshotFile(this.devtools, window, attempt.artifactsDir, screenshotName(this.artifactCounter, label));
+      return await screenshotFile(this.devtools, window, attempt.artifactsDir, screenshotName(this.artifactCounter, label), () => this.leftApp(window));
     });
   }
 
