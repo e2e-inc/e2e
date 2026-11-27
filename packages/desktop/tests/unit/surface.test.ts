@@ -410,6 +410,12 @@ describe('DesktopSurface: launching', () => {
     await expect(launched({ launch: [spawnApp({ exits: true, runningBefore: [quit] })], listWindows: [ok([])] }, { observe: false })).rejects.toThrow(/before it showed a window$/);
   });
 
+  it('reports a quit without a hand-off hint when the launch answer names no earlier copies', async () => {
+    // A checkout whose native addon was built before the driver reported them.
+    const stale = (fake: FakeDriver): Answer => ({ ok: true, data: { app: 'SpikeForm', pid: fake.spawn({ exits: true }) } });
+    await expect(launched({ launch: [stale], listWindows: [ok([])] }, { observe: false })).rejects.toThrow(/quit right after it launched, before it showed a window$/);
+  });
+
   it('names the copy that was already running when no new process could be claimed', async () => {
     const running = standIn();
     const { surface } = await initialized({ launch: [failure('TIMEOUT', 'delivered_unverified', 'Form.app was opened, but no new process carries this launch\'s token', { kind: 'unclaimed', running_before: [running] })] });
@@ -452,6 +458,20 @@ describe('DesktopSurface: the launch wait', () => {
     const scenario = { listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, accessible: false }]), failure('APP_NOT_FOUND', 'not_delivered', 'no app has that process id.')] };
     await expect(launched(scenario, { openTimeoutMs: 15_000 })).rejects.toThrow(
       'SpikeForm launched, but its window cannot be read through accessibility: the last read failed with APP_NOT_FOUND (no app has that process id). The window may be off screen',
+    );
+  }, 30_000);
+
+  it('reports the newest read that finished when the deadline cuts off the read after it', async () => {
+    const unreadable = (): readonly Record<string, unknown>[] => [{ id: 'w-mine', is_focused: true, accessible: false }];
+    await expect(launched({ listWindows: [windows(unreadable), windows(unreadable, 11_000)] }, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility (a read ran out of time): the last read that finished listed 1 window, 1 unreadable. The window may be off screen',
+    );
+  }, 30_000);
+
+  it('says no read finished when the only read of the launch wait is cut off', async () => {
+    const scenario = { listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }])], snapshot: [{ ...screen('w-mine', {}), sleepMs: 11_000 }] };
+    await expect(launched(scenario, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility (a read ran out of time): no read of its windows finished. The window may be off screen',
     );
   }, 30_000);
 

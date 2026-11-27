@@ -44,23 +44,27 @@ export async function windowReadable(operation: OperationContext, launched: Laun
   // Whether a read finished and listed no window of the app: only that shows it opened none. A read that ran out of time saw nothing.
   let listedNone = false;
   let timedOut = false;
-  // What the newest read came to, for the error of a window that never became readable.
+  // Whether the read that ran out of time gave no answer, so `last` is a read before it.
+  let cutOff = false;
+  // What the newest read that finished came to, for the error of a window that never became readable.
   let last: WindowsRead | DriverFailure | undefined;
   while (Date.now() < deadline) {
     if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${app} was cancelled`, { retryable: false });
     let screen: ProjectedScreen | undefined;
-    let read = false;
+    let current: WindowsRead | undefined;
     try {
-      last = undefined;
       // Each read gets what is left of the readiness wait, not of the whole operation.
-      last = await launched.read(Math.max(deadline - Date.now(), 0));
-      screen = launched.readable(last);
-      read = true;
+      current = await launched.read(Math.max(deadline - Date.now(), 0));
+      last = current;
+      screen = launched.readable(current);
     } catch (cause) {
-      if (last === undefined && cause instanceof EngineError && cause.cause instanceof DriverFailure) last = cause.cause;
+      const answered = cause instanceof EngineError && cause.cause instanceof DriverFailure ? cause.cause : undefined;
+      if (current === undefined && answered !== undefined) last = answered;
       // The last read ran out of budget: the window never became readable in time.
       if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') {
         timedOut = true;
+        // A read the deadline cut off answered nothing, so the newest read that finished stays the one reported.
+        cutOff = current === undefined && answered === undefined;
         break;
       }
       // A window not readable yet, or one replaced while it was read, is what this wait looks at below; so is an app that quit.
@@ -71,7 +75,7 @@ export async function windowReadable(operation: OperationContext, launched: Laun
     // A window whose root the app did not answer for is there but not readable yet, which is what this wait is for.
     if (screen !== undefined && !screen.rootUnread) return;
     if (screen !== undefined) sawWindow = true;
-    else if (read) listedNone = true;
+    else if (current !== undefined) listedNone = true;
     // An app that quit (or crashed) on its own never shows a window.
     if (await launched.exited()) {
       throw new EngineError('ENGINE_FAILURE', `${app} quit right after it launched, before it showed a window${handOffClause(': ', launched.runningBefore)}`, { retryable: false });
@@ -95,7 +99,7 @@ export async function windowReadable(operation: OperationContext, launched: Laun
   if (!sawWindow && listedNone) {
     throw new EngineError('ENGINE_FAILURE', `${app} launched, but listed no window within ${LAUNCH_READY_MS / 1000} s: it may open none (a menu-bar app) or take longer to show its first window`, { retryable: false });
   }
-  throw new EngineError('ENGINE_FAILURE', `${app} launched, but its window cannot be read through accessibility${timedOut ? ' (a read ran out of time)' : ''}: ${describeLastRead(last)}. The window may be off screen`, {
+  throw new EngineError('ENGINE_FAILURE', `${app} launched, but its window cannot be read through accessibility${timedOut ? ' (a read ran out of time)' : ''}: ${describeLastRead(last, cutOff)}. The window may be off screen`, {
     retryable: false,
   });
 }

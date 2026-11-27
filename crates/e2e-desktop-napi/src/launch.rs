@@ -220,11 +220,17 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
             }
         }
         if Instant::now() >= claim_until {
-            return Err(Failure::unconfirmed(codes::TIMEOUT, format!("{bundle} was opened, but no new process carries this launch's token"))
-                .with_details(serde_json::json!({ "kind": "unclaimed", "running_before": before })));
+            return Err(unclaimed(&bundle, &before));
         }
         sleep(Duration::from_millis(50));
     }
+}
+
+/// The failure of a launch none of whose new processes carries its token, with the copies that ran before it: the
+/// caller reads them from `running_before` to say a running copy may have taken the launch.
+fn unclaimed(bundle: &str, before: &[i32]) -> Failure {
+    Failure::unconfirmed(codes::TIMEOUT, format!("{bundle} was opened, but no new process carries this launch's token"))
+        .with_details(serde_json::json!({ "kind": "unclaimed", "running_before": before }))
 }
 
 fn launched(pid: i32, bundle: &str, bundle_id: &str, running_before: Vec<i32>) -> Launched {
@@ -235,13 +241,20 @@ fn launched(pid: i32, bundle: &str, bundle_id: &str, running_before: Vec<i32>) -
 
 #[cfg(test)]
 mod tests {
-    use super::{Launched, hidden_by, token_argument};
+    use super::{Launched, hidden_by, token_argument, unclaimed};
 
     #[test]
     fn names_the_copies_that_ran_before_the_launch() {
         let launched = |running_before| Launched { pid: 7, app: "Form".to_owned(), bundle_id: None, started: None, running_before };
         assert_eq!(serde_json::to_value(launched(vec![3, 5])).unwrap(), serde_json::json!({ "pid": 7, "app": "Form", "running_before": [3, 5] }));
         assert_eq!(serde_json::to_value(launched(vec![])).unwrap(), serde_json::json!({ "pid": 7, "app": "Form", "running_before": [] }));
+    }
+
+    #[test]
+    fn names_the_copies_that_ran_before_an_unclaimed_launch() {
+        let failure = unclaimed("Form.app", &[3, 5]);
+        assert_eq!(failure.details, Some(serde_json::json!({ "kind": "unclaimed", "running_before": [3, 5] })));
+        assert_eq!(unclaimed("Form.app", &[]).details, Some(serde_json::json!({ "kind": "unclaimed", "running_before": [] })));
     }
 
     #[test]

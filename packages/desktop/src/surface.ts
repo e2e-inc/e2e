@@ -427,7 +427,8 @@ export class DesktopSurface {
     await windowReadable(operation, {
       app: this.appName,
       foreground: this.foreground,
-      runningBefore: launched.running_before,
+      // A checkout's addon built before the driver reported them answers without the list.
+      runningBefore: launched.running_before ?? [],
       read: (timeoutMs) => this.readWindows(withDeadline({ ...operation, timeoutMs })),
       readable: (read) => this.readable(read),
       exited: async () => {
