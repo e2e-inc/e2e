@@ -357,6 +357,11 @@ describe('findReplayedDetours', () => {
     const trip = flow([tap('About', '/settings?tab=:id', 'link'), back('/about')], { endPath: '/settings?tab=privacy' });
     expect(findReplayedDetours({ ...trip, detours: [{ from: 0, to: 2 }] }, 2)).toHaveLength(1);
     expect(findReplayedDetours({ ...trip, detours: [{ from: 0, to: 2 }] }, 2, { stop: '/settings?tab=billing', places: ['/settings?tab=privacy'] })).toEqual([]);
+    // An end on the recorded route whose delta did not match: compared with where the trip left, query value included.
+    const storage = flow([tap('Save', '/storage?view=:id'), tap('About', '/storage?view=:id', 'link'), back('/about')], { endPath: '/storage?view=123' });
+    const places = ['/storage?view=123', '/storage?view=123', '/about'];
+    expect(findReplayedDetours({ ...storage, detours: [{ from: 1, to: 3 }] }, 3, { stop: '/storage?view=456', places })).toEqual([]);
+    expect(findReplayedDetours({ ...storage, detours: [{ from: 1, to: 3 }] }, 3, { stop: '/storage?view=123', places })).toHaveLength(1);
   });
 });
 

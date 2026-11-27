@@ -534,7 +534,8 @@ export class StepTraceSession {
       // A recording with no delta fails the evidence too, but nothing of it
       // showed before the replay acted: that is the generic detail.
       const recorded = (trace.endAnchors?.length ?? 0) > 0 || (trace.goneAnchors?.length ?? 0) > 0;
-      return recorded ? { matches: false, failure: 'already-showing' } : { matches: false };
+      const stood = arrived.path === undefined ? {} : { seen: arrived.path };
+      return recorded ? { matches: false, failure: 'already-showing', ...stood } : { matches: false, ...stood };
     }
     const beforeNodes = baselineNodes ?? redactNodesAgain(start.nodes, this.redaction);
     // Every look the wait takes must still be on the recorded end route: a
@@ -549,7 +550,7 @@ export class StepTraceSession {
       initial: arrived,
       ...(trace.endWaitMs === undefined ? {} : { waitMs: trace.endWaitMs }),
     })) && this.host.traceEligible;
-    return matches ? { matches } : { matches, ...(mismatch === undefined ? {} : { failure: mismatch }) };
+    return matches ? { matches } : { matches, ...(mismatch === undefined ? {} : { failure: mismatch }), ...(arrived.path === undefined ? {} : { seen: arrived.path }) };
   }
 
   /**
@@ -762,7 +763,7 @@ export class StepTraceSession {
 interface EndStateCheck {
   readonly matches: boolean;
   readonly failure?: 'already-showing' | DeltaMismatch;
-  /** Where the screen stayed when it never reached the recorded end route. */
+  /** Where the replay's end stood when it did not match: off the recorded route, or on it with another delta or query value. */
   readonly seen?: string;
 }
 

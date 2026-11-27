@@ -207,10 +207,10 @@ export function findReplayedDetours(
   const next = atEnd ? trace.endPath : trace.actions[executed]?.at;
   const confirmed = ({ from, to }: { readonly from: number; readonly to: number }): boolean => {
     if (to < executed || live === undefined || next === undefined) return true;
-    if (atEnd) return false;
     const home = live.places[from];
     if (home !== undefined) return addressKey(home) === addressKey(live.stop);
-    return !routeLocation(next).includes(':id') && routeLocation(live.stop) === routeLocation(next);
+    // An end that did not match has nothing recorded to confirm a return by.
+    return !atEnd && !routeLocation(next).includes(':id') && routeLocation(live.stop) === routeLocation(next);
   };
   const ran = {
     actions: trace.actions.slice(0, executed),
