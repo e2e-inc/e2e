@@ -906,6 +906,7 @@ fn read_tree<E: Accessible>(window: &E, app: &E, settings: Settings) -> Outcome<
     };
     let window_bounds = window.frame().map(|(x, y, width, height)| Rect { x, y, width, height });
     let focus_path = focused.as_ref().map(|focused| ancestors(focused, window)).unwrap_or_default();
+    let chrome = window_chrome(window);
     let mut walk = Walk {
         snapshot: settings.snapshot.clone(),
         max_depth: settings.max_depth.max(1),
@@ -913,8 +914,8 @@ fn read_tree<E: Accessible>(window: &E, app: &E, settings: Settings) -> Outcome<
         deadline: settings.deadline,
         focused,
         focus_unknown,
-        title_bar: window_chrome(window).as_deref().and_then(title_bar_band),
-        chrome: window_chrome(window),
+        title_bar: chrome.as_deref().and_then(title_bar_band),
+        chrome,
         nodes: 0,
         complete: !focus_unknown,
         timed_out: false,
