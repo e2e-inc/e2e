@@ -21,7 +21,11 @@ export interface ElectronOptions {
    * package installed in the project, which runs the target's `app.appPath`.
    */
   readonly executablePath?: string | undefined;
-  /** Variables added to the app's environment, over the run's own. */
+  /**
+   * Variables added to the app's environment. The app does not get the run's
+   * environment, only what a process needs to start and draw (`PATH`,
+   * `HOME`, the locale, the display): pass anything else it reads here.
+   */
   readonly env?: Readonly<Record<string, string>> | undefined;
   /** The attribute `getByTestId` reads. Default `data-testid`. */
   readonly testIdAttribute?: string | undefined;
