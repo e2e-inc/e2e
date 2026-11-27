@@ -121,6 +121,16 @@ final class DoubleClickButton: NSButton {
 }
 
 /// The second window: one control per capability, and a status line.
+/// A field that grows as it takes the keyboard, as a search field does: its box when focused is not the one it was read with.
+final class GrowingField: NSTextField {
+  lazy var width = widthAnchor.constraint(equalToConstant: 80)
+
+  override func becomeFirstResponder() -> Bool {
+    width.constant = 160
+    return super.becomeFirstResponder()
+  }
+}
+
 final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSTextFieldDelegate {
   var window: NSWindow?
   var popup: NSWindow?
@@ -142,7 +152,7 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
 
   func show() {
     if let window { window.makeKeyAndOrderFront(nil); return }
-    let window = NSWindow(contentRect: NSRect(x: 660, y: 200, width: 360, height: 870),
+    let window = NSWindow(contentRect: NSRect(x: 660, y: 200, width: 360, height: 900),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.title = "Controls"
     window.isReleasedWhenClosed = false
@@ -191,6 +201,16 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
     opener.setAccessibilityIdentifier("opener")
     opener.delegate = self
     opener.widthAnchor.constraint(equalToConstant: 260).isActive = true
+
+    // Two fields no name or identifier tells apart, each growing as it takes the keyboard: a key for one must reach it.
+    let tags = NSStackView(views: (1...2).map { _ in
+      let tag = GrowingField()
+      tag.setAccessibilityLabel("Tag")
+      tag.target = self
+      tag.action = #selector(submit(_:))
+      tag.width.isActive = true
+      return tag
+    })
 
     // An NSTabView's items are AXRadioButtons with the AXTabButton subrole: they read as tabs, the active one selected.
     let tabs = NSTabView()
@@ -255,7 +275,7 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
 
     let draft = NSHostingView(rootView: DraftAlert { [weak self] text in self?.status.stringValue = text })
 
-    let stack = NSStackView(views: [scroll, accountScroll, note, opener, tabs, options, volume, disabled, enableLater, size, agree, closeTab, draft, double, hover, hoverStatus, status])
+    let stack = NSStackView(views: [scroll, accountScroll, note, opener, tags, tabs, options, volume, disabled, enableLater, size, agree, closeTab, draft, double, hover, hoverStatus, status])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
