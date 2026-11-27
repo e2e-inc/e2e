@@ -375,8 +375,9 @@ export class FileCacheStore implements CacheStore {
       if (typeof name !== 'string' || typeof yamlDigest !== 'string' || typeof lock !== 'string' || (typeof replaces !== 'string' && replaces !== null) || basename(name) !== name) return;
       const yaml = await this.readCapped(this.path(name, RECORDING_EXTENSION));
       const current = await this.readCapped(this.path(name, LOCK_EXTENSION));
-      // A file there that could not be read says nothing of which one it is: the record waits for a read that can.
-      if ([yaml, current].some((file) => file !== undefined && file.head === undefined)) return;
+      // A file there that could not be read whole (another account's, or one over the size cap) says nothing of
+      // which one it is: the record waits for a read that can.
+      if ([yaml, current].some((file) => file !== undefined && file.text === undefined)) return;
       const currentDigest = current?.text === undefined ? null : digest(current.text);
       if (yaml?.text !== undefined && digest(yaml.text) === yamlDigest && currentDigest === replaces) {
         await writeFileAtomic(this.path(name, LOCK_EXTENSION), lock, { mode: 0o600 });

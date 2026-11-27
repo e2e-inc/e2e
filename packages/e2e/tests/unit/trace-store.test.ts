@@ -820,6 +820,21 @@ describe('FileCacheStore', () => {
       expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toEqual([]);
     });
 
+    it('keeps the record, and the lock, while the lock there is too big to read', async () => {
+      const { directory, store } = await makeStore();
+      await store.write(KEY, payload());
+      const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+      const record = { name: NAME, yamlDigest: sha(await readFile(yamlPath(directory), 'utf8')), lock: '{}', replaces: null };
+      await writeFile(path.join(directory, `.${NAME}.pending`), JSON.stringify(record), 'utf8');
+      // A checkout brought a lock over the cap this store reads.
+      const big = `${await readFile(lockPath(directory), 'utf8')}${' '.repeat(20_000)}`;
+      await writeFile(lockPath(directory), big, 'utf8');
+      const capped = new FileCacheStore({ directory, maxBytes: 10_000, writable: true });
+      expect((await capped.read(KEY, step())).status).toBe('invalid');
+      expect(await readFile(lockPath(directory), 'utf8')).toBe(big);
+      expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toHaveLength(1);
+    });
+
     it('leaves a file at the record path that is not a record a writer left', async () => {
       const { directory, store } = await makeStore();
       await store.write(KEY, payload());
