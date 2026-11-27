@@ -47,6 +47,17 @@ describe('step accounting operation contexts', () => {
     expect(accounting.actionOperation().origin).toBe('agent');
     expect(accounting.operation().origin).toBe('agent');
   });
+
+  it('names its step on every operation, replayed or live, and another step another way', () => {
+    const options = { api: 'agent.act', timeoutMs: 10_000, maxActions: 5, maxModelCalls: 5, contextBytes: 0 };
+    const accounting = new StepAccounting(runtime(), options);
+    const step = accounting.operation().agentStep;
+    expect(step).toEqual(expect.any(String));
+    expect(accounting.actionOperation().agentStep).toBe(step);
+    accounting.replaying(true);
+    expect(accounting.operation()).toMatchObject({ origin: 'test', agentStep: step });
+    expect(new StepAccounting(runtime(), options).operation().agentStep).not.toBe(step);
+  });
 });
 
 describe('step accounting model reasoning', () => {

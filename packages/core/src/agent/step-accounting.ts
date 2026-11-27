@@ -43,6 +43,9 @@ export interface StepAccountingOptions {
   readonly callSignal?: () => AbortSignal;
 }
 
+/** The last `agentStep` handed out in this process. */
+let nextStepId = 0;
+
 export class StepAccounting {
   readonly api: string;
   readonly timeoutMs: number;
@@ -75,6 +78,8 @@ export class StepAccounting {
   private modelId: string | undefined;
   /** Whether the step is replaying a recorded trace: its actions are then a test's, not the model's. */
   private inReplay = false;
+  /** This step's `agentStep`, on every operation it makes. */
+  private readonly stepId = String((nextStepId += 1));
 
   constructor(
     private readonly runtime: AgentContext,
@@ -213,9 +218,12 @@ export class StepAccounting {
     );
   }
 
-  /** Every operation inside a replayed span is the test's, navigation included; outside it, the agent's. */
+  /**
+   * Every operation inside a replayed span is the test's, navigation
+   * included; outside it, the agent's. Both carry the step's `agentStep`.
+   */
   private stamped(operation: OperationContext): OperationContext {
-    return this.inReplay ? { ...operation, origin: 'test' } : operation;
+    return { ...operation, agentStep: this.stepId, ...(this.inReplay ? { origin: 'test' as const } : {}) };
   }
 
   /** Marks the span in which the step's actions come from a recorded trace rather than the model. */

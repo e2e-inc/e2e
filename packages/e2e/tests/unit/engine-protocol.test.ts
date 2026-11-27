@@ -84,6 +84,10 @@ describe('engine protocol', () => {
     const ref = { id: 'n1', revision: '1' };
     await expect(remote.readStyle!(ref, ['color'], operation())).resolves.toEqual({ color: 'rgb(255, 0, 0)' });
     expect(read).toHaveBeenCalledExactlyOnceWith(ref, ['color'], expect.objectContaining({ origin: 'test' }));
+    // An agent step's id crosses the wire with the operation.
+    await remote.readStyle!(ref, ['color'], { ...operation(), agentStep: '7' });
+    expect(read).toHaveBeenLastCalledWith(ref, ['color'], expect.objectContaining({ agentStep: '7' }));
+    expect((read.mock.calls[0] as unknown[])[2]).not.toHaveProperty('agentStep');
     await remote.dispose!(cleanup);
     expect(() => defineEngine({ name: 'bad', version: '1', spiVersion: 1, readStyle: read })).toThrow(/readStyle without observe/);
   });
