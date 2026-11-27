@@ -485,11 +485,19 @@ fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("a {role} has no checked state to set")));
     }
     let target = wanted as u8;
-    // A box whose state cannot be read may already show the one asked for: a press would turn it the other way.
-    let mut shown = match element.attribute("AXValue") {
-        Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => return Err(unread(error, if wanted { "check" } else { "uncheck" })),
-        value => crate::snapshot::parse_toggle(value.ok().as_ref()),
+    let what = if wanted { "check" } else { "uncheck" };
+    let read = || match element.attribute("AXValue") {
+        Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => Err(unread(error, what)),
+        value => Ok(crate::snapshot::parse_toggle(value.ok().as_ref())),
     };
+    let mut shown = read()?;
+    if shown != Some(target) {
+        // A disabled AppKit box acknowledges a press and ignores it: wait for it to be enabled, then read it again, as
+        // the app may have set it meanwhile. A box that already shows the state asked for is left alone, disabled or not.
+        enabled(element, deadline, what)?;
+        shown = read()?;
+    }
+    // A box whose state cannot be read may already show the one asked for: a press would turn it the other way.
     if shown.is_none() {
         return Err(Failure::refused(
             codes::ACTION_NOT_SUPPORTED,
@@ -502,7 +510,7 @@ fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
     let reached = press_to_state(
         target,
         shown,
-        || perform(element, "AXPress", if wanted { "check" } else { "uncheck" }),
+        || perform(element, "AXPress", what),
         || {
             let before = shown;
             until(deadline, || toggle_state(element) != before);
@@ -664,6 +672,8 @@ fn finite(text: &str) -> Result<f64, ()> {
 }
 
 fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
+    // A disabled field takes no value: wait for it to be enabled, as a fill's actionability wait does.
+    enabled(element, deadline, "set value")?;
     let (ax_role, role) = role_of(element, "set value")?;
     let secure = ax_role == "AXSecureTextField" || element.text("AXSubrole").as_deref() == Some("AXSecureTextField");
     if !settable(element, "AXValue", "set value")? {
@@ -1183,10 +1193,7 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         }
         Action::Focus => focus(element, deadline),
         Action::Clear => set_value(element, "", deadline),
-        Action::Check(wanted) => {
-            enabled(element, deadline, "check")?;
-            check(element, wanted, deadline)
-        }
+        Action::Check(wanted) => check(element, wanted, deadline),
         Action::ScrollTo => perform(element, "AXScrollToVisible", "scroll into view"),
         Action::SetValue(text) => set_value(element, &text, deadline),
         Action::SelectAll => select_all(element, deadline),
