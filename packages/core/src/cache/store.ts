@@ -350,11 +350,11 @@ export class FileCacheStore implements CacheStore {
     try {
       const pending: unknown = JSON.parse(text);
       const { name, yamlDigest, lock } = (typeof pending === 'object' && pending !== null ? pending : {}) as Record<string, unknown>;
-      if (typeof name === 'string' && typeof yamlDigest === 'string' && typeof lock === 'string' && basename(name) === name) {
-        const yaml = await this.readCapped(this.path(name, RECORDING_EXTENSION));
-        if (yaml?.text !== undefined && digest(yaml.text) === yamlDigest) {
-          await writeFileAtomic(this.path(name, LOCK_EXTENSION), lock, { mode: 0o600 });
-        }
+      // A file of another shape is not a record a writer left, and is not the store's to remove.
+      if (typeof name !== 'string' || typeof yamlDigest !== 'string' || typeof lock !== 'string' || basename(name) !== name) return;
+      const yaml = await this.readCapped(this.path(name, RECORDING_EXTENSION));
+      if (yaml?.text !== undefined && digest(yaml.text) === yamlDigest) {
+        await writeFileAtomic(this.path(name, LOCK_EXTENSION), lock, { mode: 0o600 });
       }
     } catch {
       // A record that does not parse, or a lock that cannot be put in place, leaves the pair as it is:

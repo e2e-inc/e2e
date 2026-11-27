@@ -642,6 +642,15 @@ describe('FileCacheStore', () => {
       expect(JSON.parse(await readFile(lockPath(directory), 'utf8')).entries).toHaveLength(1);
       expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toHaveLength(1);
     });
+
+    it('leaves a file at the record path that is not a record a writer left', async () => {
+      const { directory, store } = await makeStore();
+      await store.write(KEY, payload());
+      const foreign = path.join(directory, `.${NAME}.pending`);
+      await writeFile(foreign, '{"upload":"queued"}', 'utf8');
+      expect((await store.read(KEY, step())).status).toBe('hit');
+      expect(await readFile(foreign, 'utf8')).toBe('{"upload":"queued"}');
+    });
   });
 
   it('keeps a recording it cannot read when another is written or evicted beside it', async () => {
