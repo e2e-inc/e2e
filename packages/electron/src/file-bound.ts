@@ -5,7 +5,7 @@
  * captured.
  */
 
-import { existsSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -53,11 +53,27 @@ export function outsideApp(location: string, directory: string | undefined): str
   return inside ? undefined : `the window left the app's directory for ${shown}, a local file outside it, so it is not read`;
 }
 
-/** The nearest directory above `file` with a `package.json`, or undefined when none has one. */
+/**
+ * The nearest directory above `file` with a `package.json` that names a
+ * package, or undefined when none has one. A manifest that only sets the
+ * module type (`{"type":"commonjs"}`, which build tools write into their
+ * output) marks how Node loads the files there, not a package of its own.
+ */
 function packageOf(file: string): string | undefined {
   for (let directory = path.dirname(path.resolve(file)); ; directory = path.dirname(directory)) {
-    if (existsSync(path.join(directory, 'package.json'))) return directory;
+    const manifest = path.join(directory, 'package.json');
+    if (existsSync(manifest) && !onlyModuleType(manifest)) return directory;
     if (path.dirname(directory) === directory) return undefined;
+  }
+}
+
+function onlyModuleType(manifest: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(manifest, 'utf8'));
+    return typeof parsed === 'object' && parsed !== null && Object.keys(parsed).join() === 'type';
+  } catch {
+    // A manifest that cannot be read is no proof the package is elsewhere: the nearer directory is the narrower bound.
+    return false;
   }
 }
 
