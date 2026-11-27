@@ -404,12 +404,10 @@ fn menu_shown(pid: i32, before: usize, deadline: Instant) {
     until(deadline.min(Instant::now() + MENU_SHOW_WAIT), || windows::open_menus(pid) > before);
 }
 
-fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
-    let element = &entry.element;
-    // A tap on a text field puts the keyboard there. AppKit's password field also offers AXConfirm, which the action
-    // choice below would send in its place, leaving the keyboard in the field before.
-    // A disabled AppKit button may still offer AXPress and acknowledge it while ignoring it: wait within the action's
-    // budget for it to be enabled, as an actionability wait does, and refuse it if it stays disabled.
+/// Waits within the action's budget for a control to be enabled, as an actionability wait does, and refuses it if it
+/// stays disabled: a disabled AppKit control may still offer AXPress and acknowledge it while ignoring it. A control
+/// with no enabled state goes at once.
+fn enabled(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
     let refuse_at = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
     loop {
         match element.attribute("AXEnabled") {
@@ -417,14 +415,21 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
                 if Instant::now() + POLL >= refuse_at {
                     return Err(Failure::refused(codes::ACTION_FAILED, "the control is disabled"));
                 }
-                go("click")?;
+                go(what)?;
                 sleep(POLL);
             }
-            Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT | ax::AX_API_DISABLED)) => return Err(unread(error, "click")),
-            _ => break,
+            Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT | ax::AX_API_DISABLED)) => return Err(unread(error, what)),
+            _ => return Ok(()),
         }
     }
+}
+
+fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
+    let element = &entry.element;
+    enabled(element, deadline, "click")?;
     let (ax_role, role) = role_of(element, "click")?;
+    // A tap on a text field puts the keyboard there. AppKit's password field also offers AXConfirm, which the action
+    // choice below would send in its place, leaving the keyboard in the field before.
     if role == "textfield" && settable(element, "AXFocused", "click")? {
         return focus(element, deadline);
     }
@@ -861,6 +866,8 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
     if ax_role == "AXMenuButton" {
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "a pull-down menu shows no selected option; tap it, then tap the menu item"));
     }
+    // A disabled pop-up ignores the press that would open its list.
+    enabled(element, deadline, "select")?;
     if ax_role == "AXPopUpButton" {
         if value_text(element).as_deref() == Some(label) {
             return Ok(());
