@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -57,6 +57,35 @@ afterEach(() => {
 });
 
 describe('initializing standalone projects', () => {
+  it('repairs an explicitly selected Claude skill copy when pnpm links the skill in .agents', async () => {
+    vi.stubEnv('CI', '');
+    vi.stubEnv('E2E_TELEMETRY_DISABLED', '1');
+    const packageSkill = path.join(dir, 'node_modules/.pnpm/e2e@sample/node_modules/e2e/skills/e2e');
+    const claudeSkill = path.join(dir, '.claude/skills/e2e');
+    const agentsLink = path.join(dir, '.agents/skills/e2e');
+    const note = path.join(claudeSkill, 'project-notes.md');
+    const skillFile = path.join(claudeSkill, 'SKILL.md');
+    mkdirSync(packageSkill, { recursive: true });
+    mkdirSync(claudeSkill, { recursive: true });
+    mkdirSync(path.dirname(agentsLink), { recursive: true });
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'fixture', private: true, packageManager: 'pnpm@12.18.0' }));
+    writeFileSync(path.join(packageSkill, 'SKILL.md'), 'installed by pnpm');
+    writeFileSync(note, 'project note');
+    symlinkSync(packageSkill, agentsLink, 'junction');
+    const originalLink = readlinkSync(agentsLink);
+
+    await execFileAsync(process.execPath, [
+      CLI, 'init', '--yes', '--engine', 'none', '--gateway', 'none', '--skills', '.claude/skills', '--mcp', 'none', '--no-install',
+    ], { cwd: dir });
+
+    expect(readFileSync(note, 'utf8')).toBe('project note');
+    expect(readlinkSync(agentsLink)).toBe(originalLink);
+    expect(readFileSync(path.join(agentsLink, 'SKILL.md'), 'utf8')).toBe('installed by pnpm');
+    expect(existsSync(skillFile), 'Claude SKILL.md was restored').toBe(true);
+    expect(readFileSync(skillFile, 'utf8')).toMatch(/^---\nname: e2e\n/);
+    expect(readFileSync(path.join(dir, 'CLAUDE.md'), 'utf8')).toContain('.claude/skills/e2e/SKILL.md');
+  });
+
   it('starts the installed MCP server from the generated Codex config with an empty npm cache offline', async () => {
     await execFileAsync(process.execPath, [CLI, 'init', '--yes', '--mcp', '.codex/config.toml'], { cwd: dir });
     linkPackages('e2e');
