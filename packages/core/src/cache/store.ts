@@ -64,7 +64,7 @@ const HEAD_BYTES = 4_096;
 /** The reviewed file's extension. */
 export const RECORDING_EXTENSION = '.yml';
 /** The generated file's extension. */
-const LOCK_EXTENSION = '.lock.json';
+export const LOCK_EXTENSION = '.lock.json';
 
 export type CacheReadResult =
   | { readonly status: 'hit'; readonly entry: TraceEntry; readonly bytes: number }
@@ -110,14 +110,9 @@ export interface ListedRecordingFile {
   /** The pair's files that say the store wrote them, each by itself: the ones `e2e cache clear` may delete. */
   readonly files: readonly string[];
   readonly parsed: ParsedRecordingFile;
+  /** Set when a file of the pair could not be opened, so nothing says whose it is; `list` skips such a pair unless asked. */
+  readonly unconfirmed?: true;
 }
-
-/**
- * A pair read from disk: its name, size, and what it holds; undefined when
- * neither file exists or neither is the store's. `unconfirmed` when a file
- * could not be opened, so nothing says whose it is.
- */
-type LoadedFile = ListedRecordingFile & { readonly unconfirmed?: true };
 
 export class FileCacheStore implements CacheStore {
   readonly writable: boolean;
@@ -127,7 +122,7 @@ export class FileCacheStore implements CacheStore {
   /** The steps read for each test, in the order they were read: where a step new to a file goes (`placeFor`). */
   private readonly readOrder = new Map<string, string[]>();
   /** Each pair as last parsed, beside the text of its files then (`load`). */
-  private readonly loaded = new Map<string, { readonly yaml: string; readonly lock: string; readonly file: LoadedFile | undefined }>();
+  private readonly loaded = new Map<string, { readonly yaml: string; readonly lock: string; readonly file: ListedRecordingFile | undefined }>();
 
   constructor(options: FileCacheStoreOptions) {
     this.directory = options.directory;
@@ -255,7 +250,7 @@ export class FileCacheStore implements CacheStore {
    * directory does not exist. Not part of `CacheStore`: only `cache.strict`
    * and `e2e cache` list a store, and only this one.
    */
-  async list(): Promise<ListedRecordingFile[]> {
+  async list(options: { readonly unconfirmed?: boolean } = {}): Promise<ListedRecordingFile[]> {
     let names: string[];
     try {
       names = await readdir(this.directory);
@@ -274,8 +269,9 @@ export class FileCacheStore implements CacheStore {
       // writer takes, so a listing never catches one half-replaced.
       if ((await this.load(stem)) === undefined) continue;
       const file = await this.locked(stem.replace(COLLISION_SUFFIX, ''), () => this.load(stem));
-      // One the store cannot tell is its own is not listed: `e2e cache clear` must not delete it.
-      if (file !== undefined && file.unconfirmed !== true) files.push(file);
+      // One the store cannot tell is its own is listed only when asked for: nothing may delete it, but
+      // `e2e cache ls` names it, since a run reads it as `invalid-entry`.
+      if (file !== undefined && (file.unconfirmed !== true || options.unconfirmed === true)) files.push(file);
     }
     return files;
   }
@@ -376,7 +372,7 @@ export class FileCacheStore implements CacheStore {
    * under its own name whose lock cannot say whose it is (a merge conflict
    * in it, or no lock) is the test's unless its YAML names another test.
    */
-  private async locate(base: string, testId: string): Promise<LoadedFile | undefined> {
+  private async locate(base: string, testId: string): Promise<ListedRecordingFile | undefined> {
     const collided = await this.load(collisionName(base, testId));
     if (collided !== undefined) return collided;
     const file = await this.load(base);
@@ -397,7 +393,7 @@ export class FileCacheStore implements CacheStore {
    * (`cache.dir` can point anywhere), so a pair neither of whose files says
    * the store wrote it is not one.
    */
-  private async load(name: string): Promise<LoadedFile | undefined> {
+  private async load(name: string): Promise<ListedRecordingFile | undefined> {
     const yaml = await this.readCapped(this.path(name, RECORDING_EXTENSION));
     const lock = await this.readCapped(this.path(name, LOCK_EXTENSION));
     // Every step of a test reads its whole pair: reading is cheap, parsing is not, so a pair whose
@@ -411,7 +407,7 @@ export class FileCacheStore implements CacheStore {
   }
 
   /** One pair as `load` read its files: its name, size, ownership, and what it holds. */
-  private async readPair(name: string, yaml: CappedFile | undefined, lock: CappedFile | undefined): Promise<LoadedFile | undefined> {
+  private async readPair(name: string, yaml: CappedFile | undefined, lock: CappedFile | undefined): Promise<ListedRecordingFile | undefined> {
     // A file that exists but cannot be opened (another account's, say) says nothing about whose it is.
     const unopened = [yaml, lock].some((file) => file !== undefined && file.head === undefined);
     const owned = writtenByStore(yaml?.head, lock?.head);

@@ -1,6 +1,6 @@
 /** `e2e cache ls`, `clear`, and `stats` over a real store directory. */
 
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
@@ -288,6 +288,25 @@ describe('e2e cache clear', () => {
     writeFileSync(path.join(directory, '.a-settings.pending'), JSON.stringify({ name: 'a-settings', yamlDigest: 'd'.repeat(64), lock: '{}' }), 'utf8');
     await invoke('cache', 'ls');
     expect(written(stderrSpy)).not.toContain('not cache files');
+  });
+
+  // Root reads anything, and Windows ignores the mode: neither has a file it cannot open.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('names a recording it cannot open as unreadable, and leaves it', async () => {
+    await seed([{ keyHash: 'a'.repeat(64), trace: trace(step('tests/a.e2e.ts::settings', 'web'), 1) }]);
+    const directory = path.join(root, CACHE_DIR);
+    const pair = ['a-settings.yml', 'a-settings.lock.json'].map((name) => path.join(directory, name));
+    for (const file of pair) chmodSync(file, 0o000);
+    try {
+      await invoke('cache', 'ls');
+      expect(written(stderrSpy)).toContain('not readable');
+      expect(written(stderrSpy)).not.toContain('not cache files');
+      stderrSpy.mockClear();
+      await invoke('cache', 'clear');
+      expect(written(stderrSpy)).toContain('could not be opened and were left alone: a-settings.yml');
+      expect(readdirSync(directory).toSorted()).toEqual(['a-settings.lock.json', 'a-settings.yml']);
+    } finally {
+      for (const file of pair) chmodSync(file, 0o600);
+    }
   });
 
   it('has nothing to clear when the store was never written', async () => {

@@ -1267,7 +1267,9 @@ signup-signs-up.yml    web     sign up as {name}        3d   7 (truncated)
 
 - A recording the store cannot read (a torn or hand-edited file, one over
   the 1 MiB ceiling, or a lock of another format) is named on stderr with
-  the reason, read as `invalid-entry` by a run, and removed by `clear`.
+  the reason, read as `invalid-entry` by a run, and removed by `clear`. One
+  it cannot open at all (another account's files, say) is named the same
+  way, and `clear` leaves it.
 - An entry an older `e2e` wrote, one `<key>.json` file per key, is no longer
   read. `ls` counts these on stderr, and `clear` removes them.
 - Files the runner never wrote are left alone.

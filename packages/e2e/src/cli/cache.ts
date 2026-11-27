@@ -17,7 +17,7 @@ import path from 'node:path';
 import type { Command } from 'commander';
 import picocolors from 'picocolors';
 import { isLockToken } from '@e2e-dev/core/lib/cache/file-lock';
-import { FileCacheStore, MAX_CACHE_WIRE_BYTES, RECORDING_EXTENSION } from '@e2e-dev/core/lib/cache/store';
+import { FileCacheStore, LOCK_EXTENSION, MAX_CACHE_WIRE_BYTES, RECORDING_EXTENSION } from '@e2e-dev/core/lib/cache/store';
 import { discoverConfig, loadConfigModule, missingConfigError } from '../config/load.ts';
 import { resolveConfig } from '../config/resolve-run.ts';
 import { errorMessage, sanitizeText } from '@e2e-dev/core/lib/internal/errors';
@@ -64,6 +64,8 @@ interface CacheContents {
   readonly legacy: readonly string[];
   /** Files in the directory that are not cache-shaped; never touched. */
   readonly foreign: readonly string[];
+  /** Pairs named like recordings that could not be opened (another account's, say): unreadable, and never deleted. */
+  readonly unopened: readonly string[];
 }
 
 /** An entry file of the store before recordings were kept per test: the key digest. */
@@ -236,20 +238,23 @@ async function readContents(directory: string): Promise<CacheContents> {
   const unreadable: { file: string; reason: string }[] = [];
   const legacy: string[] = [];
   const foreign: string[] = [];
+  const unopened: string[] = [];
 
   // Listed first: taking each test's lock can remove a stale one a crashed writer left.
-  const listedFiles = await store.list();
+  const listedFiles = await store.list({ unconfirmed: true });
   let names: string[];
   try {
     names = await readdir(directory);
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { directory, entries, files, unreadable, legacy, foreign };
+      return { directory, entries, files, unreadable, legacy, foreign, unopened };
     }
     throw cause;
   }
   // A file named like a recording is the store's only when the store lists it: one it never wrote stays foreign.
-  const owned = new Set(listedFiles.flatMap((listed) => listed.files));
+  const owned = new Set(
+    listedFiles.flatMap((listed) => (listed.unconfirmed === true ? [`${listed.name}${RECORDING_EXTENSION}`, `${listed.name}${LOCK_EXTENSION}`] : listed.files)),
+  );
   for (const name of names.toSorted()) {
     if (LEGACY_ENTRY_FILE.test(name)) legacy.push(name);
     else if (!owned.has(name) && workingFile(directory, name) === undefined) foreign.push(name);
@@ -257,8 +262,13 @@ async function readContents(directory: string): Promise<CacheContents> {
 
   for (const listed of listedFiles) {
     const file = `${listed.name}${RECORDING_EXTENSION}`;
-    files.push({ name: listed.name, bytes: listed.bytes });
     const { parsed } = listed;
+    if (listed.unconfirmed === true) {
+      unopened.push(file);
+      if (parsed.status === 'invalid') unreadable.push({ file, reason: parsed.reason });
+      continue;
+    }
+    files.push({ name: listed.name, bytes: listed.bytes });
     if (parsed.status === 'invalid') {
       unreadable.push({ file, reason: parsed.reason });
       continue;
@@ -285,7 +295,7 @@ async function readContents(directory: string): Promise<CacheContents> {
       });
     }
   }
-  return { directory, entries, files, unreadable, legacy, foreign };
+  return { directory, entries, files, unreadable, legacy, foreign, unopened };
 }
 
 /** An instruction on one line, cut to `STEP_CHARS`. */
@@ -372,6 +382,11 @@ async function clear(contents: CacheContents): Promise<number> {
       : `cleared ${removed} file(s) from ${contents.directory}\n`,
   );
   // Unreadable recordings and old entries were just deleted; only what was left alone is worth a word.
+  if (contents.unopened.length > 0) {
+    process.stderr.write(
+      `${contents.unopened.length} recording(s) in ${contents.directory} could not be opened and were left alone: ${sanitizeText(contents.unopened.join(', '))}\n`,
+    );
+  }
   warnAboutForeign(contents);
   return 0;
 }
