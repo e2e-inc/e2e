@@ -1021,10 +1021,8 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         let unchosen = |failure: Failure| unclosed(failure, close_menu(entry.pid, &menu));
         let items = all(&menu, "AXChildren", "read the list's options").map_err(unchosen)?;
         // A title the app did not answer in time may be the option asked for: that is no proof it is missing.
-        let (found, stalled) = scan(items, "read the list's options", 1, |candidate| {
-            candidate.attribute("AXTitle").map(|title| title.text() == Some(label) && candidate.boolean("AXEnabled") != Some(false))
-        })
-        .map_err(unchosen)?;
+        let (found, stalled) =
+            scan(items, "read the list's options", 1, |candidate| candidate.attribute("AXTitle").map(|title| title.text() == Some(label))).map_err(unchosen)?;
         let Some(item) = found.into_iter().next() else {
             return Err(unchosen(if stalled {
                 unread(ax::AX_CANNOT_COMPLETE, "read the list's options")
@@ -1032,6 +1030,8 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
                 Failure::refused(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\""))
             }));
         };
+        // A disabled option takes the press and ignores it: it is waited for, and refused as disabled, not as missing.
+        enabled(&item, deadline, "select").map_err(unchosen)?;
         perform(&item, "AXPress", "choose the option").map_err(|failure| match failure.delivery {
             // Refused before the press (out of time, cancelled, the item gone): nothing was chosen.
             Delivery::NotDelivered => unchosen(failure),
