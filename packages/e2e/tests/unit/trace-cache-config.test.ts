@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 import { createAgentCacheContext, settleStagedTraces } from '@e2e-dev/core/lib/cache/context';
 import { recordedProvenance } from '@e2e-dev/core/lib/cache/recorder';
 import { FileCacheStore } from '@e2e-dev/core/lib/cache/store';
@@ -292,6 +292,32 @@ describe('settleStagedTraces', () => {
       await expect(store.delete('c'.repeat(64))).resolves.toBeUndefined();
     } finally {
       await chmod(directory, 0o700);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('writes a recording that fits the store only without its locations without them', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'e2e-cache-located-'));
+    try {
+      const store = new FileCacheStore({ directory, maxBytes: 1_048_576, writable: true });
+      // 50 batch uploads that fit the limit alone, each with a long location that tips it over.
+      const actions = Array.from({ length: 50 }, (_, index) => ({
+        name: 'upload' as const,
+        summary: `upload 5 files into button "Attach ${String(index)}"`,
+        target: { role: 'button', name: `Attach ${String(index)}` },
+        paths: Array.from({ length: 5 }, (_unused, file) => `/data/${String(file)}/${'f'.repeat(3_900)}.csv`),
+        at: `/form/${'a'.repeat(4_000)}`,
+      }));
+      const context = contextWith(store);
+      context.staged.push({ kind: 'write', keyHash: KEY_A, trace: { ...trace('large'), actions, detours: [] }, stepIndex: 1 });
+      const writes = await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+      expect(writes.get(1)).toBe('saved');
+      const read = await store.read(KEY_A);
+      assert(read.status === 'hit');
+      expect(read.entry.payload.actions).toHaveLength(50);
+      expect(read.entry.payload.actions.some((action) => action.at !== undefined)).toBe(false);
+      expect(read.entry.payload).not.toHaveProperty('detours');
+    } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });
