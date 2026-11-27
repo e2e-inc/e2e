@@ -5,7 +5,7 @@
  * captured.
  */
 
-import { realpathSync, statSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,10 +21,14 @@ export interface AppFiles {
 
 /**
  * The directory the app's own pages are in, or undefined when nothing says:
- * what the main process reports, else the declared app path, else the
- * archive or directory of the first local page the app showed.
+ * for a declared main script, the package it belongs to; else what the main
+ * process reports, else the declared app path, else the archive or directory
+ * of the first local page the app showed.
  */
 export function appDirectory({ reported, declared, firstDocument }: AppFiles): string | undefined {
+  // Electron reports a main script's own directory, and a build can put the pages beside it (`out/main/index.js`
+  // and `out/renderer/`): the app is the package the script is in, as it is for an app path that names the directory.
+  if (declared !== undefined && statSync(declared, { throwIfNoEntry: false })?.isFile() === true) return canonical(packageOf(declared) ?? path.dirname(declared));
   if (reported !== undefined && reported !== '') return canonical(reported);
   if (declared !== undefined) return canonical(statSync(declared, { throwIfNoEntry: false })?.isDirectory() === true ? declared : path.dirname(declared));
   const file = localFile(firstDocument);
@@ -47,6 +51,14 @@ export function outsideApp(location: string, directory: string | undefined): str
   const relative = path.relative(directory, canonical(file));
   const inside = relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
   return inside ? undefined : `the window left the app's directory for ${shown}, a local file outside it, so it is not read`;
+}
+
+/** The nearest directory above `file` with a `package.json`, or undefined when none has one. */
+function packageOf(file: string): string | undefined {
+  for (let directory = path.dirname(path.resolve(file)); ; directory = path.dirname(directory)) {
+    if (existsSync(path.join(directory, 'package.json'))) return directory;
+    if (path.dirname(directory) === directory) return undefined;
+  }
 }
 
 function localFile(location: string): string | undefined {
