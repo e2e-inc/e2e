@@ -344,11 +344,12 @@ export class FileCacheStore implements CacheStore {
    * reviewed file is renamed first and the lock second, so a crash between
    * the two leaves the new YAML beside the old lock, which reads as an edit
    * and blocks every later write. The writer records the lock it meant to
-   * publish, with the digest of the YAML, before the first rename: a YAML
-   * that is the new one means the lock is all that is left, so it is
-   * published; any other means no rename happened, the old pair is whole,
-   * and the record is dropped. Runs under the test's lock, before anything
-   * reads the pair.
+   * publish, with the digest of the YAML and of the lock it replaces, before
+   * the first rename: a YAML that is the new one beside the lock it replaced
+   * means the lock is all that is left, so it is published; anything else
+   * means no rename happened, or both did, or the pair has changed since (a
+   * checkout), and the record is dropped. Runs under the test's lock, before
+   * anything reads the pair.
    */
   private async recover(base: string): Promise<void> {
     const path = this.pendingPath(base);
@@ -360,13 +361,15 @@ export class FileCacheStore implements CacheStore {
     }
     try {
       const pending: unknown = JSON.parse(text);
-      const { name, yamlDigest, lock } = (typeof pending === 'object' && pending !== null ? pending : {}) as Record<string, unknown>;
+      const { name, yamlDigest, lock, replaces } = (typeof pending === 'object' && pending !== null ? pending : {}) as Record<string, unknown>;
       // A file of another shape is not a record a writer left, and is not the store's to remove.
-      if (typeof name !== 'string' || typeof yamlDigest !== 'string' || typeof lock !== 'string' || basename(name) !== name) return;
+      if (typeof name !== 'string' || typeof yamlDigest !== 'string' || typeof lock !== 'string' || (typeof replaces !== 'string' && replaces !== null) || basename(name) !== name) return;
       const yaml = await this.readCapped(this.path(name, RECORDING_EXTENSION));
-      // A YAML there that could not be read says nothing of which one it is: the record waits for a read that can.
-      if (yaml !== undefined && yaml.head === undefined) return;
-      if (yaml?.text !== undefined && digest(yaml.text) === yamlDigest) {
+      const current = await this.readCapped(this.path(name, LOCK_EXTENSION));
+      // A file there that could not be read says nothing of which one it is: the record waits for a read that can.
+      if ([yaml, current].some((file) => file !== undefined && file.head === undefined)) return;
+      const currentDigest = current?.text === undefined ? null : digest(current.text);
+      if (yaml?.text !== undefined && digest(yaml.text) === yamlDigest && currentDigest === replaces) {
         await writeFileAtomic(this.path(name, LOCK_EXTENSION), lock, { mode: 0o600 });
       }
     } catch {
@@ -516,7 +519,8 @@ export class FileCacheStore implements CacheStore {
         // is recorded then too, for `recover`, which finishes a pair a crash cut between its renames.
         beforeReplace: async () => {
           if (!(await holdsFileLock(this.lockPath(name)))) return false;
-          await writeFileAtomic(pending, JSON.stringify({ name, yamlDigest: digest(yaml), lock }), { mode: 0o600 });
+          const replaces = await readFile(this.path(name, LOCK_EXTENSION), 'utf8').then(digest, () => null);
+          await writeFileAtomic(pending, JSON.stringify({ name, yamlDigest: digest(yaml), lock, replaces }), { mode: 0o600 });
           recorded = true;
           return true;
         },
@@ -639,7 +643,7 @@ function replayed(trace: ActionTrace): unknown {
   };
 }
 
-/** The digest a pending record names the YAML it was written beside by. */
+/** The digest a pending record names the YAML it was written beside, and the lock it replaces, by. */
 function digest(text: string): string {
   return createHash('sha256').update(text).digest('hex');
 }

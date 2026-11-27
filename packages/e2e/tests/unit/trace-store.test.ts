@@ -1,5 +1,6 @@
 /** The file store: one reviewable YAML file and one generated lock per test, fail-to-miss reads. */
 
+import { createHash } from 'node:crypto';
 import { chmod, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -798,6 +799,24 @@ describe('FileCacheStore', () => {
       expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toHaveLength(1);
       expect((await store.read(OTHER_KEY, step('ios'))).status).toBe('hit');
       expect((await store.read(KEY, step())).status).toBe('hit');
+      expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toEqual([]);
+    });
+
+    it('leaves a pair a checkout replaced since the writer that left the record died', async () => {
+      const { directory, store } = await makeStore();
+      await store.write(KEY, payload());
+      const written = await readFile(lockPath(directory), 'utf8');
+      // Its writer died after both renames, before it removed its record.
+      const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+      const record = { name: NAME, yamlDigest: sha(await readFile(yamlPath(directory), 'utf8')), lock: written, replaces: null };
+      await writeFile(path.join(directory, `.${NAME}.pending`), JSON.stringify(record), 'utf8');
+      // Another branch checked out: the same recording under another key.
+      const branch = await makeStore();
+      await branch.store.write(OTHER_KEY, payload());
+      await writeFile(lockPath(directory), await readFile(lockPath(branch.directory), 'utf8'), 'utf8');
+      const next = new FileCacheStore({ directory, maxBytes: MAX_CACHE_WIRE_BYTES, writable: true });
+      expect((await next.read(OTHER_KEY, step())).status).toBe('hit');
+      expect((await next.read(KEY, step())).status).toBe('miss');
       expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toEqual([]);
     });
 

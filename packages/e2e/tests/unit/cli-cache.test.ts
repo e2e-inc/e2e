@@ -233,7 +233,7 @@ describe('e2e cache clear', () => {
     writeFileSync(path.join(directory, '.a-torn.writing.takeover'), 'c'.repeat(32), 'utf8');
     // A writer that died between creating its lock and writing the token in it.
     writeFileSync(path.join(directory, '.b-torn.writing'), '', 'utf8');
-    writeFileSync(path.join(directory, '.a-torn.pending'), JSON.stringify({ name: 'a-torn', yamlDigest: 'd'.repeat(64), lock: '{}' }), 'utf8');
+    writeFileSync(path.join(directory, '.a-torn.pending'), JSON.stringify({ name: 'a-torn', yamlDigest: 'd'.repeat(64), lock: '{}', replaces: null }), 'utf8');
     // A crashed writer's: old enough to be stale.
     const old = new Date(Date.now() - 60_000);
     for (const name of readdirSync(directory)) utimesSync(path.join(directory, name), old, old);
@@ -277,7 +277,7 @@ describe('e2e cache clear', () => {
     mkdirSync(directory, { recursive: true });
     writeFileSync(path.join(directory, '.a-live.writing'), 'c'.repeat(32), 'utf8');
     writeFileSync(path.join(directory, 'a-live.yml.0123456789abcdef.tmp'), 'half', 'utf8');
-    writeFileSync(path.join(directory, '.a-live.pending'), JSON.stringify({ name: 'a-live', yamlDigest: 'd'.repeat(64), lock: '{}' }), 'utf8');
+    writeFileSync(path.join(directory, '.a-live.pending'), JSON.stringify({ name: 'a-live', yamlDigest: 'd'.repeat(64), lock: '{}', replaces: null }), 'utf8');
     await invoke('cache', 'clear');
     expect(readdirSync(directory).toSorted()).toEqual(['.a-live.pending', '.a-live.writing', 'a-live.yml.0123456789abcdef.tmp']);
   });
@@ -285,7 +285,7 @@ describe('e2e cache clear', () => {
   it('does not call a crashed writer\u2019s pending pair record another tool\u2019s file', async () => {
     await seed([{ keyHash: 'a'.repeat(64), trace: trace(step('tests/a.e2e.ts::settings', 'web'), 1) }]);
     const directory = path.join(root, CACHE_DIR);
-    writeFileSync(path.join(directory, '.a-settings.pending'), JSON.stringify({ name: 'a-settings', yamlDigest: 'd'.repeat(64), lock: '{}' }), 'utf8');
+    writeFileSync(path.join(directory, '.a-settings.pending'), JSON.stringify({ name: 'a-settings', yamlDigest: 'd'.repeat(64), lock: '{}', replaces: null }), 'utf8');
     await invoke('cache', 'ls');
     expect(written(stderrSpy)).not.toContain('not cache files');
   });

@@ -126,8 +126,8 @@ function isOwnPending(file: string): boolean {
   try {
     const record: unknown = JSON.parse(readFileSync(file, 'utf8'));
     if (typeof record !== 'object' || record === null) return false;
-    const { name, yamlDigest, lock } = record as Record<string, unknown>;
-    return typeof name === 'string' && typeof yamlDigest === 'string' && typeof lock === 'string';
+    const { name, yamlDigest, lock, replaces } = record as Record<string, unknown>;
+    return typeof name === 'string' && typeof yamlDigest === 'string' && typeof lock === 'string' && (typeof replaces === 'string' || replaces === null);
   } catch {
     return false;
   }
