@@ -329,7 +329,7 @@ const CACHE_WRITE_TEXT: Readonly<Record<NonNullable<StepCacheRecord['write']>, s
   unconfirmed: 'recording not saved: no check passed after this step',
   evicted: 'recording deleted: its replay ended in a failure or a repair, or no check confirmed it',
   'no-change': 'nothing recorded: the step changed nothing a replay could check',
-  'not-written': "recording not saved: the cache store did not write it (the test's file would go over the size limit, or holds a recording `npx e2e cache ls` names as unreadable)",
+  'not-written': "recording not saved: the cache store did not write it (the file store refuses a test's file that would go over the size limit, or that holds a recording `npx e2e cache ls` names as unreadable)",
 };
 
 /** Where an app log line came from, as the page names it. */
