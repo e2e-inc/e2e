@@ -174,7 +174,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
   /** The last test whose attempt ended here: the likely source of a rejection that surfaces between attempts. */
   private lastAttemptTestId: string | undefined;
   private readonly models: WorkerModels;
-  /** The file store's listing under `cache.strict`, read once for every attempt here. */
+  /** Where `cache.strict` checks a miss against: the test's pair in the file store, read again on each miss. */
   private readonly storedRecordings: StoredRecordings | undefined;
   /** The stored screenshots the run wrote, so no comparison passes against one nobody reviewed. */
   private readonly writtenScreenshots: WrittenScreenshots;

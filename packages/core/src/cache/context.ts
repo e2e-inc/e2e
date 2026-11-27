@@ -283,7 +283,7 @@ export function createAgentCacheContext(options: {
   readonly testId: string;
   readonly target: CacheTargetIdentity;
   readonly attemptIndex: number;
-  /** The file store's listing under `cache.strict`, shared by the attempts of one worker and target (`storedRecordingsFor`). */
+  /** Where `cache.strict` looks for a step's recording under another key (`storedRecordingsFor`): the test's pair, read on each miss. */
   readonly recordings?: StoredRecordings | undefined;
 }): AgentCacheContext | undefined {
   if (options.cache.mode === 'off') return undefined;
