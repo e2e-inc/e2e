@@ -188,8 +188,8 @@ fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
         Err(error) => {
             let then = match error {
                 _ if refuses(error) || error == ax::AX_INVALID_ELEMENT => None,
-                // The app answers again or not: one read tells, and another would wait out the same stall.
-                ax::AX_CANNOT_COMPLETE => element.attribute("AXRole").err(),
+                // The app is busy in the action's handler (a synchronous save) or quit because of it.
+                ax::AX_CANNOT_COMPLETE => busy(element),
                 // A press that closes what holds its element (a dismissed alert) can leave it readable a moment more.
                 _ => {
                     let end = Instant::now() + GONE_WAIT;
@@ -207,6 +207,26 @@ fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
     };
     element.set_timeout(0.0);
     outcome
+}
+
+/// Watches an app that did not answer an action in time until it answers again, as `answered` reads the result: `None`
+/// once it answers, `AX_INVALID_ELEMENT` once its process is gone (the action quit the app, so it landed), and the
+/// stall itself when the action's deadline comes first. A handler that blocks the app for seconds is common (a
+/// synchronous save or load), and the action ran in it.
+fn busy(element: &Element) -> Option<AXError> {
+    let pid = element.pid();
+    let deadline = CURRENT.with(|current| current.borrow().as_ref().map(|(_, deadline)| *deadline));
+    let end = deadline.map_or(Instant::now(), |deadline| deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline));
+    loop {
+        if pid.is_some_and(|pid| !crate::process::alive(pid)) {
+            return Some(ax::AX_INVALID_ELEMENT);
+        }
+        let then = element.attribute("AXRole").err();
+        if then != Some(ax::AX_CANNOT_COMPLETE) || Instant::now() + POLL >= end || cancelled() {
+            return then;
+        }
+        sleep(POLL);
+    }
 }
 
 /// Errors with which the app refuses an action before taking it: no such action or attribute, no permission, a bad
