@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm';
 import { test } from '@e2e-dev/desktop';
 import { expect } from 'e2e';
 import { frontmost, TESTBED_APP } from './frontmost.ts';
@@ -14,6 +15,26 @@ test.describe('controls window', () => {
     await screen.getByRole('button', 'Controls…').tap();
     // By its title, which waits for the window the tap is still opening.
     await desktop.useWindow('Controls');
+  });
+
+  test('picks a window by its title as screen matches text, and refuses what names none', async ({ screen, desktop }) => {
+    // Whitespace runs in a title read as one space, and its ends as none.
+    await desktop.useWindow('  Sign   In ');
+    await expect(screen.getByRole('button', 'Controls…')).toBeVisible();
+    // A RegExp made in another realm, as a helper run in a vm makes one, is a pattern too.
+    await desktop.useWindow(runInNewContext('/^Contr/') as RegExp);
+    await expect(screen.getByTestId('controls-status')).toBeVisible();
+    const refused = (choice: Promise<void>) =>
+      choice.then(
+        () => undefined,
+        (cause: unknown) => cause,
+      );
+    expect(String(await refused(desktop.useWindow(/n/)))).toMatch(/2 windows of SignInForm are titled \/n\/: "Controls" \(id \d+\), "Sign In" \(id \d+\)/);
+    const invalid = await refused(desktop.useWindow(42 as never));
+    expect((invalid as { code?: string } | undefined)?.code).toBe('INVALID_ARGUMENT');
+    expect(String(invalid)).toMatch(/takes a window's title.*not number/);
+    // A refused choice keeps the window in use.
+    await expect(screen.getByTestId('controls-status')).toBeVisible();
   });
 
   test('scrolls a list until an item shows, and selects it', async ({ screen }) => {
