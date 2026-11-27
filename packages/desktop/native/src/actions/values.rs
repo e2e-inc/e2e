@@ -318,7 +318,7 @@ pub(super) fn select_all(element: &Element, deadline: Instant) -> Outcome<()> {
         },
     };
     go("select all")?;
-    element.set_range("AXSelectedTextRange", 0, length).map_err(|error| refused(error, "select all"))?;
+    element.set_range("AXSelectedTextRange", 0, length).map_err(|error| write_failed(error, "select all"))?;
     if until(deadline, || matches!(element.attribute("AXSelectedTextRange"), Ok(Value::Range(0, selected)) if selected == length)) {
         Ok(())
     } else {
