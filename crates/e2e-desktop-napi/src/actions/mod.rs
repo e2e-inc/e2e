@@ -3,7 +3,7 @@
 //! anything reached the app when it fails, and checks its effect where the
 //! element shows it (a box's state, a field's value, a list's choice).
 
-use crate::ax::{self, AXError, Element, Value};
+use crate::ax::{self, AXError, Accessible, Element, Value};
 use crate::failure::{Delivery, Failure, Outcome, codes};
 use crate::input::{self, Pointer, Route};
 use crate::refs::{self, Entry};
@@ -125,18 +125,18 @@ pub(crate) fn stalled<T>(read: Result<T, AXError>) -> Result<Option<T>, AXError>
 
 /// The element an attribute names, such as the app's focused element or key window. A read the app did not answer in
 /// time fails as a stall, which a retry may get past, never as focus that moved; any other failure reads as none.
-pub(crate) fn element_attribute(element: &Element, name: &str, what: &str) -> Outcome<Option<Element>> {
+pub(crate) fn element_attribute<E: Accessible>(element: &E, name: &str, what: &str) -> Outcome<Option<E>> {
     Ok(stalled(element.attribute(name)).map_err(|error| unread(error, what))?.and_then(|value| value.element().cloned()))
 }
 
 /// Whether `focused`, the app's focused window, holds `window`'s focus (`windows::holds_focus`). A stall fails as one.
-pub(crate) fn holds(focused: &Element, window: &Element, what: &str) -> Outcome<bool> {
+pub(crate) fn holds<E: Accessible>(focused: &E, window: &E, what: &str) -> Outcome<bool> {
     windows::holds_focus(focused, window).map_err(|error| unread(error, what))
 }
 
 /// Whether an attribute can be set. A stall fails, so a busy app does not read as one whose control takes no input;
 /// any other failure reads as not settable.
-fn settable(element: &Element, name: &str, what: &str) -> Outcome<bool> {
+fn settable<E: Accessible>(element: &E, name: &str, what: &str) -> Outcome<bool> {
     match element.settable(name) {
         Ok(settable) => Ok(settable),
         Err(ax::AX_CANNOT_COMPLETE) => Err(unread(ax::AX_CANNOT_COMPLETE, what)),
@@ -145,7 +145,7 @@ fn settable(element: &Element, name: &str, what: &str) -> Outcome<bool> {
 }
 
 /// The actions an element takes. A stall, a gone element, or no permission fails; any other failure reads as none.
-fn action_names(element: &Element, what: &str) -> Outcome<Vec<String>> {
+fn action_names<E: Accessible>(element: &E, what: &str) -> Outcome<Vec<String>> {
     match element.actions() {
         Ok(names) => Ok(names),
         Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT | ax::AX_API_DISABLED)) => Err(unread(error, what)),
@@ -155,7 +155,7 @@ fn action_names(element: &Element, what: &str) -> Outcome<Vec<String>> {
 
 /// Every element of an array attribute, however many it holds. A read the app did not answer fails: a list read in
 /// part cannot show an option is missing.
-fn all(element: &Element, name: &str, what: &str) -> Outcome<Vec<Element>> {
+fn all<E: Accessible>(element: &E, name: &str, what: &str) -> Outcome<Vec<E>> {
     let count = match element.count(name) {
         Ok(count) => count.max(1),
         Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, what)),
@@ -211,7 +211,7 @@ fn gone_wait_end(now: Instant, deadline: Option<Instant>) -> Instant {
 
 /// Performs an AX action. Once the action is sent, an error answer cannot show that nothing happened, so the element is
 /// read again to tell (`answered`).
-fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
+fn perform<E: Accessible>(element: &E, action: &str, what: &str) -> Outcome<()> {
     go(what)?;
     element.set_timeout(BLOCKING_ACTION_SECONDS);
     let result = element.perform(action);
@@ -277,7 +277,7 @@ fn answered(error: AXError, then: Option<AXError>, what: &str) -> Outcome<()> {
 /// The element's AX role and its role in the snapshot's vocabulary. A read the app did not answer in time fails as a
 /// stall, and a gone element as a stale ref, so either is retried rather than read as a control without the role; any
 /// other failure reads as none.
-fn role_of(element: &Element, what: &str) -> Outcome<(String, &'static str)> {
+fn role_of<E: Accessible>(element: &E, what: &str) -> Outcome<(String, &'static str)> {
     let values = match element.attributes(&["AXRole", "AXSubrole"]) {
         Ok(values) => values,
         // A stall is retried, and so is an element gone since it was resolved: the locator finds its replacement.
@@ -292,17 +292,17 @@ fn role_of(element: &Element, what: &str) -> Outcome<(String, &'static str)> {
 
 /// The state a box shows, read as the snapshot reads it, so a check confirms the state an observation would report:
 /// `1`, `true`, and `on` are checked, `0` and `off` unchecked, `2` and `mixed` mixed.
-fn toggle_state(element: &Element) -> Option<u8> {
+fn toggle_state<E: Accessible>(element: &E) -> Option<u8> {
     crate::snapshot::parse_toggle(element.attribute("AXValue").ok().as_ref())
 }
 
 /// The text a value attribute holds now.
-fn value_text(element: &Element) -> Option<String> {
+fn value_text<E: Accessible>(element: &E) -> Option<String> {
     element.attribute("AXValue").ok().and_then(|value| value.display())
 }
 
 /// The element's center on screen.
-fn center(element: &Element) -> Outcome<(f64, f64)> {
+fn center<E: Accessible>(element: &E) -> Outcome<(f64, f64)> {
     let (x, y, width, height) = element.frame().ok_or_else(|| Failure::refused(codes::ACTION_FAILED, "the element has no frame on screen"))?;
     if width <= 0.0 || height <= 0.0 {
         return Err(Failure::refused(codes::ACTION_FAILED, "the element has no area on screen"));
@@ -353,7 +353,7 @@ fn menu_shown(pid: i32, before: usize, deadline: Instant) {
 /// Waits within the action's budget for a control to be enabled, as an actionability wait does, and refuses it if it
 /// stays disabled: a disabled AppKit control may still offer AXPress and acknowledge it while ignoring it. A control
 /// with no enabled state goes at once.
-fn enabled(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
+fn enabled<E: Accessible>(element: &E, deadline: Instant, what: &str) -> Outcome<()> {
     let refuse_at = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
     loop {
         match element.attribute("AXEnabled") {
@@ -373,7 +373,7 @@ fn enabled(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
 /// Brings an element a scroll area holds out of view into view (`AXScrollToVisible`), and waits for it to show. An
 /// element already on screen gets nothing; one in a minimized window, one with no size, or one that cannot be scrolled, is refused, as an
 /// action on it would reach a control the user cannot. `Ok(true)` when it scrolled the list.
-fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<bool> {
+fn reveal<E: Accessible>(element: &E, deadline: Instant, what: &str) -> Outcome<bool> {
     use crate::snapshot::{Placement, placement};
     match placement(element).map_err(|error| unread(error, what))? {
         Placement::Shown => return Ok(false),
@@ -1186,12 +1186,12 @@ mod tests {
         use super::shown_number;
         use crate::ax::{AX_CANNOT_COMPLETE, AX_FAILURE, AX_INVALID_ELEMENT, Value};
         use crate::failure::{Delivery, codes};
-        assert_eq!(shown_number(Ok(Value::Number(4.0)), "set value").unwrap(), Some(4.0));
-        assert_eq!(shown_number(Ok(Value::Text("four".into())), "set value").unwrap(), None);
-        assert_eq!(shown_number(Err(AX_FAILURE), "set value").unwrap(), None);
-        let stall = shown_number(Err(AX_CANNOT_COMPLETE), "set value").expect_err("a stall");
+        assert_eq!(shown_number::<crate::ax::Element>(Ok(Value::Number(4.0)), "set value").unwrap(), Some(4.0));
+        assert_eq!(shown_number::<crate::ax::Element>(Ok(Value::Text("four".into())), "set value").unwrap(), None);
+        assert_eq!(shown_number::<crate::ax::Element>(Err(AX_FAILURE), "set value").unwrap(), None);
+        let stall = shown_number::<crate::ax::Element>(Err(AX_CANNOT_COMPLETE), "set value").expect_err("a stall");
         assert_eq!((stall.code, stall.delivery), (codes::APP_UNRESPONSIVE, Delivery::NotDelivered));
-        let gone = shown_number(Err(AX_INVALID_ELEMENT), "set value").expect_err("gone");
+        let gone = shown_number::<crate::ax::Element>(Err(AX_INVALID_ELEMENT), "set value").expect_err("gone");
         assert_eq!((gone.code, gone.delivery), (codes::STALE_REF, Delivery::NotDelivered));
     }
 
@@ -1327,11 +1327,11 @@ mod tests {
     #[test]
     fn confirms_no_secure_fill_by_a_field_that_went_away_or_did_not_answer() {
         use crate::ax::{AX_ATTRIBUTE_UNSUPPORTED, AX_CANNOT_COMPLETE, AX_INVALID_ELEMENT, Value};
-        assert_eq!(super::secure_count(Ok(Value::Number(8.0))), Ok(Some(8)));
+        assert_eq!(super::secure_count(Ok(Value::<crate::ax::Element>::Number(8.0))), Ok(Some(8)));
         // A field that counts none is taken at the write's word.
-        assert_eq!(super::secure_count(Err(AX_ATTRIBUTE_UNSUPPORTED)), Ok(None));
-        assert_eq!(super::secure_count(Err(AX_CANNOT_COMPLETE)), Err(()));
-        assert_eq!(super::secure_count(Err(AX_INVALID_ELEMENT)), Err(()));
+        assert_eq!(super::secure_count::<crate::ax::Element>(Err(AX_ATTRIBUTE_UNSUPPORTED)), Ok(None));
+        assert_eq!(super::secure_count::<crate::ax::Element>(Err(AX_CANNOT_COMPLETE)), Err(()));
+        assert_eq!(super::secure_count::<crate::ax::Element>(Err(AX_INVALID_ELEMENT)), Err(()));
     }
 
     /// A node of a fake accessibility tree, for the text gathering that names a row.
@@ -1367,5 +1367,155 @@ mod tests {
         let scrolled =
             fake("row", None, vec![fake("statictext", Some("Notes"), vec![]), fake("scrollbar", None, vec![fake("statictext", Some("50%"), vec![])])]);
         assert_eq!(gathered(&scrolled).as_deref(), Some("Notes"));
+    }
+
+    /// The actions' rules over a fake tree, where a live app would be needed.
+    mod fake_tree {
+        use super::super::{check, enabled, perform, role_of, select_all, select_row};
+        use crate::ax::{self, Value};
+        use crate::failure::{Delivery, codes};
+        use crate::fake::Fake;
+        use crate::snapshot::{Placement, placement};
+        use std::time::{Duration, Instant};
+
+        fn soon() -> Instant {
+            Instant::now() + Duration::from_secs(5)
+        }
+
+        fn row(label: &str) -> Fake {
+            Fake::new("AXRow").children(vec![Fake::new("AXCell").children(vec![Fake::new("AXStaticText").text("AXValue", label)])])
+        }
+
+        fn list(rows: Vec<Fake>) -> Fake {
+            Fake::new("AXTable").children(rows.clone()).with("AXRows", Value::Array(rows.into_iter().map(Value::Element).collect()))
+        }
+
+        #[test]
+        fn refuses_to_select_one_of_two_rows_that_show_the_label() {
+            let (first, second) = (row("Invoice"), row("Invoice"));
+            let table = list(vec![row("Paid"), first.clone(), second.clone()]).settable("AXSelectedRows", Ok(true));
+            let failure = select_row(&table, "Invoice", soon()).expect_err("two rows show the label");
+            assert_eq!((failure.code, failure.delivery), (codes::ACTION_FAILED, Delivery::NotDelivered));
+            assert!(table.sent().is_empty() && first.sent().is_empty() && second.sent().is_empty(), "nothing was selected");
+        }
+
+        #[test]
+        fn selects_the_one_row_that_shows_the_label_through_the_list() {
+            let wanted = row("Invoice").settable("AXSelected", Ok(true));
+            let table = list(vec![row("Paid"), wanted.clone()]).settable("AXSelectedRows", Ok(true));
+            // The table selects it: the fake row shows it selected once the table's selection names it.
+            wanted.set("AXSelected", Ok(Value::Bool(true)));
+            select_row(&table, "Invoice", soon()).unwrap_or_else(|failure| panic!("{}", failure.message));
+            assert_eq!(table.sent(), ["set AXSelectedRows"]);
+            assert!(wanted.sent().is_empty());
+
+            // A list that takes no selection of its rows selects the row itself.
+            let wanted = row("Invoice").settable("AXSelected", Ok(true));
+            let table = list(vec![wanted.clone()]);
+            select_row(&table, "Invoice", soon()).unwrap_or_else(|failure| panic!("{}", failure.message));
+            assert_eq!(wanted.sent(), ["set AXSelected"]);
+        }
+
+        #[test]
+        fn refuses_a_row_it_cannot_find_or_whose_label_the_app_did_not_answer() {
+            let missing = select_row(&list(vec![row("Paid")]), "Invoice", soon()).expect_err("no such row");
+            assert_eq!(missing.code, codes::ELEMENT_NOT_FOUND);
+            // A row the app did not answer for may show the label: one match is no proof it is the only one.
+            let stalled = Fake::new("AXRow").batch_failing(ax::AX_CANNOT_COMPLETE);
+            let failure = select_row(&list(vec![row("Invoice"), stalled]), "Invoice", soon()).expect_err("a row went unread");
+            assert_eq!(failure.code, codes::APP_UNRESPONSIVE);
+            // A list with no `AXRows` lists its rows as children.
+            let wanted = row("Invoice").settable("AXSelected", Ok(true));
+            select_row(&Fake::new("AXList").children(vec![wanted.clone()]), "Invoice", soon()).unwrap_or_else(|failure| panic!("{}", failure.message));
+            assert_eq!(wanted.sent(), ["set AXSelected"]);
+        }
+
+        #[test]
+        fn counts_a_press_whose_element_went_away_a_moment_later_as_landed() {
+            // An alert's button answers its press with an error, and stays readable for a moment after the alert closed.
+            let button = Fake::new("AXButton").performing("AXPress", ax::AX_FAILURE);
+            button.gone_after(4);
+            perform(&button, "AXPress", "click").unwrap_or_else(|failure| panic!("{}", failure.message));
+            // One that stays is delivered, unverified.
+            let stays = Fake::new("AXButton").performing("AXPress", ax::AX_FAILURE);
+            let failure = perform(&stays, "AXPress", "click").expect_err("no sign it landed");
+            assert_eq!(failure.delivery, Delivery::Unknown);
+            // Refused outright: nothing reached the app.
+            let refused = Fake::new("AXButton").performing("AXPress", ax::AX_ACTION_UNSUPPORTED);
+            assert_eq!(perform(&refused, "AXPress", "click").expect_err("refused").delivery, Delivery::NotDelivered);
+        }
+
+        #[test]
+        fn reads_a_stalled_role_as_a_stall_and_a_gone_element_as_stale() {
+            assert_eq!(role_of(&Fake::new("AXButton").batch_failing(ax::AX_CANNOT_COMPLETE), "click").expect_err("a stall").code, codes::APP_UNRESPONSIVE);
+            assert_eq!(role_of(&Fake::new("AXButton").batch_failing(ax::AX_INVALID_ELEMENT), "click").expect_err("gone").code, codes::STALE_REF);
+            assert_eq!(role_of(&Fake::new("AXButton").batch_failing(ax::AX_FAILURE), "click").expect("no role").1, "unknown");
+        }
+
+        #[test]
+        fn refuses_to_check_a_control_with_no_state_it_can_read() {
+            // A toggle button reports a value as a box does, but a press on it runs its handler.
+            let button = Fake::new("AXButton").actions(&["AXPress"]).with("AXValue", Value::Number(0.0));
+            assert_eq!(check(&button, true, soon()).expect_err("no checked state").code, codes::ACTION_NOT_SUPPORTED);
+            // A box whose value says no state may already show the one asked for: a press could undo it.
+            let unread = Fake::new("AXCheckBox").text("AXValue", "maybe");
+            assert_eq!(check(&unread, true, soon()).expect_err("no state").code, codes::ACTION_NOT_SUPPORTED);
+            assert!(button.sent().is_empty() && unread.sent().is_empty());
+            // A box that already shows the state is left alone.
+            let checked = Fake::new("AXCheckBox").with("AXValue", Value::Number(1.0));
+            check(&checked, true, soon()).unwrap_or_else(|failure| panic!("{}", failure.message));
+            assert!(checked.sent().is_empty());
+        }
+
+        #[test]
+        fn refuses_a_disabled_control_once_its_wait_runs_out() {
+            let disabled = Fake::new("AXButton").with("AXEnabled", Value::Bool(false));
+            let failure = enabled(&disabled, Instant::now() + Duration::from_millis(250), "click").expect_err("disabled");
+            assert_eq!((failure.code, failure.delivery), (codes::ACTION_FAILED, Delivery::NotDelivered));
+            enabled(&Fake::new("AXButton"), soon(), "click").unwrap_or_else(|failure| panic!("{}", failure.message));
+            let stalled = Fake::new("AXButton").failing("AXEnabled", ax::AX_CANNOT_COMPLETE);
+            assert_eq!(enabled(&stalled, soon(), "click").expect_err("a stall").code, codes::APP_UNRESPONSIVE);
+        }
+
+        #[test]
+        fn refuses_select_all_on_a_field_whose_length_it_cannot_read() {
+            let field = Fake::new("AXTextField").settable("AXSelectedTextRange", Ok(true));
+            assert_eq!(select_all(&field, soon()).expect_err("no length").code, codes::ACTION_NOT_SUPPORTED);
+            assert!(field.sent().is_empty());
+            let stalled = Fake::new("AXTextField").settable("AXSelectedTextRange", Ok(true)).failing("AXNumberOfCharacters", ax::AX_CANNOT_COMPLETE);
+            assert_eq!(select_all(&stalled, soon()).expect_err("a stall").code, codes::APP_UNRESPONSIVE);
+            let typed = Fake::new("AXTextField").settable("AXSelectedTextRange", Ok(true)).text("AXValue", "héllo");
+            select_all(&typed, soon()).unwrap_or_else(|failure| panic!("{}", failure.message));
+            assert_eq!(typed.sent(), ["set AXSelectedTextRange"]);
+        }
+
+        #[test]
+        fn places_an_element_by_its_window_and_every_scroll_area_it_is_in() {
+            let window = |child: Fake| Fake::new("AXWindow").frame(0.0, 0.0, 800.0, 600.0).children(vec![child]);
+            let inside = |child: Fake| Fake::new("AXScrollArea").frame(0.0, 0.0, 400.0, 300.0).children(vec![child]);
+            let shown = Fake::new("AXButton").frame(10.0, 10.0, 80.0, 20.0);
+            let _held = window(inside(shown.clone()));
+            assert_eq!(placement(&shown), Ok(Placement::Shown));
+            // Below the scroll area, though inside the window.
+            let below = Fake::new("AXButton").frame(10.0, 400.0, 80.0, 20.0);
+            let _held = window(inside(below.clone()));
+            assert_eq!(placement(&below), Ok(Placement::ScrolledOut));
+            // An open menu floats above the window: its items are not cut by the window's frame.
+            let item = Fake::new("AXMenuItem").frame(10.0, 700.0, 80.0, 20.0);
+            let _held = window(Fake::new("AXMenu").frame(0.0, 0.0, 0.0, 0.0).children(vec![item.clone()]));
+            assert_eq!(placement(&item), Ok(Placement::Shown));
+            let minimized = Fake::new("AXButton").frame(10.0, 10.0, 80.0, 20.0);
+            let _held = window(minimized.clone()).with("AXMinimized", Value::Bool(true));
+            assert_eq!(placement(&minimized), Ok(Placement::Minimized));
+            // A control with no size and nothing in it draws nothing; one whose count stalls may hold something.
+            let collapsed = Fake::new("AXButton").frame(10.0, 10.0, 0.0, 20.0);
+            assert_eq!(placement(&collapsed), Ok(Placement::Collapsed));
+            let counted = Fake::new("AXGroup").frame(10.0, 10.0, 0.0, 20.0).counting("AXChildren", Err(ax::AX_CANNOT_COMPLETE));
+            assert_eq!(placement(&counted), Err(ax::AX_CANNOT_COMPLETE));
+            // A parent that went away: a gone element shows nowhere.
+            let orphan = Fake::new("AXButton").frame(10.0, 10.0, 80.0, 20.0);
+            let _held = Fake::new("AXGroup").gone(ax::AX_INVALID_ELEMENT).children(vec![orphan.clone()]);
+            assert_eq!(placement(&orphan), Err(ax::AX_INVALID_ELEMENT));
+        }
     }
 }

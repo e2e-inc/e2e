@@ -2,7 +2,7 @@
 //! whether on screen, layer) joined with the app's accessibility windows
 //! (title, focus, minimized), matched by the window server id.
 
-use crate::ax::{self, Element};
+use crate::ax::{self, Accessible, Element};
 use crate::failure::{Failure, Outcome, codes};
 use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
@@ -176,7 +176,7 @@ fn system_dialog(identifiers: &[String]) -> bool {
 /// Whether `window` holds the app's focused window: is it, or carries it as a sheet or an alert. The app's focused window
 /// is the sheet then, and keys reach the window through it. A parent the app did not answer for in time is no proof
 /// either way: it fails as `AX_CANNOT_COMPLETE`.
-pub fn holds_focus(focused: &Element, window: &Element) -> Result<bool, ax::AXError> {
+pub fn holds_focus<E: Accessible>(focused: &E, window: &E) -> Result<bool, ax::AXError> {
     if focused == window {
         return Ok(true);
     }

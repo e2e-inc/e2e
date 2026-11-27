@@ -9,6 +9,8 @@
 mod actions;
 mod ax;
 mod failure;
+#[cfg(test)]
+mod fake;
 mod input;
 mod launch;
 mod layout;

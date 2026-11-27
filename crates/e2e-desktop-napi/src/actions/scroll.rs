@@ -3,7 +3,7 @@
 use super::*;
 
 /// A scroll area's scroll bar for one axis. A SwiftUI `List` lists it only as a child, with no `AXVerticalScrollBar`.
-pub fn scroll_bar(element: &Element, vertical: bool) -> Option<Element> {
+pub fn scroll_bar<E: Accessible>(element: &E, vertical: bool) -> Option<E> {
     element.element(if vertical { "AXVerticalScrollBar" } else { "AXHorizontalScrollBar" }).or_else(|| {
         let orientation = if vertical { "AXVerticalOrientation" } else { "AXHorizontalOrientation" };
         element.elements("AXChildren", 16).ok()?.into_iter().find(|child| {
@@ -18,7 +18,7 @@ pub fn scroll_bar(element: &Element, vertical: bool) -> Option<Element> {
 }
 
 /// Scrolls a scroll area by moving its scroll bar, `pages` of its visible size.
-pub(super) fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
+pub(super) fn scroll<E: Accessible>(element: &E, direction: &str, pages: f64) -> Outcome<()> {
     let vertical = matches!(direction, "up" | "down");
     // A node that scrolls itself along the axis is the one moved; one that does not, a list or table, scrolls through the
     // scroll area that holds it. The enclosing pane comes last, so a swipe on a nested list never moves the pane around it.
@@ -45,7 +45,7 @@ pub(super) fn scrolls_itself(role: &str, bar: bool, actions: &[String], directio
 }
 
 /// The nearest scroll area above `element`, a few levels up, with a scroll bar for the axis.
-pub(super) fn enclosing_scroll_area(element: &Element, vertical: bool) -> Option<Element> {
+pub(super) fn enclosing_scroll_area<E: Accessible>(element: &E, vertical: bool) -> Option<E> {
     let mut current = element.element("AXParent")?;
     for _ in 0..4 {
         if current.text("AXRole").as_deref() == Some("AXScrollArea") && scroll_bar(&current, vertical).is_some() {
@@ -71,14 +71,14 @@ pub(super) const LINES_PER_PAGE: f64 = 8.0;
 
 /// Performs a scroll action `count` times. Each goes through the cancel check; a failure after the first follows a
 /// scroll that landed.
-pub(super) fn repeat(element: &Element, action: &str, count: usize) -> Outcome<()> {
+pub(super) fn repeat<E: Accessible>(element: &E, action: &str, count: usize) -> Outcome<()> {
     for sent in 0..count {
         perform(element, action, "scroll").map_err(|failure| if sent == 0 { failure } else { failure.delivered() })?;
     }
     Ok(())
 }
 
-pub(super) fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
+pub(super) fn scroll_by<E: Accessible>(element: &E, direction: &str, pages: f64) -> Outcome<()> {
     let vertical = matches!(direction, "up" | "down");
     let forward = matches!(direction, "down" | "right");
     if let Some(bar) = scroll_bar(element, vertical) {
