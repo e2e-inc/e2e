@@ -126,7 +126,7 @@ test('signs in', async ({ app, screen }) => {
 
 Roles use the names the web uses: `textbox`, `checkbox`, `combobox`,
 `button`. A tab of a SwiftUI `TabView` or an AppKit tab view is a `tab` in a
-`tablist`, so `getByRole('tab', 'Advanced').tap()` switches to it. The tree lists static text as `text`, which is not a `getByRole`
+`tablist`, so `getByRole('tab', 'Advanced').tap()` switches to it. A toolbar search field with no room to show collapses into a `button` named Search; tap it, and the field it opens is a `textbox`. The tree lists static text as `text`, which is not a `getByRole`
 role: find it with `getByText`. A control's name is the one macOS
 accessibility gives it: its title, or its accessibility label. A button's
 title is its name and its text, so `getByText('Sign in')` finds the button

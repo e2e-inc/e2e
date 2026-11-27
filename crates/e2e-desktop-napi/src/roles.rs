@@ -35,6 +35,9 @@ pub fn role(ax_role: &str, subrole: Option<&str>) -> &'static str {
         }
         Some("AXOutlineRow") => return "treeitem",
         Some("AXTableRow") => return "row",
+        // A toolbar search field too narrow to show collapses into a button that opens it: AXButton with the field's
+        // subrole, which takes a press and no text. Read as the field, it would be a text box no fill can reach.
+        Some("AXSearchField") if ax_role == "AXButton" => return "button",
         Some("AXSecureTextField" | "AXSearchField") => return "textfield",
         Some("AXCloseButton" | "AXMinimizeButton" | "AXZoomButton" | "AXToolbarButton" | "AXFullScreenButton" | "AXSortButton") => return "button",
         Some("AXToggle" | "AXSwitch") => return "switch",
@@ -213,6 +216,12 @@ mod tests {
     fn reads_an_appkit_tab_as_a_tab_not_a_radio_button() {
         assert_eq!(super::role("AXRadioButton", Some("AXTabButton")), "tab");
         assert_eq!(super::role("AXRadioButton", None), "radiobutton");
+    }
+
+    #[test]
+    fn reads_a_collapsed_search_field_as_the_button_it_is() {
+        assert_eq!(super::role("AXButton", Some("AXSearchField")), "button");
+        assert_eq!(super::role("AXTextField", Some("AXSearchField")), "textfield");
     }
 
     #[test]
