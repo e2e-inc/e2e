@@ -902,7 +902,8 @@ describe('DesktopSurface: acting', () => {
     // The scroll changed the app: a click that then fails, even as a stale ref, is never retried as if nothing happened.
     const moved = await launched({ snapshot: [twins], act: [ok({}), failure('STALE_REF', 'not_delivered')] }, { observe: false });
     const stale = every((await moved.surface.observe(operation(), undefined)).root).filter((node) => node.name === 'Delete')[1];
-    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+    // The message names the click once.
+    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false, message: expect.stringMatching(/^click: (?!click).* \(an earlier command of this step changed the app\)$/) });
     // A secondary tap goes to the driver alone, which checks the context menu live before it scrolls: the observed
     // actions may come from a read that stalled.
     const plain = await launched({ snapshot: [twins] }, { observe: false });
@@ -1220,12 +1221,14 @@ describe('DesktopSurface: keys', () => {
 
   it('presses a key into a control only while it holds focus, and into its own window', async () => {
     const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')] });
-    await surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation());
+    const username = byTestId('username');
+    const snapshotsBefore = fake.of('snapshot').length;
+    await surface.perform(username, { kind: 'press', key: 'Enter' }, operation());
     expect(inputs(fake)).toEqual(['focus', 'press return']);
     // The driver sends the key only while the control's own element still holds the app's focus, checked right before it goes.
     expect(last(fake, 'press')).toMatchObject({ windowId: 'w-mine', focusedRef: (last(fake, 'act') as { ref: string }).ref });
-    await expect(surface.perform(byTestId('sign-in'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    expect(fake.of('press')).toHaveLength(1);
+    // Whether it still holds focus is the driver's to tell, by the element itself: the window is not read again for it.
+    expect(fake.of('snapshot')).toHaveLength(snapshotsBefore);
   });
 
   it("brings a control's window forward before it focuses the control for a headed press", async () => {
@@ -1255,12 +1258,10 @@ describe('DesktopSurface: keys', () => {
     expect(inputs(fake)).toEqual([]);
   });
 
-  it('reports a read that went stale after the press focused the control as possibly committed, so it is not retried and focused again', async () => {
-    const form = renamed('macos/appkit-form', 'w-8032', 'w-mine');
-    const { surface, fake, byTestId } = await launched({ snapshot: [form, form, failure('APP_UNRESPONSIVE', 'not_delivered', 'busy', { retryable: true })] });
+  it('reports a key the driver could not send after the press focused the control as possibly committed, so it is not retried and focused again', async () => {
+    const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], press: [failure('STALE_REF', 'not_delivered')] });
     await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Tab' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
     expect(fake.acted()).toEqual(['focus']);
-    expect(fake.of('press')).toHaveLength(0);
   });
 
   it("sends no key into a window that cannot be shown to be the app's key window", async () => {
@@ -1275,69 +1276,30 @@ describe('DesktopSurface: keys', () => {
     expect(last(fake, 'press')).toMatchObject({ combo: 'return', windowId: 'w-mine' });
   });
 
-  it('sends no key when another control in the same place holds focus', async () => {
-    const form = renamed('macos/sign-in-form', 'w-8321', 'w-mine');
-    const swapped = JSON.parse(JSON.stringify(form).replace('"name":"Username"', '"name":"Search"').replace('"value":"username"', '"value":"search"')) as Answer;
-    const { surface, fake, byTestId } = await launched({ snapshot: [form, form, swapped] });
-    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toThrow(/did not keep keyboard focus/);
-    expect(fake.of('press')).toHaveLength(0);
+  it('refuses the key when the driver finds the control lost focus, as when focusing it opened a dialog', async () => {
+    const { surface, byTestId } = await launched({ snapshot: [renamed('macos/sign-in-form', 'w-8321', 'w-mine')], press: [failure('ACTION_FAILED', 'not_delivered', 'the control lost keyboard focus before the key was sent, so nothing was sent')] });
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/lost keyboard focus/) });
   });
 
-  const field = (name: string, ref: string, y: number, focused: boolean, extra: Record<string, unknown> = {}) => ({ role: 'textfield', name, ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}), ...extra });
-  const list = (id: string, children: readonly unknown[], extra: Record<string, unknown> = {}) => screen('w-mine', { name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children }, { snapshot_id: id, ...extra });
-
-  it('presses a key into one of two look-alike fields, found again by its place', async () => {
-    const read = (id: string, focusSecond: boolean) => list(id, [field('Item', `@${id}:e1`, 10, false), field('Item', `@${id}:e2`, 40, focusSecond)]);
-    const { surface, fake } = await launched({ snapshot: [read('s1', false), read('s1', false), read('s2', true)] }, { observe: false });
+  it('presses a key into one of two look-alike fields by its own element, whatever box it has once focused', async () => {
+    // A look-alike has no identity a later read could find it by, and a field can grow as it takes focus: the driver holds its element.
+    const field = (ref: string, y: number) => ({ role: 'textfield', name: 'Item', ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 } });
+    const list = screen('w-mine', { name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [field('@s1:e1', 10), field('@s1:e2', 40)] }, { snapshot_id: 's1' });
+    const { surface, fake } = await launched({ snapshot: [list] }, { observe: false });
     const observed = await surface.observe(operation(), undefined);
     await surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation());
-    expect(last(fake, 'press')).toMatchObject({ combo: 'a', windowId: 'w-mine' });
-  });
-
-  it('sends no key when a twin went as the field was focused, so the other could have taken its place', async () => {
-    const both = list('s1', [field('Item', '@s1:e1', 10, false), field('Item', '@s1:e2', 40, false)]);
-    const one = list('s2', [field('Item', '@s2:e1', 40, true)]);
-    const { surface, fake } = await launched({ snapshot: [both, both, one] }, { observe: false });
-    const observed = await surface.observe(operation(), undefined);
-    await expect(surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    expect(fake.of('press')).toHaveLength(0);
-  });
-
-  it('sends no key when focusing a look-alike field replaced it with one of the same name but another developer id', async () => {
-    const id = (value: string) => ({ native_id: { kind: 'ax_identifier', value } });
-    const read = (snapshot: string, value: string, focusSecond: boolean) => list(snapshot, [field('Item', `@${snapshot}:e1`, 10, false, id(value)), field('Item', `@${snapshot}:e2`, 40, focusSecond, id(value))]);
-    const { surface, fake } = await launched({ snapshot: [read('s1', 'Old', false), read('s1', 'Old', false), read('s2', 'New', true)] }, { observe: false, options: { headed: true } });
-    const observed = await surface.observe(operation(), undefined);
-    await expect(surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    expect(fake.of('press')).toHaveLength(0);
-  });
-
-  it('sends no key when focusing a look-alike field replaced the form with other fields in the same places', async () => {
-    const read = (snapshot: string, name: string, focusSecond: boolean) => list(snapshot, [field(name, `@${snapshot}:e1`, 10, false), field(name, `@${snapshot}:e2`, 40, focusSecond)]);
-    const { surface, fake } = await launched({ snapshot: [read('s1', 'Old', false), read('s1', 'Old', false), read('s2', 'New', true)] }, { observe: false });
-    const observed = await surface.observe(operation(), undefined);
-    await expect(surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    expect(fake.of('press')).toHaveLength(0);
-  });
-
-  it('says the read was cut short, not that focus moved, when the focus check runs out of time', async () => {
-    const whole = list('s1', [field('User', '@s1:e1', 10, false), field('Note', '@s1:e2', 40, false)]);
-    const cut = screen('w-mine', { name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, subtree_truncated: true, children: [field('User', '@s2:e1', 10, true), field('Note', '@s2:e2', 40, false, { subtree_truncated: true })] }, { snapshot_id: 's2', complete: false, truncated: true });
-    const { surface, fake } = await launched({ snapshot: [whole, whole, cut] }, { observe: false });
-    const observed = await surface.observe(operation(), undefined);
-    await expect(surface.perform(observed.root.children![0]!.ref, { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ message: expect.stringMatching(/read only in part/) });
-    expect(fake.of('press')).toHaveLength(0);
+    expect(last(fake, 'press')).toMatchObject({ combo: 'a', windowId: 'w-mine', focusedRef: '@s1:e2' });
   });
 
   it('presses a key into a located field among look-alike cards with interactive snapshots, and keeps the observation ids', async () => {
     const window = { name: 'Notes', bounds: { x: 0, y: 0, width: 300, height: 300 } };
-    const note = (focused: boolean) => ({ role: 'textfield', name: 'Note', ref_id: '@s:e1', native_id: { kind: 'ax_identifier', value: 'note' }, bounds: { x: 10, y: 10, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}) });
+    const note = { role: 'textfield', name: 'Note', ref_id: '@s:e1', native_id: { kind: 'ax_identifier', value: 'note' }, bounds: { x: 10, y: 10, width: 100, height: 20 } };
     const card = (inside: readonly unknown[]) => ({ role: 'group', name: 'Card', children: inside });
-    const read = (focused: boolean) => ({
-      ...screen('w-mine', { ...window, children: [card([note(focused)]), card([{ role: 'statictext', value: 'Draft', bounds: { x: 10, y: 60, width: 80, height: 20 } }])] }),
-      interactive: screen('w-mine', { ...window, children: [card([note(focused)])] }),
-    });
-    const { surface, fake } = await launched({ snapshot: [read(false), read(false), read(false), read(false), read(true)] }, { observe: false, options: { snapshot: 'interactive', headed: true } });
+    const read = {
+      ...screen('w-mine', { ...window, children: [card([note]), card([{ role: 'statictext', value: 'Draft', bounds: { x: 10, y: 60, width: 80, height: 20 } }])] }),
+      interactive: screen('w-mine', { ...window, children: [card([note])] }),
+    };
+    const { surface, fake } = await launched({ snapshot: [read, read, read, read] }, { observe: false, options: { snapshot: 'interactive', headed: true } });
     const before = await surface.observe(operation(), undefined);
     const [located] = await surface.locate(testId('note'), operation());
     const after = await surface.observe(operation(), undefined);
@@ -1401,6 +1363,8 @@ describe('DesktopSurface: typing', () => {
     const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')] });
     await surface.typeText('ada', { replace: true }, operation());
     expect(inputs(fake)).toEqual(['selectAll', 'press backspace', 'type']);
+    // The delete goes only while the field itself still holds focus: the driver checks the element the select-all went to.
+    expect(last(fake, 'press')).toMatchObject({ combo: 'backspace', focusedRef: (fake.of('act')[0]!.args[0] as { ref: string }).ref });
     // A field whose selection accessibility cannot set gets the select-all key through the real keyboard; in the background, nothing.
     const refused = (): Scenario => ({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], act: [failure('ACTION_NOT_SUPPORTED', 'not_delivered'), { ok: true, data: {} }] });
     const keys = await launched(refused(), { options: { headed: true } });
@@ -1431,33 +1395,30 @@ describe('DesktopSurface: typing', () => {
     expect(fake.acted()).toEqual(['type']);
   });
 
-  it('sends no delete when select all moved focus off the field, so it never reaches another control', async () => {
-    const form = renamed('macos/appkit-form', 'w-8032', 'w-mine');
-    const moved = JSON.parse(
-      JSON.stringify(form)
-        .replace('"states":["focused"]', '"states":[]')
-        .replace('"native_id":{"kind":"ax_identifier","value":"sign-in"}', '"native_id":{"kind":"ax_identifier","value":"sign-in"},"states":["focused"]'),
-    ) as Answer;
-    const { surface, fake } = await launched({ snapshot: [form, form, form, moved] });
-    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/lost keyboard focus after select all/) });
-    expect(inputs(fake)).toEqual(['selectAll']);
+  it('reports a delete the driver refused, since select all moved focus off the field, as possibly committed', async () => {
+    const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], press: [failure('ACTION_FAILED', 'not_delivered', 'the control lost keyboard focus before the key was sent, so nothing was sent')] });
+    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/^delete the selection: the control lost keyboard focus/) });
+    expect(fake.acted()).toEqual(['selectAll']);
   });
 
-  it('types nothing when the delete moved focus off the field, so the type never takes focus back from the app', async () => {
-    const form = renamed('macos/appkit-form', 'w-8032', 'w-mine');
-    const moved = JSON.parse(
-      JSON.stringify(form)
-        .replace('"states":["focused"]', '"states":[]')
-        .replace('"native_id":{"kind":"ax_identifier","value":"sign-in"}', '"native_id":{"kind":"ax_identifier","value":"sign-in"},"states":["focused"]'),
-    ) as Answer;
-    const { surface, fake } = await launched({ snapshot: [form, form, form, form, moved] });
-    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/lost keyboard focus after the delete/) });
-    expect(inputs(fake)).toEqual(['selectAll', 'press backspace']);
+  it('reports a type the driver refused, since the delete moved focus off the field, as possibly committed', async () => {
+    const lost = failure('ACTION_FAILED', 'not_delivered', 'the field lost keyboard focus before typing began, so nothing was typed');
+    const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], act: [{ ok: true, data: {} }, lost] });
+    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/type: .*lost keyboard focus before typing began/) });
+    expect(inputs(fake)).toEqual(['selectAll', 'press backspace', 'type']);
   });
 
   it('reports a type after a clear that changed the field as possibly committed', async () => {
     const { surface } = await launched({ act: [{ ok: true, data: {} }, failure('STALE_REF', 'not_delivered')] });
-    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false, message: expect.stringMatching(/^type: (?!type).* \(an earlier command of this step changed the app\)$/) });
+  });
+
+  it('names the type once when it runs out of time after the clear', async () => {
+    const { surface } = await launched({ act: [{ ok: true, data: {} }, { ok: true, data: {}, sleepMs: 3_000 }] });
+    await expect(surface.typeText('ada', { replace: true }, { ...operation(), timeoutMs: 600 })).rejects.toMatchObject({
+      code: 'ACTION_MAY_HAVE_COMMITTED',
+      message: 'type timed out before the driver answered; its input may have reached the app (an earlier command of this step changed the app)',
+    });
   });
 
   it('reads again, rather than find no focused field or nothing to scroll, when a read runs out of time', async () => {

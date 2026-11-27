@@ -1054,8 +1054,7 @@ export class DesktopSurface {
           if (rivals.length > 0 && home.is_focused !== true) {
             throw notActionable(`node ${binding.id} is in a window that cannot be shown to be the app's key window, so the key could land in another window`);
           }
-          // Focusing can hand focus on (a dialog it opens): the key goes only when the control still holds it.
-          if (!(await this.holdsFocus(binding, window, operation))) throw notActionable(`node ${binding.id} did not keep keyboard focus, so the key would land on another control`);
+          // Focusing can hand focus on (a dialog it opens): the driver sends the key only while the control's own element still holds it.
           await this.sendKey(combo, window, `press ${action.key}`, operation, binding.ref);
         } catch (cause) {
           // The focus already moved: a retry of the whole press would focus the control a second time, which an app's focus handler sees.
@@ -1124,21 +1123,6 @@ export class DesktopSurface {
       timeoutMs: operation.timeoutMs,
       onCutOff: () => this.driver?.cancelInput(inputId),
     });
-  }
-
-  /**
-   * Whether the control a binding names holds keyboard focus in a fresh read
-   * of its window. A control with an identity keeps its id; a look-alike has
-   * a new id in every read, so it is found by role, name, developer id, and
-   * place, with as many twins around it as before: a twin that went could
-   * have let another take its place.
-   */
-  private async holdsFocus(binding: NodeBinding, window: string, operation: OperationContext): Promise<boolean> {
-    // Read as the binding was: a locator's binding comes from a whole read, an observation's from an interactive one.
-    const now = await this.capture(operation, window, false, !binding.interactive);
-    // A read that ran out of time gives every control a fresh id, so it cannot tell which one holds focus: that is no lost focus.
-    if (now?.cutShort === true) throw partialRead('which control holds focus');
-    return [...(now?.bindings.values() ?? [])].some((candidate) => candidate.states?.focused === true && sameNode(candidate, binding));
   }
 
   /**
@@ -1297,17 +1281,10 @@ export class DesktopSurface {
       const window = focused.windowId ?? (await this.ownWindow(operation))?.id;
       if (window === undefined) throw this.chosenWindow === undefined ? invalidState('the app is not running; open it with app.open()') : this.chosenClosed();
       await this.selectAll(focused, window, operation);
-      // The app may move focus on select all: the delete goes only to the field that still holds it.
-      await afterChange('delete the selection', async () => {
-        if (!(await this.holdsFocus(focused, window, operation))) throw notActionable('the field lost keyboard focus after select all, so no delete was sent');
-        await this.sendKey('backspace', window, 'delete the selection', operation, focused.ref);
-      });
-      // The delete's handler may move focus on (an emptied field that advances): the driver would focus the field back
-      // to type, taking focus from the app, so the field must still hold it.
-      await afterChange('type', async () => {
-        if (!(await this.holdsFocus(focused, window, operation))) throw notActionable('the field lost keyboard focus after the delete, so nothing was typed');
-        await type();
-      });
+      // The app may move focus on select all, and the delete's handler on from an emptied field: the driver sends the
+      // delete, and then types, only while the field's own element still holds the app's focus, and never focuses it back.
+      await afterChange('delete the selection', () => this.sendKey('backspace', window, 'delete the selection', operation, focused.ref));
+      await afterChange('type', type);
     } else await type().catch((cause: unknown) => Promise.reject(translate(cause, 'type', true)));
     await this.settle(operation);
   }
@@ -1581,7 +1558,9 @@ async function afterChange(label: string, run: () => Promise<unknown>): Promise<
   try {
     await run();
   } catch (cause) {
-    throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${label}: ${(cause as Error).message} (an earlier command of this step changed the app)`, { retryable: false, cause });
+    // Only the driver's own failure is unnamed: an engine error already says which command it is.
+    const message = cause instanceof DriverFailure ? `${label}: ${cause.message}` : (cause as Error).message;
+    throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${message} (an earlier command of this step changed the app)`, { retryable: false, cause });
   }
 }
 

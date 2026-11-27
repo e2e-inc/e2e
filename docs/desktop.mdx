@@ -140,7 +140,12 @@ The `desktop` fixture lists the app's windows (`desktop.windows()`), picks
 the one `screen` reads (`desktop.useWindow(window)`), presses a key into the
 app's window for an app with no control that takes keyboard focus
 (`desktop.press('ControlOrMeta+2')`), and quits the app
-(`desktop.closeApp()`).
+(`desktop.closeApp()`). A window's id holds only while the window is open,
+so a test picks a window by its title:
+`desktop.useWindow((await desktop.windows()).find((window) => window.title === 'Controls'))`.
+`e2e mcp` writes its test lines that way too, ending with `?? "titled Controls"`:
+with no such window, `useWindow` then fails with "the app has no window titled
+Controls", where `undefined` would go back to the focused window.
 
 ## What differs from the web
 

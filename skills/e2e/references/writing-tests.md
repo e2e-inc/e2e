@@ -181,7 +181,9 @@ Write every test so a failing title names what broke.
     and iOS simulators, reset with `app.clearState()` (plus
     `device.clearKeychain()` on iOS simulator when sign-in uses keychain; on a
     physical iPhone, `app.clearState()` is simulator-only, so reinstall with
-    `device.installApp(path, { reinstall: true })`).
+    `device.installApp(path, { reinstall: true })`). If the device provider
+    supplies a remote agent-device daemon, a path absolute on the runner can
+    name a build on that daemon.
   - **Fixture-owned server data:** create shared server records with a
     run-unique `randomUUID()` name in a `test.extend` fixture, capture the
     returned id from a 2xx response before asserting the exact status, and
@@ -349,8 +351,8 @@ docs/reference/screen.mdx.
 ## expect
 
 `expect(locator)` polls up to `assertionTimeout` (5 s) or `{ timeout }`;
-`.not` passes once the negation has held for 1 s. `expect(value)` is
-synchronous. `toHaveText` compares the whole normalized text,
+`.not` passes on the first read that satisfies the negation. `expect(value)`
+is synchronous. `toHaveText` compares the whole normalized text,
 `toContainText` a substring or RegExp. List forms:
 `toHaveText(['Alpha', 'Beta'])` needs exactly those matches in order;
 `toContainText(['Alpha', 'Beta'])` needs each entry in a distinct match, in
