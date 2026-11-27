@@ -902,7 +902,8 @@ describe('DesktopSurface: acting', () => {
     // The scroll changed the app: a click that then fails, even as a stale ref, is never retried as if nothing happened.
     const moved = await launched({ snapshot: [twins], act: [ok({}), failure('STALE_REF', 'not_delivered')] }, { observe: false });
     const stale = every((await moved.surface.observe(operation(), undefined)).root).filter((node) => node.name === 'Delete')[1];
-    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+    // The message names the click once.
+    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false, message: expect.stringMatching(/^click: (?!click).* \(an earlier command of this step changed the app\)$/) });
     // A secondary tap goes to the driver alone, which checks the context menu live before it scrolls: the observed
     // actions may come from a read that stalled.
     const plain = await launched({ snapshot: [twins] }, { observe: false });
@@ -1409,7 +1410,15 @@ describe('DesktopSurface: typing', () => {
 
   it('reports a type after a clear that changed the field as possibly committed', async () => {
     const { surface } = await launched({ act: [{ ok: true, data: {} }, failure('STALE_REF', 'not_delivered')] });
-    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false, message: expect.stringMatching(/^type: (?!type).* \(an earlier command of this step changed the app\)$/) });
+  });
+
+  it('names the type once when it runs out of time after the clear', async () => {
+    const { surface } = await launched({ act: [{ ok: true, data: {} }, { ok: true, data: {}, sleepMs: 3_000 }] });
+    await expect(surface.typeText('ada', { replace: true }, { ...operation(), timeoutMs: 600 })).rejects.toMatchObject({
+      code: 'ACTION_MAY_HAVE_COMMITTED',
+      message: 'type timed out before the driver answered; its input may have reached the app (an earlier command of this step changed the app)',
+    });
   });
 
   it('reads again, rather than find no focused field or nothing to scroll, when a read runs out of time', async () => {
