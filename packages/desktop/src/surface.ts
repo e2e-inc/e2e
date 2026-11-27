@@ -224,7 +224,9 @@ export class DesktopSurface {
   async init(info: EngineInitInfo): Promise<void> {
     this.projectRoot = info.projectRoot;
     this.app = info.app;
-    // An engine handle can serve one host after another: nothing of the last one's screen carries over, and `appProcess.open` starts its process over.
+    // An engine handle can serve one host after another: nothing of the last one's app or screen carries over. Cleared before
+    // anything below can throw, so a dispose after a failed init never quits the last host's app.
+    this.appProcess.clearLaunch();
     this.forget();
     this.foreground = this.options.physicalInput || info.headed;
     const driver = (this.driver = this.loadDriver());

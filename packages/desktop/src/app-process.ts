@@ -96,16 +96,23 @@ export class AppProcess {
 
   /**
    * Starts over for a new host: nothing of the last one's app carries over,
-   * and a state directory, named for this worker so a later sweep can tell
-   * it was left behind, holds the next launch's record. A launch the last
-   * host could not settle stays in its own launch record, which a sweep takes.
+   * so a dispose after a failed `init` quits nothing it did not launch. A
+   * launch the last host could not settle stays in its own launch record,
+   * which a sweep takes.
    */
-  async open(driver: DesktopDriver): Promise<void> {
+  clearLaunch(): void {
     this.appName = undefined;
     this.pid = undefined;
     this.started = undefined;
     this.token = undefined;
     this.pending = undefined;
+  }
+
+  /**
+   * Creates the state directory that holds the next launch's record, named
+   * for this worker so a later sweep can tell it was left behind.
+   */
+  async open(driver: DesktopDriver): Promise<void> {
     this.home = await mkdtemp(path.join(tmpdir(), STATE_PREFIX));
     const started = driver.processStarted(process.pid);
     await writeFile(path.join(this.home, OWNER_FILE), started === null ? String(process.pid) : `${process.pid}\n${started}`);
