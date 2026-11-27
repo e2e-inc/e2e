@@ -405,6 +405,21 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
     // A tap on a text field puts the keyboard there. AppKit's password field also offers AXConfirm, which the action
     // choice below would send in its place, leaving the keyboard in the field before.
+    // A disabled AppKit button may still offer AXPress and acknowledge it while ignoring it: wait within the action's
+    // budget for it to be enabled, as an actionability wait does, and refuse it if it stays disabled.
+    loop {
+        match element.attribute("AXEnabled") {
+            Ok(value) if value.boolean() == Some(false) => {
+                if Instant::now() + POLL >= deadline {
+                    return Err(Failure::refused(codes::ACTION_FAILED, "the control is disabled"));
+                }
+                go("click")?;
+                sleep(POLL);
+            }
+            Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT | ax::AX_API_DISABLED)) => return Err(unread(error, "click")),
+            _ => break,
+        }
+    }
     let (ax_role, role) = role_of(element, "click")?;
     if role == "textfield" && settable(element, "AXFocused", "click")? {
         return focus(element, deadline);
