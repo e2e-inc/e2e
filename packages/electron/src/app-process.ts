@@ -264,6 +264,7 @@ export class AppProcess {
       if (!attaching.delete(info.targetId)) return;
       const page = new PageTarget(info.targetId, app.process.browser.session(sessionId), info.url, info.openerId === undefined ? undefined : app.pages.get(info.openerId));
       app.pages.set(info.targetId, page);
+      if (process.platform === 'win32') page.keepDrawing = () => unthrottle(app, page.targetId);
       // A window that has loaded nothing has no renderer and never answers: it becomes a window once it does.
       await this.follow(page, report);
       if (current() && !page.isClosed()) this.windows.add(page);
@@ -419,6 +420,38 @@ export class AppProcess {
     if (closed !== true) await app.process.browser.root.send('Target.closeTarget', { targetId: page.targetId });
     await gone;
   }
+}
+
+/**
+ * Turns off the background throttling of one window's renderer, and resolves
+ * with what turns it back on; undefined when it was off already, or the app
+ * has no inspector to ask. Windows draws nothing of a window the app hid
+ * while its renderer is throttled, screencast or not: a screenshot of one
+ * never returns, nor does the app's own `webContents.capturePage()`
+ * (measured on Electron 45). With throttling off it draws at once.
+ */
+async function unthrottle(app: RunningApp, targetId: string): Promise<(() => Promise<void>) | undefined> {
+  const main = await answerWithin(app.main, ANSWER_MS);
+  if (main === undefined) return undefined;
+  const throttled = await answerWithin(
+    main.evaluate(({ webContents }, id) => {
+      const contents = webContents.fromDevToolsTargetId(id);
+      if (contents === undefined || contents.isDestroyed() || !contents.getBackgroundThrottling()) return false;
+      contents.setBackgroundThrottling(false);
+      return true;
+    }, targetId),
+    ANSWER_MS,
+  );
+  if (throttled !== true) return undefined;
+  return async () => {
+    await answerWithin(
+      main.evaluate(({ webContents }, id) => {
+        const contents = webContents.fromDevToolsTargetId(id);
+        if (contents !== undefined && !contents.isDestroyed()) contents.setBackgroundThrottling(true);
+      }, targetId),
+      ANSWER_MS,
+    );
+  };
 }
 
 const NO_INSPECTOR =

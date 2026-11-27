@@ -427,6 +427,20 @@ describe('pixels', () => {
     // Scrolled into the green half: the document's top, which a clip that ignored the scroll would show, is red.
     expect([rgba[middle], rgba[middle + 1], rgba[middle + 2]]).toEqual([0, 128, 0]);
   });
+
+  it('captures a window the app showed and then hid, and leaves its background throttling as the app set it', async () => {
+    const page = '<body style="margin:0;background:rgb(0,128,0)"></body>';
+    const { app, windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL('data:text/html,${page}'));`);
+    await launch();
+    const window = windows.require();
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.hide(), undefined);
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible(), undefined)).toBe(false);
+    const raw = await readWindow(new DevTools(), window);
+    const { pixels } = await withPixels(new DevTools(), raw, { root: { ref: { id: 'window', revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } });
+    const rgba = new Transformer(pixels!.data).rawPixelsSync();
+    expect([rgba[0], rgba[1], rgba[2]]).toEqual([0, 128, 0]);
+    expect(await app.evaluate(({ webContents }) => webContents.getAllWebContents().map((contents) => contents.getBackgroundThrottling()), undefined)).toEqual([true]);
+  });
 });
 
 describe('video', () => {

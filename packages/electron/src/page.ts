@@ -149,6 +149,13 @@ export class PageTarget implements InputTarget {
 
   /** Set while a recording's screencast runs on the page: a capture then leaves the screencast alone. */
   recording = false;
+  /**
+   * Makes the window draw for a capture where a screencast is not enough to,
+   * and resolves with what puts it back as it was; set by what follows the
+   * app, on the platforms that need it.
+   */
+  keepDrawing: (() => Promise<(() => Promise<void>) | undefined>) | undefined;
+  private drawn: (() => Promise<void>) | undefined;
   private captures = 0;
 
   /**
@@ -160,11 +167,17 @@ export class PageTarget implements InputTarget {
   async captured<T>(capture: () => Promise<T>): Promise<T> {
     this.captures += 1;
     if (!this.recording && this.captures === 1) await this.session.send('Page.startScreencast', { format: 'jpeg', quality: 1, maxWidth: 16, maxHeight: 16 }).catch(() => undefined);
+    if (this.captures === 1) this.drawn = await this.keepDrawing?.().catch(() => undefined);
     try {
       return await capture();
     } finally {
       this.captures -= 1;
       if (!this.recording && this.captures === 0) await this.session.send('Page.stopScreencast').catch(() => undefined);
+      if (this.captures === 0) {
+        const { drawn } = this;
+        this.drawn = undefined;
+        await drawn?.().catch(() => undefined);
+      }
     }
   }
 
