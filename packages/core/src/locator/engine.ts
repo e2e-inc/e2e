@@ -7,6 +7,7 @@ import {
   type NodeRef,
   type OperationContext,
   type PointerAction,
+  type ScrollEdge,
   type SemanticNode,
   type ViewportIntersection,
   type ViewportPoint,
@@ -561,6 +562,76 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     );
   }
 
+  /**
+   * Scrolls a container to an edge within one deadline: the node `expression`
+   * names, or the screen's container when there is none. A scroll that ran
+   * out of budget (an engine timeout, or input that may have landed) did not
+   * reach the edge; an engine stops a little before the deadline, so that is
+   * said whether or not it has passed, with the engine's reason, which tells
+   * a list still moving from a stuck read, and names the step's timeout
+   * rather than the time the engine took. Only the scroll's own failure is
+   * read that way: a locate or a first observation that ran out stays what
+   * it was.
+   */
+  async scrollTo(expression: LocatorExpression | undefined, edge: ScrollEdge, timeoutMs?: number): Promise<void> {
+    const action = { kind: 'scrollTo', edge } as const;
+    this.checkAction(action);
+    const deadline = this.deadline(timeoutMs);
+    const target = expression === undefined ? '' : `: ${describeExpression(expression)}`;
+    const notReached = (cause: unknown): TestError | undefined => {
+      const engineError = asEngineError(cause);
+      if (engineError?.code !== 'OPERATION_TIMEOUT' && engineError?.code !== 'ACTION_MAY_HAVE_COMMITTED') return undefined;
+      return new TestError('ACTION_FAILED', `scrollTo('${edge}') did not reach the edge within ${deadline.endsAt - deadline.startedAt}ms (${engineError.message})${target}`, { cause });
+    };
+    if (expression === undefined) await this.scrollScreenTo(action, deadline, notReached);
+    else await this.performUntil(expression, action, deadline, notReached);
+  }
+
+  /**
+   * The screen's `scrollTo`: on the observation root, observing first when
+   * none has named it, recorded as an engine event like a node action.
+   */
+  private async scrollScreenTo(
+    action: Extract<LocatorAction, { kind: 'scrollTo' }>,
+    deadline: Deadline,
+    notReached: (cause: unknown) => TestError | undefined,
+  ): Promise<void> {
+    const startedAt = timestamp();
+    const startedMs = Date.now();
+    const fail = (failure: Error & { readonly code: string }): never => {
+      this.recordEvent({
+        kind: 'engine',
+        name: action.kind,
+        startedAt,
+        durationMs: Date.now() - startedMs,
+        status: this.signal.aborted ? 'cancelled' : 'failed',
+        code: failure.code,
+        detail: `scrollTo ${action.edge} on the screen`,
+      });
+      throw failure;
+    };
+    let root: NodeRef;
+    try {
+      root = await this.session.rootRef(this.operationWithin(deadline));
+    } catch (cause) {
+      return fail(translateLocatorError(cause));
+    }
+    if (deadline.expired()) return fail(this.lateAction(action.kind, 'the screen'));
+    try {
+      await this.session.perform(root, action, this.operationWithin(deadline));
+    } catch (cause) {
+      return fail(notReached(cause) ?? translateLocatorError(cause));
+    }
+    this.recordEvent({
+      kind: 'engine',
+      name: action.kind,
+      startedAt,
+      durationMs: Date.now() - startedMs,
+      status: 'passed',
+      detail: `scrollTo ${action.edge} on the screen`,
+    });
+  }
+
   /** Performs one pointer action at a viewport point, with no node behind it. */
   async performAt(point: ScreenPoint, action: ScreenPointerAction, timeoutMs?: number): Promise<void> {
     this.checkPointerAction(action);
@@ -716,11 +787,17 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     }
   }
 
-  /** `perform` within a deadline a caller shares across steps, such as the swipes of one scroll. */
+  /**
+   * `perform` within a deadline a caller shares across steps, such as the
+   * swipes of one scroll. `performFailure` reads a failure of the perform
+   * itself, never of the locate before it; `undefined` leaves it to the usual
+   * translation.
+   */
   async performUntil(
     expression: LocatorExpression,
     action: LocatorAction | ActionBuilder,
     deadline: Deadline,
+    performFailure?: (cause: unknown) => (Error & { readonly code: string }) | undefined,
   ): Promise<void> {
     if (typeof action !== 'function') this.checkAction(action);
     const startedAt = timestamp();
@@ -752,7 +829,7 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
           stale += 1;
           continue;
         }
-        const failure = translateLocatorError(cause, expression);
+        const failure = performFailure?.(cause) ?? translateLocatorError(cause, expression);
         record(this.signal.aborted ? 'cancelled' : 'failed', failure.code);
         throw failure;
       }
