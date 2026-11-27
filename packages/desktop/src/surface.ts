@@ -41,7 +41,7 @@ import {
 } from '@e2e-dev/core/engine';
 import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
 import { toCombo } from './keys.ts';
-import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
+import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_POLL_MS, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
 import { launchArgumentList } from './launch-arguments.ts';
 import { handOffClause, type WindowsRead } from './launch-report.ts';
 import { LAUNCH_READY_MS, QUIT, windowReadable } from './launch-wait.ts';
@@ -62,6 +62,14 @@ const LATE_APP_MS = 2_000;
 
 /** How often it looks. */
 const LATE_APP_POLL_MS = 100;
+
+/**
+ * How long an open in the foreground waits, once the window can be read, for
+ * the app to have a key window: an app coming forward takes the keyboard a
+ * moment after its window shows, and keys typed before then miss it. An app
+ * that names no key window by then is left as it is.
+ */
+const KEY_WINDOW_MS = 2_000;
 
 /** How far a swipe scrolls, in screens of the scrolled area, by its momentum: the web engine's strides, so a momentum means the same on every engine. */
 const SWIPE_PAGES = { slow: 0.75, none: 0.5, fast: 1.5 } as const;
@@ -439,6 +447,8 @@ export class DesktopSurface {
     // The process and when it started, so a later run can quit it, and never a later process given the same id.
     await this.writeRecord({ token, pid: launched.pid, ...(this.started === undefined ? {} : { started: this.started }) });
     this.forget();
+    // The readiness wait's own deadline, which the key-window wait after it never passes.
+    const readyBy = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
     await windowReadable(operation, {
       app: this.appName,
       foreground: this.foreground,
@@ -454,6 +464,7 @@ export class DesktopSurface {
       },
       screenLocked: () => driver.screenLocked(),
     });
+    await this.keyWindow(operation, readyBy);
   }
 
   /** The engine error for a failed launch, naming what to fix where the driver says what went wrong. */
@@ -474,6 +485,27 @@ export class DesktopSurface {
     const file = path.join(this.home, APP_FILE);
     await writeFile(`${file}.partial`, JSON.stringify(record));
     await rename(`${file}.partial`, file);
+  }
+
+  /**
+   * After a launch in the foreground, waits up to `KEY_WINDOW_MS` (and never
+   * past `deadline`) until a window of the app, not a dialog macOS put over
+   * it, is its key window: with `physicalInput` the keys of the test's first
+   * `pressSequentially` go through the real keyboard, and keys typed while
+   * the app is still coming forward could miss it. In the background the
+   * app's keys go to its own event queue, which the driver sends only while
+   * the window is key, so there is nothing to wait for. Never fails the open:
+   * an app that names no key window is read as it is.
+   */
+  private async keyWindow(operation: OperationContext, deadline: number): Promise<void> {
+    if (!this.foreground) return;
+    const until = Math.min(deadline, Date.now() + KEY_WINDOW_MS);
+    while (Date.now() < until) {
+      if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
+      const windows = await this.ownWindows(withDeadline({ ...operation, timeoutMs: Math.max(until - Date.now(), 0) })).catch(() => []);
+      if (windows.some((window) => window.is_focused === true && window.system !== true)) return;
+      await sleep(Math.min(LAUNCH_POLL_MS, Math.max(until - Date.now(), 0)), operation.signal);
+    }
   }
 
   /** The windows of the app the engine launched, for the `desktop` fixture; none while it is not running. */

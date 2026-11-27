@@ -768,6 +768,26 @@ describe('DesktopSurface: reading', () => {
     });
   });
 
+  it('opens an app in the foreground only once it has a key window, so the first keys reach it', async () => {
+    const unfocused = windows(() => [{ id: 'w-mine', title: 'Spike Form' }]);
+    const focused = windows(() => [{ id: 'w-mine', title: 'Spike Form', is_focused: true }]);
+    const fake = fakeDriver({ listWindows: [unfocused, unfocused, unfocused, unfocused, focused] });
+    await launched(fake, { observe: false, runHeaded: true });
+    expect(fake.of('listWindows')).toHaveLength(5);
+    // In the background the keys go to the app's own queue, which the driver sends only while the window is key: nothing to wait for.
+    const background = fakeDriver({ listWindows: [unfocused, unfocused, unfocused, unfocused, focused] });
+    await launched(background, { observe: false });
+    expect(background.of('listWindows')).toHaveLength(1);
+  });
+
+  it('opens an app in the foreground that names no key window once the wait for one is over', async () => {
+    const fake = fakeDriver({ listWindows: [windows(() => [{ id: 'w-mine', title: 'Spike Form' }, { id: 'w-siri', is_focused: true, system: true }])] });
+    const started = Date.now();
+    await launched(fake, { observe: false, runHeaded: true });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_900);
+    expect(Date.now() - started).toBeLessThan(5_000);
+  });
+
   it('reads the main window before the first one listed when the app in the background has none focused', async () => {
     const list = windows(() => [{ id: 'w-dialog', visible: true }, { id: 'w-doc', visible: true, is_main: true }]);
     const { surface, fake } = await launched({ listWindows: [list] }, { observe: false });
@@ -1810,7 +1830,8 @@ describe('DesktopSurface: points', () => {
 
   it('refuses a tap at a point when a sheet took focus as the window came forward, and taps one on a sheet already open', async () => {
     const at = (sheet: boolean) => windows(() => [{ id: 'w-mine', is_focused: true, ...(sheet ? { sheet_focused: true, sheet_id: 's-1' } : {}), bounds: { x: 100, y: 100, width: 400, height: 300 } }]);
-    const opened = await launched({ listWindows: [at(false), at(false), at(true)] }, { observe: false, options: { physicalInput: true } });
+    // The launch's read, its wait for a key window in the foreground, the tap's first read, then the window as it came forward.
+    const opened = await launched({ listWindows: [at(false), at(false), at(false), at(true)] }, { observe: false, options: { physicalInput: true } });
     await expect(opened.surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/sheet opened/) });
     expect(opened.fake.of('pointer')).toHaveLength(0);
     const open = await launched({ listWindows: [at(true)] }, { observe: false, options: { physicalInput: true } });
@@ -1835,8 +1856,8 @@ describe('DesktopSurface: points', () => {
       { before: 's-1', now: 's-2', message: /another sheet took the place/ },
     ];
     for (const { before, now, message } of cases) {
-      // The launch, the observation, then the tap's two reads of the window.
-      const { surface, fake } = await launched({ listWindows: [at(before), at(before), at(now), at(now)] }, { observe: false, options: { physicalInput: true } });
+      // The launch, its wait for a key window in the foreground, the observation, then the tap's two reads of the window.
+      const { surface, fake } = await launched({ listWindows: [at(before), at(before), at(before), at(now), at(now)] }, { observe: false, options: { physicalInput: true } });
       await surface.observe(operation(), undefined);
       await expect(surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(message) });
       expect(fake.of('pointer')).toHaveLength(0);
