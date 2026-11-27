@@ -40,6 +40,18 @@ describe('nodeOp', () => {
     expect(await run(await element('#hidden'), 'checkEnabled', false)).toEqual({ ok: false, reason: 'it is not visible' });
   });
 
+  it('finds an element inert through the slot it is shown in, and outside an open modal dialog, and refuses a file input there', async () => {
+    await window.setContent(`<span id="host"><select id="slotted"><option>A</option><option>B</option></select></span><input id="file" type="file"><dialog id="modal"><input id="inside"></dialog><script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<div inert><slot></slot></div>';
+    </script>`);
+    const inert = { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
+    expect(await run(await element('#slotted'), 'checkSelect', { label: 'B' })).toEqual(inert);
+    expect(await run(await element('#file'), 'checkFileInput')).toEqual({ ok: true });
+    await window.inPage(() => (document.getElementById('modal') as HTMLDialogElement).showModal());
+    expect(await run(await element('#file'), 'checkFileInput')).toEqual(inert);
+    expect(await run(await element('#inside'), 'checkEditable')).toEqual({ ok: true });
+  });
+
   it('hit-tests through a slot and a shadow host, and names the element that covers the point', async () => {
     await window.setContent(`
       <div id="host"><button id="slotted" style="width:100px;height:40px">S</button></div>

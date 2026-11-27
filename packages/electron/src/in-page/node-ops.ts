@@ -107,8 +107,22 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
     if (control?.matches(':disabled') === true) return true;
     return above(target, '[aria-disabled]')?.getAttribute('aria-disabled')?.toLowerCase() === 'true';
   };
-  /** Whether the element, or anything above it, is inert. */
-  const isInert = (target: Element): boolean => above(target, '[inert]') !== null;
+  /**
+   * Whether the element is inert: an `inert` element holds it in the tree as
+   * rendered (through the slot it is assigned to and the shadow host of each
+   * root it sits in), or a modal dialog is open and it is outside every one,
+   * which makes it inert with no attribute to show it.
+   */
+  const isInert = (target: Element): boolean => {
+    let inModal = false;
+    for (let at: Element | null = target; at !== null; ) {
+      if (at.hasAttribute('inert')) return true;
+      inModal ||= at.matches('dialog:modal');
+      const root = at.getRootNode();
+      at = at.assignedSlot ?? at.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
+    }
+    return !inModal && target.ownerDocument.querySelector('dialog:modal') !== null;
+  };
   /** Whether the element holds focus within its own document or shadow root. */
   const holdsFocus = (target: Element): boolean => {
     const root = target.getRootNode();
@@ -280,6 +294,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       const element = live();
       if (!(element instanceof HTMLInputElement) || element.type !== 'file') return { ok: false, reason: 'it is not a file input' };
       if (isDisabled(element)) return { ok: false, reason: 'it is disabled' };
+      if (isInert(element)) return { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
       return { ok: true };
     },
     takesFiles(count) {
