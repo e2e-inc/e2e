@@ -8,6 +8,8 @@
  * project only through `e2e`'s dependency and the engines' peer, as it does
  * for a user, and the install must hold one copy of it: two would split the
  * error classes and the engine registry between the runner and the engines.
+ * `@e2e-dev/util`, which core depends on, is packed with this machine's
+ * addon in it, since no platform package is published yet.
  * A second project installs `@e2e-dev/core` and the engines without `e2e`,
  * as a program that drives a browser or device with core alone does, and
  * imports each engine's main entry there.
@@ -36,7 +38,7 @@ if (pnpmVersion === undefined) {
 }
 
 /** The packages a new user installs: the runner and its engines, and the core both build on. */
-const PACKAGES = ['core', 'e2e', 'web', 'mobile', 'desktop', 'desktop/npm/darwin-arm64', 'desktop/npm/darwin-x64'] as const;
+const PACKAGES = ['util', 'core', 'e2e', 'web', 'mobile', 'desktop', 'desktop/npm/darwin-arm64', 'desktop/npm/darwin-x64'] as const;
 
 const root = mkdtempSync(join(tmpdir(), 'e2e-install-smoke-'));
 const tarballs = join(root, 'tarballs');
@@ -71,12 +73,12 @@ try {
   const files = readdirSync(tarballs);
   // The version follows the prefix, so `e2e-dev-desktop-` never takes `e2e-dev-desktop-darwin-arm64-`.
   const tarball = (prefix: string): string => `file:${join(tarballs, files.find((file) => file.startsWith(prefix) && /^[\d.]/.test(file.slice(prefix.length)))!)}`;
-  // `e2e` names its exact `@e2e-dev/core`, which the registry has not published yet: the override serves the tarball.
+  // `e2e` names its exact `@e2e-dev/core`, and core its exact `@e2e-dev/util`, which the registry has not published yet: the overrides serve the tarballs.
   // So are the desktop engine's platform packages, which carry no driver when packed off a release. Off the Mac they
   // match, an install from the registry skips them by `os` and `cpu`; a skipped `file:` override breaks pnpm 11's
   // frozen reinstall instead (ENOTDIR), so there the override drops them.
   const platformPackage = (name: string, arch: string): string => (process.platform === 'darwin' && process.arch === arch ? JSON.stringify(tarball(`e2e-dev-${name}-`)) : '"-"');
-  workspaceYaml = `overrides:\n  '@e2e-dev/core': ${JSON.stringify(tarball('e2e-dev-core-'))}\n  '@e2e-dev/desktop-darwin-arm64': ${platformPackage('desktop-darwin-arm64', 'arm64')}\n  '@e2e-dev/desktop-darwin-x64': ${platformPackage('desktop-darwin-x64', 'x64')}\n${driverVersion ? `  agent-device: ${JSON.stringify(driverVersion)}\n` : ''}`;
+  workspaceYaml = `overrides:\n  '@e2e-dev/core': ${JSON.stringify(tarball('e2e-dev-core-'))}\n  '@e2e-dev/util': ${JSON.stringify(tarball('e2e-dev-util-'))}\n  '@e2e-dev/desktop-darwin-arm64': ${platformPackage('desktop-darwin-arm64', 'arm64')}\n  '@e2e-dev/desktop-darwin-x64': ${platformPackage('desktop-darwin-x64', 'x64')}\n${driverVersion ? `  agent-device: ${JSON.stringify(driverVersion)}\n` : ''}`;
   writeFileSync(join(project, 'pnpm-workspace.yaml'), workspaceYaml);
   writeFileSync(
     join(project, 'package.json'),

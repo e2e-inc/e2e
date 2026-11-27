@@ -81,6 +81,11 @@ jobs:
       - name: MCP Registry entry matches the runner
         if: ${{ inputs.agent-device-version == '' }}
         run: pnpm mcp-server:check
+      # @e2e-dev/util's crates on Linux, which the macOS `native` job does not reach; it checks the whole workspace.
+      # rustup installs the toolchain rust-toolchain.toml pins on first use.
+      - name: Rust crates of @e2e-dev/util (clippy, tests)
+        if: ${{ inputs.agent-device-version == '' }}
+        run: cargo clippy -p e2e-util -p e2e-util-napi --all-targets --locked -- -D warnings && cargo test -p e2e-util -p e2e-util-napi --locked
       # The registry rejects an invalid entry only at publish, from a release
       # tag that can no longer change.
       - uses: ./.github/actions/mcp-publisher
@@ -165,7 +170,7 @@ jobs:
       - uses: ./.github/actions/workspace-install
         with:
           agent-device-version: ${{ inputs.agent-device-version }}
-      - run: pnpm --filter @e2e-dev/core run build && pnpm --filter e2e run build
+      - run: pnpm --filter @e2e-dev/util run build && pnpm --filter @e2e-dev/core run build && pnpm --filter e2e run build
       - name: The CLI on Bun ${{ matrix.bun }}
         run: pnpm --filter e2e exec vitest run tests/integration/bun-runtime.test.ts
         env:
@@ -237,7 +242,7 @@ jobs:
       - name: Load the addon through the engine
         env:
           REQUIRE_DESKTOP_NATIVE: '1'
-        run: pnpm --filter @e2e-dev/core run build && pnpm --filter @e2e-dev/desktop exec vitest run tests/unit/driver.test.ts
+        run: pnpm --filter @e2e-dev/util run build && pnpm --filter @e2e-dev/core run build && pnpm --filter @e2e-dev/desktop exec vitest run tests/unit/driver.test.ts
 
   # The Electron engine on its testbed app. Electron has no headless mode, so
   # the app runs under a virtual display.
