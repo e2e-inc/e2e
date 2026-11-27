@@ -299,6 +299,8 @@ pub(crate) enum Placement {
     ScrolledOut,
     /// In a minimized window: no scroll shows it.
     Minimized,
+    /// A control with no width or height and nothing inside it: it draws nothing, wherever it is.
+    Collapsed,
 }
 
 /// Where an element is now, by the test the snapshot reads `offscreen` with: its frame against the window and every
@@ -307,6 +309,12 @@ pub(crate) enum Placement {
 /// answer in time.
 pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
     let frame = element.frame();
+    if let Some((_, _, width, height)) = frame
+        && (width <= 0.0 || height <= 0.0)
+        && element.count("AXChildren").unwrap_or(0) == 0
+    {
+        return Ok(Placement::Collapsed);
+    }
     let mut clip: Option<Rect> = None;
     let mut next = element.element("AXParent");
     for _ in 0..MAX_ANCESTORS {

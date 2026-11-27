@@ -425,7 +425,7 @@ fn enabled(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
 }
 
 /// Brings an element a scroll area holds out of view into view (`AXScrollToVisible`), and waits for it to show. An
-/// element already on screen gets nothing; one in a minimized window, or one that cannot be scrolled, is refused, as an
+/// element already on screen gets nothing; one in a minimized window, one with no size, or one that cannot be scrolled, is refused, as an
 /// action on it would reach a control the user cannot.
 fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
     use crate::snapshot::{Placement, placement};
@@ -434,6 +434,7 @@ fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
         Placement::Minimized => {
             return Err(Failure::refused(codes::ACTION_FAILED, "the element's window is minimized, so the user cannot reach it; restore the window first"));
         }
+        Placement::Collapsed => return Err(Failure::refused(codes::ACTION_FAILED, "the element has no size on screen, so the user cannot reach it")),
         Placement::ScrolledOut => {}
     }
     if !action_names(element, what)?.iter().any(|name| name == "AXScrollToVisible") {
