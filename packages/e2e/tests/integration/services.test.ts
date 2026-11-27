@@ -1867,7 +1867,7 @@ test('reads a service', async ({ services }) => {
 
     /** `e2e mcp` running in `dir` over stdio, with a client that sends requests and tool calls to it. */
     async function mcpServer(dir: string) {
-      const server = spawn(process.execPath, [CLI, 'mcp'], { cwd: dir, env: { ...process.env, CI: '' }, stdio: ['pipe', 'pipe', 'pipe'] });
+      const server = spawn(process.execPath, [CLI, 'mcp', '--max-sessions', '2'], { cwd: dir, env: { ...process.env, CI: '', E2E_TELEMETRY_DISABLED: '1' }, stdio: ['pipe', 'pipe', 'pipe'] });
       const output = { stderr: '' };
 
       server.stderr.on('data', (chunk: Buffer) => {
@@ -1922,6 +1922,75 @@ test('reads a service', async ({ services }) => {
 
       return { server, output, exited, request, callTool };
     }
+
+    /** Holds the app's shutdown until the test releases it. */
+    function heldAppProject(port: number, ready: boolean): FixtureProject {
+      const project = createProject({
+        'services.ts': SERVICES,
+        'server.cjs': SERVER.replace("  appendFileSync('events.log', 'app stop\\n');\n  process.exit(0);", `
+  appendFileSync('events.log', 'app stopping\\n');
+  const timer = setInterval(() => {
+    if (!require('node:fs').existsSync('release-stop')) return;
+    clearInterval(timer);
+    appendFileSync('events.log', 'app stop\\n');
+    process.exit(0);
+  }, 10);`),
+        'e2e.config.ts': CONFIG
+          .replace("url: 'http://127.0.0.1:0',", `url: 'http://127.0.0.1:${port}',${ready ? '' : " readyUrl: 'http://127.0.0.1:1/',"}`)
+          .replace("PORT: '{port}'", `PORT: '${port}'`)
+          .replace('shutdownTimeout: 2000', 'startupTimeout: 60_000, shutdownTimeout: 15_000')
+          .replace('  ],', "    { name: 'independent', platform: 'fake', engine: createFakeEngine().engine },\n  ],"),
+      });
+      projects.push(project);
+      return project;
+    }
+
+    it.skipIf(process.platform === 'win32')('frees an unrelated session slot while another app is still stopping', async () => {
+      const project = heldAppProject(await freePort(), true);
+      const { server, exited, callTool } = await mcpServer(project.dir);
+
+      try {
+        const slow = sessionId(await callTool('open_session', { target: 'fake' }));
+        const other = sessionId(await callTool('open_session', { target: 'independent' }));
+        const closing = callTool('close_session', { session: slow });
+        try {
+          await expect.poll(() => eventLines(project), { timeout: 5_000 }).toContain('app stopping');
+          await expect(Promise.race([
+            callTool('close_session', { session: other }),
+            sleep(2_000, 'the unrelated close is still waiting', { ref: false }),
+          ])).resolves.toContain(`Session ${other} closed`);
+          const next = sessionId(await callTool('open_session', { target: 'independent' }));
+          expect(next).toBeTruthy();
+          expect(eventLines(project)).not.toContain('app stop');
+          expect(eventLines(project)).not.toContain('stop alpha');
+        } finally {
+          writeFileSync(path.join(project.dir, 'release-stop'), '');
+          await closing;
+        }
+      } finally {
+        server.stdin.end();
+        expect(await exited).toBe(0);
+      }
+    });
+
+    it.skipIf(process.platform === 'win32')('stops a cancelled app start before releasing its services on server shutdown', async () => {
+      const port = await freePort();
+      const project = heldAppProject(port, false);
+      const { server, exited, request } = await mcpServer(project.dir);
+
+      try {
+        void request('tools/call', { name: 'open_session', arguments: { target: 'fake' } });
+        await expect.poll(() => fetch(`http://127.0.0.1:${port}`).then((response) => response.ok, () => false), { timeout: 5_000 }).toBe(true);
+        server.stdin.end();
+        await expect.poll(() => eventLines(project), { timeout: 5_000 }).toContain('app stopping');
+      } finally {
+        writeFileSync(path.join(project.dir, 'release-stop'), '');
+        server.stdin.end();
+        expect(await exited).toBe(0);
+      }
+
+      expect(eventLines(project)).toEqual(['start alpha', 'start beta', 'env', `app start ${port} http://alpha.test`, 'app stopping', 'app stop', 'stop beta', 'stop alpha']);
+    });
 
     it('stops the app and then the services when the client closes stdin with sessions open, and leaves no process behind', async () => {
       const port = await freePort();

@@ -52,6 +52,9 @@ export class SharedProcesses<Held extends AppProcesses = AppProcesses> implement
   /** Stops still running, and starts abandoned, by key. */
   private readonly draining = new Map<string, Promise<unknown>>();
 
+  /** Wait on cancellation when the caller still holds dependencies of the process it abandons. */
+  constructor(private readonly options: { readonly waitForAbandonedStart?: boolean } = {}) {}
+
   async acquire(key: string, start: (signal: AbortSignal) => Promise<Held>, signal: AbortSignal): Promise<Held> {
     let entry = this.entries.get(key);
     if (entry === undefined) {
@@ -74,19 +77,18 @@ export class SharedProcesses<Held extends AppProcesses = AppProcesses> implement
     const shared = entry;
     shared.users += 1;
     shared.waiting += 1;
+    let abandoned: Promise<void> | undefined;
     const giveUp = (): void => {
       shared.waiting -= 1;
       if (shared.waiting > 0 || shared.settled) return;
       shared.abandon.abort();
       this.forget(key, shared);
       // A start that completes despite the abort has nobody left to stop it: it stops here.
-      this.draining.set(
-        key,
-        shared.started.then(
-          (started) => started.stop(() => undefined),
-          () => undefined,
-        ),
+      abandoned = shared.started.then(
+        (started) => started.stop(() => undefined),
+        () => undefined,
       );
+      this.draining.set(key, abandoned);
     };
     if (signal.aborted) giveUp();
     else signal.addEventListener('abort', giveUp, { once: true });
@@ -94,10 +96,12 @@ export class SharedProcesses<Held extends AppProcesses = AppProcesses> implement
     let processes: Held;
 
     try {
-      // An attempt that gives up stops waiting at once, whether or not others still wait on the start.
       processes = await Promise.race([shared.started, cancelled(signal, shared.started)]);
     } catch (cause) {
       shared.users -= 1;
+      if (this.options.waitForAbandonedStart && abandoned !== undefined) {
+        await abandoned.catch(() => undefined);
+      }
       throw cause;
     } finally {
       signal.removeEventListener('abort', giveUp);
