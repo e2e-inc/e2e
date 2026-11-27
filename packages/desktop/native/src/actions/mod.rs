@@ -363,10 +363,10 @@ fn click_shown(entry: &Entry, deadline: Instant) -> Outcome<()> {
     }
     let names = action_names(element, "click")?;
     if let Some(action) = ["AXPress", "AXOpen", "AXConfirm"].into_iter().find(|name| names.iter().any(|candidate| candidate == name)) {
-        let opens_menu = ax_role == "AXPopUpButton" || ax_role == "AXMenuButton";
-        let before = windows::open_menus(entry.pid);
+        // Only a press that opens a menu waits for it, so only it counts the open menus, a read of every window there is.
+        let before = (ax_role == "AXPopUpButton" || ax_role == "AXMenuButton").then(|| windows::open_menus(entry.pid));
         perform(element, action, "click")?;
-        if opens_menu {
+        if let Some(before) = before {
             menu_shown(entry.pid, before, deadline);
         }
         return Ok(());
