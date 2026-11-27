@@ -39,7 +39,7 @@ import type {
 } from '@e2e-dev/core/engine';
 import { performAtPoint, performOnNode, pressKey, swipeWindow, typeText, type ActionContext } from './actions.ts';
 import { AppProcess, DISCARD_CLOSE_MS, RESTART_CLOSE_MS, type AppDownload } from './app-process.ts';
-import { answerWithin, withBudget, type Budget } from './budget.ts';
+import { answerWithin, Budget, withBudget } from './budget.ts';
 import { screenshotFile, screenshotName, withPixels } from './capture.ts';
 import { DevTools } from './devtools.ts';
 import { DialogRouter, type DialogHandler } from './dialogs.ts';
@@ -153,14 +153,17 @@ export class ElectronSurface {
 
   /** `app.open()` and `app.restart()`: quits the app if it runs and launches it again on the attempt's app data. */
   restart(operation: OperationContext): Promise<void> {
+    // Started now: the quit, and a launch or quit ahead in the queue, spend the operation's time too.
+    const budget = new Budget(operation, 'app.open');
     return this.app.serialized(async () => {
       await this.app.quit(operation, RESTART_CLOSE_MS);
-      await this.launch(operation);
+      await this.launch(operation, budget);
     });
   }
 
   /** `app.clearState()`: quits the app, empties its data, and launches it again. */
   reset(operation: OperationContext): Promise<void> {
+    const budget = new Budget(operation, 'app.open');
     return this.app.serialized(async () => {
       await this.app.quit(operation, DISCARD_CLOSE_MS);
       if (this.userDataDir !== undefined) {
@@ -168,15 +171,15 @@ export class ElectronSurface {
         // As private as mkdtemp made it: the app's data is no other local user's to list.
         mkdirSync(this.userDataDir, { recursive: true, mode: 0o700 });
       }
-      await this.launch(operation);
+      await this.launch(operation, budget);
     });
   }
 
-  private async launch(operation: OperationContext): Promise<void> {
+  private async launch(operation: OperationContext, budget: Budget): Promise<void> {
     const { attempt, userDataDir, executable } = this;
     if (attempt === undefined || userDataDir === undefined) throw invalidState('app.open() runs inside a test: no attempt is running');
     if (executable === undefined) throw invalidState('the electron engine was not initialized');
-    await this.app.launch({ executable, projectRoot: this.projectRoot, app: this.appInfo, env: this.runEnv, userDataDir, attempt }, operation);
+    await this.app.launch({ executable, projectRoot: this.projectRoot, app: this.appInfo, env: this.runEnv, userDataDir, attempt }, operation, budget);
     await this.recorder?.snap();
   }
 

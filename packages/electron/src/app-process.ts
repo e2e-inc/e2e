@@ -137,11 +137,15 @@ export class AppProcess {
     await stop(app, Math.min(budget.timeoutMs, graceMs));
   }
 
-  /** Launches the app on the attempt's user-data directory and waits for its first window to load, all within one budget. */
-  async launch(setup: LaunchSetup, operation: OperationContext): Promise<void> {
+  /**
+   * Launches the app on the attempt's user-data directory and waits for its
+   * first window to load, all within one budget: `budget` when the operation
+   * did other work before the launch, such as quitting the app.
+   */
+  async launch(setup: LaunchSetup, operation: OperationContext, budget = new Budget(operation, 'app.open')): Promise<void> {
     // One budget for the whole launch, ending a little before the operation does so the launch reports why it failed
     // rather than the operation timing out; each phase gets what the ones before it left.
-    const timeout = Math.max(1, new Budget(operation, 'app.open').waits.remaining());
+    const timeout = Math.max(1, budget.waits.remaining());
     const deadline = new Deadline(timeout);
     const left = (): number => Math.max(1, deadline.remaining());
     let app: RunningApp;
