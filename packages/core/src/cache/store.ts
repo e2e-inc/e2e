@@ -317,7 +317,7 @@ export class FileCacheStore implements CacheStore {
   private async locked<T>(base: string, operation: () => Promise<T>, creates = false): Promise<T> {
     if (creates) await mkdir(this.directory, { recursive: true });
     else if (!(await access(this.directory, constants.W_OK).then(() => true, () => false))) return operation();
-    return withFileLock(join(this.directory, `.${base}.writing`), async () => {
+    return withFileLock(this.lockPath(base), async () => {
       if (this.writable) await this.recover(base);
       return operation();
     });

@@ -357,6 +357,23 @@ describe('FileCacheStore', () => {
     expect(await filesAfter([signOut, signIn])).toEqual(one);
   });
 
+  it('writes a test whose name carries its hash under the lock that clearing and evicting take', async () => {
+    const { directory, store } = await makeStore();
+    const testId = 'tests/login.e2e.ts::%E3%83%AD%E3%82%B0%E3%82%A4%E3%83%B3';
+    let wrote = false;
+    let writing: Promise<void> | undefined;
+    await withFileLock(path.join(directory, '.login.writing'), async () => {
+      writing = store.write(KEY, payload('web', { recordedFor: step('web', { testId }) })).then(() => {
+        wrote = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(wrote).toBe(false);
+    });
+    await writing;
+    expect(wrote).toBe(true);
+    expect((await store.read(KEY, step('web', { testId }))).status).toBe('hit');
+  });
+
   it('writes two targets of one test at once without losing either', async () => {
     const { store } = await makeStore();
     const targets = ['web', 'ios', 'android', 'desktop'];
