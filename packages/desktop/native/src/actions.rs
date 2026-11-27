@@ -937,7 +937,8 @@ fn close_menu(pid: i32, menu: &Element) -> bool {
         || {
             // Escape goes to the process, which may have closed this menu and opened another: it is sent only while this
             // menu is still there, and a menu left open then makes the failure delivered.
-            if menu.attribute("AXRole").is_ok() {
+            // The read waits on the app, and the caller may cancel meanwhile: it is checked again just before the key.
+            if menu.attribute("AXRole").is_ok() && !cancelled() {
                 let _ = input::parse_combo("escape").and_then(|combo| input::press(&combo, Route::Process(pid)));
             }
         },
