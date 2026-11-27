@@ -292,6 +292,12 @@ describe('pixels', () => {
     expect(result.maskedRegionCount).toBe(1);
   });
 
+  it.runIf(process.platform === 'win32')('says a hidden window has nothing to capture on Windows, rather than waiting on it', async () => {
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => ${LOADED});`);
+    await launch();
+    await expect(screenshotFile(new DevTools(), windows.require(), directory, 'shot.png')).rejects.toThrow(/the window is hidden/);
+  });
+
   it('masks a nested document in a page its root zooms', async () => {
     const page = `<html style="zoom:2"><body style="margin:0"><div style="height:20px"></div><iframe style="border:0;margin-left:30px;width:100px;height:50px" srcdoc="<body style=margin:0;background:red>"></iframe></body></html>`;
     const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);

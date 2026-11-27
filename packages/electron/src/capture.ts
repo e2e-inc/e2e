@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { ConfigurationError, readPngSize, type EngineSnapshot, type ObservationPixels } from '@e2e-dev/core/engine';
 import type { DevTools } from './devtools.ts';
+import { invalidState } from './errors.ts';
 import { pixelRatio, placeMasks, removeMasks, type MaskState } from './in-page/masks.ts';
 import { viewportSize } from './in-page/node-ops.ts';
 import { inDocument, type RawRead } from './locate.ts';
@@ -97,8 +98,20 @@ async function captureViewport(window: AppWindow, scale: 'css' | 'device'): Prom
   return Buffer.from(data, 'base64');
 }
 
+/**
+ * Why the window has no pixels to capture, if it has none: Windows draws
+ * nothing of a window the app keeps hidden, and a capture of one never
+ * returns.
+ */
+async function undrawn(page: PageTarget, platform: NodeJS.Platform = process.platform): Promise<string | undefined> {
+  if (platform !== 'win32') return undefined;
+  const hidden = await page.evaluate(() => document.visibilityState === 'hidden');
+  return hidden ? 'the window is hidden, and Windows draws nothing of a hidden window to capture: show it (BrowserWindow.show()) before the screenshot' : undefined;
+}
+
 /** Adds the pixels to an observation of a read window, or leaves them out when they are withheld. */
 export async function withPixels(devtools: DevTools, raw: RawRead, snapshot: EngineSnapshot): Promise<EngineSnapshot> {
+  if ((await undrawn(raw.window.page)) !== undefined) return snapshot;
   // The pixels are of the document the snapshot describes, or the observation is taken again.
   const capture = await inDocument(raw.window, raw.generation, () => maskedCapture(devtools, raw.window, raw.dom.unmaskableCount(), 'css'));
   if ('withheld' in capture) return { ...snapshot, maskedRegionCount: capture.masked };
@@ -116,6 +129,8 @@ export async function withPixels(devtools: DevTools, raw: RawRead, snapshot: Eng
  * with `POLICY_DENIED` when the capture is withheld.
  */
 export async function screenshotFile(devtools: DevTools, window: AppWindow, artifactsDir: string, name: string): Promise<string> {
+  const hidden = await undrawn(window.page);
+  if (hidden !== undefined) throw invalidState(hidden);
   const capture = await maskedCapture(devtools, window, await unmaskable(devtools, window), 'device');
   if ('withheld' in capture) throw new ConfigurationError('POLICY_DENIED', capture.withheld);
   const relative = path.posix.join('screenshots', name);
