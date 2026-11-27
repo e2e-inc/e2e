@@ -4,6 +4,12 @@
 //! stay behind.
 
 use crate::failure::{Failure, Outcome, codes};
+use core_foundation::array::CFArray;
+use core_foundation::base::{CFType, TCFType};
+use core_foundation::data::CFData;
+use core_foundation::dictionary::CFDictionary;
+use core_foundation::propertylist;
+use core_foundation::string::CFString;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 use objc2_foundation::{NSDictionary, NSString, NSURL};
@@ -27,6 +33,8 @@ pub struct LaunchRequest {
     /// A bundle id or an app name, looked up among the installed apps.
     pub bundle_id: Option<String>,
     pub arguments: Vec<String>,
+    /// Arguments only an app that can keep documents in iCloud gets, before `arguments`.
+    pub cloud_document_arguments: Vec<String>,
     /// The whole environment `open` runs with, which the app inherits.
     pub environment: Vec<(String, String)>,
     /// Marks the process the launch starts.
@@ -130,6 +138,32 @@ fn hidden_by(signature: &str) -> bool {
     })
 }
 
+/// The entitlement that gives an app an iCloud container to keep documents in. AppKit sends an app's new documents
+/// there only when its signature holds one.
+const ICLOUD_CONTAINERS: &str = "com.apple.developer.ubiquity-container-identifiers";
+
+/// Whether the bundle's app can keep documents in iCloud, from the entitlements in its signature.
+fn keeps_documents_in_icloud(bundle: &str) -> bool {
+    let output = Command::new("/usr/bin/codesign")
+        .args(["-d", "--entitlements", "-", "--xml"])
+        .arg(bundle)
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+    output.is_ok_and(|output| names_icloud_container(&output.stdout))
+}
+
+/// Whether entitlements, the XML property list `codesign` prints, name an iCloud container.
+fn names_icloud_container(entitlements: &[u8]) -> bool {
+    let Ok((list, _)) = propertylist::create_with_data(CFData::from_buffer(entitlements), propertylist::kCFPropertyListImmutable) else { return false };
+    let list = unsafe { CFType::wrap_under_create_rule(list) };
+    let Some(entitlements) = list.downcast::<CFDictionary>() else { return false };
+    let Some(containers) = entitlements.find(CFString::from_static_string(ICLOUD_CONTAINERS).as_CFTypeRef()) else { return false };
+    unsafe { CFType::wrap_under_get_rule(*containers) }.downcast::<CFArray>().is_some_and(|containers| !containers.is_empty())
+}
+
 /// Starts a new instance of the app with `open -n`, run with exactly the
 /// environment given (LaunchServices hands the app the environment of the
 /// process that asks), and finds the process it started: the new copy whose
@@ -164,7 +198,11 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
         command.arg("-g");
     }
     command.arg("--env").arg(format!("{TOKEN_VARIABLE}={token}"));
-    command.arg(&bundle).arg("--args").args(&request.arguments);
+    command.arg(&bundle).arg("--args");
+    if keeps_documents_in_icloud(&bundle) {
+        command.args(&request.cloud_document_arguments);
+    }
+    command.args(&request.arguments);
     if hides_environment(&bundle) {
         command.arg(TOKEN_ARGUMENT).arg(&token);
     }
@@ -224,7 +262,7 @@ fn launched(pid: i32, bundle: &str, bundle_id: &str) -> Launched {
 
 #[cfg(test)]
 mod tests {
-    use super::hidden_by;
+    use super::{hidden_by, names_icloud_container};
 
     #[test]
     fn tells_which_signatures_hide_the_environment() {
@@ -235,5 +273,17 @@ mod tests {
         ));
         assert!(hidden_by("CodeDirectory v=20400 size=1 flags=0x800(restrict) hashes=1\n"));
         assert!(!hidden_by("CodeDirectory v=20500 size=1 flags=0x10000(runtime) hashes=1\nAuthority=Developer ID Application: Slack Technologies\n"));
+    }
+
+    #[test]
+    fn tells_which_entitlements_name_an_icloud_container() {
+        let entitlements = |body: &str| format!(r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>{body}</dict></plist>"#);
+        // TextEdit, a sandboxed app with no iCloud container, a container list left empty, and an unsigned app (`codesign` prints nothing).
+        assert!(names_icloud_container(
+            entitlements("<key>com.apple.developer.ubiquity-container-identifiers</key><array><string>com.apple.TextEdit</string></array>").as_bytes()
+        ));
+        assert!(!names_icloud_container(entitlements("<key>com.apple.security.app-sandbox</key><true/>").as_bytes()));
+        assert!(!names_icloud_container(entitlements("<key>com.apple.developer.ubiquity-container-identifiers</key><array/>").as_bytes()));
+        assert!(!names_icloud_container(b""));
     }
 }

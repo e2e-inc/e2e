@@ -107,6 +107,8 @@ export interface DesktopDriver {
     path?: string;
     bundleId?: string;
     arguments: readonly string[];
+    /** Arguments only an app that can keep documents in iCloud gets, before `arguments`. */
+    cloudDocumentArguments: readonly string[];
     environment: Readonly<Record<string, string>>;
     token: string;
     activate: boolean;

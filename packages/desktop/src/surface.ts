@@ -40,7 +40,7 @@ import {
 import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
 import { toCombo } from './keys.ts';
 import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_POLL_MS, LAUNCH_TOKEN, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
-import { launchArgumentList } from './launch-arguments.ts';
+import { launchArgumentLists } from './launch-arguments.ts';
 import { ROOT_ID, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
@@ -74,14 +74,6 @@ const QUIT = new Error('the app quit');
 
 /** The cause of a screenshot withheld because its secure fields could not be shown masked, which the harness reads as masking it could not prove. */
 const UNMASKED = new Error('the secure fields of the screenshot could not be placed');
-
-/**
- * Launch arguments every launch gets first: no window or document the app saved at its last quit comes back, and a
- * document-based app with iCloud Documents autosaves a new document on this Mac, not into iCloud Drive, where each
- * run would leave one behind and sync it. First, because the last of a repeated user default wins: the target's own
- * `app.launchArguments` override these.
- */
-const FRESH_STATE_ARGUMENTS = ['-ApplePersistenceIgnoreState', 'YES', '-NSDocumentSaveNewDocumentsToCloud', 'NO'];
 
 /** The most elements one driver snapshot reads (`MAX_NODES` in `crates/e2e-desktop-napi/src/snapshot.rs`): a larger window is read in part. */
 const MAX_SNAPSHOT_NODES = '8,000';
@@ -407,7 +399,7 @@ export class DesktopSurface {
     const start = (): Promise<Envelope<Launched>> =>
       (started = driver.launch({
         ...('path' in target ? { path: target.path } : { bundleId: target.bundleId }),
-        arguments: [...FRESH_STATE_ARGUMENTS, ...launchArgumentList(this.app)],
+        ...launchArgumentLists(this.app),
         environment: this.appEnv,
         token,
         // In the background unless `headed` or the run's `--headed`: otherwise the app takes the keyboard from whoever is at the Mac.

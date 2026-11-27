@@ -106,10 +106,11 @@ the app in the foreground, but only `desktop({ headed: true })` turns on the
 physical input described below. When the engine launched it
 before, it quits that copy first. A copy you opened yourself is left alone,
 and the engine never reads or drives it. Every test ends with the app quit,
-and no window the app saved at its last quit comes back. A document-based
-app saves new documents on this Mac by default, not in iCloud Drive: the
-engine launches it with `-NSDocumentSaveNewDocumentsToCloud NO`. To change
-that, set `NSDocumentSaveNewDocumentsToCloud: true` in `app.launchArguments`.
+and no window the app saved at its last quit comes back. An app that
+can keep documents in iCloud saves new ones on this Mac by default, not in
+iCloud Drive: the engine launches it with
+`-NSDocumentSaveNewDocumentsToCloud NO`. To change that, set
+`NSDocumentSaveNewDocumentsToCloud: true` in `app.launchArguments`.
 
 ```ts title="tests/sign-in.e2e.ts"
 import { test } from '@e2e-dev/desktop';

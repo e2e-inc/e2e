@@ -100,6 +100,8 @@ pub struct LaunchOptions {
     pub path: Option<String>,
     pub bundle_id: Option<String>,
     pub arguments: Vec<String>,
+    /// Arguments only an app that can keep documents in iCloud gets, before `arguments`.
+    pub cloud_document_arguments: Vec<String>,
     /// The whole environment the app is started with, beside launchd's own.
     pub environment: HashMap<String, String>,
     /// Marks the process the launch starts, as `E2E_DESKTOP_LAUNCH`.
@@ -124,6 +126,7 @@ pub async fn launch(options: LaunchOptions) -> Value {
             path: options.path,
             bundle_id: options.bundle_id,
             arguments: options.arguments,
+            cloud_document_arguments: options.cloud_document_arguments,
             environment,
             token: options.token,
             activate: options.activate,

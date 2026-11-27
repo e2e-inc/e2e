@@ -149,28 +149,9 @@ async function deadPid(): Promise<number> {
 describe('DesktopSurface: launching', () => {
   it("passes the target's launch arguments after its own, an object spelled as user defaults", async () => {
     const { fake } = await launched({}, { launchArgumentValues: { AppleLanguages: ['fr'], e2e: true } });
-    expect(last<{ arguments: string[] }>(fake, 'launch')?.arguments).toEqual([
-      '-ApplePersistenceIgnoreState',
-      'YES',
-      '-NSDocumentSaveNewDocumentsToCloud',
-      'NO',
-      '-AppleLanguages',
-      '(fr)',
-      '-e2e',
-      'YES',
-    ]);
-  });
-
-  it("puts the target's own value for a fresh-state default last, where macOS reads it over the engine's", async () => {
-    const { fake } = await launched({}, { launchArgumentValues: { NSDocumentSaveNewDocumentsToCloud: true } });
-    expect(last<{ arguments: string[] }>(fake, 'launch')?.arguments).toEqual([
-      '-ApplePersistenceIgnoreState',
-      'YES',
-      '-NSDocumentSaveNewDocumentsToCloud',
-      'NO',
-      '-NSDocumentSaveNewDocumentsToCloud',
-      'YES',
-    ]);
+    const sent = last<{ arguments: string[]; cloudDocumentArguments: string[] }>(fake, 'launch');
+    expect(sent?.arguments).toEqual(['-ApplePersistenceIgnoreState', 'YES', '-AppleLanguages', '(fr)', '-e2e', 'YES']);
+    expect(sent?.cloudDocumentArguments).toEqual(['-NSDocumentSaveNewDocumentsToCloud', 'NO']);
   });
 
   it('launches the app by id in the background, and reads only the windows of the process it launched', async () => {
