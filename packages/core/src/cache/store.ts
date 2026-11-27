@@ -354,6 +354,8 @@ export class FileCacheStore implements CacheStore {
       // A file of another shape is not a record a writer left, and is not the store's to remove.
       if (typeof name !== 'string' || typeof yamlDigest !== 'string' || typeof lock !== 'string' || basename(name) !== name) return;
       const yaml = await this.readCapped(this.path(name, RECORDING_EXTENSION));
+      // A YAML there that could not be read says nothing of which one it is: the record waits for a read that can.
+      if (yaml !== undefined && yaml.head === undefined) return;
       if (yaml?.text !== undefined && digest(yaml.text) === yamlDigest) {
         await writeFileAtomic(this.path(name, LOCK_EXTENSION), lock, { mode: 0o600 });
       }

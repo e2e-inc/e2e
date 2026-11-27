@@ -742,6 +742,22 @@ describe('FileCacheStore', () => {
       expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toEqual([]);
     });
 
+    // Root reads anything, and Windows ignores the mode: neither has a YAML it cannot open.
+    it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('keeps the record while the YAML cannot be read, and finishes the pair once it can', async () => {
+      const { directory, store } = await makeStore();
+      await store.write(KEY, payload());
+      await killedWriter(directory, '.lock.json');
+      await chmod(yamlPath(directory), 0o000);
+      try {
+        expect((await store.read(OTHER_KEY, step('ios'))).status).not.toBe('hit');
+        expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toHaveLength(1);
+      } finally {
+        await chmod(yamlPath(directory), 0o600);
+      }
+      expect((await store.read(OTHER_KEY, step('ios'))).status).toBe('hit');
+      expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toEqual([]);
+    });
+
     it('settles nothing when not writable, and reads the pair as it is', async () => {
       const { directory, store } = await makeStore();
       await store.write(KEY, payload());
