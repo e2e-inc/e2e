@@ -52,6 +52,25 @@ describe('nodeOp', () => {
     expect(await run(await element('#inside'), 'checkEditable')).toEqual({ ok: true });
   });
 
+  it('takes a modal dialog in a shadow root as open, and a modal under an inert element as out of its reach, as Chromium does', async () => {
+    await window.setContent(`<input id="file" type="file"><span id="host"></span><div inert><dialog id="nested"><input id="free"></dialog></div><script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<dialog><p>Shadow modal</p></dialog>';
+    </script>`);
+    const inert = { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
+    await window.inPage(() => (document.getElementById('host')!.shadowRoot!.querySelector('dialog') as HTMLDialogElement).showModal());
+    expect(await run(await element('#file'), 'checkFileInput')).toEqual(inert);
+    await window.inPage(() => {
+      (document.getElementById('host')!.shadowRoot!.querySelector('dialog') as HTMLDialogElement).close();
+      (document.getElementById('nested') as HTMLDialogElement).showModal();
+    });
+    // What Chromium says: the input inside the modal takes focus.
+    expect(await window.inPage(() => {
+      document.getElementById('free')!.focus();
+      return document.activeElement?.id;
+    })).toBe('free');
+    expect(await run(await element('#free'), 'checkEditable')).toEqual({ ok: true });
+  });
+
   it('hit-tests through a slot and a shadow host, and names the element that covers the point', async () => {
     await window.setContent(`
       <div id="host"><button id="slotted" style="width:100px;height:40px">S</button></div>

@@ -107,21 +107,28 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
     if (control?.matches(':disabled') === true) return true;
     return above(target, '[aria-disabled]')?.getAttribute('aria-disabled')?.toLowerCase() === 'true';
   };
+  /** Whether a modal dialog is open in the root or in any open shadow root under it. */
+  const modalOpen = (root: Document | ShadowRoot): boolean => {
+    if (root.querySelector('dialog:modal') !== null) return true;
+    for (const element of root.querySelectorAll('*')) if (element.shadowRoot !== null && modalOpen(element.shadowRoot)) return true;
+    return false;
+  };
   /**
-   * Whether the element is inert: an `inert` element holds it in the tree as
-   * rendered (through the slot it is assigned to and the shadow host of each
-   * root it sits in), or a modal dialog is open and it is outside every one,
-   * which makes it inert with no attribute to show it.
+   * Whether the element is inert, as Chromium has it: an `inert` element
+   * holds it in the tree as rendered (through the slot it is assigned to and
+   * the shadow host of each root it sits in), or a modal dialog is open and
+   * it is outside every one, which makes it inert with no attribute to show
+   * it. An open modal dialog is in the top layer, out of reach of an `inert`
+   * above it.
    */
   const isInert = (target: Element): boolean => {
-    let inModal = false;
     for (let at: Element | null = target; at !== null; ) {
       if (at.hasAttribute('inert')) return true;
-      inModal ||= at.matches('dialog:modal');
+      if (at.matches('dialog:modal')) return false;
       const root = at.getRootNode();
       at = at.assignedSlot ?? at.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
     }
-    return !inModal && target.ownerDocument.querySelector('dialog:modal') !== null;
+    return modalOpen(target.ownerDocument);
   };
   /** Whether the element holds focus within its own document or shadow root. */
   const holdsFocus = (target: Element): boolean => {
