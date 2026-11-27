@@ -104,6 +104,9 @@ describe('writeTracePages', () => {
         }),
       ],
     });
+    // The test's own recording file is there: the guest's step still does not name it.
+    mkdirSync(path.join(root, '.e2e', 'cache'), { recursive: true });
+    writeFileSync(path.join(root, '.e2e', 'cache', 'auth-opens.yml'), RECORDING);
     await writeTracePages(reportDocument({ status: 'passed', results: [guest] }), new Set([guest.id]), { projectRoot: root, resultsRoot: dir, cacheDir: path.join(root, '.e2e', 'cache') });
     const [page] = readdirSync(dir);
     const text = readFileSync(path.join(dir, page!, 'trace.md'), 'utf8');
