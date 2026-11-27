@@ -80,6 +80,18 @@ export async function unpackFiles(files: string): Promise<Buffer> {
   try {
     return await inflate(Buffer.from(files, 'base64'), { maxOutputLength: MAX_OUTPUT_BYTES });
   } catch {
-    throw invalidState('the saved session holds app data this engine cannot read');
+    throw unreadableFiles();
   }
 }
+
+/**
+ * The refusal of app data a restore will not put in place. What a tar unpacks
+ * to is judged on the unpacked tree, never on its headers: no two tar
+ * programs read those alike.
+ */
+export function unreadableFiles(): EngineError {
+  return invalidState('the saved session holds app data this engine cannot restore: only files, directories, and symlinks, with no hard links');
+}
+
+/** Where a restore unpacks inside the app's data, so the files in place go only once their replacement is whole. */
+export const STAGING = '.e2e-restore';

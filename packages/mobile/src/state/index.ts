@@ -29,7 +29,7 @@ const PLATFORMS: Readonly<Record<MobilePlatform, PlatformState>> = { ios, androi
 const APP_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** What every platform's snapshot says about itself. */
-const Origin = z.object({ platform: z.enum(['ios', 'android']), app: z.string().regex(APP_ID) });
+const Origin = z.object({ platform: z.enum(['ios', 'android']), app: z.string().max(255).regex(APP_ID) });
 
 export async function captureAppState(target: StateTarget, signal: AbortSignal): Promise<EngineState> {
   assertTarget(target);
@@ -39,7 +39,7 @@ export async function captureAppState(target: StateTarget, signal: AbortSignal):
 export async function restoreAppState(target: StateTarget, state: EngineState, signal: AbortSignal): Promise<void> {
   assertTarget(target);
   if (state.format !== STATE_FORMAT || state.version !== STATE_VERSION) {
-    throw invalidState(`unsupported state format ${state.format}@${String(state.version)}`);
+    throw invalidState(`the saved session is not a ${STATE_FORMAT} version ${String(STATE_VERSION)} state`);
   }
   const origin = Origin.safeParse(state.data);
   if (!origin.success) throw invalidState('the saved session is not a mobile app state');

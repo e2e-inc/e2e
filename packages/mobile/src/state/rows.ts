@@ -9,15 +9,21 @@ import { invalidState } from '../support.ts';
 import { failure } from './host.ts';
 
 const COLUMN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const SCALAR = /^(?:NULL|-?\d+(?:\.\d+)?(?:e[+-]?\d+)?|X'(?:[0-9A-Fa-f]{2})*')$/i;
+
 /**
- * What `quote()` emits: NULL, a number, a blob, or a string with its quotes
- * doubled. Nothing else may reach a statement. No NUL in a string: the
- * sqlite3 shell cuts its input line there, closing quote included.
+ * Whether `value` is what `quote()` emits: NULL, a number, a blob, or a
+ * string with its quotes doubled. Nothing else may reach a statement. No NUL
+ * in a string: the sqlite3 shell cuts its input line there, closing quote
+ * included. A string is checked without a pattern, which a long one overflows.
  */
-const LITERAL = /^(?:NULL|-?\d+(?:\.\d+)?(?:e[+-]?\d+)?|X'[0-9A-Fa-f]*'|'(?:[^'\0]|'')*')$/i;
+function isLiteral(value: string): boolean {
+  if (!value.startsWith("'")) return SCALAR.test(value);
+  return value.length >= 2 && value.endsWith("'") && !value.includes('\0') && !value.slice(1, -1).replaceAll("''", '').includes("'");
+}
 
 /** Rows of one table, column name to literal. A snapshot is input: this is what keeps a crafted one out of a statement. */
-export const Rows = z.array(z.record(z.string().regex(COLUMN), z.string().regex(LITERAL)));
+export const Rows = z.array(z.record(z.string().regex(COLUMN), z.string().refine(isLiteral)));
 export type Row = z.infer<typeof Rows>[number];
 
 /** Runs statements on a store's database with the sqlite3 shell and returns its output. */

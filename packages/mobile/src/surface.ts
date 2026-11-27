@@ -2023,8 +2023,13 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     const target = this.stateTarget('session.save()');
     // Leaving the app is when it, and the system on its behalf (cookies), writes what it still holds in memory.
     await this.command('session.save()', (client) => client.command.home(this.selection()), operation.signal);
-    const state = await captureAppState(target, operation.signal);
-    await this.openApp(target.app, { relaunch: true }, operation.signal);
+    const relaunch = () => this.openApp(target.app, { relaunch: true }, operation.signal);
+    const state = await captureAppState(target, operation.signal).catch(async (error: unknown) => {
+      // A capture stops the app and changes nothing, so the app comes back; why the capture failed is what the test hears.
+      await relaunch().catch(() => undefined);
+      throw error;
+    });
+    await relaunch();
     return state;
   }
 
