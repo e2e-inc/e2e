@@ -230,17 +230,17 @@ describe('scrollTo out of budget', () => {
     expect((await offsets()).top).toBe(0);
   });
 
-  it('says the budget ran out, not stale, when the screen\'s pane left and the page stayed busy past the budget', async () => {
-    // The page does not scroll, so the screen scrolls the pane. The pane removes itself on its first scroll,
-    // then the page blocks past the budget right after that jump reads, so the next jump finds the pane gone too late.
-    await page.setContent(`<!doctype html><body style="margin: 0"><div id="pane" style="height: 100vh; overflow-y: auto">${ROWS}</div>
+  it('says the budget ran out, not stale, when the located pane left and the page stayed busy past the budget', async () => {
+    // The pane removes itself, and the located row with it, on its first scroll; then the page blocks past the
+    // budget right after that jump reads, so the next jump finds the pane gone with no budget left to find it again.
+    await page.setContent(`<!doctype html><body style="margin: 0"><div id="pane" style="height: 100vh; overflow-y: auto"><p id="first">Row 0</p>${ROWS}</div>
       <script>
         document.getElementById('pane').addEventListener('scroll', (event) => {
           event.target.remove();
           requestAnimationFrame(() => setTimeout(() => { const end = Date.now() + 1_000; while (Date.now() < end); }, 0));
         }, { once: true });
       </script></body>`);
-    const failure = await scroll('bottom', undefined, 800).catch((cause: unknown) => cause);
+    const failure = await scroll('bottom', '#first', 800).catch((cause: unknown) => cause);
     expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT', message: 'the budget ran out after 1 jump, before a jump confirmed the bottom edge' });
   });
 
@@ -401,6 +401,9 @@ describe('scrollTo on a node', () => {
     ['body', 'contain: style'],
     ['body', 'container-type: inline-size'],
     ['body', 'container-type: size'],
+    ['body', 'container-type: anchored'],
+    ['html', 'container-type: anchored'],
+    ['body', 'container-type: scroll-state anchored'],
     ['html', 'contain: layout'],
   ])('scrolls a body whose overflow stays its own under %s { %s }, from a node and from the screen', async (on, style) => {
     const content = (form: string) => `<!doctype html><html style="${on === 'html' ? style : ''}">`
