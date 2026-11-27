@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { instructionDigest, paramsDigest } from '@e2e-dev/core/lib/cache/identity';
 import { holdsFileLock, withFileLock } from '@e2e-dev/core/lib/cache/file-lock';
 import { FileCacheStore, MAX_CACHE_WIRE_BYTES } from '@e2e-dev/core/lib/cache/store';
+import { expandTrace, templateTrace, type ParamTemplate } from '@e2e-dev/core/lib/cache/template';
 import { MAX_TRACE_TEST_ID_CHARS, type ActionTrace, type TraceProvenance } from '@e2e-dev/core/lib/cache/trace';
 import { bound } from '@e2e-dev/core/lib/internal/text';
 import { MAX_PARAMS_DEPTH, validateJsonValue } from '@e2e-dev/core/lib/internal/json-value';
@@ -302,6 +303,20 @@ describe('FileCacheStore', () => {
     await store.delete(KEY, longFile);
     expect((await store.read(KEY, longFile)).status).toBe('miss');
     expect(await readdir(directory)).toEqual([]);
+  });
+
+  it('replays a unique() value whose parameter is named with a quote', async () => {
+    const { store } = await makeStore();
+    const customer = (value: string): ParamTemplate[] => [{ pointer: '/Customer "ID"', value }];
+    const typed = payload('web', {
+      actions: [{ name: 'type', summary: 'type "acme-123" into textbox "Customer"', target: { role: 'textbox', name: 'Customer' }, value: 'acme-123' }],
+    });
+    await store.write(KEY, templateTrace(typed, customer('acme-123'))!);
+    const read = await store.read(KEY, step());
+    expect(read.status).toBe('hit');
+    // The summary the YAML's reader makes quotes the slot, escaping the quotes in its name.
+    const replayed = read.status === 'hit' ? expandTrace(read.entry.payload, customer('acme-456')) : undefined;
+    expect(replayed?.actions[0]).toMatchObject({ value: 'acme-456', summary: 'type "acme-456" into textbox "Customer"' });
   });
 
   it('names an agent other than the default on its step', async () => {

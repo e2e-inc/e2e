@@ -22,6 +22,7 @@
  * as a miss.
  */
 
+import { summarizeRecordedAction } from '../agent/actions.ts';
 import { normalizeText } from '../internal/text.ts';
 import type { JsonValue } from '../types.ts';
 import { mapTraceText, type ActionTrace } from './trace.ts';
@@ -274,8 +275,24 @@ export function templateTrace(trace: ActionTrace, templates: readonly ParamTempl
 /**
  * The recording as replayed: placeholders filled from this call's templates,
  * or undefined when the entry names a parameter this call did not mark.
+ *
+ * An action summary that spells a placeholder is made again from the filled
+ * action rather than filled: a summary is prose made from the action, which
+ * quotes the value and so escapes a quote in the parameter's name, and
+ * filling it would look for a parameter of another name.
  */
 export function expandTrace(trace: ActionTrace, templates: readonly ParamTemplate[]): ActionTrace | undefined {
   const values = new Map(templates.map((template) => [template.pointer, template.value]));
-  return mapTraceText(trace, (text) => expandText(text, values));
+  const made = new Set<number>();
+  const actions = trace.actions.map((action, index) => {
+    if (action.name === 'tool' || !action.summary.includes(PLACEHOLDER_PREFIX)) return action;
+    made.add(index);
+    return { ...action, summary: '' };
+  });
+  const expanded = mapTraceText({ ...trace, actions }, (text) => expandText(text, values));
+  if (expanded === undefined || made.size === 0) return expanded;
+  return {
+    ...expanded,
+    actions: expanded.actions.map((action, index) => (made.has(index) && action.name !== 'tool' ? { ...action, summary: summarizeRecordedAction(action) } : action)),
+  };
 }
