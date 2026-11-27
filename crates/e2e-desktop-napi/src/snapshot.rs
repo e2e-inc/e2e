@@ -1305,6 +1305,22 @@ mod tests {
         }
 
         #[test]
+        fn reads_a_row_partly_in_view_and_folds_only_rows_wholly_out_of_it() {
+            // Rows 10 points off the grid: row 4 (90-110) and row 9 (190-210) are partly in view, so they are read.
+            let rows: Vec<Fake> = (0..20)
+                .map(|index| {
+                    let row = row(&format!("Task {index}"), f64::from(index) * 20.0 + 10.0);
+                    if !(4..=9).contains(&index) { row.failing("AXChildren", ax::AX_CANNOT_COMPLETE) } else { row }
+                })
+                .collect();
+            let tree = whole(&scrolled(rows));
+            assert!(tree.complete, "nothing inside a folded row was read");
+            let folded: Vec<usize> = named(&tree, "Tasks").children.iter().map(|child| child.folded).collect();
+            assert_eq!(folded, [4, 0, 0, 0, 0, 0, 0, 10], "rows 0-3 and 10-19 fold, 4-9 are read");
+            assert!(has(&tree, "Task 4") && has(&tree, "Task 9"));
+        }
+
+        #[test]
         fn folds_no_row_that_holds_the_focus_and_nothing_outside_a_list() {
             let field = Fake::new("AXTextField").description("Note").frame(4.0, 400.0, 200.0, 20.0).with("AXFocused", Value::Bool(true));
             let editing = Fake::new("AXRow").frame(0.0, 400.0, 300.0, 20.0).children(vec![field.clone()]);
