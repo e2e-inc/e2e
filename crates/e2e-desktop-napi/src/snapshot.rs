@@ -662,12 +662,15 @@ impl<E: Accessible> Walk<E> {
         let role = if root && read.role == "unknown" { "window" } else { read.role };
         // A row a scroll area holds wholly out of view is folded: one request read its frame, and nothing else of it is
         // read. A 200-row list costs what its visible rows cost, and a locator or an agent reads those rows, as a
-        // virtualized list on a phone shows them. A scroll brings a folded row into view, where it is read whole.
+        // virtualized list on a phone shows them. A scroll brings a folded row into view, where it is read whole. A
+        // selected row is read wherever it is, as a focused one is: `getByRole('row', { selected: true })` after a
+        // `selectOption` finds the row it chose, as a browser's selected option is found out of view.
         if rows
             && role != "scrollbar"
             && let (Some(bounds), Some(clip)) = (read.bounds, clip)
             && outside(bounds, clip)
             && !self.focus_path.contains(element)
+            && read.selected != Some(true)
         {
             return Some(RawNode::folded());
         }
@@ -1327,6 +1330,13 @@ mod tests {
             let app = Fake::default().with("AXFocusedUIElement", Value::Element(field));
             let tree = read(&scrolled(vec![row("Task 0", 100.0), editing]), &app, 30, false, Instant::now() + Duration::from_secs(60)).expect("a tree");
             assert!(named(&tree, "Note").states.contains(&"focused"), "the row being typed into is read whole");
+
+            // Nor a selected row: a select chose it, and the selection reads it out of view.
+            let chosen = row("Task 40", 900.0).with("AXSelected", Value::Bool(true));
+            let tree = whole(&scrolled(vec![row("Task 0", 100.0), row("Task 39", 880.0), chosen]));
+            let folded: Vec<usize> = named(&tree, "Tasks").children.iter().map(|child| child.folded).collect();
+            assert_eq!(folded, [0, 1, 0], "only the row neither selected nor in view folds");
+            assert!(has(&tree, "Task 40") && nodes(&tree.tree).iter().any(|node| node.role == "row" && node.states.contains(&"selected")));
 
             // A pane's child out of view is read as offscreen: only a list's rows fold.
             let pane = Fake::new("AXGroup").description("Pane").children(vec![button("Far").frame(0.0, 900.0, 80.0, 20.0)]);
