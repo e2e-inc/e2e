@@ -78,22 +78,22 @@ export function detectWorkspacePackageManager(
 ): ProjectManager {
   const project = path.resolve(dir);
   const own = managerAt(project) ?? workspaceGlobs(project)?.manager;
-  if (own !== undefined) return projectManager(own, project);
+  if (own !== undefined) return projectManager(own, project, env);
   for (let current = path.dirname(project); ; current = path.dirname(current)) {
     const workspace = workspaceGlobs(current);
     if (workspace !== undefined) {
       const member = includesPackage(workspace.globs, path.relative(current, project).split(path.sep).join('/'));
-      if (member) return projectManager(managerAt(current) ?? workspace.manager ?? invokingManager(env), current);
+      if (member) return projectManager(managerAt(current) ?? workspace.manager ?? invokingManager(env), current, env);
       break;
     }
     if (path.dirname(current) === current) break;
   }
-  return projectManager(invokingManager(env), project);
+  return projectManager(invokingManager(env), project, env);
 }
 
 /** `manager` as the manager of the install rooted at `root`. */
-export function projectManager(manager: PackageManager, root: string): ProjectManager {
-  return { manager, root, yarnBerry: manager === 'yarn' && usesYarnBerry(root) };
+export function projectManager(manager: PackageManager, root: string, env: NodeJS.ProcessEnv = process.env): ProjectManager {
+  return { manager, root, yarnBerry: manager === 'yarn' && usesYarnBerry(root, env) };
 }
 
 /** The lockfile names every manager writes, for a caller that must put one back. */
@@ -104,18 +104,28 @@ function invokingManager(env: NodeJS.ProcessEnv): PackageManager {
   return isPackageManager(invoking) ? invoking : 'npm';
 }
 
-/** The manager `dir` names itself: its `packageManager` field, else its lockfile. */
+/** The manager `dir` names itself: its `packageManager` field, else its `devEngines` pin, else its lockfile. */
 function managerAt(dir: string): PackageManager | undefined {
-  const field = readPackageManifest(dir)?.['packageManager'];
-  return fieldManager(typeof field === 'string' ? field : undefined) ?? lockfileManager(dir);
+  const manifest = readPackageManifest(dir);
+  const field = manifest?.['packageManager'];
+  return fieldManager(typeof field === 'string' ? field : undefined) ?? devEnginesManager(manifest) ?? lockfileManager(dir);
+}
+
+/** The one manager `devEngines.packageManager` names, or undefined when it names none or lists several. */
+function devEnginesManager(manifest: Record<string, unknown> | undefined): PackageManager | undefined {
+  const devEngines = manifest?.['devEngines'];
+  const pin = isPlainObject(devEngines) ? devEngines['packageManager'] : undefined;
+  const name = isPlainObject(pin) ? pin['name'] : undefined;
+  return typeof name === 'string' && isPackageManager(name) ? name : undefined;
 }
 
 /**
  * Whether the Yarn project rooted at `root` is on Yarn 2 or later: it has a
  * `.yarnrc.yml`, else its `packageManager` field names the version, else its
- * lockfile is in the format Yarn 1 does not write.
+ * lockfile is in the format Yarn 1 does not write, else, for a project not
+ * installed yet, the Yarn that invoked the current process is.
  */
-function usesYarnBerry(root: string): boolean {
+function usesYarnBerry(root: string, env: NodeJS.ProcessEnv): boolean {
   if (existsSync(path.join(root, '.yarnrc.yml'))) return true;
   const field = readPackageManifest(root)?.['packageManager'];
   const major = typeof field === 'string' ? /^yarn@(\d+)/u.exec(field)?.[1] : undefined;
@@ -123,7 +133,8 @@ function usesYarnBerry(root: string): boolean {
   try {
     return /^__metadata:/mu.test(readFileSync(path.join(root, 'yarn.lock'), 'utf8'));
   } catch {
-    return false;
+    const invoking = /^yarn\/(\d+)/u.exec(env['npm_config_user_agent'] ?? '')?.[1];
+    return invoking !== undefined && Number(invoking) >= 2;
   }
 }
 

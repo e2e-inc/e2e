@@ -72,6 +72,17 @@ describe('planMcpRegistration', () => {
     expect(toml!.content).toBe('# Keep this comment\n[mcp_servers.e2e]\ncommand = "pnpm"\nargs = ["exec","e2e","mcp"]\nstartup_timeout_sec = 30\n');
   });
 
+  it('keeps what an entry passes to e2e mcp, and drops what it passed to its old launcher', () => {
+    writeFileSync(path.join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { e2e: { command: 'npx', args: ['-y', 'e2e', 'mcp', '--target', 'web', '--headed'] } } }));
+    mkdirSync(path.join(dir, '.codex'));
+    writeFileSync(path.join(dir, '.codex/config.toml'), '[mcp_servers.e2e]\ncommand = "npx"\nargs = ["e2e", "mcp", "--target", "web"]\n');
+    const [json, toml] = planMcpRegistration(dir, ['.mcp.json', '.codex/config.toml'], { manager: 'pnpm', yarnBerry: false }).registrations;
+    expect(JSON.parse(json!.content)).toEqual({ mcpServers: { e2e: { command: 'pnpm', args: ['exec', 'e2e', 'mcp', '--target', 'web', '--headed'] } } });
+    expect(toml!.content).toBe('[mcp_servers.e2e]\ncommand = "pnpm"\nargs = ["exec","e2e","mcp","--target","web"]\n');
+    writeFileSync(path.join(dir, '.mcp.json'), json!.content);
+    expect(planMcpRegistration(dir, ['.mcp.json'], { manager: 'pnpm', yarnBerry: false }).registrations).toEqual([]);
+  });
+
   it('registers Codex in its project TOML config and discovers it on the next run', () => {
     const [plan] = planMcpRegistration(dir, ['.codex/config.toml'], NPM).registrations;
     expect(plan!.content).toContain('[mcp_servers.e2e]');
