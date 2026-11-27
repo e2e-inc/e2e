@@ -15,6 +15,10 @@ function scroll(at?: string): RecordedAction {
   return { name: 'scroll', summary: 'scroll down', direction: 'down', ...(at === undefined ? {} : { at }) };
 }
 
+function navigate(url: string, at?: string): RecordedAction {
+  return { name: 'navigate', summary: `navigate to ${url}`, url, ...(at === undefined ? {} : { at }) };
+}
+
 function back(at?: string): RecordedAction {
   return { name: 'back', summary: 'go back', ...(at === undefined ? {} : { at }) };
 }
@@ -336,6 +340,17 @@ describe('findReplayedDetours', () => {
     const pages = flow([tap('About', '/', 'link'), back('/about'), tap('Increment', '/')], { endPath: '/' });
     expect(findReplayedDetours({ ...pages, detours: [{ from: 0, to: 2 }] }, 2, { stop: '/', places: [] })).toHaveLength(1);
     expect(findReplayedDetours({ ...pages, detours: [{ from: 0, to: 2 }] }, 2, { stop: '/diverted', places: [] })).toEqual([]);
+  });
+
+  it('reads a span again inside when the replay saw that its return at the stop did not happen', () => {
+    // Home, About, Echo, back to About, then Home: the way Home now leads to Storage, where the replay stopped.
+    const stored = flow(
+      [tap('About', '/', 'link'), navigate('/echo', '/about'), back('/echo'), tap('Home', '/about', 'link'), tap('Increment', '/')],
+      { endPath: '/' },
+    );
+    expect(findReplayedDetours({ ...stored, detours: [{ from: 0, to: 4 }] }, 4, { stop: '/storage', places: ['/', '/about', '/echo', '/about'] })).toEqual([
+      { from: 1, to: 3, at: '/about', via: '/echo', evidence: 'locations' },
+    ]);
   });
 
   it('counts no return at an end the replay saw stay off the recorded route', () => {

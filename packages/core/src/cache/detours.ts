@@ -205,7 +205,7 @@ export function findReplayedDetours(
   // Where the action the replay stopped at was recorded, or the recorded end when it ran them all.
   const atEnd = executed >= trace.actions.length;
   const next = atEnd ? trace.endPath : trace.actions[executed]?.at;
-  const confirmed = ({ from, to }: TraceDetour): boolean => {
+  const confirmed = ({ from, to }: { readonly from: number; readonly to: number }): boolean => {
     if (to < executed || live === undefined || next === undefined) return true;
     if (atEnd) return false;
     const home = live.places[from];
@@ -219,15 +219,17 @@ export function findReplayedDetours(
   };
   const spans = trace.detours;
   if (spans === undefined) return findDetours(ran);
-  const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to <= executed) }, routeLocation);
-  const cut = spans.filter(({ from, to }) => from < executed && executed < to);
+  const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to <= executed) }, routeLocation).filter(confirmed);
+  // A span the hand-off cut through, or one that came back at the stop where the replay saw it did not, is read again inside.
+  const cut = spans.filter(({ from, to }) => from < executed && (executed < to || (to === executed && !finished.some((span) => span.from === from))));
   const inCut = cut.flatMap((span) => {
     // Every place here is the entry's, spelled as it stores them.
     const inside = { actions: ran.actions.slice(span.from), ...(next === undefined ? {} : { endPath: next }) };
     const stored = new Set(Array.from({ length: inside.actions.length + 1 }, (_, index) => index));
-    return findDetours({ ...inside, stored }).map((detour) => ({ ...detour, from: detour.from + span.from, to: detour.to + span.from }));
+    const counts = ({ from, to }: { readonly from: number; readonly to: number }) => to + span.from <= span.to && confirmed({ from: from + span.from, to: to + span.from });
+    return findDetours({ ...inside, stored, counts }).map((detour) => ({ ...detour, from: detour.from + span.from, to: detour.to + span.from }));
   });
-  return [...finished, ...inCut].filter(confirmed).toSorted((a, b) => a.from - b.from);
+  return [...finished, ...inCut].toSorted((a, b) => a.from - b.from);
 }
 
 /**
