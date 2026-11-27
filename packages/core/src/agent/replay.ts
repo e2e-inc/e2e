@@ -481,7 +481,8 @@ interface Ends {
  * like `relocate` does, judging the source first as main did, so a source
  * still loading is waited for whatever the destination shows. Each end keeps
  * its twin refusal on later looks, as `relocate` does. A coordinate source
- * that can be placed on this look does not stop a wait for the destination.
+ * that can be placed on this look lets an unresolved destination wait.
+ * If both points can be placed, the current look is enough.
  * Returns the last look judged; nothing when no look could be read.
  */
 async function relocateEnds(
@@ -489,7 +490,7 @@ async function relocateEnds(
   source: TraceTargetDescriptor | undefined,
   destination: TraceTargetDescriptor | undefined,
   look: Look,
-  canPlaceSource?: (relocated: Relocated) => boolean,
+  shouldWaitForDestination?: (source: Relocated, destination: Relocated) => boolean,
 ): Promise<Ends | undefined> {
   const refused = new Set<TraceTargetDescriptor>();
   let latest: Ends | undefined;
@@ -511,7 +512,7 @@ async function relocateEnds(
     latest = { screen, ends: [from?.relocated, to?.relocated], refused: unresolved(source, from) || unresolved(destination, to) };
     if (from?.relocated.kind === 'failed') {
       if (from.wait) return undefined;
-      if (to?.wait === true && canPlaceSource?.(from.relocated) === true) return undefined;
+      if (to?.wait === true && shouldWaitForDestination?.(from.relocated, to.relocated) === true) return undefined;
       return latest;
     }
     return to?.wait === true ? undefined : latest;
@@ -597,8 +598,11 @@ async function placePoints(
   | { readonly kind: 'failed'; readonly failure: ReplayHandOffReason; readonly why?: string }
 > {
   const source = from.within;
-  const ends = await relocateEnds(host, source?.descriptor, to.within?.descriptor, look, (relocated) =>
-    source !== undefined && placeWithin(relocated, { ...source, point: from.point, viewport }) !== undefined,
+  const destination = to.within;
+  const ends = await relocateEnds(host, source?.descriptor, destination?.descriptor, look, (currentSource, currentDestination) =>
+    source !== undefined && destination !== undefined
+    && placeWithin(currentSource, { ...source, point: from.point, viewport }) !== undefined
+    && placeWithin(currentDestination, { ...destination, point: to.point, viewport }) === undefined,
   );
   if (ends === undefined) return { kind: 'failed', failure: from.within === undefined ? 'action-failed' : 'target-not-found' };
   const { width, height } = ends.screen.viewport;

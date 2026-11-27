@@ -716,6 +716,32 @@ describe('replayTrace: bare-point drags', () => {
     }
   });
 
+  it('uses the current observation when both drag points already identify a control', async () => {
+    const node = (id: string, role: string, name: string, x: number): SemanticNode => ({
+      ref: { id, revision: 'r1' }, role, name, rect: { x, y: 0, width: 150, height: 100 },
+    });
+    const card = node('card', 'button', 'Card', 25);
+    const twin = node('twin', 'button', 'Card', 225);
+    const lane = node('lane', 'region', 'Done', 425);
+    const other = node('other', 'region', 'Done', 645);
+    const extra = node('extra', 'region', 'Done', 865);
+    const drag: RecordedAction = {
+      name: 'dragAt',
+      summary: 'drag Card to Done',
+      from: { point: { x: 100, y: 50 }, within: { target: { role: 'button', name: 'Card' }, fx: 0.5, fy: 0.5 } },
+      to: { point: { x: 500, y: 50 }, within: { target: { role: 'region', name: 'Done', position: { index: 0, of: 2 } }, fx: 0.5, fy: 0.5 } },
+      viewport: VIEWPORT,
+    };
+    const drags: unknown[] = [];
+    const host = makeHost({ onAction: (name, detail) => void (name === 'dragAt' && drags.push(detail)) });
+    host.capture = async () => host.looks.length === 1
+      ? screen([card, twin, lane, other, extra])
+      : screen([card, twin, other, extra]);
+
+    expect(await replayTrace(host, trace([drag]))).toMatchObject({ completed: true, executed: 1 });
+    expect(drags).toEqual([{ from: { x: 100, y: 50 }, to: { x: 500, y: 50 } }]);
+  });
+
   it.each([
     { label: 'waits for the destination when the source point resolves same-named candidates', twinX: 220, placeable: true },
     { label: 'stops when same-named sources overlap at the recorded point', twinX: 25, placeable: false },
