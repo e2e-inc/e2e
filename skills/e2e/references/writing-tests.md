@@ -526,7 +526,7 @@ background: `waitForPopup(() => trigger)` makes it active and returns it.
 
 Patterns use Playwright's glob grammar (`*` within one path segment, `**`
 across `/`); a relative one resolves against the base URL. In strings that
-use glob syntax, e2e matches raw `"`, `<`, `>`, `` ` ``, `^`, and `'`
+use glob syntax, e2e matches raw `"`, `<`, `>`, `` ` ``, `^`, `'`, and escaped `\{` and `\}`
 according to the browser's encoding for the URL component. For example,
 a query apostrophe in an HTTP URL matches `%27`. Full reference:
 docs/reference/web.mdx, docs/browser.mdx.

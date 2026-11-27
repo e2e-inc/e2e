@@ -112,6 +112,8 @@ const ENCODED_LITERALS = new Map([
   ['<', encodedLiteral('<', PATH_QUERY_FRAGMENT)],
   ['>', encodedLiteral('>', PATH_QUERY_FRAGMENT)],
   ['^', encodedLiteral('^', URL_PATH)],
+  ['{', encodedLiteral('{', URL_PATH)],
+  ['}', encodedLiteral('}', URL_PATH)],
 ]);
 
 /**

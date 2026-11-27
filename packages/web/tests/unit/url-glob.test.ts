@@ -125,6 +125,14 @@ describe('URL globs', () => {
     expect(matches('/a^*', `${BASE}a%5E1`)).toBe(true);
   });
 
+  it('matches escaped braces against their path encoding and keeps query braces raw', () => {
+    const url = new URL('/a{b}1?x={2', BASE).href;
+    expect(url).toBe(`${BASE}a%7Bb%7D1?x={2`);
+    expect(matches('**/a\\{b\\}*', url)).toBe(true);
+    expect(matches('/a\\{b\\}*?x=\\{*', url)).toBe(true);
+    expect(matches('**/a?x=\\{*', `${BASE}a?x=%7B1`)).toBe(false);
+  });
+
   it('matches only the browser spelling in each brace alternative', () => {
     const glob = "/{search?next=,authors}/O'Neil";
     expect(matches(glob, BASE + "authors/O'Neil")).toBe(true);
