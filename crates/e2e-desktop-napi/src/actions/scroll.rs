@@ -130,6 +130,13 @@ pub(super) fn offset_to_show(start: f64, end: f64, view_start: f64, view_end: f6
 /// `Ok(true)` when it moved one. An area whose bar takes no value moves nothing, and the element stays out of view.
 pub(super) fn bring_into_view(element: &Element, what: &str) -> Outcome<bool> {
     let mut moved = false;
+    // Once one scroll bar moved, the app's content moved: no later failure can say nothing was sent.
+    scroll_areas_to(element, what, &mut moved).map_err(|failure| if moved { failure.delivered() } else { failure })?;
+    Ok(moved)
+}
+
+/// The walk `bring_into_view` makes, setting `moved` once a scroll bar took a new value.
+fn scroll_areas_to(element: &Element, what: &str, moved: &mut bool) -> Outcome<()> {
     let mut next = element.element("AXParent");
     for _ in 0..crate::snapshot::MAX_ANCESTORS {
         let Some(area) = next else { break };
@@ -157,15 +164,12 @@ pub(super) fn bring_into_view(element: &Element, what: &str) -> Outcome<bool> {
                 if !settable(&bar, "AXValue", what)? {
                     continue;
                 }
-                go(what).map_err(|failure| if moved { failure.delivered() } else { failure })?;
-                bar.set_number("AXValue", (current + offset / room).clamp(0.0, 1.0)).map_err(|error| {
-                    let failure = write_failed(error, what);
-                    if moved { failure.delivered() } else { failure }
-                })?;
-                moved = true;
+                go(what)?;
+                bar.set_number("AXValue", (current + offset / room).clamp(0.0, 1.0)).map_err(|error| write_failed(error, what))?;
+                *moved = true;
             }
         }
         next = area.element("AXParent");
     }
-    Ok(moved)
+    Ok(())
 }
