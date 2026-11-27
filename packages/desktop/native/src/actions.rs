@@ -403,6 +403,12 @@ fn menu_shown(pid: i32, before: usize, deadline: Instant) {
 
 fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
+    // A tap on a text field puts the keyboard there. AppKit's password field also offers AXConfirm, which the action
+    // choice below would send in its place, leaving the keyboard in the field before.
+    let (_, tapped_role) = role_of(element, "click")?;
+    if tapped_role == "textfield" && settable(element, "AXFocused", "click")? {
+        return focus(element, deadline);
+    }
     let names = action_names(element, "click")?;
     if let Some(action) = ["AXPress", "AXOpen", "AXConfirm"].into_iter().find(|name| names.iter().any(|candidate| candidate == name)) {
         let (ax_role, _) = role_of(element, "click")?;
