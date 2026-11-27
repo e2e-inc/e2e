@@ -40,6 +40,10 @@ test.describe('controls page', () => {
   test('reads a heading tag\'s level over its aria-level, and a progress element\'s value', async ({ screen }) => {
     await expect(screen.getByRole('heading', { name: 'Levels', level: 2 })).toHaveCount(1);
     await expect(screen.getByRole('progressbar', 'Sync')).toHaveValue('70');
+    // Clamped to its range, as the element's value is; an indeterminate one has no value at all.
+    await expect(screen.getByRole('progressbar', 'Overfull')).toHaveValue('10');
+    expect(await failure(expect(screen.getByRole('progressbar', 'Waiting')).toHaveValue('', { timeout: 500 }))).toBeDefined();
+    expect(await failure(expect(screen.getByRole('progressbar', 'Waiting')).not.toHaveValue('', { timeout: 500 }))).toBeDefined();
   });
 
   test('clears a field with a Delete key an editor sees, and focuses nothing on an element that takes no focus', async ({ screen }) => {
