@@ -89,6 +89,11 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
         };
         let forward = !physical || app.boolean("AXFrontmost") == Some(true);
         if held && forward {
+            // The first key goes only to the field, read once more as the last read before it: the reads above wait on
+            // the app, and a handler that moved focus to another field of the window meanwhile would take the key.
+            if last.is_none() && focused_element().as_ref() != Some(&entry.element) {
+                return Err(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed"));
+            }
             sent_to.replace(Some((target, count)));
             Ok(())
         } else {
