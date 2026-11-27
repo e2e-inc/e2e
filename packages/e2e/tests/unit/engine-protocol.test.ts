@@ -22,6 +22,7 @@ import {
   type EngineAttemptContext,
   type EngineHandle,
   type EngineInitInfo,
+  type EngineManifest,
   type OperationContext,
   type SemanticNode,
 } from '@e2e-dev/core/lib/engine/index';
@@ -681,6 +682,23 @@ describe('engine protocol', () => {
       expect(() => defineEngine(toy({ alwaysHeaded: 'yes' as never }))).toThrow(/alwaysHeaded must be a boolean/);
     });
 
+    it('leaves an explicit false alwaysHeaded off the handle and out of the manifest', () => {
+      const off = defineEngine(toy({ alwaysHeaded: false }));
+      expect(Object.hasOwn(off, 'alwaysHeaded')).toBe(false);
+      expect(Object.hasOwn(describeEngine(off), 'alwaysHeaded')).toBe(false);
+      const remote = connectEngine({ manifest: { ...describeEngine(off), alwaysHeaded: false }, transport: loopbackTransport(off) });
+      expect(Object.hasOwn(remote, 'alwaysHeaded')).toBe(false);
+    });
+
+    it('refuses a server that does not declare the alwaysHeaded its manifest promised, and one that declares it unasked', async () => {
+      const plain = defineEngine(toy({}));
+      const promised = connectEngine({ manifest: { ...describeEngine(plain), alwaysHeaded: true }, transport: loopbackTransport(plain) });
+      await expect(promised.init!(initInfo())).rejects.toThrow(/alwaysHeaded is false, declared true/);
+      const shown = defineEngine(toy({ alwaysHeaded: true }));
+      const unasked = connectEngine({ manifest: describeEngine(plain), transport: loopbackTransport(shown) });
+      await expect(unasked.init!(initInfo())).rejects.toThrow(/alwaysHeaded is true, declared false/);
+    });
+
     it('refuses a fileApps flag that is not a boolean', () => {
       expect(() => defineEngine(toy({ fileApps: 'yes' as never }))).toThrow(/fileApps must be a boolean/);
     });
@@ -916,7 +934,7 @@ describe('engine protocol against a server written from the messages alone', () 
               'artifacts/screenshot': async () => ({ data: Buffer.from('png bytes').toString('base64'), mediaType: 'image/png' }),
               ...overrides,
             },
-            notifications: { exit: () => server.close('exit') },
+            notifications: { initialized: () => void received.push('initialized'), exit: () => server.close('exit') },
           },
         );
         return {
@@ -947,6 +965,47 @@ describe('engine protocol against a server written from the messages alone', () 
     });
     const remote = connectEngine({ manifest: { name: 'hand', version: '1', spiVersion: 1, methods: ['engine/observe'] }, transport });
     await expect(remote.init!(initInfo())).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('protocol 999') });
+  });
+
+  describe.each(['tapModifiers', 'selectsDevice', 'grantsAllPermissions', 'launchArgumentValues', 'fileApps', 'alwaysHeaded'] as const)('a server announcing %s', (flag) => {
+    const methods = ['engine/observe', 'lifecycle/init'] as const;
+    const declared: EngineManifest = { name: 'hand', version: '1', spiVersion: 1, methods: [...methods] };
+    const announcing = (value: unknown) =>
+      handWritten([...methods], {
+        initialize: async () => ({ protocolVersion: 1, manifest: { ...declared, [flag]: value } }),
+        'lifecycle/init': async () => {
+          announced.received.push('lifecycle/init');
+          return null;
+        },
+      });
+    let announced: ReturnType<typeof handWritten>;
+
+    it.each(['yes', null, 0])('is refused before initialized when the value is %j and the declaration leaves the flag out', async (value) => {
+      announced = announcing(value);
+      const remote = connectEngine({ manifest: declared, transport: announced.transport });
+      await expect(remote.init!(initInfo())).rejects.toMatchObject({
+        code: 'ENGINE_FAILURE',
+        message: expect.stringContaining(`${flag} is ${JSON.stringify(value)}, declared false`),
+      });
+      expect(announced.received).toEqual(['transport closed']);
+    });
+
+    it('is accepted when the value is an explicit false and the declaration leaves the flag out', async () => {
+      announced = announcing(false);
+      const remote = connectEngine({ manifest: declared, transport: announced.transport });
+      await remote.init!(initInfo());
+      expect(announced.received).toEqual(['initialized', 'lifecycle/init']);
+    });
+  });
+
+  it('refuses a server announcing an isolation the protocol does not know', async () => {
+    const declared: EngineManifest = { name: 'hand', version: '1', spiVersion: 1, methods: ['engine/observe'] };
+    const { transport, received } = handWritten(['engine/observe'], {
+      initialize: async () => ({ protocolVersion: 1, manifest: { ...declared, isolation: 'forever' } }),
+    });
+    const remote = connectEngine({ manifest: declared, transport });
+    await expect(remote.init!(initInfo())).rejects.toThrow(/isolation is "forever", declared "attempt"/);
+    expect(received).toEqual(['transport closed']);
   });
 
   it('rejects a request answered with a malformed error instead of throwing out of the stream', async () => {
@@ -1023,7 +1082,7 @@ describe('engine protocol against a server written from the messages alone', () 
     expect(readFileSync(path.join(artifactsDir, relative), 'utf8')).toBe('png bytes');
     expect(facts).toEqual([{ written: 'by hand' }]);
     await remote.dispose!(cleanup);
-    expect(received).toEqual(['lifecycle/startAttempt', 'shutdown', 'transport closed']);
+    expect(received).toEqual(['initialized', 'lifecycle/startAttempt', 'shutdown', 'transport closed']);
     rmSync(artifactsDir, { recursive: true, force: true });
   });
 

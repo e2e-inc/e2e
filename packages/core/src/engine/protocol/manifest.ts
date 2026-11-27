@@ -71,9 +71,14 @@ export function manifestMismatch(declared: EngineManifest, announced: EngineMani
   return fields.map((field) => `${field} is ${show(actual[field])}, declared ${show(expected[field])}`).join('; ');
 }
 
-/** A manifest with its lists in one order and its optional flags explicit, so equal manifests compare equal. */
+/**
+ * A manifest with its lists in one order and its optional members explicit, so
+ * equal manifests compare equal. Only a member left out takes its default: a
+ * server's value of the wrong type stays as sent and differs from the declaration.
+ */
 function comparable(manifest: EngineManifest) {
   const sorted = <T extends string>(list: readonly T[] | undefined): readonly T[] => [...(list ?? [])].toSorted();
+  const flag = (value: unknown): unknown => (value === undefined ? false : value);
   return {
     name: manifest.name,
     version: manifest.version,
@@ -83,12 +88,12 @@ function comparable(manifest: EngineManifest) {
     methods: sorted<EngineMethod>(manifest.methods),
     actions: sorted(manifest.actions),
     pointerActions: sorted(manifest.pointerActions),
-    tapModifiers: manifest.tapModifiers === true,
-    selectsDevice: manifest.selectsDevice === true,
-    grantsAllPermissions: manifest.grantsAllPermissions === true,
-    launchArgumentValues: manifest.launchArgumentValues === true,
-    fileApps: manifest.fileApps === true,
-    alwaysHeaded: manifest.alwaysHeaded === true,
-    isolation: manifest.isolation === 'worker' ? 'worker' : 'attempt',
+    tapModifiers: flag(manifest.tapModifiers),
+    selectsDevice: flag(manifest.selectsDevice),
+    grantsAllPermissions: flag(manifest.grantsAllPermissions),
+    launchArgumentValues: flag(manifest.launchArgumentValues),
+    fileApps: flag(manifest.fileApps),
+    alwaysHeaded: flag(manifest.alwaysHeaded),
+    isolation: manifest.isolation === undefined ? 'attempt' : (manifest.isolation as unknown),
   };
 }
