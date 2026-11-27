@@ -282,6 +282,27 @@ describe('findDetoursAfterReplay', () => {
     expect(findDetoursAfterReplay(trace, [], 3, new Set([1, 2]))).toEqual([]);
   });
 
+  it('compares a return with the place the trip left from too, so a copied :id home links no two records', () => {
+    // A free scroll the replay ran on the end route carries the entry's `/?view=:id`; the agent never came back to account.
+    const views = flow(
+      [tap('Panel', '/?view=account', 'link'), scroll('/?view=:id'), tap('Help', '/?view=account', 'link'), back('/help'), tap('Billing', '/?view=unrelated')],
+      { endPath: '/?view=unrelated' },
+    );
+    expect(findDetoursAfterReplay(views, [], 2, new Set([1]))).toEqual([]);
+    // Two copied orders, then the agent's order 456, the cart, and order 789: no return.
+    const orders = flow([scroll('/orders/:id'), scroll('/orders/:id'), tap('Cart', '/orders/456', 'link'), tap('Order 789', '/cart', 'link')], { endPath: '/orders/789' });
+    expect(findDetoursAfterReplay(orders, [], 2, new Set([0, 1]))).toEqual([]);
+  });
+
+  it('still finds the agent\'s trip inside one it does not count', () => {
+    // From a copied `/?view=:id`: About, Storage, back to About, then another view, which spells like the copied one.
+    const trace = flow(
+      [tap('About', '/?view=:id', 'link'), tap('Storage', '/about', 'link'), back('/storage'), tap('View', '/about', 'link')],
+      { endPath: '/?view=second' },
+    );
+    expect(findDetoursAfterReplay(trace, [], 1, new Set([0]))).toEqual([{ from: 1, to: 3, at: '/about', via: '/storage', evidence: 'locations' }]);
+  });
+
   it('adds no span that crosses one the entry found, which would claim a return that never happened', () => {
     // The replay ran order 1, the list, order 2 (`back` without looking), the list; the agent then opened order 2 again and ended there.
     const trace = flow(

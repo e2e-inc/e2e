@@ -43,6 +43,12 @@ type DetourInput = Pick<ActionTrace, 'actions' | 'startPath' | 'endPath' | 'trun
   readonly stored?: ReadonlySet<number>;
   /** Spans already settled: the scan starts in none and crosses none. */
   readonly bounds?: readonly Pick<TraceDetour, 'from' | 'to'>[];
+  /**
+   * Whether a trip counts, judged before the scan moves past it, so a trip
+   * inside one that does not is still found: `home` is the place the scan
+   * started from, `from` the action that left, `to` where it came back.
+   */
+  readonly counts?: (trip: { readonly home: number; readonly from: number; readonly to: number }) => boolean;
 };
 
 /** One stretch of a recording that left a screen and came back to it with nothing typed, chosen, or set on the way. */
@@ -165,8 +171,10 @@ export function findDetoursAfterReplay(
 ): TraceDetour[] {
   // A trip from a place the replay copied from the entry back to one the agent saw compares them by spelling, which
   // cannot tell a record or view from another when it holds `:id` (as `findReplayedDetours` rules at the stop).
-  const unproven = ({ from }: TraceDetour) => kept.has(from) && routeLocation(trace.actions[from]?.at ?? '').includes(':id');
-  const found = findDetours({ ...trace, stored: kept, bounds: replayed }).filter((detour) => detour.to >= executed && !unproven(detour));
+  const unproven = (index: number) => kept.has(index) && routeLocation(trace.actions[index]?.at ?? '').includes(':id');
+  const counts = ({ home, from, to }: { readonly home: number; readonly from: number; readonly to: number }) =>
+    to >= executed && !unproven(home) && !unproven(from);
+  const found = findDetours({ ...trace, stored: kept, bounds: replayed, counts });
   const spans = [...replayed, ...found].map(({ from, to }) => ({ from, to })).toSorted((x, y) => x.from - y.from);
   // This run's places are live addresses: named as an entry spells them, as `byLocations` names its own.
   return recorded({ ...trace, detours: spans }, routeLocation);
@@ -314,7 +322,8 @@ function byLocations(trace: DetourInput): TraceDetour[] {
       if (changesState(actions[to - 1]!)) break;
       const place = where[to];
       if (place === undefined) continue;
-      if (!samePlace(from, to)) {
+      // Home is where the scan started and where the trip left from: a stored spelling matches both a record and another one.
+      if (!samePlace(from, to) || !samePlace(left, to)) {
         via ??= place;
       } else if (via === undefined) {
         left = to;
@@ -323,7 +332,7 @@ function byLocations(trace: DetourInput): TraceDetour[] {
         break;
       }
     }
-    if (back === undefined || via === undefined) {
+    if (back === undefined || via === undefined || trace.counts?.({ home: from, from: left, to: back }) === false) {
       from += 1;
       continue;
     }
