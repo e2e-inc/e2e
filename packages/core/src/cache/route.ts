@@ -165,6 +165,7 @@ function queryPairs(search: string, mint: boolean): (readonly [string, string])[
   return pairs.toSorted(([a, x], [b, y]) => (a === b ? compareText(x, y) : compareText(a, b)));
 }
 
+/** Code-unit order, so a query's pairs sort alike on every machine. */
 function compareText(a: string, b: string): number {
   if (a === b) return 0;
   return a < b ? -1 : 1;

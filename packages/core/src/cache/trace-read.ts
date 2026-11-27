@@ -215,6 +215,7 @@ function readRecordedAction(document: unknown): RecordedAction | undefined {
   return at === undefined ? action : { ...action, at };
 }
 
+/** One stored action without its provenance (`at`), which `readRecordedAction` adds. */
 function readActionBody(document: unknown): RecordedAction | undefined {
   if (typeof document !== 'object' || document === null || Array.isArray(document)) {
     return undefined;
