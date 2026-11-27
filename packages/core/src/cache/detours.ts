@@ -163,7 +163,10 @@ export function findDetoursAfterReplay(
   executed: number,
   kept: ReadonlySet<number>,
 ): TraceDetour[] {
-  const found = findDetours({ ...trace, stored: kept, bounds: replayed }).filter(({ to }) => to >= executed);
+  // A trip from a place the replay copied from the entry back to one the agent saw compares them by spelling, which
+  // cannot tell a record or view from another when it holds `:id` (as `findReplayedDetours` rules at the stop).
+  const unproven = ({ from }: TraceDetour) => kept.has(from) && routeLocation(trace.actions[from]?.at ?? '').includes(':id');
+  const found = findDetours({ ...trace, stored: kept, bounds: replayed }).filter((detour) => detour.to >= executed && !unproven(detour));
   const spans = [...replayed, ...found].map(({ from, to }) => ({ from, to })).toSorted((x, y) => x.from - y.from);
   // This run's places are live addresses: named as an entry spells them, as `byLocations` names its own.
   return recorded({ ...trace, detours: spans }, routeLocation);

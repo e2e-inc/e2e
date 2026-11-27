@@ -273,6 +273,15 @@ describe('findDetoursAfterReplay', () => {
     ]);
   });
 
+  it('finds no return to a copied location that reads :id, which could be another view', () => {
+    // The replay left the account view by `back`-free taps it ran without looking, so their places are the entry's `/?view=:id`; it stopped on another view.
+    const trace = flow(
+      [tap('Panel', '/?view=account', 'link'), tap('Help', '/?view=:id', 'link'), back('/help'), tap('Billing', '/?view=unrelated')],
+      { endPath: '/?view=unrelated' },
+    );
+    expect(findDetoursAfterReplay(trace, [], 3, new Set([1, 2]))).toEqual([]);
+  });
+
   it('adds no span that crosses one the entry found, which would claim a return that never happened', () => {
     // The replay ran order 1, the list, order 2 (`back` without looking), the list; the agent then opened order 2 again and ended there.
     const trace = flow(
