@@ -107,6 +107,20 @@ the way a user would.
     are the whole public surface: the flows, stores, and fetch behind them
     are module-private, not a library for other products. `tests/live/` holds hand-run
     checks that need a stored login and are never part of `pnpm test`.
+- `crates/e2e-util` and `crates/e2e-util-napi` - a logic crate with no
+  binding dependency, tested with `cargo test` alone, and its Node binding,
+  which only converts types, schedules work off the JavaScript thread, and
+  maps errors. `pnpm --filter @e2e-dev/util build:native` (the `util` entry
+  in `scripts/native/addons.ts`) builds `packages/util/util.<platform>.node`.
+- `packages/util` - `@e2e-dev/util`, the loader and TypeScript API over
+  `e2e-util-napi`: PNG decode and encode, box resampling, crop, box
+  painting, and a bit-exact port of pixelmatch 8, every pixel call a
+  Promise run on a native pool, a decoded image kept native as
+  `NativeImage`. The addon loads on the first call. `@e2e-dev/core`'s
+  `internal/image.ts` and `@e2e-dev/mobile`'s masking use it; its
+  `tests/` hold it to the JavaScript it replaced, byte for byte, and
+  `bench/` times both. A prototype (ENG-1543): no platform packages are
+  published yet, so it loads only a checkout build.
 - `packages/web` — the published `@e2e-dev/web` package: the
   browser engine, built with the public `defineEngine`, contributing the
   `browser` fixture and `expect(browser)`. `@e2e-dev/web/engine` (and
