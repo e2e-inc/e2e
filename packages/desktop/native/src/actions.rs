@@ -23,6 +23,9 @@ const MENU_SHOW_WAIT: Duration = Duration::from_millis(1_000);
 
 /// How often an effect is polled.
 const POLL: Duration = Duration::from_millis(30);
+/// How long before the deadline a wait that ends in a refusal gives up: the engine cuts the call off at that same
+/// deadline, and a refusal that came after it would read as input that may have reached the app.
+const ANSWER_MARGIN: Duration = Duration::from_millis(200);
 
 /// What `act` does.
 pub enum Action {
@@ -407,10 +410,11 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     // choice below would send in its place, leaving the keyboard in the field before.
     // A disabled AppKit button may still offer AXPress and acknowledge it while ignoring it: wait within the action's
     // budget for it to be enabled, as an actionability wait does, and refuse it if it stays disabled.
+    let refuse_at = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
     loop {
         match element.attribute("AXEnabled") {
             Ok(value) if value.boolean() == Some(false) => {
-                if Instant::now() + POLL >= deadline {
+                if Instant::now() + POLL >= refuse_at {
                     return Err(Failure::refused(codes::ACTION_FAILED, "the control is disabled"));
                 }
                 go("click")?;
