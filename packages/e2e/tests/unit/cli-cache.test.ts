@@ -216,6 +216,13 @@ describe('e2e cache show', () => {
     cwd.mockRestore();
     expect(process.exitCode).toBe(0);
     expect(written(stdoutSpy)).toContain('summary    the bare capture');
+    // A bare name that is neither a file nor hex digits may be a digest typed wrong.
+    const missing = vi.spyOn(process, 'cwd').mockReturnValue(root);
+    await invoke('cache', 'show', '4f1c0a9d3b6g');
+    missing.mockRestore();
+    expect(process.exitCode).toBe(2);
+    expect(written(stderrSpy)).toContain('4f1c0a9d3b6g: no such file, and not an entry digest, which is hex digits; e2e cache ls lists the entries');
+    process.exitCode = undefined;
     const torn = path.join(root, 'saved', 'torn.json');
     writeFileSync(torn, '{ not json', 'utf8');
     await invoke('cache', 'show', torn);

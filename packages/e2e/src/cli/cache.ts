@@ -84,7 +84,9 @@ const DIGEST_PREFIX_CHARS = 12;
 async function cache(command: CacheCommand | { readonly show: string }, options: CacheOptions = {}): Promise<number> {
   // A path names its own file, wherever it is and whatever its name: a copied
   // recording or another package's entry is read as it is, with no config.
-  if (typeof command === 'object' && isFilePath(command.show)) return await showFile(path.resolve(options.cwd ?? process.cwd(), command.show));
+  if (typeof command === 'object' && isFilePath(command.show)) {
+    return await showFile(path.resolve(options.cwd ?? process.cwd(), command.show), path.basename(command.show) === command.show);
+  }
   let directory: string;
   try {
     directory = await resolveCacheDirectory(options);
@@ -328,10 +330,12 @@ function findEntry(contents: CacheContents, ref: string): CacheEntrySummary | un
  * The file is read the way the store reads one, by size and through the
  * trace-1 reader, so what prints is what a run would replay.
  */
-async function showFile(file: string): Promise<number> {
+async function showFile(file: string, bare = false): Promise<number> {
   const entry = await readEntryFile(file);
   if (typeof entry === 'string') {
-    process.stderr.write(`${plain(file)}: ${entry}\n`);
+    // A bare name that is no file may be a digest typed wrong.
+    const hint = bare && entry === 'no such file' ? ', and not an entry digest, which is hex digits; e2e cache ls lists the entries' : '';
+    process.stderr.write(`${plain(file)}: ${entry}${hint}\n`);
     return 2;
   }
   const trace = entry.payload;
