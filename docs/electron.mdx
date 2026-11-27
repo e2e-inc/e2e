@@ -6,7 +6,7 @@ description: Test an Electron app through Chromium's accessibility tree, window 
 `@e2e-dev/electron` tests Electron apps. It launches your app, reads each
 window through Chromium's accessibility tree over the DevTools protocol, and
 drives it with trusted input. Tests use the same `agent`, `screen`, and
-`expect` APIs as browser tests.
+`expect` APIs as tests on every other platform.
 
 ## Set up
 
@@ -35,8 +35,7 @@ your setup.
 
 Set `app.appPath` to your app's directory or main script, relative to the
 project root. Extra flags in `app.launchArguments` are appended to every
-launch. In the config below, set `ADA_PASSWORD` to at least 6 characters
-before running.
+launch.
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -55,6 +54,9 @@ export default {
   },
 } satisfies E2EConfig;
 ```
+
+The `credentials` block is the test user for the sign-in test below. See
+[Credentials](/authentication#credentials).
 
 ## Write a test
 
@@ -83,9 +85,6 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
   expect(userData).toContain('e2e-electron-');
 });
 ```
-
-`getByRole`, `getByLabel`, `getByText`, `getByPlaceholder`, and `getByTestId`
-(`data-testid` by default) work as they do on the web.
 
 ## The electron fixture
 
