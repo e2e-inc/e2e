@@ -119,6 +119,8 @@ test.describe('controls page', () => {
     // Chromium leaves this label's text out of its tree; a tap on it toggles the checkbox.
     await screen.getByText('Drawn by its label').tap();
     await expect(drawn).not.toBeChecked();
+    // A label with an empty for names no control: a checkbox with no box and no id stays hidden beside it.
+    await expect(screen.getByTestId('ghost-box')).toBeHidden();
     // The field a label names is no second match for the label's words.
     await expect(screen.getByText('Tracked')).toHaveCount(1);
     // A text query scoped to the element that holds the text finds it.

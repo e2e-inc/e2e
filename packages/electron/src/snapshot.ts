@@ -178,7 +178,8 @@ export class DomSnapshot {
    */
   drawnByLabel(index: number): boolean {
     const id = this.attributesAt(index)['id'];
-    const labels = [...this.labelsFor.get(id ?? '') ?? []];
+    // An empty `for` names no element, as `label.control` reads it.
+    const labels = id === undefined || id === '' ? [] : [...(this.labelsFor.get(id) ?? [])];
     for (let at = this.parents[index] ?? -1; at >= 0; at = this.parents[at] ?? -1) if (this.nameAt(at) === 'LABEL') labels.push(at);
     return labels.some((label) => {
       const box = this.boxes.get(label);
