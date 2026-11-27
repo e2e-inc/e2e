@@ -55,13 +55,18 @@ const metadata = JSON.parse(execFileSync(run.file, [...run.prefix, 'metadata', '
 const built = path.join(metadata.target_directory, target, 'release', library(addon.crate, target));
 replaceAddon(built, path.join(addon.packageDir, name));
 if (values.out !== undefined) {
-  mkdirSync(values.out, { recursive: true });
-  replaceAddon(built, path.join(values.out, name));
-  const manifest = path.join(values.out, 'package.json');
-  if (existsSync(manifest)) {
-    const { version } = JSON.parse(readFileSync(manifest, 'utf8')) as { version: string };
-    writeFileSync(path.join(values.out, '.build.json'), `${JSON.stringify({ version })}\n`);
+  // Relative to where the command was typed: `pnpm --filter` runs the script in the package, and sets INIT_CWD to that directory.
+  const out = path.resolve(process.env.INIT_CWD ?? process.cwd(), values.out);
+  const manifest = path.join(out, 'package.json');
+  const platformPackage = existsSync(manifest) ? (JSON.parse(readFileSync(manifest, 'utf8')) as { name: string; version: string; main?: string }) : undefined;
+  // A platform package takes only the addon its `main` names: one for another platform would be stamped and published as its.
+  if (platformPackage?.main !== undefined && platformPackage.main !== name) {
+    throw new Error(`${platformPackage.name} ships ${platformPackage.main}, not ${name}; build it with the --target its cpu names`);
   }
+  mkdirSync(out, { recursive: true });
+  replaceAddon(built, path.join(out, name));
+  if (platformPackage !== undefined) writeFileSync(path.join(out, '.build.json'), `${JSON.stringify({ version: platformPackage.version })}\n`);
+  process.stdout.write(`built ${path.join(out, name)}\n`);
 }
 process.stdout.write(`built ${path.join(addon.packageDir, name)}\n`);
 

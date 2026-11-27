@@ -188,6 +188,17 @@ Integration tests need Chromium:
 pnpm --filter @e2e-dev/web exec playwright-core install chromium
 ```
 
+The desktop engine runs a native driver, the Rust crate
+`crates/e2e-desktop-napi`, which `pnpm build` leaves out. To run the
+desktop engine or `apps/desktop-testbed` on a Mac, build it with
+[rustup](https://rustup.rs) installed (rustup installs the toolchain
+`rust-toolchain.toml` pins), and again after its sources change; the engine
+refuses a build older than them:
+
+```sh
+pnpm --filter @e2e-dev/desktop build:native
+```
+
 Docs are part of the change, not a follow-up. A behavior change updates its
 page under `docs/` in the same review, and `skills/e2e/` when the
 skill describes that surface.
