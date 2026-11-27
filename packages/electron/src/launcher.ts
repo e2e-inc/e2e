@@ -169,6 +169,8 @@ export class ElectronProcess {
     if (pid === undefined) return;
     try {
       if (process.platform === 'win32') {
+        // taskkill finds the tree by its root, and an exited process is no root: its pid names nothing, or a process of someone else's.
+        if (this.child.exitCode !== null || this.child.signalCode !== null) return;
         const { status, error } = spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', timeout: TASKKILL_MS });
         if (error !== undefined || status !== 0) throw error ?? new Error(`taskkill exited with ${status}`);
       } else {

@@ -206,7 +206,8 @@ test.describe('controls page', () => {
 
   test('says a window\'s renderer crashed, and reads it again once the app reloads it', async ({ screen, electron }) => {
     await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer());
-    const crashed = await failure(screen.getByRole('heading', 'Controls').waitFor({ timeout: 1000 }));
+    // The crash is known when Chromium reports it, which on Windows is after it wrote a crash dump.
+    const crashed = await failure(screen.getByRole('heading', 'Controls').waitFor({ timeout: 10_000 }));
     expect(crashed).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('renderer crashed') });
     // The crashed window is still one of the app's windows; its document cannot answer, so its title is the OS window's.
     const [crashedWindow] = electron.windows();
@@ -244,7 +245,10 @@ test.describe('an app that quits on its own', () => {
     await app.open();
     await electron.evaluate(({ app: main }) => setTimeout(() => main.quit(), 50));
     await expect.poll(() => electron.windows().length).toBe(0);
-    expect(await failure(screen.getByRole('button', 'Sign in').tap({ timeout: 1000 }))).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('quit on its own') });
+    // The app has quit once its process is gone, which on Windows can be seconds after its last window closed.
+    const refused = (): Promise<unknown> => failure(screen.getByRole('button', 'Sign in').tap({ timeout: 1000 }));
+    await expect.poll(refused, { timeout: 30_000 }).toMatchObject({ code: 'APP_NOT_OPEN' });
+    expect(await refused()).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('quit on its own') });
   });
 });
 

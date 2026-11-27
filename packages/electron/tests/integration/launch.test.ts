@@ -61,7 +61,12 @@ function appWith(body: string, launchArguments: readonly string[] = []): Launche
 
 /** The processes started from an app's directory that are still alive. */
 function processesOf(directory: string): string[] {
-  if (process.platform === 'win32') return [];
+  if (process.platform === 'win32') {
+    // The directory goes in by the environment, so the query's own command line does not name it.
+    const query = 'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($env:E2E_APP_DIRECTORY) } | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }';
+    const listed = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', query], { encoding: 'utf8', env: { ...process.env, E2E_APP_DIRECTORY: directory } });
+    return listed.split(/\r?\n/).filter((line) => line.trim() !== '');
+  }
   return execFileSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' }).split('\n').filter((line) => line.includes(directory));
 }
 
@@ -187,7 +192,7 @@ describe('quit', () => {
     await polite.launch();
     await polite.app.quit({ timeoutMs: 5000 }, 5000);
     expect(processesOf(polite.directory)).toEqual([]);
-    expect(() => execFileSync('ls', [path.join(polite.directory, 'quit-handled')])).not.toThrow();
+    expect(existsSync(path.join(polite.directory, 'quit-handled'))).toBe(true);
 
     const stubborn = appWith(`app.on('before-quit', (event) => event.preventDefault()); app.whenReady().then(() => { ${LOADED}; });`);
     await stubborn.launch();

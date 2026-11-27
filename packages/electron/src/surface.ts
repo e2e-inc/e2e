@@ -47,6 +47,7 @@ import type { ElectronMainModule } from './fixtures.ts';
 import { closedWindow, invalidState, notActionable } from './errors.ts';
 import { ensureFfmpeg } from './ffmpeg.ts';
 import { outsideApp } from './file-bound.ts';
+import { AppData } from './app-data.ts';
 import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
 import { locateIn, projectRead, readWindow, type ProjectionContext, type RawRead } from './locate.ts';
 import { checkLaunchArguments, type ResolvedElectronOptions } from './options.ts';
@@ -83,6 +84,7 @@ export class ElectronSurface {
   private readonly windowList = new Windows();
   private readonly dialogs = new DialogRouter();
   private readonly app: AppProcess;
+  private readonly appData = new AppData();
 
   constructor(private readonly options: ResolvedElectronOptions) {
     this.app = new AppProcess(options, this.windowList, this.dialogs);
@@ -120,7 +122,7 @@ export class ElectronSurface {
     this.recordings = 0;
     this.dialogs.reset();
     // The app's data lives here for the whole attempt: `app.restart()` keeps it, `app.clearState()` empties it.
-    this.userDataDir = mkdtempSync(path.join(tmpdir(), 'e2e-electron-'));
+    this.userDataDir = this.appData.create();
     return Promise.resolve();
   }
 
@@ -129,9 +131,9 @@ export class ElectronSurface {
     this.recorder = undefined;
     await uncollected?.abandon().catch(() => undefined);
     await this.app.serialized(() => this.app.quit(context, DISCARD_CLOSE_MS));
-    // Retried: Chromium's helper processes can still be closing their files in it.
-    if (this.userDataDir !== undefined) rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    const { userDataDir } = this;
     this.userDataDir = undefined;
+    if (userDataDir !== undefined) await this.appData.discard(userDataDir);
     if (this.uploadsDir !== undefined) rmSync(this.uploadsDir, { recursive: true, force: true });
     this.uploadsDir = undefined;
     this.attempt = undefined;
@@ -143,7 +145,11 @@ export class ElectronSurface {
   }
 
   async dispose(context: EngineCleanupContext): Promise<void> {
-    await this.endAttempt(context);
+    try {
+      await this.endAttempt(context);
+    } finally {
+      await this.appData.close();
+    }
   }
 
   // --- the app ---
@@ -160,10 +166,11 @@ export class ElectronSurface {
   reset(operation: OperationContext): Promise<void> {
     return this.app.serialized(async () => {
       await this.app.quit(operation, DISCARD_CLOSE_MS);
-      if (this.userDataDir !== undefined) {
-        rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-        // As private as mkdtemp made it: the app's data is no other local user's to list.
-        mkdirSync(this.userDataDir, { recursive: true, mode: 0o700 });
+      const { userDataDir } = this;
+      if (userDataDir !== undefined) {
+        // A new directory, not the old one emptied: the app that just quit can still hold files in the old one.
+        this.userDataDir = this.appData.create();
+        await this.appData.discard(userDataDir);
       }
       await this.launch(operation);
     });
