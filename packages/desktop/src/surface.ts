@@ -239,6 +239,8 @@ export class DesktopSurface {
   private chosenWindow: string | undefined;
   /** A window the agent's own step opened while the test had one chosen, which the agent reads and acts in while it is open (see `follow`). */
   private followed: string | undefined;
+  /** The agent step `followed` and `agentSeen` belong to: another step starts from the chosen window again. */
+  private followStep: string | undefined;
   /** The windows the agent's newest read listed while a window was chosen; none before its first read, and after a read of the test's own. */
   private agentSeen: ReadonlySet<string> | undefined;
   /**
@@ -525,6 +527,7 @@ export class DesktopSurface {
     this.chosenWindow = id;
     this.followed = undefined;
     this.agentSeen = undefined;
+    this.followStep = undefined;
     // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
     this.pointWindow = undefined;
     // The video records what `screen` reads, from now on, not from the next read.
@@ -581,16 +584,20 @@ export class DesktopSurface {
    * While a window is active, the agent follows a window its own step opened
    * (Preferences, from a button it pressed): one its previous read did not
    * list, that is the app's key window now, and that is not a dialog macOS
-   * put over the app. It reads and acts there while that window is open. The
-   * test's own steps stay on the active window, and a read of the test's ends
-   * the following, so the next agent step starts from the active window again.
+   * put over the app. It reads and acts there while that window is open, for
+   * the rest of that step: an operation's `agentStep` names the step,
+   * replayed from the cache too, where `origin` is the test's. The test's own
+   * steps stay on the active window, and the next agent step starts from it
+   * again.
    */
-  private follow(windows: readonly RawWindow[], origin: OperationContext['origin']): string | undefined {
+  private follow(windows: readonly RawWindow[], operation: Pick<OperationContext, 'agentStep'>): string | undefined {
     const active = this.activeChoice(windows);
-    if (active === undefined || origin !== 'agent') {
+    const step = operation.agentStep;
+    if (active === undefined || step === undefined || step !== this.followStep) {
       this.followed = undefined;
       this.agentSeen = undefined;
-      return active;
+      this.followStep = step;
+      if (active === undefined || step === undefined) return active;
     }
     // A list that came back empty (the app quit) is no evidence of a window the agent opened next.
     if (windows.length === 0) return this.followed ?? active;
@@ -605,7 +612,7 @@ export class DesktopSurface {
 
   /** The window `follow` answers for an operation, from the windows listed now. */
   private inUse(windows: readonly RawWindow[], operation: OperationContext): RawWindow | undefined {
-    const id = this.follow(windows, operation.origin);
+    const id = this.follow(windows, operation);
     return id === undefined ? byPreference(windows)[0] : windows.find((window) => window.id === id);
   }
 
@@ -749,6 +756,7 @@ export class DesktopSurface {
     this.chosenWindow = undefined;
     this.followed = undefined;
     this.agentSeen = undefined;
+    this.followStep = undefined;
     this.bindings.clear();
     this.ids.clear();
   }
@@ -832,7 +840,7 @@ export class DesktopSurface {
   /** One read for `capture`: the app's windows, and the first of those asked for that accessibility can read. */
   private async readWindows(operation: OperationContext, windowId?: string, forMask = false, whole = false): Promise<WindowsRead> {
     const windows = await this.ownWindows(operation, true);
-    const target = windowId ?? this.follow(windows, operation.origin);
+    const target = windowId ?? this.follow(windows, operation);
     if (windows.length === 0 && this.pid !== undefined) this.unlessLocked();
     // A window the list no longer has is closed: its identities go, so windows opened and closed one after another do not pile them up.
     const open = new Set(windows.map((window) => window.id));
@@ -1504,11 +1512,12 @@ export class DesktopSurface {
    * Makes sure a menu bar command goes to the window `screen` reads: the menu bar acts on the app's key window, so with
    * an active window that is not the key window, the command would act on another one. Without `physicalInput` that is
    * refused, nothing sent, as a key to a window that is not the key window is; with it, the active window comes forward
-   * first. With no window active, `screen` reads the focused window, which is the key window.
+   * first. With no window active, `screen` reads the focused window, which is the key window. An agent step's window
+   * is the one it followed, if any (`follow`).
    */
   private async keyWindowForMenu(pid: number, label: string, operation: OperationContext): Promise<void> {
     const windows = await this.ownWindows(operation);
-    const active = this.activeChoice(windows);
+    const active = this.follow(windows, operation);
     if (active === undefined || windows.find((window) => window.id === active)?.is_focused === true) return;
     if (!this.options.physicalInput) {
       throw notActionable(`${label}: the active window is not the app's key window, and the menu bar acts on the key window, so nothing was pressed; activate the key window, or set desktop({ physicalInput: true }) to bring the active one forward`);

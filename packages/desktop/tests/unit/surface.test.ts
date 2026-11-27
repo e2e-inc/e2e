@@ -709,26 +709,28 @@ describe('DesktopSurface: reading', () => {
       });
     const read = (fake: FakeDriver) => (last(fake, 'snapshot') as { windowId: string }).windowId;
     const main = { id: 'w-main', title: 'Inbox' };
+    /** An operation of agent step `id`: the agent's own, or the test's while the step replays from the cache. */
+    const step = (id: string, origin: 'agent' | 'test' = 'agent') => ({ ...operation(origin), agentStep: id });
 
     it("follows a window that opened and took focus after the agent's read, and leaves the test on the active one", async () => {
       const list = { current: [{ ...main, is_focused: true }] as readonly Record<string, unknown>[] };
       const fake = app(list);
       const { surface } = await launched(fake, { observe: false });
       await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
-      await surface.observe(operation('agent'), undefined);
+      await surface.observe(step('1'), undefined);
       expect(read(fake)).toBe('w-main');
       list.current = [main, { id: 'w-prefs', title: 'Preferences', is_focused: true }];
-      const observed = await surface.observe(operation('agent'), undefined);
+      const observed = await surface.observe(step('1'), undefined);
       expect(read(fake)).toBe('w-prefs');
       // The agent acts on what it reads there, and a key it presses goes to that window.
-      await surface.perform(observed.root.children![0]!.ref, { kind: 'tap' }, operation('agent'));
+      await surface.perform(observed.root.children![0]!.ref, { kind: 'tap' }, step('1'));
       expect(last(fake, 'act')).toMatchObject({ ref: '@s:w-prefs', action: 'click' });
-      await surface.pressKey('Enter', operation('agent'));
+      await surface.pressKey('Enter', step('1'));
       expect(last(fake, 'press')).toMatchObject({ windowId: 'w-prefs' });
       // The test's own read stays on the active window, and the next agent step starts from it again.
       await surface.locate(testId('nowhere'), operation('test'));
       expect(read(fake)).toBe('w-main');
-      await surface.observe(operation('agent'), undefined);
+      await surface.observe(step('2'), undefined);
       expect(read(fake)).toBe('w-main');
     });
 
@@ -737,12 +739,12 @@ describe('DesktopSurface: reading', () => {
       const fake = app(list);
       const { surface } = await launched(fake, { observe: false });
       await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
-      await surface.observe(operation('agent'), undefined);
+      await surface.observe(step('1'), undefined);
       list.current = [main, { id: 'w-old', title: 'Old', is_focused: true }, { id: 'w-panel', title: 'Panel' }];
-      await surface.observe(operation('agent'), undefined);
+      await surface.observe(step('1'), undefined);
       expect(read(fake)).toBe('w-main');
       list.current = [main, { id: 'w-siri', is_focused: true, system: true }];
-      await surface.observe(operation('agent'), undefined);
+      await surface.observe(step('1'), undefined);
       expect(read(fake)).toBe('w-main');
     });
 
@@ -751,19 +753,43 @@ describe('DesktopSurface: reading', () => {
       const fake = app(list);
       const { surface } = await launched(fake, { observe: false });
       await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
-      await surface.observe(operation('agent'), undefined);
+      await surface.observe(step('1'), undefined);
       list.current = [main, { id: 'w-prefs', is_focused: true }];
-      await surface.observe(operation('agent'), undefined);
+      await surface.observe(step('1'), undefined);
       expect(read(fake)).toBe('w-prefs');
       list.current = [{ ...main, is_focused: true }];
-      await surface.observe(operation('agent'), undefined);
+      await surface.observe(step('1'), undefined);
       expect(read(fake)).toBe('w-main');
       // activate() ends the following too.
       list.current = [main, { id: 'w-prefs', is_focused: true }];
-      await surface.observe(operation('agent'), undefined);
+      await surface.observe(step('1'), undefined);
       expect(read(fake)).toBe('w-prefs');
       await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
-      await surface.observe(operation('agent'), undefined);
+      await surface.observe(step('1'), undefined);
+      expect(read(fake)).toBe('w-main');
+    });
+
+    it('follows the window in a step replayed from the cache, whose operations are the test\'s', async () => {
+      const list = { current: [{ ...main, is_focused: true }] as readonly Record<string, unknown>[] };
+      const fake = app(list);
+      const { surface } = await launched(fake, { observe: false });
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(step('1', 'test'), undefined);
+      list.current = [main, { id: 'w-prefs', title: 'Preferences', is_focused: true }];
+      await surface.observe(step('1', 'test'), undefined);
+      expect(read(fake)).toBe('w-prefs');
+    });
+
+    it('starts each agent step from the active window, with no test read between them', async () => {
+      const list = { current: [{ ...main, is_focused: true }] as readonly Record<string, unknown>[] };
+      const fake = app(list);
+      const { surface } = await launched(fake, { observe: false });
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(step('1'), undefined);
+      list.current = [main, { id: 'w-prefs', title: 'Preferences', is_focused: true }];
+      await surface.observe(step('1'), undefined);
+      expect(read(fake)).toBe('w-prefs');
+      await surface.observe(step('2'), undefined);
       expect(read(fake)).toBe('w-main');
     });
   });
