@@ -70,6 +70,10 @@ test.describe('login form', () => {
       expect(refused).toHaveProperty('code', 'POLICY_DENIED');
     } finally {
       await device.setOrientation('portrait');
+      await expect.poll(async () => {
+        const viewport = await device.viewport();
+        return viewport.height > viewport.width;
+      }).toBe(true);
     }
     await expect(screen.getByTestId('login-button')).toBeVisible();
   });
