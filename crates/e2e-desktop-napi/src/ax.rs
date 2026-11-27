@@ -9,7 +9,7 @@ use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use core_foundation_sys::array::{CFArrayGetCount, CFArrayGetValueAtIndex, CFArrayRef};
 use core_foundation_sys::base::{Boolean, CFEqual, CFGetTypeID, CFHash, CFIndex, CFRange, CFRelease, CFRetain, CFTypeID, CFTypeRef};
-use core_foundation_sys::string::{CFStringGetTypeID, CFStringRef};
+use core_foundation_sys::string::{CFStringGetCharacters, CFStringGetLength, CFStringGetTypeID, CFStringRef, UniChar};
 use std::ffi::c_void;
 use std::hash::{Hash, Hasher};
 
@@ -203,6 +203,15 @@ fn slots(decoded: Vec<Result<Value, AXError>>) -> Result<Vec<Option<Value>>, AXE
         .collect()
 }
 
+/// The whole text of a `CFString`. `CFString`'s own `to_string` reads a C string where CoreFoundation keeps one, which
+/// ends at an embedded NUL: an app's text can hold one, and what comes after it would be lost.
+pub fn text_of(string: CFStringRef) -> String {
+    let length = unsafe { CFStringGetLength(string) };
+    let mut units: Vec<UniChar> = vec![0; length.max(0) as usize];
+    unsafe { CFStringGetCharacters(string, CFRange { location: 0, length }, units.as_mut_ptr()) };
+    String::from_utf16_lossy(&units)
+}
+
 fn decode(value: CFTypeRef) -> Result<Value, AXError> {
     if value.is_null() {
         return Err(AX_NO_VALUE);
@@ -210,8 +219,7 @@ fn decode(value: CFTypeRef) -> Result<Value, AXError> {
     let kind = unsafe { CFGetTypeID(value) };
     unsafe {
         if kind == CFStringGetTypeID() {
-            let string = CFString::wrap_under_get_rule(value as CFStringRef);
-            return Ok(Value::Text(string.to_string()));
+            return Ok(Value::Text(text_of(value as CFStringRef)));
         }
         if kind == CFBoolean::type_id() {
             let boolean = CFBoolean::wrap_under_get_rule(value as _);
@@ -325,9 +333,20 @@ impl Element {
 
     /// Up to `max` elements of an array attribute, from the first.
     pub fn elements(&self, name: &str, max: usize) -> Result<Vec<Element>, AXError> {
+        self.elements_from(name, 0, max)
+    }
+
+    /// Up to the last `max` elements of an array attribute.
+    pub fn last_elements(&self, name: &str, max: usize) -> Result<Vec<Element>, AXError> {
+        let count = self.count(name)?;
+        self.elements_from(name, count.saturating_sub(max), max)
+    }
+
+    /// Up to `max` elements of an array attribute, from `start`.
+    fn elements_from(&self, name: &str, start: usize, max: usize) -> Result<Vec<Element>, AXError> {
         let key = CFString::new(name);
         let mut values: CFArrayRef = std::ptr::null();
-        let error = unsafe { AXUIElementCopyAttributeValues(self.0, key.as_concrete_TypeRef(), 0, max as CFIndex, &mut values) };
+        let error = unsafe { AXUIElementCopyAttributeValues(self.0, key.as_concrete_TypeRef(), start as CFIndex, max as CFIndex, &mut values) };
         if error != AX_SUCCESS {
             return Err(error);
         }
@@ -492,7 +511,16 @@ pub fn describe(error: AXError) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{AX_ATTRIBUTE_UNSUPPORTED, AX_CANNOT_COMPLETE, AX_INVALID_ELEMENT, AX_NO_VALUE, Value, slots};
+    use super::{AX_ATTRIBUTE_UNSUPPORTED, AX_CANNOT_COMPLETE, AX_INVALID_ELEMENT, AX_NO_VALUE, Value, slots, text_of};
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
+
+    #[test]
+    fn reads_the_whole_text_of_a_string_past_an_embedded_nul() {
+        for text in ["Alpha\0Beta", "Ünïcödé 😀", ""] {
+            assert_eq!(text_of(CFString::new(text).as_concrete_TypeRef()), text);
+        }
+    }
 
     #[test]
     fn fails_a_batch_read_on_a_stalled_or_gone_slot_and_reads_any_other_error_as_no_value() {

@@ -8,7 +8,6 @@ use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::number::CFNumber;
-use core_foundation::string::CFString;
 use core_foundation_sys::array::{CFArrayGetCount, CFArrayGetValueAtIndex};
 use core_foundation_sys::base::CFTypeRef;
 use core_foundation_sys::dictionary::{CFDictionaryGetValue, CFDictionaryRef};
@@ -89,7 +88,7 @@ fn string(dictionary: CFDictionaryRef, key: CFStringRefStatic) -> Option<String>
     if value.is_null() {
         return None;
     }
-    Some(unsafe { CFString::wrap_under_get_rule(value as _) }.to_string())
+    Some(crate::ax::text_of(value as _))
 }
 
 fn bounds(dictionary: CFDictionaryRef) -> Option<Rect> {
@@ -142,10 +141,7 @@ pub fn ax_windows(app: &Element) -> Outcome<Vec<(Element, Option<u32>)>> {
         Err(ax::AX_NO_VALUE | ax::AX_ATTRIBUTE_UNSUPPORTED) => Ok(Vec::new()),
         Err(ax::AX_INVALID_ELEMENT) => Err(Failure::refused(codes::APP_NOT_FOUND, "the app is no longer running")),
         Err(ax::AX_API_DISABLED) => Err(Failure::refused(codes::PERM_DENIED, "this process has no Accessibility permission")),
-        Err(ax::AX_CANNOT_COMPLETE) => {
-            Err(Failure::refused(codes::APP_UNRESPONSIVE, "the app did not answer its window list in time")
-                .with_details(serde_json::json!({ "retryable": true })))
-        }
+        Err(ax::AX_CANNOT_COMPLETE) => Err(unanswered()),
         // An app that has no accessibility for its windows will not have it on a later read: say so, do not wait.
         Err(ax::AX_NOT_IMPLEMENTED) => Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "the app does not expose its windows to accessibility")),
         Err(error) => Err(Failure::refused(codes::APP_UNRESPONSIVE, format!("reading the app's windows failed: {}", ax::describe(error)))
@@ -153,18 +149,31 @@ pub fn ax_windows(app: &Element) -> Outcome<Vec<(Element, Option<u32>)>> {
     }
 }
 
-/// The developer identifiers in a small subtree, `levels` deep and at most 8 children a level.
-fn identifiers(element: &Element, levels: usize) -> Vec<String> {
+/// The app did not answer a read of its windows in time: a stall, not an answer, so the list is read again.
+fn unanswered() -> Failure {
+    Failure::refused(codes::APP_UNRESPONSIVE, "the app did not answer its window list in time").with_details(serde_json::json!({ "retryable": true }))
+}
+
+/// The developer identifiers in a small subtree, `levels` deep and at most 8 children a level. A read the app did not
+/// answer in time is an error: identifiers it holds back are no proof the dialog is the app's own.
+fn identifiers(element: &Element, levels: usize) -> Result<Vec<String>, ax::AXError> {
     let mut found = Vec::new();
-    if let Some(identifier) = element.text("AXIdentifier") {
-        found.push(identifier);
+    match element.attribute("AXIdentifier") {
+        Ok(value) => found.extend(value.text().map(str::to_owned)),
+        Err(error @ ax::AX_CANNOT_COMPLETE) => return Err(error),
+        Err(_) => {}
     }
     if levels > 0 {
-        for child in element.elements("AXChildren", 8).unwrap_or_default() {
-            found.extend(identifiers(&child, levels - 1));
+        let children = match element.elements("AXChildren", 8) {
+            Ok(children) => children,
+            Err(error @ ax::AX_CANNOT_COMPLETE) => return Err(error),
+            Err(_) => Vec::new(),
+        };
+        for child in children {
+            found.extend(identifiers(&child, levels - 1)?);
         }
     }
-    found
+    Ok(found)
 }
 
 /// Whether an untitled dialog with these identifiers inside is one macOS put among the app's windows: Siri's, which
@@ -209,12 +218,19 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
             continue;
         };
         let entry = server.iter().find(|window| window.id == id);
-        let values = element.attributes(&["AXTitle", "AXMinimized", "AXPosition", "AXSize", "AXSubrole", "AXMain"]).unwrap_or_else(|_| vec![None; 6]);
+        let values = match element.attributes(&["AXTitle", "AXMinimized", "AXPosition", "AXSize", "AXSubrole", "AXMain"]) {
+            Ok(values) => values,
+            Err(ax::AX_CANNOT_COMPLETE) => return Err(unanswered()),
+            // A window that closed as it was read has none of them.
+            Err(_) => vec![None; 6],
+        };
         let title = values[0].as_ref().and_then(|value| value.text().map(str::to_owned));
         let minimized = values[1].as_ref().and_then(|value| value.boolean()).unwrap_or(false);
         let subrole = values[4].as_ref().and_then(|value| value.text());
         // Only an untitled dialog is read further: an app's own windows nearly all have titles.
-        let system = subrole == Some("AXDialog") && title.as_deref().is_none_or(|title| title.trim().is_empty()) && system_dialog(&identifiers(element, 3));
+        let system = subrole == Some("AXDialog")
+            && title.as_deref().is_none_or(|title| title.trim().is_empty())
+            && system_dialog(&identifiers(element, 3).map_err(|_| unanswered())?);
         let ax_bounds = match (&values[2], &values[3]) {
             (Some(ax::Value::Point(x, y)), Some(ax::Value::Size(width, height))) => Some(Rect { x: *x, y: *y, width: *width, height: *height }),
             _ => None,

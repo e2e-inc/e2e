@@ -100,6 +100,12 @@ export interface OpenWindow {
 /** What a target launches: a `.app` bundle on disk, or an installed app by bundle id or name. */
 type LaunchTarget = { readonly path: string; readonly label: string } | { readonly bundleId: string; readonly label: string };
 
+/** A window a point was taken in, and the sheet that held its focus then. */
+interface PointWindow {
+  readonly id: string;
+  readonly sheet: string | undefined;
+}
+
 /**
  * A launch whose outcome is unknown: its token, and the driver's answer,
  * which may still name the process it started, or say it started none
@@ -230,7 +236,7 @@ export class DesktopSurface {
    * agent's as core hit-tests it, against the newest observation. `sheet` says whether a sheet held its focus then: one
    * that opened since was not where the point was taken.
    */
-  private pointWindow: { readonly id: string; readonly sheet: string | undefined } | undefined;
+  private pointWindow: PointWindow | undefined;
   /** The newest binding of every node id an observation or a locate handed out, newest last. */
   private readonly bindings = new Map<string, NodeBinding>();
   /** The id handed out for each node identity since the app launched; see `projectSnapshot`. */
@@ -961,13 +967,12 @@ export class DesktopSurface {
     }
     const binding = this.binding(ref);
     switch (action.kind) {
-      case 'tap': {
-        const scrolled = await this.shown(binding, 'tap', operation);
-        const click = (): Promise<void> => this.refCommand('click', binding, operation);
-        if (scrolled) await afterChange('click', click);
-        else await click();
+      case 'tap':
+        // The driver waits for a disabled control first, then scrolls one a list holds out of view into view, and counts a
+        // failure after that scroll as delivered: a control that stays disabled is refused with nothing sent.
+        reachable(binding, 'tap');
+        await this.refCommand('click', binding, operation);
         break;
-      }
       case 'secondaryTap':
         // The driver checks the control offers a context menu, live, before it scrolls one out of view into view (or
         // refuses one it cannot reach), and counts a failure after that scroll as delivered: the observed actions may be
@@ -1026,7 +1031,9 @@ export class DesktopSurface {
           }).catch((cause: unknown) => Promise.reject(translate(cause, 'focus window', true)));
         }
         await this.refCommand('focus', binding, operation);
-        try {
+        // The focus already reached the app: a failure from here on may have committed, and a retry of the whole press
+        // would focus the control a second time, which an app's focus handler sees.
+        await afterChange(`press ${action.key}`, async () => {
           // The key goes to the process, which hands it to its key window: with another window that could be it, the control's must be the one shown focused.
           // A window on another Space, which the window list shows as not visible, is still the control's: with `physicalInput` the press brings it forward.
           const windows = await this.ownWindows(operation);
@@ -1039,13 +1046,7 @@ export class DesktopSurface {
           }
           // Focusing can hand focus on (a dialog it opens): the driver sends the key only while the control's own element still holds it.
           await this.sendKey(combo, window, `press ${action.key}`, operation, binding.ref);
-        } catch (cause) {
-          // The focus already moved: a retry of the whole press would focus the control a second time, which an app's focus handler sees.
-          if (cause instanceof EngineError && cause.retryable) {
-            throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `press ${action.key}: ${cause.message} (the control was already focused)`, { retryable: false, cause });
-          }
-          throw cause;
-        }
+        });
         break;
       }
       case 'selectOption':
@@ -1067,22 +1068,6 @@ export class DesktopSurface {
   /** The agent reads the screen right after acting, so its actions let the UI settle first; a test's own steps verify with `expect`. */
   private async settle(operation: OperationContext): Promise<void> {
     if (operation.origin === 'agent') await sleep(Math.min(this.options.settleMs, operation.timeoutMs), operation.signal);
-  }
-
-  /**
-   * Refuses a tap on a node the read found off screen, which accessibility would press all the same: one a scroll area
-   * holds out of view. When the driver can scroll it into view, it does, and answers only once the element shows: a
-   * fresh read could not tell a look-alike node that moved from its siblings.
-   */
-  private async shown(binding: NodeBinding, what: string, operation: OperationContext): Promise<boolean> {
-    if (binding.states?.hidden !== true) return false;
-    // Only a node a scroll area holds out of view is scrolled: the driver checks it shows by its frame and the scroll
-    // areas around it, which a minimized window or a collapsed control would pass unchanged.
-    if (binding.scrolledOut === true && binding.ref !== undefined && binding.actions.includes('ScrollTo')) {
-      await this.refCommand('scrollTo', binding, operation);
-      return true;
-    }
-    throw notActionable(`node ${binding.id} is not on screen, so a ${what} would reach a control the user cannot; scroll it into view first`);
   }
 
   /** One action on a node's ref, failures translated. */
@@ -1172,27 +1157,27 @@ export class DesktopSurface {
       );
       if (other !== undefined) throw notActionable(`a ${other.role ?? 'control'} is at the center of node ${binding.id}, so a double-click there would press it; act on that control instead`);
     }
-    this.pointWindow = binding.windowId === undefined ? undefined : { id: binding.windowId, sheet: now?.sheet };
+    // The point is measured in this read, not in the newest screen handed to the harness, which a later point still is.
+    const taken = binding.windowId === undefined ? undefined : { id: binding.windowId, sheet: now?.sheet };
     // Coming forward can reveal a control over the node: the driver checks after the move that none is under a double-click.
-    await this.pointerAt(center, { kind }, operation, kind === 'doubleTap');
+    await this.pointerAt(center, { kind }, operation, kind === 'doubleTap', taken);
   }
 
   /** Physical pointer input at a point in the window: only with `physicalInput`, and only then declared. */
   async performAt(point: ViewportPoint, action: PointerAction, context: OperationContext): Promise<void> {
-    await this.pointerAt(point, action, context, false);
+    await this.pointerAt(point, action, context, false, this.pointWindow);
   }
 
   /**
    * `performAt`, and `content` when the point is on a node with no ref, which takes no click of its own: the driver
    * then refuses a control under the pointer after the move, not only another window.
    */
-  private async pointerAt(point: ViewportPoint, action: PointerAction, context: OperationContext, content: boolean): Promise<void> {
+  private async pointerAt(point: ViewportPoint, action: PointerAction, context: OperationContext, content: boolean, observed: PointWindow | undefined): Promise<void> {
     const operation = withDeadline(context);
     if (action.kind !== 'hover' && action.kind !== 'tap' && action.kind !== 'doubleTap' && action.kind !== 'secondaryTap') {
       throw unsupported(`the desktop engine cannot perform ${action.kind} at a point`);
     }
     // The point is in the observed window's coordinates: find that window where it is now (it may have moved), or the app's own window before any observation.
-    const observed = this.pointWindow;
     const target = observed === undefined ? await this.ownWindow(operation) : (await this.ownWindows(operation)).find((candidate) => candidate.id === observed.id);
     const window = target?.bounds;
     if (target === undefined || window === undefined) throw notActionable('the window the point was taken from is no longer on screen; observe again');
@@ -1218,9 +1203,10 @@ export class DesktopSurface {
     // A click carries no window, only screen coordinates: if another window (a sheet, a panel the app raised) took focus as this one came forward, it could be the one under the point.
     if (forward.is_focused !== true) throw notActionable('another window took focus as the window the point was taken from was brought forward, and could be under the point; observe again');
     // A sheet counts as its window's focus, for keys. The point was taken on the sheet there then (in the observation, or as this action began when none came first): one that opened since could cover it, one that closed uncovered what was under it, and one in its place is another.
+    // A hover presses nothing: the driver refuses it only when another window, a sheet included, is on top at the point.
     const sheetThen = observed === undefined ? sheetKey(target) : observed.sheet;
     const sheetNow = sheetKey(forward);
-    if (!sameSheet(sheetNow, sheetThen)) {
+    if (action.kind !== 'hover' && !sameSheet(sheetNow, sheetThen)) {
       const what = sheetThen === undefined ? 'a sheet opened over the window' : sheetNow === undefined ? 'the sheet the point was taken on closed' : 'another sheet took the place of the one the point was taken on';
       throw notActionable(`${what} since the point was taken, and the click could land on something else; observe again`);
     }
@@ -1512,8 +1498,19 @@ function holds(rect: Rect, point: { readonly x: number; readonly y: number }): b
 }
 
 /** The window a screen was read from, and the sheet that held its focus then: where a point taken in it was taken. */
-function pointIn(screen: ProjectedScreen): { readonly id: string; readonly sheet: string | undefined } | undefined {
+function pointIn(screen: ProjectedScreen): PointWindow | undefined {
   return screen.windowId === undefined ? undefined : { id: screen.windowId, sheet: screen.sheet };
+}
+
+/**
+ * Refuses a press on a node the read found off screen, which accessibility would press all the same, unless the driver
+ * can scroll it into view: one a scroll area holds out of view, with a ref and the scroll action. A minimized window's
+ * control or one with no size would pass the driver's check unchanged.
+ */
+function reachable(binding: NodeBinding, what: string): void {
+  if (binding.states?.hidden !== true) return;
+  if (binding.scrolledOut === true && binding.ref !== undefined && binding.actions.includes('ScrollTo')) return;
+  throw notActionable(`node ${binding.id} is not on screen, so a ${what} would reach a control the user cannot; scroll it into view first`);
 }
 
 /** Stands for a sheet the driver gave no key: it is never known to be the same sheet as any. */
