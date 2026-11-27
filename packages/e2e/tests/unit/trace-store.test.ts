@@ -404,6 +404,16 @@ describe('FileCacheStore', () => {
     expect(codes).toEqual([0, 0, 0, 0]);
   });
 
+  it('takes over the empty lock of a writer that died before writing its token', async () => {
+    const { directory, store } = await makeStore();
+    const lock = path.join(directory, `.${NAME}.writing`);
+    await writeFile(lock, '', 'utf8');
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lock, old, old);
+    expect(await store.write(KEY, payload())).toBeDefined();
+    expect((await store.read(KEY, step())).status).toBe('hit');
+  });
+
   it('replays a step whose act the YAML shows redacted', async () => {
     const { directory, store } = await makeStore();
     // The instruction as the entry keeps it differs from the one the key digested (a redacted secret, say).

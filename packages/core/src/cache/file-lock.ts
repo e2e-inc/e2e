@@ -37,8 +37,11 @@ const queues = new Map<string, Promise<void>>();
  */
 const heldTokens = new Map<string, string>();
 
-/** What a lock file this module writes holds: one holder's random token. */
-const LOCK_TOKEN = /^[a-f0-9]{32}$/u;
+/**
+ * What a lock file this module writes holds: one holder's random token, or
+ * nothing when the holder died between creating the file and writing it.
+ */
+const LOCK_TOKEN = /^(?:[a-f0-9]{32})?$/u;
 
 /** Whether a file's text is a lock this module wrote; anything else at a lock path is another tool's. */
 export function isLockToken(text: string): boolean {
@@ -118,7 +121,8 @@ async function acquire(lockPath: string): Promise<string> {
 
 /**
  * Whether the file at `path` is a lock a dead holder left: a token, as
- * every lock this module takes holds, older than `STALE_MS`. Any other file
+ * every lock this module takes holds (or the empty file of a holder that
+ * died before writing it), older than `STALE_MS`. Any other file
  * is another tool's, whatever its age, and is never removed.
  */
 async function isStale(path: string): Promise<boolean> {

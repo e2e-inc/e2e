@@ -227,6 +227,8 @@ describe('e2e cache clear', () => {
     writeFileSync(path.join(directory, 'a-torn.yml.0123456789abcdef.tmp'), '{}', 'utf8');
     writeFileSync(path.join(directory, '.a-torn.writing'), 'c'.repeat(32), 'utf8');
     writeFileSync(path.join(directory, '.a-torn.writing.takeover'), 'c'.repeat(32), 'utf8');
+    // A writer that died between creating its lock and writing the token in it.
+    writeFileSync(path.join(directory, '.b-torn.writing'), '', 'utf8');
     writeFileSync(path.join(directory, '.a-torn.pending'), JSON.stringify({ name: 'a-torn', yamlDigest: 'd'.repeat(64), lock: '{}' }), 'utf8');
     // A crashed writer's: old enough to be stale.
     const old = new Date(Date.now() - 60_000);
