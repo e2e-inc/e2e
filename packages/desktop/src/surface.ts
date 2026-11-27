@@ -1303,6 +1303,34 @@ export class DesktopSurface {
   }
 
   /**
+   * `app.back()`: presses the app's Back menu item through accessibility, the
+   * item titled Back or Go Back, else the one whose shortcut is Command-[. It
+   * is never a key sent on a guess: an app whose menu bar has no Back refuses
+   * with `UNSUPPORTED_CAPABILITY`, and one whose Back is disabled (nothing to
+   * go back to) with `NOT_ACTIONABLE`, and neither is sent anything.
+   */
+  async back(context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    const { pid } = this;
+    if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
+    await this.requireRunning();
+    // As for `tryRef`: a press still unsent once the call is given up is never sent.
+    const inputId = this.requireDriver().inputId();
+    try {
+      await this.input((driver, timeoutMs) => driver.pressBack({ pid, inputId, timeoutMs }), {
+        label: 'app.back()',
+        input: true,
+        signal: operation.signal,
+        timeoutMs: operation.timeoutMs,
+        onCutOff: () => this.driver?.cancelInput(inputId),
+      });
+    } catch (cause) {
+      throw translate(cause, 'app.back()', true);
+    }
+    await this.settle(operation);
+  }
+
+  /**
    * Sends one key combo to the launched process's window; with `focusedRef`, only while that control still holds the
    * app's focus, checked by the driver right before the key goes. Without `physicalInput`
    * the key goes into the process's event queue, which hands it to its key

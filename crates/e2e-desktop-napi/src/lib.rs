@@ -276,6 +276,22 @@ pub async fn press(options: PressOptions) -> Value {
     .await
 }
 
+#[napi(object)]
+pub struct BackOptions {
+    pub pid: i32,
+    /// Names this press, so `cancelInput` can stop it before it presses the item.
+    pub input_id: Option<u32>,
+    pub timeout_ms: f64,
+}
+
+/// Presses the app's Back menu item through accessibility: the item titled Back or Go Back, else the one whose
+/// shortcut is Command-[. Refuses, pressing nothing, when the app's menu bar has none or it is disabled.
+#[napi(ts_return_type = "Promise<NativeEnvelope<{ title: string; menu: string }>>")]
+pub async fn press_back(options: BackOptions) -> Value {
+    let deadline = deadline(options.timeout_ms);
+    blocking(move || data(actions::back(options.pid, options.input_id, deadline)?)).await
+}
+
 /// Brings a window and its app forward. `inputId` names it, so `cancelInput` stops it before it changes the focus.
 #[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
 pub async fn focus_window(pid: i32, window_id_text: String, input_id: Option<u32>, timeout_ms: Option<f64>) -> Value {

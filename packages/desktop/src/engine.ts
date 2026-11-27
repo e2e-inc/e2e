@@ -81,6 +81,8 @@ export function desktop(options: DesktopOptions = {}): DesktopEngine<'macos', 'a
     // with `restart`, a fresh launch of the target's app.
     session: {
       restart: (operation) => surface.restart(operation),
+      // The app's Back menu item, pressed through accessibility; an app without one refuses.
+      back: (operation) => surface.back(operation),
     },
     artifacts: {
       screenshot: (label, operation) => surface.screenshot(label, operation),

@@ -129,6 +129,12 @@ export interface DesktopDriver {
   cancelInput(inputId: number): void;
   /** `inputId` names the press, so `cancelInput` can stop it before it sends the key. */
   press(options: { pid: number; windowId: string; combo: string; physical: boolean; inputId?: number; timeoutMs: number; focusedRef?: string }): Promise<Envelope<unknown>>;
+  /**
+   * Presses the app's Back menu item through accessibility: the item titled Back or Go Back, else the one whose
+   * shortcut is Command-[. Refuses, pressing nothing, when the menu bar has none (`ACTION_NOT_SUPPORTED`) or the item is
+   * disabled (`ACTION_FAILED`). `inputId` names the press, so `cancelInput` can stop it before it presses the item.
+   */
+  pressBack(options: { pid: number; inputId?: number; timeoutMs: number }): Promise<Envelope<{ readonly title: string; readonly menu: string }>>;
   /** Fails as `press` would for a combo this Mac's keyboard layout cannot type, and sends nothing. */
   checkCombo(combo: string): Promise<Envelope<unknown>>;
   /** `inputId` names the call, so `cancelInput` stops it before it changes the focus. */
