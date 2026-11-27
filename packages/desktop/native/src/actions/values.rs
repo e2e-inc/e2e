@@ -260,6 +260,13 @@ pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Out
         }
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("the value of this {role} cannot be set")));
     }
+    // Whether the value is a number (a slider's), read before anything is sent: a read the app did not answer in time is
+    // no proof it is text, and writing text to a number fails.
+    let numeric = match element.attribute("AXValue") {
+        Ok(Value::Number(_)) => true,
+        Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, "set value")),
+        _ => false,
+    };
     // A field that holds focus commits its text the way typing does; one that cannot take focus still takes the value.
     // Focus moved by this call has reached the app (its handlers may have run), so a later failure is no longer "nothing sent".
     // A focus write that failed after the app took it (a focus handler that replaced the field) may still have run its
@@ -268,7 +275,6 @@ pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Out
         go("set value")?;
         element.set_bool("AXFocused", true).map_or_else(|error| !refuses(error), |()| true)
     };
-    let numeric = matches!(element.attribute("AXValue"), Ok(Value::Number(_)));
     // The reads above can take long on a slow app; the caller may have given up since.
     go("set value").map_err(|failure| if moved_focus { failure.delivered() } else { failure })?;
     let written = match (numeric, finite(text)) {
