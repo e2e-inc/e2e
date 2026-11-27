@@ -225,7 +225,7 @@ fn level_of(value: Option<Value>) -> Option<u32> {
 
 /// The text of the element that labels another (`AXTitleUIElement`).
 /// `Err` for a read the app did not answer in time: a name it may have had.
-fn label_of(element: &Element) -> Result<Option<String>, ax::AXError> {
+pub(crate) fn label_of(element: &Element) -> Result<Option<String>, ax::AXError> {
     let values = match element.attributes(&["AXValue", "AXTitle"]) {
         Ok(values) => values,
         Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),

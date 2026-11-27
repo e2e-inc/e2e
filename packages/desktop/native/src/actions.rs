@@ -820,16 +820,21 @@ fn row_label(element: &Element) -> Result<Option<String>, AXError> {
     Ok(crate::snapshot::content_name(&texts))
 }
 
-/// An element's own name: its title, else its description, else, for a text, its value.
+/// An element's own name, as the snapshot gives it: its title, else the text of the element that labels it
+/// (`AXTitleUIElement`), else its description, else, for a text, its value.
 fn own_label(element: &Element) -> Result<Option<String>, AXError> {
-    let values = match element.attributes(&["AXRole", "AXTitle", "AXDescription", "AXValue"]) {
+    let values = match element.attributes(&["AXRole", "AXTitle", "AXDescription", "AXValue", "AXTitleUIElement"]) {
         Ok(values) => values,
         Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
         Err(_) => return Ok(None),
     };
     let text = |index: usize| values[index].as_ref().and_then(Value::text).map(str::to_owned).filter(|text| !text.trim().is_empty());
     let role = values[0].as_ref().and_then(Value::text).unwrap_or_default();
-    Ok(text(1).or_else(|| text(2)).or_else(|| if roles::text(roles::role(role, None)) { text(3) } else { None }))
+    let labelled = match &values[4] {
+        Some(Value::Element(label)) => crate::snapshot::label_of(label)?,
+        _ => None,
+    };
+    Ok(text(1).or(labelled).or_else(|| text(2)).or_else(|| if roles::text(roles::role(role, None)) { text(3) } else { None }))
 }
 
 /// The texts inside an element, in reading order, as the snapshot gathers a row's name from them.
