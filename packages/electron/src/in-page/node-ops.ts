@@ -59,6 +59,10 @@ export interface NodeOps {
   isFileInput(): boolean;
   /** Whether the node, the focused element, takes typed text, or typed keys as a widget's typeahead. */
   takesText(): boolean;
+  /** The element's computed value of each named CSS property. */
+  readStyle(names: readonly string[]): Record<string, string>;
+  /** How much of the element's box is inside the window, past what its scrolling ancestors clip. */
+  viewportIntersection(): { readonly intersects: boolean; readonly ratio: number };
 }
 
 /** Runs one of `NodeOps` on `node`. */
@@ -281,6 +285,37 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
     isFileInput() {
       const target = live();
       return target instanceof HTMLInputElement && target.type === 'file';
+    },
+    readStyle(names) {
+      const computed = getComputedStyle(live());
+      return Object.fromEntries(names.map((property) => [property, computed.getPropertyValue(property)]));
+    },
+    // Measured from the boxes rather than with an IntersectionObserver, which answers at the page's next frame: a
+    // window the app keeps hidden draws none.
+    viewportIntersection() {
+      const target = live();
+      const box = target.getBoundingClientRect();
+      if (box.width <= 0 || box.height <= 0) return { intersects: false, ratio: 0 };
+      let { left, top, right, bottom } = box;
+      const clip = (by: { left: number; top: number; right: number; bottom: number }, x: boolean, y: boolean): void => {
+        if (x) [left, right] = [Math.max(left, by.left), Math.min(right, by.right)];
+        if (y) [top, bottom] = [Math.max(top, by.top), Math.min(bottom, by.bottom)];
+      };
+      // A fixed box is clipped by the window alone; an absolute one by the scrollers that position it.
+      let position = getComputedStyle(target).position;
+      for (let parent = target.parentElement ?? (target.getRootNode() as ShadowRoot).host ?? null; parent !== null && position !== 'fixed'; parent = parent.parentElement ?? (parent.getRootNode() as ShadowRoot).host ?? null) {
+        const style = getComputedStyle(parent);
+        if (position !== 'absolute' || style.position !== 'static') {
+          const inner = parent.getBoundingClientRect();
+          const edge = { left: inner.left + parent.clientLeft, top: inner.top + parent.clientTop, right: inner.left + parent.clientLeft + parent.clientWidth, bottom: inner.top + parent.clientTop + parent.clientHeight };
+          if (parent !== document.documentElement && parent !== document.body) clip(edge, style.overflowX !== 'visible', style.overflowY !== 'visible');
+          position = style.position;
+        }
+      }
+      clip({ left: 0, top: 0, right: innerWidth, bottom: innerHeight }, true, true);
+      const inside = Math.max(0, right - left) * Math.max(0, bottom - top);
+      const ratio = Math.min(1, inside / (box.width * box.height));
+      return { intersects: inside > 0, ratio };
     },
     takesText() {
       const active = live();

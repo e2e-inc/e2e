@@ -21,6 +21,12 @@ export function createElectronFixture(surface: ElectronSurface, context: EngineF
     async useWindow(which, options) {
       return await surface.useWindow(which, context.operation(stepTimeout(options?.timeout, 'electron.useWindow')));
     },
+    async waitForDownload(trigger, options) {
+      if (typeof trigger !== 'function') throw new ConfigurationError('INVALID_ARGUMENT', 'electron.waitForDownload() takes the function that starts the download');
+      const file = await surface.waitForDownload(trigger, context.operation(stepTimeout(options?.timeout, 'electron.waitForDownload')));
+      context.attachArtifact('download', file.path);
+      return file;
+    },
     locator(selector) {
       if (typeof selector !== 'string' || selector.trim() === '') throw new ConfigurationError('INVALID_ARGUMENT', 'electron.locator() takes a CSS selector string');
       return context.locator({ kind: 'selector', selector });
@@ -29,6 +35,7 @@ export function createElectronFixture(surface: ElectronSurface, context: EngineF
   return context.fixture('electron', electron, {
     evaluate: { kind: 'resource' },
     windows: { kind: 'resource' },
+    waitForDownload: { kind: 'resource', timeout: false },
     useWindow: { kind: 'resource', timeout: (_which, options) => options?.timeout, label: (which) => (typeof which === 'number' ? String(which) : JSON.stringify({ ...which, title: which.title?.toString(), url: which.url?.toString() })) },
   });
 }

@@ -11,11 +11,15 @@
  * artifacts), and the running app's (`AppProcess` and `Windows`).
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ConfigurationError, Deadline, sleep } from '@e2e-dev/core/engine';
+import { ConfigurationError, Deadline, EngineError, pollCondition, sleep, TestError, validateComputedStyleProperties } from '@e2e-dev/core/engine';
 import type {
+  ComputedStyleProperty,
+  ComputedStyleValues,
+  ViewportIntersection,
+  VideoSegment,
   EngineAppInfo,
   EngineAttemptContext,
   EngineCleanupContext,
@@ -34,17 +38,19 @@ import type {
   ViewportPoint,
 } from '@e2e-dev/core/engine';
 import { performAtPoint, performOnNode, pressKey, swipeWindow, typeText, type ActionContext } from './actions.ts';
-import { AppProcess, DISCARD_CLOSE_MS, RESTART_CLOSE_MS } from './app-process.ts';
+import { AppProcess, DISCARD_CLOSE_MS, RESTART_CLOSE_MS, type AppDownload } from './app-process.ts';
 import { answerWithin, withBudget, type Budget } from './budget.ts';
 import { screenshotFile, screenshotName, withPixels } from './capture.ts';
 import { DevTools } from './devtools.ts';
 import type { ElectronMainModule } from './fixtures.ts';
 import { closedWindow, invalidState, notActionable } from './errors.ts';
+import { ensureFfmpeg } from './ffmpeg.ts';
 import { outsideApp } from './file-bound.ts';
 import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
 import { locateIn, projectRead, readWindow, type ProjectionContext, type RawRead } from './locate.ts';
 import type { ResolvedElectronOptions } from './options.ts';
 import type { ElectronWindow, WindowMatcher } from './fixtures.ts';
+import { Recorder } from './video.ts';
 import { ROOT_ID, Windows, type AppWindow } from './windows.ts';
 
 /** How long a read waits for a crashed window to load again. */
@@ -64,13 +70,18 @@ export class ElectronSurface {
   private executable: string | undefined;
   private attempt: EngineAttemptContext | undefined;
   private userDataDir: string | undefined;
+  private uploadsDir: string | undefined;
   private artifactCounter = 0;
+  private recorder: Recorder | undefined;
+  /** Recordings started this attempt, for their file names. */
+  private recordings = 0;
   private readonly devtools = new DevTools();
   private readonly windowList = new Windows();
   private readonly app: AppProcess;
 
   constructor(private readonly options: ResolvedElectronOptions) {
     this.app = new AppProcess(options, this.windowList);
+    this.windowList.onShown = (window) => this.recorder?.follow(window?.page);
   }
 
   // --- run and worker lifecycle ---
@@ -100,6 +111,7 @@ export class ElectronSurface {
   startAttempt(context: EngineAttemptContext): Promise<void> {
     this.attempt = context;
     this.artifactCounter = 0;
+    this.recordings = 0;
     this.app.takeUnhandledDialog();
     // The app's data lives here for the whole attempt: `app.restart()` keeps it, `app.clearState()` empties it.
     this.userDataDir = mkdtempSync(path.join(tmpdir(), 'e2e-electron-'));
@@ -107,10 +119,15 @@ export class ElectronSurface {
   }
 
   async endAttempt(context: EngineCleanupContext): Promise<void> {
+    const uncollected = this.recorder;
+    this.recorder = undefined;
+    await uncollected?.abandon().catch(() => undefined);
     await this.app.serialized(() => this.app.quit(context, DISCARD_CLOSE_MS));
     // Retried: Chromium's helper processes can still be closing their files in it.
     if (this.userDataDir !== undefined) rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     this.userDataDir = undefined;
+    if (this.uploadsDir !== undefined) rmSync(this.uploadsDir, { recursive: true, force: true });
+    this.uploadsDir = undefined;
     this.attempt = undefined;
     // A dialog the test's last step opened has no next step to fail: the attempt's end is it.
     this.failOnDialog();
@@ -148,6 +165,7 @@ export class ElectronSurface {
     if (attempt === undefined || userDataDir === undefined) throw invalidState('app.open() runs inside a test: no attempt is running');
     if (executable === undefined) throw invalidState('the electron engine was not initialized');
     await this.app.launch({ executable, projectRoot: this.projectRoot, app: this.appInfo, env: this.runEnv, userDataDir, attempt }, operation);
+    await this.recorder?.snap();
   }
 
   // --- reading ---
@@ -249,7 +267,15 @@ export class ElectronSurface {
   // --- acting ---
 
   private actions(): ActionContext {
-    return { devtools: this.devtools, windows: this.windowList, projectRoot: this.projectRoot };
+    return {
+      devtools: this.devtools,
+      windows: this.windowList,
+      projectRoot: this.projectRoot,
+      uploads: () => {
+        this.uploadsDir ??= mkdtempSync(path.join(tmpdir(), 'e2e-electron-uploads-'));
+        return this.uploadsDir;
+      },
+    };
   }
 
   /** Why the window is not one to observe, trace, or capture: it shows a local file outside the app's directory. */
@@ -347,6 +373,69 @@ export class ElectronSurface {
     return await withBudget(operation, 'electron.evaluate', () => run);
   }
 
+  // --- reads of one node ---
+
+  async readStyle(ref: NodeRef, properties: readonly ComputedStyleProperty[], operation: OperationContext): Promise<ComputedStyleValues> {
+    const requested = validateComputedStyleProperties(properties);
+    const { window, backendNodeId } = this.windowList.bind(ref);
+    return await withBudget(operation, 'read computed style', () => this.devtools.callOn(window.page, backendNodeId, 'readStyle', requested));
+  }
+
+  async viewportIntersection(ref: NodeRef, operation: OperationContext): Promise<ViewportIntersection> {
+    const { window, backendNodeId } = this.windowList.bind(ref);
+    return await withBudget(operation, 'measure viewport intersection', () => this.devtools.callOn(window.page, backendNodeId, 'viewportIntersection'));
+  }
+
+  // --- history ---
+
+  /** `app.back()`: the shown window's previous history entry, when it has one. */
+  async back(operation: OperationContext): Promise<void> {
+    const window = this.requireWindow();
+    await this.act(operation, 'back', window, async (budget) => {
+      const { session } = window.page;
+      const { currentIndex, entries } = await session.send('Page.getNavigationHistory');
+      const previous = entries[currentIndex - 1];
+      if (previous === undefined) throw notActionable('the window has no page to go back to');
+      await budget.send(() => session.send('Page.navigateToHistoryEntry', { entryId: previous.id }));
+    });
+  }
+
+  // --- downloads ---
+
+  /**
+   * Runs `trigger` and waits for the next download the app starts to finish,
+   * then copies the file into the attempt's artifacts. The trigger is test
+   * code: its error is reported as it is.
+   */
+  async waitForDownload(trigger: () => Promise<void>, operation: OperationContext): Promise<{ readonly path: string; readonly absolutePath: string; readonly suggestedFilename: string }> {
+    const attempt = this.attempt;
+    if (attempt === undefined) throw invalidState('a download is waited for inside a test');
+    this.failOnDialog();
+    const before = (await this.app.downloads()).length;
+    await trigger();
+    let finished: AppDownload | undefined;
+    await pollCondition({
+      deadline: new Deadline(operation.timeoutMs),
+      signal: operation.signal,
+      negated: false,
+      evaluate: async () => {
+        const next = (await this.app.downloads())[before];
+        if (next === undefined || next.state === 'progressing') return false;
+        finished = next;
+        return true;
+      },
+      onTimeout: () => new TestError('ACTION_FAILED', `no download finished within ${operation.timeoutMs}ms of the trigger`),
+    });
+    if (finished === undefined) throw invalidState('the download was lost');
+    if (finished.state !== 'completed') throw new EngineError('ENGINE_FAILURE', `the download of ${finished.filename} was ${finished.state}`, { retryable: false });
+    this.artifactCounter += 1;
+    const relative = path.posix.join('downloads', `${String(this.artifactCounter).padStart(3, '0')}-${path.basename(finished.filename).replace(/[^A-Za-z0-9._-]+/g, '-') || 'download'}`);
+    const absolute = path.join(attempt.artifactsDir, relative);
+    mkdirSync(path.dirname(absolute), { recursive: true });
+    copyFileSync(finished.path, absolute);
+    return { path: relative, absolutePath: absolute, suggestedFilename: finished.filename };
+  }
+
   // --- pixels ---
 
   async screenshot(label: string | undefined, operation: OperationContext): Promise<string> {
@@ -359,5 +448,27 @@ export class ElectronSurface {
       this.artifactCounter += 1;
       return await screenshotFile(this.devtools, window, attempt.artifactsDir, screenshotName(this.artifactCounter, label));
     });
+  }
+
+  // --- video ---
+
+  /** Starts a recording: of the shown window now, and of each one shown after it, through a relaunch too. */
+  async startVideo(operation: OperationContext): Promise<void> {
+    const attempt = this.attempt;
+    if (attempt === undefined) throw invalidState('a video is recorded inside a test');
+    if (this.recorder !== undefined) throw invalidState('a video is already recording');
+    const ffmpeg = await withBudget(operation, 'video start', () => ensureFfmpeg(this.runEnv, operation.signal));
+    this.recordings += 1;
+    const name = this.recordings === 1 ? 'video' : `video-part${this.recordings}`;
+    // Never pixels of a local file outside the app's directory, as no screenshot is.
+    const recorder = new Recorder(ffmpeg, attempt.artifactsDir, path.posix.join('video', `${name}.webm`), (page) => outsideApp(page.url(), this.app.appDirectory) === undefined);
+    this.recorder = recorder;
+    recorder.follow(this.windowList.current()?.page);
+  }
+
+  async stopVideo(): Promise<readonly VideoSegment[]> {
+    const recorder = this.recorder;
+    this.recorder = undefined;
+    return (await recorder?.stop()) ?? [];
   }
 }

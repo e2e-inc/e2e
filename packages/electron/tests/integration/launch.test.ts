@@ -3,7 +3,7 @@
  * waits on every window, or on the main process's inspector, cannot start.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { Transformer } from '@napi-rs/image';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,8 +13,10 @@ import type { EngineAttemptContext, OperationContext } from '@e2e-dev/core/engin
 import { AppProcess, type LaunchSetup } from '../../src/app-process.ts';
 import { screenshotFile, withPixels } from '../../src/capture.ts';
 import { DevTools } from '../../src/devtools.ts';
+import { ensureFfmpeg } from '../../src/ffmpeg.ts';
 import { readWindow } from '../../src/locate.ts';
 import { resolveOptions } from '../../src/options.ts';
+import { Recorder } from '../../src/video.ts';
 import { Windows } from '../../src/windows.ts';
 import { electronBinary } from './electron-binary.ts';
 
@@ -366,5 +368,70 @@ describe('pixels', () => {
     const middle = (Math.floor(size.height / 2) * size.width + Math.floor(size.width / 2)) * channels;
     // Scrolled into the green half: the document's top, which a clip that ignored the scroll would show, is red.
     expect([rgba[middle], rgba[middle + 1], rgba[middle + 2]]).toEqual([0, 128, 0]);
+  });
+});
+
+describe('video', () => {
+  const SHOW = process.platform === 'linux';
+  const page = (title: string, colour: string): string => `'data:text/html,' + ${JSON.stringify(encodeURIComponent(`<title>${title}</title><body style="margin:0;background:${colour}">`))}`;
+  const TWO_WINDOWS = `app.whenReady().then(async () => {
+    await new BrowserWindow({ show: ${SHOW}, width: 300, height: 200 }).loadURL(${page('One', 'rgb(255,0,0)')});
+    await new BrowserWindow({ show: ${SHOW}, width: 300, height: 200 }).loadURL(${page('Two', 'rgb(0,0,255)')});
+  });`;
+
+  /** Each frame of a video as one averaged colour. */
+  function frameColours(ffmpeg: string, file: string): (readonly [number, number, number])[] {
+    const { stdout, status } = spawnSync(ffmpeg, ['-v', 'error', '-i', file, '-vf', 'scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], { maxBuffer: 16 * 1024 * 1024 });
+    expect(status).toBe(0);
+    const frames: (readonly [number, number, number])[] = [];
+    for (let at = 0; at + 2 < stdout.length; at += 3) frames.push([stdout[at]!, stdout[at + 1]!, stdout[at + 2]!]);
+    return frames;
+  }
+
+  async function twoWindows(): Promise<{ readonly windows: Windows; readonly directory: string; readonly ffmpeg: string }> {
+    const { windows, launch, directory } = appWith(TWO_WINDOWS);
+    await launch();
+    await expect.poll(() => windows.open().length).toBe(2);
+    return { windows, directory, ffmpeg: await ensureFfmpeg(process.env, new AbortController().signal) };
+  }
+
+  it('records the shown window, and the next one shown, into one file', async () => {
+    const { windows, directory, ffmpeg } = await twoWindows();
+    const [one, two] = windows.open();
+    const recorder = new Recorder(ffmpeg, directory, 'video/video.webm', () => true);
+    recorder.follow(one!.page);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    recorder.follow(two!.page);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const segments = await recorder.stop();
+    expect(segments).toEqual([{ path: 'video/video.webm', startedAt: expect.any(String) as string }]);
+    const frames = frameColours(ffmpeg, path.join(directory, 'video', 'video.webm'));
+    expect(frames.length).toBeGreaterThan(20);
+    const [red, , blue] = frames[0]!;
+    expect(red).toBeGreaterThan(180);
+    expect(blue).toBeLessThan(80);
+    const last = frames.at(-1)!;
+    expect(last[0]).toBeLessThan(80);
+    expect(last[2]).toBeGreaterThan(180);
+  });
+
+  it('keeps no frame of a window it may not show, and writes no file for a recording with none', async () => {
+    const { windows, directory, ffmpeg } = await twoWindows();
+    const [one, two] = windows.open();
+    const partial = new Recorder(ffmpeg, directory, 'video/partial.webm', (shown) => shown === one!.page);
+    partial.follow(one!.page);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    partial.follow(two!.page);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(await partial.stop()).toHaveLength(1);
+    for (const [red, , blue] of frameColours(ffmpeg, path.join(directory, 'video', 'partial.webm'))) {
+      expect(red).toBeGreaterThan(180);
+      expect(blue).toBeLessThan(80);
+    }
+    const none = new Recorder(ffmpeg, directory, 'video/none.webm', () => false);
+    none.follow(one!.page);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(await none.stop()).toEqual([]);
+    expect(existsSync(path.join(directory, 'video', 'none.webm'))).toBe(false);
   });
 });

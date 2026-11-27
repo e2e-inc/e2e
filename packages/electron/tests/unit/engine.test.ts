@@ -9,7 +9,11 @@ describe('electron()', () => {
     expect(engine.platform).toBe('electron');
     expect([...engine.capabilities]).toEqual(expect.arrayContaining(['observation', 'actions', 'location', 'pointer', 'keyboard', 'artifacts', 'electron']));
     expect(engine.actions).toContain('setInputFiles');
-    expect(engine.actions).not.toContain('setInputFilePayloads');
+    expect(engine.actions).toContain('setInputFilePayloads');
+    expect([...engine.capabilities]).toEqual(expect.arrayContaining(['computed-style', 'viewport-intersection']));
+    expect(engine.artifacts?.startVideo).toBeTypeOf('function');
+    expect(engine.artifacts?.stopVideo).toBeTypeOf('function');
+    expect(engine.session?.back).toBeTypeOf('function');
     expect(engine.session?.restart).toBeTypeOf('function');
     expect(engine.session?.open).toBeUndefined();
   });

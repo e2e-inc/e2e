@@ -7,6 +7,9 @@ someFiles.addEventListener('click', () => someFiles.setAttribute('aria-checked',
 const attachment = document.querySelector('[data-testid="attachment"]');
 attachment.addEventListener('change', () => {
   document.querySelector('[data-testid="attachment-count"]').textContent = `${attachment.files.length} files`;
+  void (attachment.files[0]?.text() ?? Promise.resolve('')).then((text) => {
+    document.querySelector('[data-testid="attachment-text"]').textContent = text.slice(0, 40);
+  });
 });
 
 document.querySelector('#guard').addEventListener('click', () => {

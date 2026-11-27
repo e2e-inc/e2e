@@ -201,4 +201,24 @@ describe('queryAll', () => {
     const crossing = await window.inPage((source: string) => (new Function(`return (${source})`)() as typeof queryAll)('#host .hit').length, queryAll.toString());
     expect(crossing).toBe(0);
   });
+
+  it('reads computed styles, and how much of a box its scrollers and the window leave in view', async () => {
+    await window.setContent(`
+      <body style="margin:0">
+      <p id="styled" style="color:rgb(255, 0, 0);font-weight:700">S</p>
+      <div style="width:100px;height:100px;overflow:hidden;position:relative">
+        <div id="half" style="width:100px;height:100px;margin-top:50px"></div>
+        <div id="scrolled-out" style="width:100px;height:50px;margin-top:500px"></div>
+        <div id="fixed" style="position:fixed;left:0;top:0;width:10px;height:10px"></div>
+      </div>
+      <div id="below" style="margin-top:5000px;width:10px;height:10px"></div>
+      <span id="boxless" style="display:none">N</span>`);
+    expect(await run(await element('#styled'), 'readStyle', ['color', 'font-weight'])).toEqual({ color: 'rgb(255, 0, 0)', 'font-weight': '700' });
+    expect(await run(await element('#half'), 'viewportIntersection')).toEqual({ intersects: true, ratio: 0.5 });
+    expect(await run(await element('#scrolled-out'), 'viewportIntersection')).toEqual({ intersects: false, ratio: 0 });
+    // A fixed box is the window's to clip, whatever scroller it sits in.
+    expect(await run(await element('#fixed'), 'viewportIntersection')).toEqual({ intersects: true, ratio: 1 });
+    expect(await run(await element('#below'), 'viewportIntersection')).toEqual({ intersects: false, ratio: 0 });
+    expect(await run(await element('#boxless'), 'viewportIntersection')).toEqual({ intersects: false, ratio: 0 });
+  });
 });

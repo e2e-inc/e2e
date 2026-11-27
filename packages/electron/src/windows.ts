@@ -36,11 +36,23 @@ export function nodeId(window: AppWindow, generation: number, backendNodeId: num
 
 export class Windows {
   private readonly byPage = new Map<PageTarget, AppWindow>();
-  private shown: AppWindow | undefined;
+  private shownWindow: AppWindow | undefined;
+  /** Told each time another window, or none, becomes the shown one. */
+  onShown: ((window: AppWindow | undefined) => void) | undefined;
   /** The windows shown before the current one, oldest first: closing the shown window goes back to the latest still open. */
   private history: AppWindow[] = [];
   private nextSerial = 1;
   private readonly crashed = new Set<PageTarget>();
+
+  private get shown(): AppWindow | undefined {
+    return this.shownWindow;
+  }
+
+  private set shown(window: AppWindow | undefined) {
+    if (window === this.shownWindow) return;
+    this.shownWindow = window;
+    this.onShown?.(window);
+  }
 
   /** Registers a page the app opened, once; undefined when it is already known or closed. Its node ids get a serial of their own. */
   add(page: PageTarget): AppWindow | undefined {

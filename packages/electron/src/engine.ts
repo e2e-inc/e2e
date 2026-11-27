@@ -53,9 +53,10 @@ export function electron(options: ElectronOptions = {}): ElectronEngine {
     dispose: (context) => surface.dispose(context),
     observe: (operation, observeOptions) => surface.observe(operation, observeOptions),
     locate: (expression, operation) => surface.locate(expression, operation),
+    readStyle: (ref, properties, operation) => surface.readStyle(ref, properties, operation),
+    viewportIntersection: (ref, operation) => surface.viewportIntersection(ref, operation),
     perform: (ref, action, operation) => surface.perform(ref, action, operation),
-    // In-memory uploads have no path for the DevTools protocol to hand the input; every other kind is a trusted input event or a DOM call.
-    actions: [...LOCATOR_ACTION_KINDS, 'blur', 'multiTap'],
+    actions: [...LOCATOR_ACTION_KINDS, 'blur', 'multiTap', 'setInputFilePayloads'],
     tapModifiers: true,
     performAt: (point, action, operation) => surface.performAt(point, action, operation),
     pointerActions: POINTER_ACTION_KINDS,
@@ -66,6 +67,7 @@ export function electron(options: ElectronOptions = {}): ElectronEngine {
     validateApp: (app, info) => validateApp(app, info, resolved.executablePath),
     // No `open`: an Electron app loads its own pages, so the runner serves `app.open()` with `restart`, a fresh launch.
     session: {
+      back: (operation) => surface.back(operation),
       restart: (operation) => surface.restart(operation),
       reset: (operation) => surface.reset(operation),
       switchTab: (index, operation) => surface.switchTab(index, operation),
@@ -73,6 +75,8 @@ export function electron(options: ElectronOptions = {}): ElectronEngine {
     },
     artifacts: {
       screenshot: (label, operation) => surface.screenshot(label, operation),
+      startVideo: (operation) => surface.startVideo(operation),
+      stopVideo: () => surface.stopVideo(),
     },
     fixtures: {
       electron: (context) => createElectronFixture(surface, context),

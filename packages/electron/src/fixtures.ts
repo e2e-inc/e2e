@@ -50,6 +50,12 @@ export interface Electron {
    */
   useWindow(which: WindowMatcher, options?: { readonly timeout?: number }): Promise<ElectronWindow>;
   /**
+   * Runs `trigger` and waits for the download it starts to finish, up to
+   * `timeout` milliseconds or else the action timeout. The file is copied
+   * into the attempt's artifacts: `path` is relative to them.
+   */
+  waitForDownload(trigger: () => Promise<void>, options?: { readonly timeout?: number }): Promise<{ readonly path: string; readonly absolutePath: string; readonly suggestedFilename: string }>;
+  /**
    * A locator for a CSS selector in the window `screen` reads, for an element
    * no role, label, text, or test id names. It matches in the window's
    * document and in each open shadow root, one root at a time, and never

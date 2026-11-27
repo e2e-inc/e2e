@@ -5,7 +5,7 @@
  * makes there.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Protocol } from 'devtools-protocol';
 import {
@@ -49,6 +49,8 @@ export interface ActionContext {
   readonly devtools: DevTools;
   readonly windows: Windows;
   readonly projectRoot: string;
+  /** The attempt's directory for files the engine writes for the app to read, made on first use and removed with the attempt. */
+  uploads(): string;
 }
 
 /** One action on one node: the node it waits on, and the budget its input goes through. */
@@ -96,7 +98,7 @@ export function performOnNode(context: ActionContext, window: AppWindow, backend
     case 'setInputFiles':
       return setInputFiles(step, action);
     case 'setInputFilePayloads':
-      throw unsupported('in-memory files are not supported; pass file paths');
+      return setInputFilePayloads(step, action);
     case 'dragTo':
       return dragTo(step, action);
     case 'swipe':
@@ -269,6 +271,25 @@ async function setInputFiles(step: Step, action: ActionOf<'setInputFiles'>): Pro
     return;
   }
   await step.budget.send(() => step.window.page.session.send('DOM.setFileInputFiles', { files, backendNodeId: step.backendNodeId }));
+}
+
+/**
+ * In-memory files. The DevTools protocol sets a file input from paths only,
+ * so each file is written to the attempt's upload directory, which lasts as
+ * long as the app may read it: a page reads a chosen file when it sends it,
+ * not when it is chosen.
+ */
+async function setInputFilePayloads(step: Step, action: ActionOf<'setInputFilePayloads'>): Promise<void> {
+  const directory = mkdtempSync(path.join(step.context.uploads(), 'files-'));
+  const paths = action.files.map((file, index) => {
+    // A directory per file: two files may share a name, and a name is the page's to read, never a path to follow.
+    const own = path.join(directory, String(index));
+    mkdirSync(own);
+    const written = path.join(own, path.basename(file.name) || 'file');
+    writeFileSync(written, file.buffer);
+    return written;
+  });
+  await setInputFiles(step, { kind: 'setInputFiles', paths });
 }
 
 /**

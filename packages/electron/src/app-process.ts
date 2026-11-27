@@ -78,6 +78,13 @@ interface AppReport {
   dialog(unhandled: EngineError): void;
 }
 
+/** A download the app started: the name the server or the link gave it, where it is saved, and Electron's state for it. */
+export interface AppDownload {
+  readonly filename: string;
+  readonly path: string;
+  readonly state: 'progressing' | 'completed' | 'cancelled' | 'interrupted';
+}
+
 export class AppProcess {
   private app: RunningApp | undefined;
   private exit: string | undefined;
@@ -387,6 +394,13 @@ export class AppProcess {
     }
   }
 
+  /** Every download the app started since it launched, in order, each as it stands now. */
+  async downloads(): Promise<readonly AppDownload[]> {
+    const app = this.app;
+    if (app === undefined) throw this.notRunning();
+    return await (await this.main(app)).evaluate(() => (globalThis as { e2eDownloads?: AppDownload[] }).e2eDownloads ?? [], undefined);
+  }
+
   /** The OS window title of a page's `BrowserWindow`, read in the main process; undefined for a view, or when the app does not answer. */
   async windowTitle(page: PageTarget): Promise<string | undefined> {
     const main = this.app === undefined ? undefined : await answerWithin(this.app.main, TITLE_MS);
@@ -552,6 +566,14 @@ async function placeDownloads(main: MainProcess, directory: string, withinMs: nu
         placed.add(target);
         target.on('will-download', (_event, item) => {
           if (item.getSavePath() === '') item.setSavePath(`${downloads}/${item.getFilename()}`);
+          // What `electron.waitForDownload` reads: each download the app started, and how it ended.
+          const entry = { filename: item.getFilename(), path: item.getSavePath(), state: 'progressing' };
+          const log = ((globalThis as { e2eDownloads?: (typeof entry)[] }).e2eDownloads ??= []);
+          log.push(entry);
+          item.once('done', (_done, state) => {
+            entry.path = item.getSavePath();
+            entry.state = state;
+          });
         });
       };
       place(session.defaultSession);
