@@ -116,9 +116,9 @@ describe('session screen presenter', () => {
 
   /**
    * Opens a session on the orders page: a sidebar of 12 links beside a
-   * main that changes wholesale when one order opens, so the tap's screen
-   * goes out whole with the sidebar folded to one line. Each call builds
-   * a fresh page, since opening an order mutates the main.
+   * main that changes wholesale when one order opens. Each call builds
+   * a fresh page, since opening an order mutates the main. An observe
+   * before the tap lets the tap's screen fold the sidebar to one line.
    */
   async function openOrdersSession(): Promise<{ sessionHost: SessionHost; id: string; opened: string }> {
     const sidebar: ScriptedNode = {
