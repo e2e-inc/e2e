@@ -142,7 +142,7 @@ export interface EngineHandle<
 | `isolation` | `'attempt'` या `'worker'` के अलावा कुछ भी। |
 | `keyboard`, `state`, `artifacts`, `session` | अनजान key या नॉन-फ़ंक्शन मेंबर। `type` और `press` के बिना `keyboard`; `capture` और `restore` दोनों के बिना `state`; `screenshot` के बिना `artifacts`; `stopVideo` के बिना `startVideo`, या इसका उल्टा। |
 | `secrets` | `secrets.get()` हैंडल्स का ऐरे न हो। |
-| `fixtures` | ऑब्जेक्ट न हो, ऐसा फ़िक्स्चर जो फ़ैक्ट्री फ़ंक्शन न हो, या ऐसा फ़िक्स्चर नाम जो लोअर-कैमल आइडेंटिफ़ायर न हो या `agent`, `app`, `screen`, `platform`, `request`, या `session` को शैडो करे। |
+| `fixtures` | ऑब्जेक्ट न हो, ऐसा फ़िक्स्चर जो फ़ैक्ट्री फ़ंक्शन न हो, या ऐसा फ़िक्स्चर नाम जो लोअर-कैमल आइडेंटिफ़ायर न हो या `agent`, `app`, `screen`, `platform`, `request`, `services`, या `session` को शैडो करे। |
 
 <Note>
 `artifacts.startTrace` और `artifacts.stopTrace` कॉन्ट्रैक्ट से हटा दिए गए हैं। उनके

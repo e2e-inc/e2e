@@ -506,6 +506,8 @@ expect(payload).toEqual({ ok: true, items: [{ sku: 'a' }] });
 #### `toMatchObject`
 
 ज़रूरी करता है कि `expected` की हर प्रॉपर्टी रिकर्सिव तरीके से मेल खाए।
+मैचर `void` लौटाता है। जाँच के बाद प्रॉपर्टी पढ़नी हों, तो ओरिजिनल वैल्यू अपने
+पास रखें।
 
 ```ts
 expect(order).toMatchObject({ customer: { name: 'Ada' }, lines: [{ sku: 'a' }, { sku: 'b' }] });

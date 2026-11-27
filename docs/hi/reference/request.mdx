@@ -85,9 +85,11 @@ const found = await request.get('/api/orders?reference=r1');
 
 ### `WebResponse`
 
-रिस्पॉन्स, जिसकी बॉडी पहले से पढ़ी जा चुकी है। यह वही टाइप है जो वेब इंजन के
-[`browser.waitForResponse`](/reference/web#waitforresponse) और `route.fetch()`
-लौटाते हैं।
+HTTP रिस्पॉन्स, जिसकी बॉडी `request` पहले ही पढ़ चुका है। वेब इंजन का
+`route.fetch()` यही टाइप लौटाता है।
+[`browser.waitForResponse`](/reference/web#waitforresponse) एक
+`PageResponse` लौटाता है। यह `WebResponse` में `request` जोड़ता है, और रिस्पॉन्स
+मैच होते ही बॉडी पढ़ना शुरू कर देता है।
 
 | मेंबर | टाइप |
 | --- | --- |
