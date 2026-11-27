@@ -216,7 +216,7 @@ export class AppProcess {
     const { appPath } = setup.app;
     // The window the launch waited for, which need not be the first registered: that one may be a splash or a blank page.
     const firstDocument = first.url();
-    this.directory = appDirectory({ reported, declared: appPath === undefined ? undefined : path.resolve(setup.projectRoot, appPath), firstDocument });
+    this.directory = appDirectory({ reported, declared: appPath === undefined ? undefined : path.resolve(setup.projectRoot, appPath), firstDocument, projectRoot: setup.projectRoot });
   }
 
   /** Starts the binary. Nothing is awaited: a binary that cannot start shows as a process that ended. */
