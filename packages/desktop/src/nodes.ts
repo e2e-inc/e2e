@@ -97,7 +97,18 @@ export interface NodeBinding {
    * window, under a hidden ancestor, or with no size stays hidden whatever scrolls.
    */
   readonly scrolledOut?: true;
+  /**
+   * The nodes around this one a press on it can go to, nearest first: at most
+   * `MAX_PRESS_LEVELS` levels up, ending at the first one with a ref of its own
+   * (a row, a button, a list, a scroll area), which is the last a press may
+   * reach, and never the window. A cell with no press of its own passes the
+   * press on to its row. Empty for a child of the window.
+   */
+  readonly around?: readonly NodeBinding[];
 }
+
+/** How many levels up a press on text or an image looks for the row or button it sits in. */
+const MAX_PRESS_LEVELS = 3;
 
 /** A snapshot as the engine keeps it: the tree the harness sees, and a binding for every node in it. */
 export interface ProjectedScreen {
@@ -282,7 +293,8 @@ export function projectSnapshot(
 
   // `hiddenAbove`: an ancestor is hidden, a wrapper left out included, so nothing under it is on screen; the resolver reads each node's own state only. `scrolled` when a scroll area is all that hides it, which a scroll into view of the node can undo, else `other`.
   // `prior`: the id the node held before, which a cut gave it a fresh one in place of; look-alikes under it are reported against that id, which their identities are kept under.
-  const project = (node: RawNode, id: string, stable: boolean, likeness: string, hiddenAbove: false | 'scrolled' | 'other', prior: string | undefined): SemanticNode => {
+  // `around`: what a press on this node can go to, nearest first (see `NodeBinding.around`).
+  const project = (node: RawNode, id: string, stable: boolean, likeness: string, hiddenAbove: false | 'scrolled' | 'other', prior: string | undefined, around: readonly NodeBinding[]): SemanticNode => {
     if (node.folded !== undefined && node.folded > 0) return fold(node.folded, id, likeness);
     const rawStates = new Set(node.states ?? []);
     const role = ROLE_MAP[node.role] ?? (node.role === 'unknown' ? undefined : node.role);
@@ -336,7 +348,7 @@ export function projectSnapshot(
       if (scrollTargets.vertical === undefined && axes.includes('vertical')) scrollTargets.vertical = id;
       if (scrollTargets.horizontal === undefined && axes.includes('horizontal')) scrollTargets.horizontal = id;
     }
-    bindings.set(id, {
+    const binding: NodeBinding = {
       id,
       ...(node.ref_id === undefined ? {} : { ref: node.ref_id }),
       ...(role === undefined ? {} : { role }),
@@ -350,7 +362,13 @@ export function projectSnapshot(
       interactive,
       ...(scrolledOut ? { scrolledOut } : {}),
       ...(node.native_id === undefined || node.native_id.value === '' ? {} : { testId: node.native_id.value }),
-    });
+      ...(around.length === 0 ? {} : { around }),
+    };
+    bindings.set(id, binding);
+    // A press on a child can go to this node, and on through it to what is around it only while it has no ref of its own: a
+    // row, a button, a list, or a scroll area ends the way up, and a cell that takes no press passes it on to its row.
+    const passes = node.ref_id === undefined || (node.role === 'cell' && node.available_actions?.includes('Click') !== true);
+    const aroundChildren = id === ROOT_ID ? [] : (passes ? [binding, ...around] : [binding]).slice(0, MAX_PRESS_LEVELS);
     const kept: RawNode[] = [];
     const underHidden = new Map<RawNode, 'scrolled' | 'other'>();
     // Whether a wrapper left out had children the read cut off: its unread children are this node's, and one could be a twin of a listed one.
@@ -391,7 +409,7 @@ export function projectSnapshot(
       const childPrior = childStable ? childId : prior !== undefined && seen !== undefined ? priorIdOf?.(`${prior}/${seen}`) : undefined;
       const above = states.hidden === true ? (scrolledOut ? 'scrolled' : 'other') : (underHidden.get(child) ?? false);
       // An open menu or popover floats above the window, so a scroll that took its trigger out of view does not hide it (the driver reads it as on screen).
-      return project(child, childId, childStable, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, above === 'scrolled' && FLOATING_ROLES.has(child.role) ? false : above, childPrior);
+      return project(child, childId, childStable, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, above === 'scrolled' && FLOATING_ROLES.has(child.role) ? false : above, childPrior, aroundChildren);
     });
     return {
       ref: { id, revision: '' },
@@ -420,7 +438,7 @@ export function projectSnapshot(
     return { ref: { id, revision: '' }, text: `${count} ${count === 1 ? 'row' : 'rows'} out of view`, states };
   };
 
-  const root = project(raw.tree, ROOT_ID, true, '', false, ROOT_ID);
+  const root = project(raw.tree, ROOT_ID, true, '', false, ROOT_ID, []);
   const title = label(raw.tree.name) ?? label(raw.window?.title);
   return {
     root,

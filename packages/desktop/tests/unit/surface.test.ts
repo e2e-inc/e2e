@@ -1307,6 +1307,62 @@ describe('DesktopSurface: acting', () => {
     expect(scrolls.fake.acted()).toEqual(['scrollTo']);
   });
 
+  describe('a press on text or an image', () => {
+    const text = (value: string, extra: Record<string, unknown> = {}) => ({ role: 'statictext', value, native_id: { kind: 'ax_identifier', value }, ...extra });
+    const read = screen('w-mine', {
+      name: 'Tasks',
+      children: [
+        {
+          role: 'outline',
+          ref_id: '@s:list',
+          available_actions: ['Scroll'],
+          children: [
+            { role: 'row', ref_id: '@s:row', available_actions: ['RightClick'], children: [{ role: 'cell', ref_id: '@s:cell', available_actions: ['ScrollTo'], children: [{ role: 'group', children: [text('Medium')] }] }] },
+            { role: 'button', ref_id: '@s:button', name: 'Archive', available_actions: ['Click'], children: [{ role: 'image', native_id: { kind: 'ax_identifier', value: 'icon' } }] },
+            text('Loose'),
+            {
+              role: 'row',
+              ref_id: '@s:far-row',
+              children: [{ role: 'group', name: 'One', children: [{ role: 'group', name: 'Two', children: [{ role: 'group', name: 'Three', children: [text('Deep')] }] }] }],
+            },
+          ],
+        },
+        { role: 'textfield', ref_id: '@s:field', name: 'Note', available_actions: ['SetValue', 'Click'], children: [text('Hint')] },
+        text('Status'),
+      ],
+    });
+
+    it('taps the row the text is in, through a cell that takes no click of its own', async () => {
+      const { surface, fake } = await launched({ snapshot: [read] }, { observe: false });
+      const [medium] = await surface.locate(testId('Medium'), operation());
+      await surface.perform(medium!.ref, { kind: 'tap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:row', action: 'click' });
+    });
+
+    it("taps the button an image is in, and opens the row's menu from text in it", async () => {
+      const { surface, fake } = await launched({ snapshot: [read] }, { observe: false });
+      const [icon] = await surface.locate(testId('icon'), operation());
+      await surface.perform(icon!.ref, { kind: 'tap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:button', action: 'click' });
+      const [medium] = await surface.locate(testId('Medium'), operation());
+      await surface.perform(medium!.ref, { kind: 'secondaryTap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:row', action: 'rightClick' });
+    });
+
+    it('refuses text with no row or button around it: never the list, a field, the window, or past three levels', async () => {
+      const { surface, fake } = await launched({ snapshot: [read] }, { observe: false });
+      for (const id of ['Loose', 'Status', 'Deep']) {
+        const [node] = await surface.locate(testId(id), operation());
+        await expect(surface.perform(node!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/no row, cell, or button around it takes one/) });
+      }
+      // Text a field shows inside it (a hint) is the field's: a tap on it focuses the field, as a click there does.
+      const [hint] = await surface.locate(testId('Hint'), operation());
+      await surface.perform(hint!.ref, { kind: 'tap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:field', action: 'click' });
+      expect(fake.acted().filter((action) => action === 'click')).toHaveLength(1);
+    });
+  });
+
   it('scrolls a control into view through the driver when it is hidden and has a ref', async () => {
     const read = screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'button', name: 'Far', ref_id: '@s:e1', states: ['offscreen'], bounds: { x: 10, y: 900, width: 50, height: 20 } }] });
     const { surface, fake } = await launched({ snapshot: [read] }, { observe: false });

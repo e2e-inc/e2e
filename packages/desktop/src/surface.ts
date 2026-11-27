@@ -949,7 +949,10 @@ export class DesktopSurface {
   }
 
   private refOf(binding: NodeBinding, action: string): string {
-    if (binding.ref === undefined) throw notActionable(`node ${binding.id} (${binding.role ?? 'unknown'}) is not a control the engine can ${action}`);
+    if (binding.ref === undefined) {
+      const around = action === 'click' || action === 'rightClick' ? ', and no row, cell, or button around it takes one' : '';
+      throw notActionable(`node ${binding.id} (${binding.role ?? 'unknown'}) is not a control the engine can ${action}${around}`);
+    }
     return binding.ref;
   }
 
@@ -976,8 +979,10 @@ export class DesktopSurface {
     const binding = this.binding(ref);
     switch (action.kind) {
       case 'tap': {
-        const scrolled = await this.shown(binding, 'tap', operation);
-        const click = (): Promise<void> => this.refCommand('click', binding, operation);
+        // Text or an image in a row or a button takes no click of its own: the click goes to the row or button, as a click on text does on the web.
+        const target = pressTarget(binding, 'tap');
+        const scrolled = await this.shown(target, 'tap', operation);
+        const click = (): Promise<void> => this.refCommand('click', target, operation);
         if (scrolled) await afterChange('click', click);
         else await click();
         break;
@@ -985,8 +990,8 @@ export class DesktopSurface {
       case 'secondaryTap':
         // The driver checks the control offers a context menu, live, before it scrolls one out of view into view (or
         // refuses one it cannot reach), and counts a failure after that scroll as delivered: the observed actions may be
-        // from a read that stalled, which proves no menu absent.
-        await this.refCommand('rightClick', binding, operation);
+        // from a read that stalled, which proves no menu absent. Text in a row opens the row's menu.
+        await this.refCommand('rightClick', pressTarget(binding, 'secondaryTap'), operation);
         break;
       case 'doubleTap':
         // A double click needs the real pointer; declared with `physicalInput` alone. A node with no ref (a plain view, text) takes it at its center.
@@ -1631,6 +1636,27 @@ async function settleWithin<T>(promise: Promise<T>, ms: number, signal: AbortSig
 
 /** Roles whose `Click` may be a selection (`AXSelected`), not a press of their own. */
 const SELECTED_BY_CLICK = new Set(['row', 'cell', 'treeitem', 'option', 'tab']);
+
+/** Roles that show content and take no press of their own: a press on one goes to the row or button around it. */
+const CONTENT_ROLES = new Set(['text', 'heading', 'image', 'paragraph']);
+
+/** Roles the driver clicks by selecting them through their list, whatever actions they list; a cell that lists no click passes it on to its row. */
+const CLICKED_BY_SELECTION = new Set(['row', 'treeitem']);
+
+/**
+ * The node a tap or a secondary tap on `binding` goes to: the node itself,
+ * unless it is content (text, an image) that takes no such press, or has no
+ * ref at all; then the nearest node around it that takes the press, within the
+ * levels `around` holds, which never pass the first row, button, list, or
+ * scroll area above it, nor the window. With none, the node itself, which the
+ * driver refuses.
+ */
+function pressTarget(binding: NodeBinding, kind: 'tap' | 'secondaryTap'): NodeBinding {
+  const takes = (node: NodeBinding): boolean =>
+    node.ref !== undefined && (kind === 'tap' ? node.actions.includes('Click') || CLICKED_BY_SELECTION.has(node.role ?? '') : node.actions.includes('RightClick'));
+  if (binding.ref !== undefined && (takes(binding) || !CONTENT_ROLES.has(binding.role ?? ''))) return binding;
+  return binding.around?.find(takes) ?? binding;
+}
 
 /** Whether a node takes a press of its own, as the driver's hit test judges an element under the pointer. */
 function pressable(binding: NodeBinding): boolean {
