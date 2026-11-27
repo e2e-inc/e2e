@@ -13,6 +13,7 @@ import {
   installCommand,
   readPackageManifest,
   runScriptCommand,
+  usesYarnBerry,
   type PackageManager,
 } from '../internal/package-manager.ts';
 import { CONFIG_NAMES, JS_CONFIG_NAMES } from '../config/names.ts';
@@ -407,7 +408,7 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
   if (manager !== workspace.manager) clack.log.warn(`This workspace uses ${workspace.manager}, which was not found on this machine; continuing with ${manager}`);
   let mcpRegistrations: ReturnType<typeof planMcpRegistration>['registrations'];
   try {
-    const plan = planMcpRegistration(cwd, mcpFiles, manager);
+    const plan = planMcpRegistration(cwd, mcpFiles, manager, manager === 'yarn' && usesYarnBerry(manager === workspace.manager ? workspace.root : cwd));
     mcpRegistrations = plan.registrations;
     for (const link of plan.links) {
       clack.log.warn(`Symlink, not touching: ${link.relative} -> ${link.target} (e2e mcp server)`);
@@ -698,7 +699,7 @@ function planWorkflow(input: {
     ...(nodeVersionFile === undefined ? {} : { nodeVersionFile: posixRelative(repositoryRoot, nodeVersionFile) }),
     ...(nodeMajor === undefined ? {} : { nodeMajor }),
     ...(manager === 'pnpm' && !packageManager.startsWith('pnpm@') ? { pnpmVersion: localPnpmMajor() } : {}),
-    yarnBerry: existsSync(path.join(installRoot, '.yarnrc.yml')) || /^yarn@[2-9]/u.test(packageManager),
+    yarnBerry: usesYarnBerry(installRoot),
     // Bun before 1.2 writes the binary bun.lockb.
     ...(manager === 'bun' && !existsSync(path.join(installRoot, 'bun.lock')) && existsSync(path.join(installRoot, 'bun.lockb')) ? { lockfile: 'bun.lockb' } : {}),
     secrets,

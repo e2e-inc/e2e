@@ -103,15 +103,16 @@ export function findRegisteredMcpFiles(cwd: string): string[] {
  * project whose `devEngines` pins another manager, and finds no binary in a
  * Yarn Plug'n'Play install; a Bun project may have no Node.js for it at all.
  */
-function mcpLaunch(manager: PackageManager): { readonly command: string; readonly args: readonly string[] } {
+function mcpLaunch(manager: PackageManager, yarnBerry: boolean): { readonly command: string; readonly args: readonly string[] } {
   switch (manager) {
     case 'npm':
       return { command: 'npx', args: ['e2e', 'mcp'] };
     case 'pnpm':
       return { command: 'pnpm', args: ['exec', 'e2e', 'mcp'] };
     case 'yarn':
-      // Yarn 1 prints a banner to stdout, the protocol's stream, unless told to stay silent; `run --silent` is the form Yarn 2 and later take too.
-      return { command: 'yarn', args: ['run', '--silent', 'e2e', 'mcp'] };
+      // `exec`, since `yarn run e2e` and `yarn e2e` run a package.json script named e2e before the binary. Yarn 1 also
+      // prints a banner to stdout, the protocol's stream, unless silenced, and takes the server's flags as its own without `--`; Yarn 2 and later refuse both.
+      return yarnBerry ? { command: 'yarn', args: ['exec', 'e2e', 'mcp'] } : { command: 'yarn', args: ['--silent', 'exec', '--', 'e2e', 'mcp'] };
     case 'bun':
       return { command: 'bunx', args: ['e2e', 'mcp'] };
   }
@@ -123,9 +124,10 @@ function mcpLaunch(manager: PackageManager): { readonly command: string; readonl
  * Extra settings on the e2e entry, other servers, other keys, and the file's
  * indentation are preserved. A file reached through a symlink is never read;
  * it is returned among `links` for the caller to report and skip.
+ * `yarnBerry` says a Yarn project is on Yarn 2 or later, whose command differs.
  */
-export function planMcpRegistration(cwd: string, files: readonly string[], manager: PackageManager): McpPlan {
-  const launch = mcpLaunch(manager);
+export function planMcpRegistration(cwd: string, files: readonly string[], manager: PackageManager, yarnBerry = false): McpPlan {
+  const launch = mcpLaunch(manager, yarnBerry);
   const registrations: McpRegistration[] = [];
   const links: McpLink[] = [];
   for (const file of files) {

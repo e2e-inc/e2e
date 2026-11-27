@@ -1,6 +1,6 @@
 /** Which package manager a project uses, for install hints that name a runnable command. */
 
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { compileGlob, matchesGlob } from '@e2e-dev/core/lib/internal/globs';
 import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
@@ -94,6 +94,12 @@ function invokingManager(env: NodeJS.ProcessEnv): PackageManager {
 function managerAt(dir: string): PackageManager | undefined {
   const field = readPackageManifest(dir)?.['packageManager'];
   return fieldManager(typeof field === 'string' ? field : undefined) ?? lockfileManager(dir);
+}
+
+/** Whether the Yarn project rooted at `root` is on Yarn 2 or later: it has a `.yarnrc.yml`, or its `packageManager` field names such a version. */
+export function usesYarnBerry(root: string): boolean {
+  const field = readPackageManifest(root)?.['packageManager'];
+  return existsSync(path.join(root, '.yarnrc.yml')) || (typeof field === 'string' && /^yarn@[2-9]/u.test(field));
 }
 
 /** The package.json in `dir` as an object, or undefined when it is missing or not one. */

@@ -30,7 +30,7 @@ an existing registration, and start the MCP client in the project so `npx`
 uses the installed e2e version. Use the project's package manager: `pnpm
 exec e2e mcp` in a pnpm project (`npx` fails there with `EBADDEVENGINES`
 when `devEngines` pins pnpm, and the client shows only `Connection
-closed`), `yarn run --silent e2e mcp` with Yarn, `bunx e2e mcp` with Bun.
+closed`), `yarn exec e2e mcp` with Yarn (`yarn --silent exec -- e2e mcp` on Yarn 1), `bunx e2e mcp` with Bun.
 For Claude Code:
 
 ```bash

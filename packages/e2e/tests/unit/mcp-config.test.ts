@@ -48,12 +48,14 @@ describe('planMcpRegistration', () => {
   });
 
   it.each([
-    ['npm', 'npx', ['e2e', 'mcp']],
-    ['pnpm', 'pnpm', ['exec', 'e2e', 'mcp']],
-    ['yarn', 'yarn', ['run', '--silent', 'e2e', 'mcp']],
-    ['bun', 'bunx', ['e2e', 'mcp']],
-  ] as const)("starts the server with the project's own manager: %s", (manager, command, args) => {
-    const [json, toml] = planMcpRegistration(dir, ['.mcp.json', '.codex/config.toml'], manager).registrations;
+    ['npm', false, 'npx', ['e2e', 'mcp']],
+    ['pnpm', false, 'pnpm', ['exec', 'e2e', 'mcp']],
+    // Never `yarn run`: it would run a package.json script named e2e instead of the binary.
+    ['yarn', false, 'yarn', ['--silent', 'exec', '--', 'e2e', 'mcp']],
+    ['yarn', true, 'yarn', ['exec', 'e2e', 'mcp']],
+    ['bun', false, 'bunx', ['e2e', 'mcp']],
+  ] as const)("starts the server with the project's own manager: %s (Yarn 2 or later: %s)", (manager, yarnBerry, command, args) => {
+    const [json, toml] = planMcpRegistration(dir, ['.mcp.json', '.codex/config.toml'], manager, yarnBerry).registrations;
     expect(JSON.parse(json!.content)).toEqual({ mcpServers: { e2e: { command, args } } });
     expect(toml!.content).toBe(`[mcp_servers.e2e]\nargs = ${JSON.stringify(args)}\ncommand = ${JSON.stringify(command)}\n`);
   });
