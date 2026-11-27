@@ -63,6 +63,8 @@ interface Harness {
   readonly context: StepExecutorContext;
   /** Runs one tool through the session's `call` path and returns its text. */
   run(tool: string, args: Record<string, unknown>): Promise<string>;
+  /** Replaces what observe lists from the next observation on, as an engine that numbers every screen afresh does. */
+  show(screen: readonly Fake[]): void;
 }
 
 /**
@@ -80,7 +82,7 @@ async function harness(options: {
   /** The verbs the target declares; the whole grammar by default. */
   readonly verbs?: readonly ExecutorVerb[];
 }): Promise<Harness> {
-  const root: Fake = { id: 'root', role: 'document', name: 'Page', y: 0, children: options.screen };
+  let root: Fake = { id: 'root', role: 'document', name: 'Page', y: 0, children: options.screen };
   const base = fakeExecutorContext({
     secrets: [{ name: 'admin.password', purpose: 'password' }, { name: 'apiKey', purpose: 'generic-secret' }],
     ...(options.verbs === undefined ? {} : { verbs: options.verbs }),
@@ -142,6 +144,10 @@ async function harness(options: {
     run: async (tool, args) => {
       const result = await invokeTool(tool, tools[tool]!, args, extra);
       return result.content.map((part) => (part.type === 'text' ? part.text : '')).join('\n');
+    },
+    show: (screen) => {
+      root = { ...root, children: screen };
+      for (const node of screen) index(node);
     },
   };
 }
@@ -449,6 +455,18 @@ describe('SessionTestLines', () => {
 
   it('forgets every id after a screen read without a tree, as the step does', async () => {
     const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] }, tree: false });
+    expect(noteOf(await session.run('tap', { target: 'n2' }))).toBe('No test line: #n2 is not on the newest screen.');
+  });
+
+  it('finds an id an earlier screen listed on the newest one, as the step does for the action', async () => {
+    const renumbered: Fake = { id: 'n9', role: 'button', name: 'Save', y: 40 };
+    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [renumbered] } });
+    session.show([renumbered]);
+    await session.context.observe();
+    expect(noteOf(await session.run('tap', { target: 'n2' }))).toBe('Test line: await screen.getByRole("button", "Save").tap();');
+    // Two nodes that read like it: the step finds neither, and neither does the line.
+    session.show([renumbered, { id: 'n10', role: 'button', name: 'Save', y: 80 }]);
+    await session.context.observe();
     expect(noteOf(await session.run('tap', { target: 'n2' }))).toBe('No test line: #n2 is not on the newest screen.');
   });
 

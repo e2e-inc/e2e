@@ -221,7 +221,7 @@ changed on screen.
 
 | Input | Does |
 | --- | --- |
-| A node id | From the newest observation. |
+| A node id | From the newest observation. An id only an earlier observation listed is found again on the newest one by what its node read as (role, name, text), when exactly one node there reads the same; otherwise the action fails with `LOCATOR_NOT_FOUND`. |
 | The value, key, `checked` state, direction, drop target, project-relative or `sample:` `files`, URL, `width` and `height`, or secret name | What the verb needs. |
 | `modifiers` (optional) | On `tap`, `double_tap`, and `right_click`, when the engine declares `tapModifiers`: a list of `Shift`, `Control`, `Alt`, `Meta`, `ControlOrMeta`, held for the click. |
 
@@ -356,7 +356,8 @@ Test line: await screen.getByRole("button", "Sign in").tap();
 ```
 
 - The locator comes from the target as the newest observation listed it,
-  before the action runs. Role and name, label, placeholder, text, and test
+  before the action runs. An id an earlier observation listed is the node
+  the action acts on there (see [Actions](#actions)). Role and name, label, placeholder, text, and test
   id are tried in that order, and the first that matches the target and
   nothing else on the live screen wins, as [`locate`](#locate) would report it.
 - A locator that also matches twins is narrowed: to nodes that render
@@ -643,7 +644,11 @@ exits.
 
 Sessions enforce what tests enforce:
 
-- Node ids are valid only against the newest observation.
+- Node ids are resolved against the newest observation. An id that only an
+  earlier observation listed is found again by what its node read as, when
+  exactly one node on the newest screen reads the same, as an agent step
+  finds it; otherwise the action fails with `LOCATOR_NOT_FOUND`. A secret
+  fill then checks the node it found, as for any fill.
 - The single actions fill a secret only through `type_secret`.
   [`run_code`](#run_code) fills one as a test does.
 - Once the config has loaded, its secret values are redacted from every text

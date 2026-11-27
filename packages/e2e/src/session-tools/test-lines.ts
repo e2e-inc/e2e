@@ -11,7 +11,9 @@
  * narrowed (to the nodes that render, under a container, or by position, in
  * that order), and otherwise the result says why there is no line. The
  * point tools print the line of the listed control they act on by id, or
- * `screen.tapAt` for a bare tap, and say why there is none otherwise. The
+ * `screen.tapAt` for a bare tap, and say why there is none otherwise. An id
+ * an earlier screen listed is found on the newest one as the step finds it
+ * for the action: by what it read as, when exactly one node there reads so. The
  * session keeps the lines in order, with the lines `run_code` passed
  * among them, and `test_lines` returns them as a draft test body, lines that
  * continue a resumed test, or lines for a held test's pause point. Only the session
@@ -44,6 +46,8 @@ const MAX_TRIES = 10;
 const MAX_CONTAINERS = 3;
 /** CSS pixels a match's center may sit outside the target's box and still be the target. */
 const BOX_SLACK = 1;
+/** Screens kept before the newest one, for an id an earlier screen listed: the step keeps as many (`MAX_RECENT_OBSERVATIONS`, less the newest). */
+const MAX_EARLIER_SCREENS = 7;
 
 /** The roles `getByRole` takes, so a node read as `generic` never becomes a role query. */
 const ROLES: ReadonlySet<string> = new Set(
@@ -128,10 +132,16 @@ interface Listed {
   readonly root: ExecutorNode;
 }
 
-/** The newest observation's tree, and its nodes by id, each with its parent's id. */
+/** One node of a screen, with its parent's id. */
+interface ScreenEntry {
+  readonly node: ExecutorNode;
+  readonly parent: string | undefined;
+}
+
+/** An observation's tree, and its nodes by id. */
 interface Screen {
   readonly root: ExecutorNode;
-  readonly nodes: ReadonlyMap<string, { readonly node: ExecutorNode; readonly parent: string | undefined }>;
+  readonly nodes: ReadonlyMap<string, ScreenEntry>;
 }
 
 /** What one locator matched: how many nodes, and which of them is the target. */
@@ -175,6 +185,8 @@ type Entry = { readonly tool: string } & LinePlan;
 /** The test lines of one session: the observations it keeps for them, the wrapped grammar, and `test_lines`. */
 export class SessionTestLines {
   private screen: Screen | undefined;
+  /** The screens before the newest one, oldest first. */
+  private readonly earlier: Screen[] = [];
   private readonly entries: Entry[] = [];
   /** The step context `watch` wrapped, whose hit test places a point tool's target. */
   private context: StepExecutorContext | undefined;
@@ -274,22 +286,52 @@ export class SessionTestLines {
     ].join('\n');
   }
 
-  /** Keeps an observation's tree as the newest screen; one without a tree leaves no id to look up, as for the step. */
+  /**
+   * Keeps an observation's tree as the newest screen, and the one before it
+   * among the earlier ones; one without a tree leaves no id to look up, now
+   * or from before, as for the step.
+   */
   private keep(observation: ExecutorObservation): void {
-    this.screen = observation.tree === undefined ? undefined : indexScreen(observation.tree);
+    if (observation.tree === undefined) {
+      this.screen = undefined;
+      this.earlier.length = 0;
+      return;
+    }
+    if (this.screen !== undefined) this.earlier.push(this.screen);
+    if (this.earlier.length > MAX_EARLIER_SCREENS) this.earlier.shift();
+    this.screen = indexScreen(observation.tree);
   }
 
-  /** The node an id names on the newest screen, with its ancestors. */
+  /**
+   * The node an id names on the newest screen, with its ancestors. An id only
+   * an earlier screen listed (an engine that numbers every screen afresh) is
+   * found as the step finds it for the action: the node it named on the
+   * newest screen that listed it, if exactly one node on the newest screen
+   * reads like it.
+   */
   private listed(id: string): Listed | undefined {
     const screen = this.screen;
-    const entry = screen?.nodes.get(id.replace(/^#/, ''));
-    if (screen === undefined || entry === undefined) return undefined;
+    if (screen === undefined) return undefined;
+    const key = id.replace(/^#/, '');
+    const entry = screen.nodes.get(key) ?? this.refound(key, screen);
+    if (entry === undefined) return undefined;
     const ancestors: ExecutorNode[] = [];
     for (let parent = entry.parent; parent !== undefined; parent = screen.nodes.get(parent)?.parent) {
       const node = screen.nodes.get(parent)?.node;
       if (node !== undefined) ancestors.push(node);
     }
     return { node: entry.node, ancestors, root: screen.root };
+  }
+
+  /** The newest screen's entry for the one node that reads like what `id` named on the latest earlier screen that listed it. */
+  private refound(id: string, screen: Screen): ScreenEntry | undefined {
+    for (let index = this.earlier.length - 1; index >= 0; index -= 1) {
+      const was = this.earlier[index]!.nodes.get(id)?.node;
+      if (was === undefined) continue;
+      const alike = twinsOf(screen.root, was);
+      return alike.length === 1 ? screen.nodes.get(alike[0]!.id) : undefined;
+    }
+    return undefined;
   }
 
   /** A grammar tool that works out its line before the action and adds it to the result after. */
@@ -767,7 +809,7 @@ function pointCode(point: ViewportPoint): string {
 
 /** Indexes an observation's tree by id, each node with its parent's id. */
 function indexScreen(root: ExecutorNode): Screen {
-  const nodes = new Map<string, { readonly node: ExecutorNode; readonly parent: string | undefined }>();
+  const nodes = new Map<string, ScreenEntry>();
   const walk = (node: ExecutorNode, parent: string | undefined): void => {
     nodes.set(node.id, { node, parent });
     for (const child of node.children ?? []) walk(child, node.id);
