@@ -101,6 +101,9 @@ pub struct RawSnapshot {
     /// app stalled or a limit cut it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     timed_out: bool,
+    /// True when the app did not answer for the window itself: the tree is a bare window, which is no window read yet.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    root_unread: bool,
     /// True when the node budget stopped the read.
     truncated: bool,
     ref_count: usize,
@@ -130,6 +133,8 @@ struct Walk {
     complete: bool,
     /// Whether the deadline stopped the read.
     timed_out: bool,
+    /// Whether the app did not answer for the window itself.
+    root_unread: bool,
     /// How many reads of an element that still exists failed; a parent whose subtree lost one is truncated.
     lost: usize,
     truncated: bool,
@@ -551,6 +556,7 @@ impl Walk {
             Err(error) => {
                 if missed(error) {
                     self.lose();
+                    self.root_unread = true;
                 }
                 Read {
                     role: "window",
@@ -776,6 +782,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         nodes: 0,
         complete: true,
         timed_out: false,
+        root_unread: false,
         lost: 0,
         truncated: false,
         refs: Vec::new(),
@@ -806,6 +813,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         snapshot_id: walk.snapshot,
         complete: walk.complete,
         timed_out: walk.timed_out,
+        root_unread: walk.root_unread,
         truncated: walk.truncated,
         ref_count,
         tree,
