@@ -480,14 +480,16 @@ interface Ends {
  * the next. An end with no descriptor (a bare point) needs no finding. Waits
  * like `relocate` does, judging the source first as main did, so a source
  * still loading is waited for whatever the destination shows. Each end keeps
- * its twin refusal on later looks, as `relocate` does. Returns the last look
- * judged; nothing when no look could be read.
+ * its twin refusal on later looks, as `relocate` does. A coordinate source
+ * that can be placed on this look does not stop a wait for the destination.
+ * Returns the last look judged; nothing when no look could be read.
  */
 async function relocateEnds(
   host: ReplayHost,
   source: TraceTargetDescriptor | undefined,
   destination: TraceTargetDescriptor | undefined,
   look: Look,
+  canPlaceSource?: (relocated: Relocated) => boolean,
 ): Promise<Ends | undefined> {
   const refused = new Set<TraceTargetDescriptor>();
   let latest: Ends | undefined;
@@ -507,8 +509,12 @@ async function relocateEnds(
     const unresolved = (descriptor: TraceTargetDescriptor | undefined, judged: typeof from) =>
       descriptor !== undefined && refused.has(descriptor) && judged?.relocated.kind === 'failed';
     latest = { screen, ends: [from?.relocated, to?.relocated], refused: unresolved(source, from) || unresolved(destination, to) };
-    const first = [from, to].find((judged) => judged?.relocated.kind === 'failed');
-    return first?.wait === true ? undefined : latest;
+    if (from?.relocated.kind === 'failed') {
+      if (from.wait) return undefined;
+      if (to?.wait === true && canPlaceSource?.(from.relocated) === true) return undefined;
+      return latest;
+    }
+    return to?.wait === true ? undefined : latest;
   }, look);
   return settled ?? latest;
 }
@@ -590,7 +596,10 @@ async function placePoints(
   | { readonly kind: 'placed'; readonly from: ViewportPoint; readonly to: ViewportPoint }
   | { readonly kind: 'failed'; readonly failure: ReplayHandOffReason; readonly why?: string }
 > {
-  const ends = await relocateEnds(host, from.within?.descriptor, to.within?.descriptor, look);
+  const source = from.within;
+  const ends = await relocateEnds(host, source?.descriptor, to.within?.descriptor, look, (relocated) =>
+    source !== undefined && placeWithin(relocated, { ...source, point: from.point, viewport }) !== undefined,
+  );
   if (ends === undefined) return { kind: 'failed', failure: from.within === undefined ? 'action-failed' : 'target-not-found' };
   const { width, height } = ends.screen.viewport;
   const points: ViewportPoint[] = [];

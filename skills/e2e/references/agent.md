@@ -238,6 +238,8 @@ takes over from the current screen when the app no longer matches.
   goal records it again. `step.cache.reason` says why a replay missed.
 - A step that changes nothing on screen or in the route records nothing
   and runs live every run.
+- A cached coordinate drag can wait for the drop target when the recorded
+  point identifies the source among same-named controls.
 - While you fix a test, keep the cache on so confirmed goals replay (topic
   `debugging`, "Rerunning a test while you fix it"). Use `--no-cache` to
   rule out a stale replay (topic `debugging`, "Tools") and for one live run

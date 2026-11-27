@@ -715,6 +715,38 @@ describe('replayTrace: bare-point drags', () => {
       expect(drags, waits).toEqual([{ from: { x: 100, y: 350 }, to: { x: 500, y: 200 } }]);
     }
   });
+
+  it.each([
+    { label: 'waits for the destination when the source point resolves same-named candidates', twinX: 220, placeable: true },
+    { label: 'stops when same-named sources overlap at the recorded point', twinX: 25, placeable: false },
+  ])('$label', async ({ twinX, placeable }) => {
+    const card: SemanticNode = { ref: { id: 'c', revision: 'r1' }, role: 'button', name: 'Card', rect: { x: 0, y: 0, width: 200, height: 100 } };
+    const twin: SemanticNode = { ...card, ref: { id: 'twin', revision: 'r1' }, rect: { x: twinX, y: 0, width: 200, height: 100 } };
+    const lane: SemanticNode = { ref: { id: 'l', revision: 'r1' }, role: 'region', name: 'Done', rect: { x: 450, y: 0, width: 200, height: 100 } };
+    const drag: RecordedAction = {
+      name: 'dragAt',
+      summary: 'drag Card to Done',
+      from: { point: { x: 100, y: 50 }, within: { target: { role: 'button', name: 'Card' }, fx: 0.5, fy: 0.5 } },
+      to: { point: { x: 550, y: 50 }, within: { target: { role: 'region', name: 'Done' }, fx: 0.5, fy: 0.5 } },
+      viewport: VIEWPORT,
+    };
+    const drags: unknown[] = [];
+    const host = makeHost({ onAction: (name, detail) => void (name === 'dragAt' && drags.push(detail)) });
+    host.capture = async () => host.looks.length === 1
+      ? screen([card, twin])
+      : screen([{ ...card, rect: { x: 25, y: 0, width: 200, height: 100 } }, twin, lane]);
+
+    const outcome = await replayTrace(host, trace([drag]));
+    if (placeable) {
+      expect(outcome).toMatchObject({ completed: true, executed: 1 });
+      expect(drags).toEqual([{ from: { x: 125, y: 50 }, to: { x: 550, y: 50 } }]);
+      expect(host.looks).toEqual(['held-still', 'raw']);
+    } else {
+      expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
+      expect(drags).toEqual([]);
+      expect(host.looks).toEqual(['held-still']);
+    }
+  });
 });
 
 describe('replayTrace: the recorded control is gone and a twin is left', () => {
@@ -820,6 +852,23 @@ describe('replayTrace: the recorded control is gone and a twin is left', () => {
     const outcome = await replayTrace(host, trace([{ name: 'drag', summary: 'drag', target: flagged, destination: { role: 'textbox', name: 'Email' } }]));
     expect(outcome).toMatchObject({ completed: true, executed: 1 });
     expect(drops).toEqual([{ source: { id: 'a' }, destination: { id: 'n2' } }]);
+  });
+
+  it('refuses a coordinate drag when a replacement sits under the recorded source point', async () => {
+    const twin = setUp('b', { x: 0, y: 0, width: 200, height: 200 }, 'setup-secondary');
+    const destination = { ...email, rect: { x: 250, y: 0, width: 100, height: 200 } };
+    const host = makeHost({});
+    host.capture = async () => screen(host.looks.length === 1 ? [twin] : [twin, destination]);
+    const drag: RecordedAction = {
+      name: 'dragAt',
+      summary: 'drag Set up to Email',
+      from: { point: { x: 100, y: 100 }, within: { target: flagged, fx: 0.5, fy: 0.5 } },
+      to: { point: { x: 300, y: 100 }, within: { target: { role: 'textbox', name: 'Email' }, fx: 0.5, fy: 0.5 } },
+      viewport: VIEWPORT,
+    };
+
+    expect(await replayTrace(host, trace([drag]))).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
+    expect(host.calls).toEqual([]);
   });
 
   it('keeps a drag end refused while it looks again for the test id: a second look-alike does not end the wait', async () => {
