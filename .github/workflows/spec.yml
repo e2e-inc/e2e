@@ -232,12 +232,13 @@ jobs:
       - uses: ./.github/actions/load-x64-addon
         with:
           addon: packages/desktop/desktop.darwin-x64.node
-      # The engine's loader on the addon just built: the test that runs it is skipped wherever no addon was built.
+      # The engine's unit suite on macOS, with the addon just built: its loader test, and the state tests that guard
+      # what `app.clearState()` removes from ~/Library, are skipped on the Linux test jobs.
       - uses: ./.github/actions/workspace-install
-      - name: Load the addon through the engine
+      - name: Run the engine's unit tests with the addon
         env:
           REQUIRE_DESKTOP_NATIVE: '1'
-        run: pnpm --filter @e2e-dev/core run build && pnpm --filter @e2e-dev/desktop exec vitest run tests/unit/driver.test.ts
+        run: pnpm --filter @e2e-dev/core run build && pnpm --filter @e2e-dev/desktop exec vitest run
 
   # The Electron engine on its testbed app. Electron has no headless mode, so
   # the app runs under a virtual display.

@@ -957,7 +957,7 @@ trees, on both platforms, without a device.
   (the desktop driver's `cargo fmt --check`, clippy, and `cargo test`, a
   build for both Mac architectures with each one's architecture checked by
   `lipo`, a load of the arm64 build, also
-  through the engine's loader test, and a load of the x64 build in the
+  through the engine's unit suite, which runs its macOS-only tests there, and a load of the x64 build in the
   official darwin-x64 Node under Rosetta; rustup, when the image has none,
   comes from the rustup-init release and SHA-256 that
   `.github/actions/rust-toolchain` pins), which
