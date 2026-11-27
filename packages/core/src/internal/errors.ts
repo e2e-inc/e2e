@@ -361,9 +361,13 @@ export function translateEngineError(cause: unknown, suffix = ''): E2EError {
   if (isE2EError(cause)) return classifyError(cause);
   const engineError = asEngineError(cause);
   if (engineError !== undefined) {
+    // What the engine says after the generic words and the step: why a read went stale or ran out of time (a tree
+    // deeper than the engine reads, a locked screen) is often the one thing that tells the user what to fix. The words
+    // before it read as they always did, for anything that matches them.
+    const said = (generic: string): string => (engineError.message === '' || engineError.message === generic ? `${generic}${suffix}` : `${generic}${suffix} (${engineError.message})`);
     switch (engineError.code) {
       case 'NODE_STALE':
-        return new TestError('LOCATOR_NOT_FOUND', `node became stale${suffix}`, { cause });
+        return new TestError('LOCATOR_NOT_FOUND', said('node became stale'), { cause });
       case 'FRAME_NOT_FOUND':
         return new TestError('LOCATOR_NOT_FOUND', `${engineError.message}${suffix}`, { cause });
       case 'FRAME_AMBIGUOUS':
@@ -373,7 +377,7 @@ export function translateEngineError(cause: unknown, suffix = ''): E2EError {
       case 'ACTION_MAY_HAVE_COMMITTED':
         return new TestError('ACTION_FAILED', `${engineError.message}${suffix}`, { cause });
       case 'OPERATION_TIMEOUT':
-        return new TestError('ACTION_FAILED', `operation timed out${suffix}`, { cause });
+        return new TestError('ACTION_FAILED', said('operation timed out'), { cause });
       case 'CANCELLED':
         return new E2EError('infrastructure', 'CANCELLED', 'operation cancelled', { cause });
       case 'UNSUPPORTED_CAPABILITY':
