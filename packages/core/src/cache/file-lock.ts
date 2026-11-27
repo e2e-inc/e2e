@@ -126,9 +126,11 @@ async function acquire(lockPath: string): Promise<string> {
  * is another tool's, whatever its age, and is never removed.
  */
 async function isStale(path: string): Promise<boolean> {
+  // The token first, then the age: a holder that lets go and a new one that takes the path in between leave a
+  // fresh file, which reads as live. The other order could pair the old file's age with the new one's token.
+  if (!(await readFile(path, 'utf8').then(isLockToken, () => false))) return false;
   const stats = await stat(path).catch(() => undefined);
-  if (stats === undefined || Date.now() - stats.mtimeMs <= STALE_MS) return false;
-  return readFile(path, 'utf8').then(isLockToken, () => false);
+  return stats !== undefined && Date.now() - stats.mtimeMs > STALE_MS;
 }
 
 /**
