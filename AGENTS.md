@@ -360,8 +360,8 @@ the way a user would.
   AppKit app (`app/macos/main.swift`, built by `pnpm build:app` into
   `build/SignInForm.app`): a sign-in form, and a Controls window with one
   control per engine capability the form does not reach. Its e2e suites on
-  `@e2e-dev/desktop`: `tests/` locators only, `tests-headed/` the physical
-  pointer and keyboard (`pnpm test:headed`, which moves your pointer), and
+  `@e2e-dev/desktop`: `tests/` locators only, `tests-physical/` the physical
+  pointer and keyboard (`pnpm test:physical`, which moves your pointer), and
   `tests-agent/` one `agent.act`. Hand-run on a Mac with Accessibility
   permission and the native driver built; no CI job runs it yet.
 - `apps/electron-testbed` (`@e2e-dev/electron-testbed`, private) - a small
@@ -441,8 +441,8 @@ the way a user would.
   with `npx skills add e2e-inc/e2e --skill migrate-to-e2e`; not shipped
   in the package and not read by `e2e guide`.
 - `.dev/skills/` — the skills we use to work on this repo (`authoring-docs`,
-  `babysit`, `ship-pr`, `verify`, `writing-pr`). `npx skills add e2e-inc/e2e`
-  offers only `skills/*`: its default scan never looks in `.dev/`, and it skips
+  `babysit`, `merge-risk`, `ship-pr`, `verify`, `writing-pr`).
+  `npx skills add e2e-inc/e2e` offers only `skills/*`: its default scan never looks in `.dev/`, and it skips
   `.claude/skills/<name>`, the relative symlink to each that agents load
   them through, because it does not follow symlinked directories. Its
   `--full-depth` scan does reach `.dev/skills/`; there the frontmatter's

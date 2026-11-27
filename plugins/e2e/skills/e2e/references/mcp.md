@@ -79,8 +79,9 @@ Everything a session does is a catalog tool run through
   its nodes.
 - `close_session`: frees the session's slot once its cleanup finishes, even
   while an unrelated app is still stopping.
-- `observe`: one node per line as `#id role "name" ...`, plus the path. Node
-  ids are valid only for the newest observation.
+- `observe`: one node per line as `#id role "name" ...`, plus the path. Use
+  ids from the newest observation; an older id works only when exactly one
+  node on the newest screen reads like its node.
 - The grammar verbs (`tap`, `type`, `press`, `select`, `check`, `scroll`,
   `drag`, `upload`, `navigate`, `back`, ...): each reports what changed and
   the `Test line:` that repeats it, or `No test line:` and why.
@@ -92,8 +93,10 @@ Everything a session does is a catalog tool run through
 - `test_lines`: every test line printed or passed so far, in order, as a
   draft test body.
 - `screenshot` (masked pixels; secure fields only), the point tools
-  (`tap_at`, `type_at`, ...) after a screenshot, `start_recording` and
-  `stop_recording`, and the project's own tools.
+  (`tap_at`, `type_at`, ...) after a screenshot, each with the test line of
+  the listed control it acted on (or `screen.tapAt` for a bare tap), or
+  `No test line:` and why, `start_recording` and `stop_recording`, and the
+  project's own tools.
 
 Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
 Full reference: docs/reference/mcp.mdx.
@@ -221,7 +224,9 @@ screen looks: `run_code` reads the accessibility tree, not pixels.
 Pass only `attach` to `open_session`, with the ID from the pause header,
 from the test run's directory and the same e2e version:
 `open_session {attach: "k3f9"}`. The session has the normal tools on that
-target, and its `test_lines` belong at the pause point of the held test.
+target, `run_code` with the engine's fixture (`desktop`, `browser`,
+`device`) included, and its `test_lines` belong at the pause point of the
+held test.
 `close_session` detaches and leaves the test held; Enter, or
 `npx e2e run --step next`, resumes the test and ends the attachment.
 

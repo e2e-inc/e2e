@@ -88,6 +88,8 @@ export interface Launched {
   readonly bundle_id?: string;
   /** When the process started, in microseconds since the epoch, read as the driver claimed it. */
   readonly started?: number;
+  /** The copies of the app that ran before the launch, which the launch never claims. */
+  readonly running_before: readonly number[];
 }
 
 /** What the driver can do: one function per native call. */
@@ -131,6 +133,8 @@ export interface DesktopDriver {
   checkCombo(combo: string): Promise<Envelope<unknown>>;
   /** `inputId` names the call, so `cancelInput` stops it before it changes the focus. */
   focusWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
+  /** Closes a window as its close button does, and answers once it left the app's windows. `inputId` names the call, so `cancelInput` stops it before the button is pressed. */
+  closeWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
   /**
    * `inputId` names the pointer input, so `cancelInput` stops what it has yet to send. With `target`, the window the
    * point was taken in, no click goes once another window or app took the focus from it, or its sheet changed: `sheet`
@@ -191,6 +195,12 @@ export class DriverFailure extends Error {
     this.code = failure.code;
     this.notDelivered = failure.disposition?.delivery === 'not_delivered';
     this.details = failure.details ?? {};
+  }
+
+  /** The copies of the app a failed launch says ran before it; none when it names none. */
+  get runningBefore(): readonly number[] {
+    const before = this.details.running_before;
+    return Array.isArray(before) ? before.filter((pid): pid is number => typeof pid === 'number') : [];
   }
 }
 

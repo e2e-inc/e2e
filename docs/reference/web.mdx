@@ -1595,6 +1595,11 @@ export interface WebOptions {
    */
   readonly browser?: BrowserName | BrowserProvider;
   /**
+   * Whether a locally launched Chromium runs with its OS sandbox on; default
+   * `true` on macOS and Windows, `false` on Linux.
+   */
+  readonly chromiumSandbox?: boolean;
+  /**
    * Initial viewport of every attempt's page; default 1280 by 720. `null`
    * emulates no size: the page fills the browser window, whatever size the
    * window has (a hosted browser's live view, a headed run), and

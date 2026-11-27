@@ -702,7 +702,7 @@ export class SessionHost {
       lines.push(`- ${toolSignature('run_code', runCode)}: JavaScript with loops, variables, and return values. Use it for most of the work: one call that reads, computes, acts, and asserts, in place of many single actions. A read's value shows in the result unless the code returns or logs. Its API:`, ...runCodeApi({ attempt: () => live.attempt, engineFixtures: Object.keys(live.target.engine?.fixtures ?? {}) }).map((line) => `  ${line}`));
     }
     lines.push(
-      'Node ids ("n42") are valid only for the newest observation. Every action prints the test line that repeats it. Call close_session when you are done.',
+      'Node ids ("n42") come from the newest observation; an older id works only when exactly one node on the newest screen reads like its node. Every action prints the test line that repeats it. Call close_session when you are done.',
       READ_WRITING_GUIDE,
     );
     return `${lines.join('\n')}\n\n${screen}`;
@@ -775,14 +775,15 @@ export class SessionHost {
             'Only where the project has no config file: the engine to open on. A package name calls its default export with no options: "@e2e-dev/web". An object passes options, and an option of this same shape is called first and replaced by its result, which is how an engine gets a device or browser provider: {package: "@e2e-dev/mobile", options: {platform: "ios", device: {package: "@e2e-dev/limrun", export: "limrun", options: {region: "eu"}}}}. Excludes target, config, and test',
           ),
         app: z
-          .object({
+          .looseObject({
             url: z.string().min(1).optional().describe('The URL the session opens, and the base of relative navigation'),
             bundleId: z.string().min(1).optional().describe('An installed app to launch: its bundle id, package, or display name'),
             appPath: z.string().min(1).optional().describe("A build to install and launch: an .app, .ipa, or .apk, relative to the server's working directory"),
           })
-          .strict()
           .optional()
-          .describe('With engine: the app under test. @e2e-dev/web needs url; @e2e-dev/mobile needs bundleId or appPath'),
+          .describe(
+            "With engine: the app under test, with any key of a config target's app, such as launchArguments, permissions, or command. @e2e-dev/web needs url; @e2e-dev/mobile and @e2e-dev/desktop need bundleId or appPath",
+          ),
       }).strict(),
       readOnly: false,
       call: async (args, extra) => textResult(await this.open(args, extra.signal)),

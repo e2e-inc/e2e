@@ -105,6 +105,12 @@ async function launched(scenario: Scenario | FakeDriver = {}, launch: Launch = {
   return { surface, fake, byTestId };
 }
 
+/** What a fixture factory is given, with every call on the test's own budget and nothing recorded. */
+function fixtureContext(timeoutMs = 10_000): Parameters<typeof createDesktopFixture>[1] {
+  // oxlint-disable-next-line e2e/no-chained-type-assertions -- a stand-in for the two members the fixture reads
+  return { operation: (timeout?: number) => ({ ...operation(), timeoutMs: timeout ?? timeoutMs }), fixture: <T,>(_name: string, value: T) => value } as unknown as Parameters<typeof createDesktopFixture>[1];
+}
+
 /** The arguments of the newest call of a method. */
 function last<T = Record<string, unknown>>(fake: FakeDriver, method: string): T | undefined {
   return fake.of(method).at(-1)?.args[0] as T | undefined;
@@ -169,11 +175,11 @@ describe('DesktopSurface: launching', () => {
     expect(JSON.stringify(launch)).not.toContain('hunter2');
   });
 
-  it("launches the app in the foreground when the run asks for --headed, or desktop({ headed }) does, and only then", async () => {
+  it("launches the app in the foreground when the run asks for --headed, or desktop({ physicalInput }) does, and only then", async () => {
     const { fake } = await launched({}, { runHeaded: true, observe: false });
     expect(last(fake, 'launch')).toMatchObject({ activate: true });
-    const { fake: headed } = await launched({}, { options: { headed: true }, observe: false });
-    expect(last(headed, 'launch')).toMatchObject({ activate: true });
+    const { fake: physical } = await launched({}, { options: { physicalInput: true }, observe: false });
+    expect(last(physical, 'launch')).toMatchObject({ activate: true });
     const { fake: background } = await launched({}, { observe: false });
     expect(last(background, 'launch')).toMatchObject({ activate: false });
   });
@@ -392,19 +398,91 @@ describe('DesktopSurface: launching', () => {
     await expect(launched({ launch: [spawnApp({ exits: true })], listWindows: [ok([])] }, { observe: false })).rejects.toThrow(/quit right after it launched/);
     expect(Date.now() - started).toBeLessThan(3_000);
   });
+
+  it('says a copy that was already running took the launch, when the launched process quit beside one', async () => {
+    const running = standIn();
+    const open = launched({ launch: [spawnApp({ exits: true, runningBefore: [running] })], listWindows: [ok([])] }, { observe: false });
+    await expect(open).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: `SpikeForm quit right after it launched, before it showed a window: a copy of it was already running (process ${running}), and an app that runs one copy at a time hands the launch to that copy and exits. If this app does, quit the running copy first: the engine drives only a copy it launched`,
+    });
+    // The copy the engine did not launch is left running.
+    expect(alive(running)).toBe(true);
+  });
+
+  it('blames no copy that ran before the launch once that copy is gone', async () => {
+    const quit = standIn({ exits: true });
+    expect(await gone(quit)).toBe(true);
+    await expect(launched({ launch: [spawnApp({ exits: true, runningBefore: [quit] })], listWindows: [ok([])] }, { observe: false })).rejects.toThrow(/before it showed a window$/);
+  });
+
+  it('reports a quit without a hand-off hint when the launch answer names no earlier copies', async () => {
+    // A checkout whose native addon was built before the driver reported them.
+    const stale = (fake: FakeDriver): Answer => ({ ok: true, data: { app: 'SpikeForm', pid: fake.spawn({ exits: true }) } });
+    await expect(launched({ launch: [stale], listWindows: [ok([])] }, { observe: false })).rejects.toThrow(/quit right after it launched, before it showed a window$/);
+  });
+
+  it('names the copy that was already running when no new process could be claimed', async () => {
+    const running = standIn();
+    const { surface } = await initialized({ launch: [failure('TIMEOUT', 'delivered_unverified', 'Form.app was opened, but no new process carries this launch\'s token', { kind: 'unclaimed', running_before: [running] })] });
+    await expect(surface.restart(operation())).rejects.toMatchObject({
+      code: 'ACTION_MAY_HAVE_COMMITTED',
+      message: expect.stringMatching(new RegExp(`looks for it again; a copy of it was already running \\(process ${running}\\).*quit the running copy first: the engine drives only a copy it launched$`)),
+    });
+  });
 });
 
 describe('DesktopSurface: the launch wait', () => {
-  it('fails the open when the window never becomes readable', async () => {
-    await expect(launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, accessible: false }])] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/cannot be read through accessibility/);
+  it('fails the open when the window never becomes readable, saying what the reads listed', async () => {
+    await expect(launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, accessible: false }])] }, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility: the last read listed 1 window, 1 unreadable. The window may be off screen',
+    );
+  }, 30_000);
+
+  it('names the failure the last read of an unreadable window answered with', async () => {
+    const scenario = { listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel', accessible: false }])], snapshot: [failure('WINDOW_NOT_FOUND', 'not_delivered', 'window w-mine has no accessibility element.')] };
+    await expect(launched(scenario, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility: the last read listed 2 windows, 2 unreadable; the last read failed with WINDOW_NOT_FOUND (window w-mine has no accessibility element). The window may be off screen',
+    );
   }, 30_000);
 
   it('reports a launch whose window reads ran out of time as unreadable, not as an app that opened no window', async () => {
-    await expect(launched({ listWindows: [failure('TIMEOUT', 'not_delivered')] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/cannot be read through accessibility \(a read ran out of time\)/);
+    await expect(launched({ listWindows: [failure('TIMEOUT', 'not_delivered')] }, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'cannot be read through accessibility (a read ran out of time): the last read failed with TIMEOUT (TIMEOUT from the fake). The window may be off screen',
+    );
   });
 
-  it('says a background app that opens no window needs headed, however the wait ends against a slow window list', async () => {
-    await expect(launched({ listWindows: [{ ok: true, data: [], sleepMs: 700 }] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/opened no window.*desktop\(\{ headed: true \}\)/);
+  it('names no failure a later read of the launch wait got past, and counts a window whose root never answers', async () => {
+    const listed = windows(() => [{ id: 'w-mine', is_focused: true }]);
+    const scenario = { listWindows: [failure('APP_NOT_FOUND', 'not_delivered'), listed], snapshot: [screen('w-mine', {}, { root_unread: true })] };
+    await expect(launched(scenario, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility: the last read listed 1 window, 0 unreadable, 1 whose root element did not answer. The window may be off screen',
+    );
+  }, 30_000);
+
+  it('reports a last read that listed nothing by its failure, not by the list of the read before it', async () => {
+    const scenario = { listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, accessible: false }]), failure('APP_NOT_FOUND', 'not_delivered', 'no app has that process id.')] };
+    await expect(launched(scenario, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility: the last read failed with APP_NOT_FOUND (no app has that process id). The window may be off screen',
+    );
+  }, 30_000);
+
+  it('reports the newest read that finished when the deadline cuts off the read after it', async () => {
+    const unreadable = (): readonly Record<string, unknown>[] => [{ id: 'w-mine', is_focused: true, accessible: false }];
+    await expect(launched({ listWindows: [windows(unreadable), windows(unreadable, 11_000)] }, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility (a read ran out of time): the last read that finished listed 1 window, 1 unreadable. The window may be off screen',
+    );
+  }, 30_000);
+
+  it('says no read finished when the only read of the launch wait is cut off', async () => {
+    const scenario = { listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }])], snapshot: [{ ...screen('w-mine', {}), sleepMs: 11_000 }] };
+    await expect(launched(scenario, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility (a read ran out of time): no read of its windows finished. The window may be off screen',
+    );
+  }, 30_000);
+
+  it('says a background app that opens no window needs to come forward, however the wait ends against a slow window list', async () => {
+    await expect(launched({ listWindows: [{ ok: true, data: [], sleepMs: 700 }] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/opened no window.*desktop\(\{ physicalInput: true \}\)/);
   }, 30_000);
 
   it('says a foreground launch listed no window, rather than that its window cannot be read', async () => {
@@ -560,10 +638,10 @@ describe('DesktopSurface: reading', () => {
     const both = windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }]);
     const fake = fakeDriver({ listWindows: [both, both, ok([])] });
     const { surface } = await launched(fake, { observe: false });
-    await surface.useWindow('w-panel', signal, 5_000);
+    await surface.activateWindow('w-panel', { signal, timeoutMs: 5_000 });
     fake.locked = true;
     await expect(surface.locate(testId('username'), operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
-    await surface.useWindow(undefined, signal, 5_000);
+    // The window stays the active one: a locked screen lists none, which is no proof that it closed.
     await expect(surface.locate(testId('username'), operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
   });
 
@@ -586,7 +664,7 @@ describe('DesktopSurface: reading', () => {
   it('reads again, never a closed window, when the screen locks between the window list and the read', async () => {
     const fake = fakeDriver({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }])], snapshot: [snapshotAnswer('macos/appkit-form'), failure('WINDOW_NOT_FOUND', 'not_delivered')] });
     const { surface } = await launched(fake, { observe: false });
-    await surface.useWindow('w-panel', signal, 5_000);
+    await surface.activateWindow('w-panel', { signal, timeoutMs: 5_000 });
     fake.locked = true;
     await expect(surface.locate(testId('username'), operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
   });
@@ -607,12 +685,12 @@ describe('DesktopSurface: reading', () => {
     expect((last(fake, 'snapshot') as { windowId: string }).windowId).toBe('w-doc');
   });
 
-  it("reads the app's own window, not the Siri dialog macOS put in focus over it, unless the test picks the dialog", async () => {
+  it("reads the app's own window, not the Siri dialog macOS put in focus over it, unless the test makes the dialog active", async () => {
     const list = windows(() => [{ id: 'w-siri', is_focused: true, system: true }, { id: 'w-doc', visible: true }]);
     const { surface, fake } = await launched({ listWindows: [list] }, { observe: false });
     await surface.observe(operation(), undefined);
     expect((last(fake, 'snapshot') as { windowId: string }).windowId).toBe('w-doc');
-    await surface.useWindow('w-siri', signal, 5_000);
+    await surface.activateWindow('w-siri', { signal, timeoutMs: 5_000 });
     await surface.observe(operation(), undefined);
     expect((last(fake, 'snapshot') as { windowId: string }).windowId).toBe('w-siri');
   });
@@ -649,7 +727,7 @@ describe('DesktopSurface: reading', () => {
     const pid = fake.pid;
     fake.startTimes.set(pid, 42);
     await expect(surface.locate(testId('nowhere'), operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/quit/) });
-    await expect(surface.windows(signal, 5_000)).resolves.toEqual([]);
+    await expect(surface.windows({ signal, timeoutMs: 5_000 })).resolves.toEqual([]);
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
     expect(await gone(pid, 300)).toBe(false);
   });
@@ -700,10 +778,10 @@ describe('DesktopSurface: reading', () => {
 
   it("reads a window's title from the driver's list, and lists the app's windows", async () => {
     const { surface } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', title: 'Spike Form', is_focused: true }]), windows(() => [{ id: 'w-mine', title: 'Spike Form', is_focused: true }, { id: 'w-prefs', title: 'Preferences' }, { id: 'w-untitled' }])] }, { observe: false });
-    expect(await surface.windows(signal, 5_000)).toEqual([
-      { id: 'w-mine', title: 'Spike Form', focused: true },
-      { id: 'w-prefs', title: 'Preferences', focused: false },
-      { id: 'w-untitled', title: '', focused: false },
+    expect(await surface.windows({ signal, timeoutMs: 5_000 })).toEqual([
+      { id: 'w-mine', title: 'Spike Form', active: true, readable: true },
+      { id: 'w-prefs', title: 'Preferences', active: false, readable: true },
+      { id: 'w-untitled', title: '', active: false, readable: true },
     ]);
   });
 
@@ -776,36 +854,150 @@ describe('DesktopSurface: reading', () => {
 });
 
 describe('DesktopSurface: windows', () => {
-  it('reads only the window a test chose, until it goes back to the focused one', async () => {
-    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel', is_focused: false }])] });
-    await expect(surface.useWindow('w-gone', signal, 5_000)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    await surface.useWindow('w-panel', signal, 5_000);
+  it('reads only the window a test made active, whichever has focus, and marks it in the list', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', title: 'Mine', is_focused: true }, { id: 'w-panel', title: 'Panel', is_focused: false }])] });
+    expect(await surface.windows({ signal, timeoutMs: 5_000 })).toEqual([{ id: 'w-mine', title: 'Mine', active: true, readable: true }, { id: 'w-panel', title: 'Panel', active: false, readable: true }]);
+    await expect(surface.activateWindow('w-gone', { signal, timeoutMs: 5_000 })).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/has closed/) });
+    await surface.activateWindow('w-panel', { signal, timeoutMs: 5_000 });
     await surface.observe(operation(), undefined);
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-panel' });
-    await surface.useWindow(undefined, signal, 5_000);
+    expect(await surface.windows({ signal, timeoutMs: 5_000 })).toEqual([{ id: 'w-mine', title: 'Mine', active: false, readable: true }, { id: 'w-panel', title: 'Panel', active: true, readable: true }]);
+    await surface.activateWindow('w-mine', { signal, timeoutMs: 5_000 });
     await surface.observe(operation(), undefined);
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
   });
 
-  it('acts on no node read in another window than the one a test chose', async () => {
+  it('acts on no node read in another window than the one a test made active', async () => {
     const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }])] });
-    await surface.useWindow('w-panel', signal, 5_000);
+    await surface.activateWindow('w-panel', { signal, timeoutMs: 5_000 });
     await expect(surface.perform(byTestId('sign-in'), { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
     expect(inputs(fake)).toEqual([]);
   });
 
-  it('refuses to read a chosen window that closed between the list and the read', async () => {
-    const { surface } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }])], snapshot: [snapshotAnswer('macos/appkit-form'), snapshotAnswer('macos/appkit-form'), failure('WINDOW_NOT_FOUND', 'not_delivered')] });
-    await surface.useWindow('w-panel', signal, 5_000);
-    await expect(surface.locate(testId('nowhere'), operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/useWindow\(\) chose/) });
+  it('reads again, never another window or an empty screen, when the active window closed between the list and the read', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }])], snapshot: [snapshotAnswer('macos/appkit-form'), snapshotAnswer('macos/appkit-form'), failure('WINDOW_NOT_FOUND', 'not_delivered')] });
+    await surface.activateWindow('w-panel', { signal, timeoutMs: 5_000 });
+    await expect(surface.locate(testId('nowhere'), operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/could be read/) });
+    expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-panel' });
   });
 
-  it('refuses to read a chosen window once it closed, rather than show an empty screen', async () => {
+  it('follows the focused window again once the active window closed, as a closed tab hands the screen on', async () => {
     const both = windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }]);
-    const { surface } = await launched({ listWindows: [both, both, both, windows(() => [{ id: 'w-mine', is_focused: true }])] });
-    await surface.useWindow('w-panel', signal, 5_000);
-    await expect(surface.locate(testId('nowhere'), operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/useWindow\(\) chose/) });
-    await expect(surface.pressKey('Enter', operation())).rejects.toThrow(/useWindow\(\) chose/);
+    const { surface, fake } = await launched({ listWindows: [both, both, both, windows(() => [{ id: 'w-mine', is_focused: true }])] });
+    await surface.activateWindow('w-panel', { signal, timeoutMs: 5_000 });
+    await surface.locate(testId('nowhere'), operation());
+    expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
+    expect(await surface.windows({ signal, timeoutMs: 5_000 })).toEqual([{ id: 'w-mine', title: '', active: true, readable: true }]);
+    await surface.pressKey('Enter', operation());
+    expect(last(fake, 'press')).toMatchObject({ windowId: 'w-mine' });
+  });
+});
+
+describe('desktop fixture: windows', () => {
+  const mine = { id: 'w-mine', title: 'Sign In', is_focused: true };
+  const panel = { id: 'w-panel', title: 'Controls' };
+
+  it('hands out one handle per window, which reads its title and whether it is active or closed', async () => {
+    const { surface } = await launched({ listWindows: [windows(() => [mine, panel])] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const [first, second] = await desktop.windows();
+    expect(await Promise.all([first!.title(), first!.isActive(), second!.title(), second!.isActive()])).toEqual(['Sign In', true, 'Controls', false]);
+    expect((await desktop.windows())[1]).toBe(second);
+    await second!.activate();
+    expect(await Promise.all([first!.isActive(), second!.isActive(), second!.isClosed()])).toEqual([false, true, false]);
+  });
+
+  it('reads a closed window as closed and not active, and refuses its title and activate()', async () => {
+    const both = windows(() => [mine, panel]);
+    const { surface } = await launched({ listWindows: [both, both, both, windows(() => [mine])] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const closed = (await desktop.windows())[1]!;
+    expect(await Promise.all([closed.isClosed(), closed.isActive()])).toEqual([true, false]);
+    await expect(closed.title()).rejects.toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/has closed/) });
+    await expect(closed.activate()).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/has closed/) });
+  });
+
+  it('closes a window through its handle, and leaves one that already closed alone', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [mine, panel])], closeWindow: [ok({}), failure('WINDOW_NOT_FOUND', 'not_delivered', 'the app has no window')] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const controls = (await desktop.windows())[1]!;
+    await controls.close();
+    expect(fake.of('closeWindow').map((call) => call.args)).toEqual([[fake.pid, 'w-panel']]);
+    await controls.close();
+  });
+
+  it('reports a window that stayed open as a close that may have landed, and refuses one with no close button or that accessibility cannot read', async () => {
+    const { surface } = await launched({
+      listWindows: [windows(() => [mine, panel])],
+      closeWindow: [failure('ACTION_FAILED', 'delivered_unverified', 'the window stayed open'), failure('WINDOW_NOT_FOUND', 'not_delivered', 'no accessibility element', { kind: 'window_without_accessibility_element' }), failure('ACTION_NOT_SUPPORTED', 'not_delivered', 'the window has no close button')],
+    });
+    await expect(surface.closeWindow('w-panel', operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/stayed open/) });
+    await expect(surface.closeWindow('w-panel', operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/no accessibility element/) });
+    await expect(surface.closeWindow('w-panel', operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/no close button/) });
+  });
+
+  it('waits for a window by its title, a string exactly or a RegExp, and leaves the active window as it is', async () => {
+    const alone = windows(() => [mine]);
+    const { surface, fake } = await launched({ listWindows: [alone, alone, alone, windows(() => [mine, panel])] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const found = await desktop.window({ title: 'Controls' });
+    expect(await found.title()).toBe('Controls');
+    expect(await desktop.window({ title: /^contr/i })).toBe(found);
+    expect(await found.isActive()).toBe(false);
+    await surface.observe(operation(), undefined);
+    expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
+  });
+
+  it('names the open windows when none gets the title in time, and refuses a matcher with no title', async () => {
+    const { surface } = await launched({ listWindows: [windows(() => [mine])] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    await expect(desktop.window({ title: 'Controls' }, { timeout: 300 })).rejects.toMatchObject({ code: 'ACTION_FAILED', message: 'no window has the title "Controls"; open: "Sign In"' });
+    await expect(desktop.window({} as { title: string })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+  });
+
+  it('runs a trigger, waits for the window it opens, and makes that window active', async () => {
+    const alone = windows(() => [mine]);
+    let opened = false;
+    const { surface, fake } = await launched({ listWindows: [alone, alone, alone, (driver) => windows(() => (opened ? [mine, panel] : [mine]))(driver)] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const controls = await desktop.waitForWindow(async () => {
+      opened = true;
+    });
+    expect(await Promise.all([controls.title(), controls.isActive()])).toEqual(['Controls', true]);
+    await surface.observe(operation(), undefined);
+    expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-panel' });
+  });
+
+  it('still looks for the window once, with a real read, when the trigger used up the wait', async () => {
+    const alone = windows(() => [mine]);
+    const { surface } = await launched({ listWindows: [alone, alone, alone, windows(() => [mine, panel], 50)] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const controls = await desktop.waitForWindow(() => new Promise((resolve) => setTimeout(resolve, 400)), { timeout: 300 });
+    expect(await controls.title()).toBe('Controls');
+  });
+
+  it('reads again when the app does not answer its window list while the window opens', async () => {
+    const alone = windows(() => [mine]);
+    const busy = failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer its window list in time', { retryable: true });
+    const { surface } = await launched({ listWindows: [alone, alone, alone, busy, windows(() => [mine, panel])] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    expect(await (await desktop.waitForWindow(async () => undefined)).title()).toBe('Controls');
+  });
+
+  it('takes the new window of the app, not a dialog macOS put over it or a window accessibility cannot read', async () => {
+    const alone = windows(() => [mine]);
+    const after = windows(() => [{ id: 'w-siri', title: '', system: true }, { id: 'w-ghost', title: 'Ghost', accessible: false }, mine, panel]);
+    const { surface } = await launched({ listWindows: [alone, alone, alone, after] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    expect(await (await desktop.waitForWindow(async () => undefined)).title()).toBe('Controls');
+  });
+
+  it('fails when the trigger opens no window in time, and reports a failing trigger as it is', async () => {
+    const { surface } = await launched({ listWindows: [windows(() => [mine])] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    await expect(desktop.waitForWindow(async () => undefined, { timeout: 300 })).rejects.toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/^no window opened within 300ms; the trigger resolved after \d+ms$/) });
+    const thrown = new Error('the button is gone');
+    await expect(desktop.waitForWindow(() => Promise.reject(thrown))).rejects.toBe(thrown);
   });
 });
 
@@ -835,7 +1027,7 @@ describe('DesktopSurface: acting', () => {
   });
 
   it('maps each control action onto the driver action that performs it', async () => {
-    const { surface, fake, byTestId } = await launched({}, { options: { headed: true } });
+    const { surface, fake, byTestId } = await launched({}, { options: { physicalInput: true } });
     const signIn = byTestId('sign-in');
     for (const kind of ['tap', 'doubleTap', 'secondaryTap', 'focus', 'clear', 'hover'] as const) await surface.perform(signIn, { kind }, operation());
     expect(fake.acted()).toEqual(['click', 'doubleClick', 'rightClick', 'focus', 'clear', 'hover']);
@@ -858,12 +1050,12 @@ describe('DesktopSurface: acting', () => {
     const form = (child: Record<string, unknown>) => screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ bounds: { x: 10, y: 10, width: 50, height: 20 }, ...child }] });
     const label = form({ role: 'statictext', value: 'Hello' });
     const replaced = form({ role: 'button', name: 'Delete', ref_id: '@s:e9' });
-    const swapped = await launched({ snapshot: [label, label, replaced] }, { observe: false, options: { headed: true } });
+    const swapped = await launched({ snapshot: [label, label, replaced] }, { observe: false, options: { physicalInput: true } });
     const [hello] = (await swapped.surface.observe(operation(), undefined)).root.children!;
     await expect(swapped.surface.perform(hello!.ref, { kind: 'doubleTap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
     expect(inputs(swapped.fake)).toEqual([]);
     const placed = windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x: 0, y: 0, width: 200, height: 200 } }]);
-    const still = await launched({ snapshot: [label], listWindows: [placed] }, { observe: false, options: { headed: true } });
+    const still = await launched({ snapshot: [label], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
     const [shown] = (await still.surface.observe(operation(), undefined)).root.children!;
     await still.surface.perform(shown!.ref, { kind: 'doubleTap' }, operation());
     expect(inputs(still.fake)).toEqual(['focusWindow', 'pointer']);
@@ -902,7 +1094,8 @@ describe('DesktopSurface: acting', () => {
     // The scroll changed the app: a click that then fails, even as a stale ref, is never retried as if nothing happened.
     const moved = await launched({ snapshot: [twins], act: [ok({}), failure('STALE_REF', 'not_delivered')] }, { observe: false });
     const stale = every((await moved.surface.observe(operation(), undefined)).root).filter((node) => node.name === 'Delete')[1];
-    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+    // The message names the click once.
+    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false, message: expect.stringMatching(/^click: (?!click).* \(an earlier command of this step changed the app\)$/) });
     // A secondary tap goes to the driver alone, which checks the context menu live before it scrolls: the observed
     // actions may come from a read that stalled.
     const plain = await launched({ snapshot: [twins] }, { observe: false });
@@ -961,7 +1154,7 @@ describe('DesktopSurface: acting', () => {
       children: [{ role: 'group', name: 'Row', bounds: { x: 10, y: 10, width: 100, height: 50 }, children: [{ role: 'button', name: 'Delete', ref_id: '@s:e9', bounds: { x: 50, y: 25, width: 20, height: 20 } }] }],
     });
     const placed = windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x: 0, y: 0, width: 200, height: 200 } }]);
-    const { surface, fake } = await launched({ snapshot: [row], listWindows: [placed] }, { observe: false, options: { headed: true } });
+    const { surface, fake } = await launched({ snapshot: [row], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
     const every = (node: SemanticNode): SemanticNode[] => [node, ...(node.children ?? []).flatMap(every)];
     const group = every((await surface.observe(operation(), undefined)).root).find((node) => node.role === 'group' && node.name === 'Row');
     await expect(surface.perform(group!.ref, { kind: 'doubleTap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/button is at the center of node/) });
@@ -976,7 +1169,7 @@ describe('DesktopSurface: acting', () => {
       bounds: { x: 0, y: 0, width: 200, height: 200 },
       children: [{ role: 'group', name: 'Row', bounds: { x: 20, y: 20, width: 80, height: 30 }, children: [{ role: 'button', name: 'Delete', ref_id: '@s:e9', bounds: { x: 50, y: 20, width: 80, height: 30 } }] }],
     });
-    const past = await launched({ snapshot: [wide], listWindows: [placed] }, { observe: false, options: { headed: true } });
+    const past = await launched({ snapshot: [wide], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
     const wideRow = every((await past.surface.observe(operation(), undefined)).root).find((node) => node.role === 'group' && node.name === 'Row');
     await expect(past.surface.perform(wideRow!.ref, { kind: 'doubleTap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
     expect(inputs(past.fake)).toEqual([]);
@@ -989,7 +1182,7 @@ describe('DesktopSurface: acting', () => {
         { role: 'button', name: 'Delete', ref_id: '@s:e9', bounds: { x: 50, y: 5, width: 20, height: 30 } },
       ],
     });
-    const over = await launched({ snapshot: [laid], listWindows: [placed] }, { observe: false, options: { headed: true } });
+    const over = await launched({ snapshot: [laid], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
     const notes = every((await over.surface.observe(operation(), undefined)).root).find((node) => node.role === 'text' || node.name === 'Notes');
     await expect(over.surface.perform(notes!.ref, { kind: 'doubleTap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
     expect(inputs(over.fake)).toEqual([]);
@@ -1002,7 +1195,7 @@ describe('DesktopSurface: acting', () => {
         { role: 'button', name: 'Delete', ref_id: '@s:e9', states: ['offscreen'], bounds: { x: 50, y: 5, width: 20, height: 30 } },
       ],
     });
-    const away = await launched({ snapshot: [scrolled], listWindows: [placed] }, { observe: false, options: { headed: true } });
+    const away = await launched({ snapshot: [scrolled], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
     const visible = every((await away.surface.observe(operation(), undefined)).root).find((node) => node.name === 'Notes');
     await away.surface.perform(visible!.ref, { kind: 'doubleTap' }, operation());
     expect(away.fake.of('pointer').at(-1)?.args).toEqual([60, 20, 'doubleTap']);
@@ -1012,7 +1205,7 @@ describe('DesktopSurface: acting', () => {
       bounds: { x: 0, y: 0, width: 200, height: 200 },
       children: [{ role: 'group', name: 'Row', bounds: { x: 10, y: 10, width: 100, height: 50 }, children_count: 1 }],
     });
-    const cut = await launched({ snapshot: [deep], listWindows: [placed] }, { observe: false, options: { headed: true } });
+    const cut = await launched({ snapshot: [deep], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
     const shallow = every((await cut.surface.observe(operation(), undefined)).root).find((node) => node.name === 'Row');
     await expect(cut.surface.perform(shallow!.ref, { kind: 'doubleTap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE', message: expect.stringMatching(/read only in part/) });
     expect(inputs(cut.fake)).toEqual([]);
@@ -1023,10 +1216,10 @@ describe('DesktopSurface: acting', () => {
         bounds: { x: 0, y: 0, width: 200, height: 200 },
         children: [{ role, name: 'Holder', ref_id: '@s:e9', available_actions: actions, bounds: { x: 10, y: 10, width: 100, height: 20 }, children: [{ role: 'statictext', value: 'Inner', bounds: { x: 10, y: 10, width: 100, height: 20 } }] }],
       });
-    const button = await launched({ snapshot: [labelled('button', ['Click'])], listWindows: [placed] }, { observe: false, options: { headed: true } });
+    const button = await launched({ snapshot: [labelled('button', ['Click'])], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
     const inButton = every((await button.surface.observe(operation(), undefined)).root).find((node) => node.name === 'Inner');
     await expect(button.surface.perform(inButton!.ref, { kind: 'doubleTap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    const selectable = await launched({ snapshot: [labelled('row', ['Click'])], listWindows: [placed] }, { observe: false, options: { headed: true } });
+    const selectable = await launched({ snapshot: [labelled('row', ['Click'])], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
     const inRow = every((await selectable.surface.observe(operation(), undefined)).root).find((node) => node.name === 'Inner');
     await selectable.surface.perform(inRow!.ref, { kind: 'doubleTap' }, operation());
     expect(selectable.fake.pointerOptions.at(-1)?.target).toMatchObject({ content: true });
@@ -1036,7 +1229,7 @@ describe('DesktopSurface: acting', () => {
     const at = (x: number) =>
       screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'statictext', value: 'Hello', native_id: { kind: 'ax_identifier', value: 'hello' }, bounds: { x, y: 10, width: 50, height: 20 } }, ...(x === 10 ? [] : [{ role: 'button', name: 'Delete', ref_id: '@s:e9', bounds: { x: 10, y: 10, width: 50, height: 20 } }])] });
     const placed = windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x: 0, y: 0, width: 200, height: 200 } }]);
-    const { surface, fake } = await launched({ snapshot: [at(10), at(10), at(100)], listWindows: [placed] }, { observe: false, options: { headed: true } });
+    const { surface, fake } = await launched({ snapshot: [at(10), at(10), at(100)], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
     const [hello] = (await surface.observe(operation(), undefined)).root.children!;
     await surface.perform(hello!.ref, { kind: 'doubleTap' }, operation());
     expect(fake.of('pointer').at(-1)?.args).toEqual([125, 20, 'doubleTap']);
@@ -1204,8 +1397,8 @@ describe('DesktopSurface: keys', () => {
     expect(last(fake, 'press')).toEqual({ pid: fake.pid, windowId: 'w-mine', combo: 'cmd+a', physical: false, inputId: expect.any(Number), timeoutMs: expect.any(Number) });
   });
 
-  it('presses keys through the real keyboard with headed', async () => {
-    const { surface, fake } = await launched({}, { options: { headed: true } });
+  it('presses keys through the real keyboard with physicalInput', async () => {
+    const { surface, fake } = await launched({}, { options: { physicalInput: true } });
     await surface.pressKey('Enter', operation());
     expect(last(fake, 'press')).toMatchObject({ combo: 'return', physical: true });
   });
@@ -1220,16 +1413,18 @@ describe('DesktopSurface: keys', () => {
 
   it('presses a key into a control only while it holds focus, and into its own window', async () => {
     const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')] });
-    await surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation());
+    const username = byTestId('username');
+    const snapshotsBefore = fake.of('snapshot').length;
+    await surface.perform(username, { kind: 'press', key: 'Enter' }, operation());
     expect(inputs(fake)).toEqual(['focus', 'press return']);
     // The driver sends the key only while the control's own element still holds the app's focus, checked right before it goes.
     expect(last(fake, 'press')).toMatchObject({ windowId: 'w-mine', focusedRef: (last(fake, 'act') as { ref: string }).ref });
-    await expect(surface.perform(byTestId('sign-in'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    expect(fake.of('press')).toHaveLength(1);
+    // Whether it still holds focus is the driver's to tell, by the element itself: the window is not read again for it.
+    expect(fake.of('snapshot')).toHaveLength(snapshotsBefore);
   });
 
-  it("brings a control's window forward before it focuses the control for a headed press", async () => {
-    const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')] }, { options: { headed: true } });
+  it("brings a control's window forward before it focuses the control for a physical press", async () => {
+    const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')] }, { options: { physicalInput: true } });
     await surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation());
     // The window comes forward first, so a control in a window another held the keyboard from can take focus.
     expect(inputs(fake).slice(-3)).toEqual(['focusWindow', 'focus', 'press return']);
@@ -1255,12 +1450,10 @@ describe('DesktopSurface: keys', () => {
     expect(inputs(fake)).toEqual([]);
   });
 
-  it('reports a read that went stale after the press focused the control as possibly committed, so it is not retried and focused again', async () => {
-    const form = renamed('macos/appkit-form', 'w-8032', 'w-mine');
-    const { surface, fake, byTestId } = await launched({ snapshot: [form, form, failure('APP_UNRESPONSIVE', 'not_delivered', 'busy', { retryable: true })] });
+  it('reports a key the driver could not send after the press focused the control as possibly committed, so it is not retried and focused again', async () => {
+    const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], press: [failure('STALE_REF', 'not_delivered')] });
     await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Tab' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
     expect(fake.acted()).toEqual(['focus']);
-    expect(fake.of('press')).toHaveLength(0);
   });
 
   it("sends no key into a window that cannot be shown to be the app's key window", async () => {
@@ -1270,74 +1463,35 @@ describe('DesktopSurface: keys', () => {
   });
 
   it('presses a key into a control whose window is on another Space, which the window list shows as not visible', async () => {
-    const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, visible: false }])] }, { options: { headed: true } });
+    const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, visible: false }])] }, { options: { physicalInput: true } });
     await surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation());
     expect(last(fake, 'press')).toMatchObject({ combo: 'return', windowId: 'w-mine' });
   });
 
-  it('sends no key when another control in the same place holds focus', async () => {
-    const form = renamed('macos/sign-in-form', 'w-8321', 'w-mine');
-    const swapped = JSON.parse(JSON.stringify(form).replace('"name":"Username"', '"name":"Search"').replace('"value":"username"', '"value":"search"')) as Answer;
-    const { surface, fake, byTestId } = await launched({ snapshot: [form, form, swapped] });
-    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toThrow(/did not keep keyboard focus/);
-    expect(fake.of('press')).toHaveLength(0);
+  it('refuses the key when the driver finds the control lost focus, as when focusing it opened a dialog', async () => {
+    const { surface, byTestId } = await launched({ snapshot: [renamed('macos/sign-in-form', 'w-8321', 'w-mine')], press: [failure('ACTION_FAILED', 'not_delivered', 'the control lost keyboard focus before the key was sent, so nothing was sent')] });
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/lost keyboard focus/) });
   });
 
-  const field = (name: string, ref: string, y: number, focused: boolean, extra: Record<string, unknown> = {}) => ({ role: 'textfield', name, ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}), ...extra });
-  const list = (id: string, children: readonly unknown[], extra: Record<string, unknown> = {}) => screen('w-mine', { name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children }, { snapshot_id: id, ...extra });
-
-  it('presses a key into one of two look-alike fields, found again by its place', async () => {
-    const read = (id: string, focusSecond: boolean) => list(id, [field('Item', `@${id}:e1`, 10, false), field('Item', `@${id}:e2`, 40, focusSecond)]);
-    const { surface, fake } = await launched({ snapshot: [read('s1', false), read('s1', false), read('s2', true)] }, { observe: false });
+  it('presses a key into one of two look-alike fields by its own element, whatever box it has once focused', async () => {
+    // A look-alike has no identity a later read could find it by, and a field can grow as it takes focus: the driver holds its element.
+    const field = (ref: string, y: number) => ({ role: 'textfield', name: 'Item', ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 } });
+    const list = screen('w-mine', { name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [field('@s1:e1', 10), field('@s1:e2', 40)] }, { snapshot_id: 's1' });
+    const { surface, fake } = await launched({ snapshot: [list] }, { observe: false });
     const observed = await surface.observe(operation(), undefined);
     await surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation());
-    expect(last(fake, 'press')).toMatchObject({ combo: 'a', windowId: 'w-mine' });
-  });
-
-  it('sends no key when a twin went as the field was focused, so the other could have taken its place', async () => {
-    const both = list('s1', [field('Item', '@s1:e1', 10, false), field('Item', '@s1:e2', 40, false)]);
-    const one = list('s2', [field('Item', '@s2:e1', 40, true)]);
-    const { surface, fake } = await launched({ snapshot: [both, both, one] }, { observe: false });
-    const observed = await surface.observe(operation(), undefined);
-    await expect(surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    expect(fake.of('press')).toHaveLength(0);
-  });
-
-  it('sends no key when focusing a look-alike field replaced it with one of the same name but another developer id', async () => {
-    const id = (value: string) => ({ native_id: { kind: 'ax_identifier', value } });
-    const read = (snapshot: string, value: string, focusSecond: boolean) => list(snapshot, [field('Item', `@${snapshot}:e1`, 10, false, id(value)), field('Item', `@${snapshot}:e2`, 40, focusSecond, id(value))]);
-    const { surface, fake } = await launched({ snapshot: [read('s1', 'Old', false), read('s1', 'Old', false), read('s2', 'New', true)] }, { observe: false, options: { headed: true } });
-    const observed = await surface.observe(operation(), undefined);
-    await expect(surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    expect(fake.of('press')).toHaveLength(0);
-  });
-
-  it('sends no key when focusing a look-alike field replaced the form with other fields in the same places', async () => {
-    const read = (snapshot: string, name: string, focusSecond: boolean) => list(snapshot, [field(name, `@${snapshot}:e1`, 10, false), field(name, `@${snapshot}:e2`, 40, focusSecond)]);
-    const { surface, fake } = await launched({ snapshot: [read('s1', 'Old', false), read('s1', 'Old', false), read('s2', 'New', true)] }, { observe: false });
-    const observed = await surface.observe(operation(), undefined);
-    await expect(surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    expect(fake.of('press')).toHaveLength(0);
-  });
-
-  it('says the read was cut short, not that focus moved, when the focus check runs out of time', async () => {
-    const whole = list('s1', [field('User', '@s1:e1', 10, false), field('Note', '@s1:e2', 40, false)]);
-    const cut = screen('w-mine', { name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, subtree_truncated: true, children: [field('User', '@s2:e1', 10, true), field('Note', '@s2:e2', 40, false, { subtree_truncated: true })] }, { snapshot_id: 's2', complete: false, truncated: true });
-    const { surface, fake } = await launched({ snapshot: [whole, whole, cut] }, { observe: false });
-    const observed = await surface.observe(operation(), undefined);
-    await expect(surface.perform(observed.root.children![0]!.ref, { kind: 'press', key: 'a' }, operation())).rejects.toMatchObject({ message: expect.stringMatching(/read only in part/) });
-    expect(fake.of('press')).toHaveLength(0);
+    expect(last(fake, 'press')).toMatchObject({ combo: 'a', windowId: 'w-mine', focusedRef: '@s1:e2' });
   });
 
   it('presses a key into a located field among look-alike cards with interactive snapshots, and keeps the observation ids', async () => {
     const window = { name: 'Notes', bounds: { x: 0, y: 0, width: 300, height: 300 } };
-    const note = (focused: boolean) => ({ role: 'textfield', name: 'Note', ref_id: '@s:e1', native_id: { kind: 'ax_identifier', value: 'note' }, bounds: { x: 10, y: 10, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}) });
+    const note = { role: 'textfield', name: 'Note', ref_id: '@s:e1', native_id: { kind: 'ax_identifier', value: 'note' }, bounds: { x: 10, y: 10, width: 100, height: 20 } };
     const card = (inside: readonly unknown[]) => ({ role: 'group', name: 'Card', children: inside });
-    const read = (focused: boolean) => ({
-      ...screen('w-mine', { ...window, children: [card([note(focused)]), card([{ role: 'statictext', value: 'Draft', bounds: { x: 10, y: 60, width: 80, height: 20 } }])] }),
-      interactive: screen('w-mine', { ...window, children: [card([note(focused)])] }),
-    });
-    const { surface, fake } = await launched({ snapshot: [read(false), read(false), read(false), read(false), read(true)] }, { observe: false, options: { snapshot: 'interactive', headed: true } });
+    const read = {
+      ...screen('w-mine', { ...window, children: [card([note]), card([{ role: 'statictext', value: 'Draft', bounds: { x: 10, y: 60, width: 80, height: 20 } }])] }),
+      interactive: screen('w-mine', { ...window, children: [card([note])] }),
+    };
+    const { surface, fake } = await launched({ snapshot: [read, read, read, read] }, { observe: false, options: { snapshot: 'interactive', physicalInput: true } });
     const before = await surface.observe(operation(), undefined);
     const [located] = await surface.locate(testId('note'), operation());
     const after = await surface.observe(operation(), undefined);
@@ -1355,13 +1509,13 @@ describe('DesktopSurface: keys', () => {
 });
 
 describe('DesktopSurface: typing', () => {
-  it('types keystrokes into the focused field, into the app without headed and through the real keyboard with it', async () => {
+  it('types keystrokes into the focused field, into the app without physicalInput and through the real keyboard with it', async () => {
     const { surface, fake } = await launched({});
     await surface.typeText('ada', { replace: false }, operation());
     expect(last(fake, 'act')).toMatchObject({ ref: '@s1y1hxmo5pexrl:e1', action: 'type', value: 'ada', physical: false });
-    const headed = await launched({}, { options: { headed: true } });
-    await headed.surface.typeText('ada', { replace: false }, operation());
-    expect(last(headed.fake, 'act')).toMatchObject({ action: 'type', physical: true });
+    const physical = await launched({}, { options: { physicalInput: true } });
+    await physical.surface.typeText('ada', { replace: false }, operation());
+    expect(last(physical.fake, 'act')).toMatchObject({ action: 'type', physical: true });
   });
 
   it('stops the text still to type once the call is cut off, so no key lands after the step gave up', async () => {
@@ -1401,9 +1555,11 @@ describe('DesktopSurface: typing', () => {
     const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')] });
     await surface.typeText('ada', { replace: true }, operation());
     expect(inputs(fake)).toEqual(['selectAll', 'press backspace', 'type']);
+    // The delete goes only while the field itself still holds focus: the driver checks the element the select-all went to.
+    expect(last(fake, 'press')).toMatchObject({ combo: 'backspace', focusedRef: (fake.of('act')[0]!.args[0] as { ref: string }).ref });
     // A field whose selection accessibility cannot set gets the select-all key through the real keyboard; in the background, nothing.
     const refused = (): Scenario => ({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], act: [failure('ACTION_NOT_SUPPORTED', 'not_delivered'), { ok: true, data: {} }] });
-    const keys = await launched(refused(), { options: { headed: true } });
+    const keys = await launched(refused(), { options: { physicalInput: true } });
     await keys.surface.typeText('ada', { replace: true }, operation());
     expect(inputs(keys.fake)).toEqual(['selectAll', 'press cmd+a', 'press backspace', 'type']);
     const background = await launched(refused());
@@ -1431,33 +1587,30 @@ describe('DesktopSurface: typing', () => {
     expect(fake.acted()).toEqual(['type']);
   });
 
-  it('sends no delete when select all moved focus off the field, so it never reaches another control', async () => {
-    const form = renamed('macos/appkit-form', 'w-8032', 'w-mine');
-    const moved = JSON.parse(
-      JSON.stringify(form)
-        .replace('"states":["focused"]', '"states":[]')
-        .replace('"native_id":{"kind":"ax_identifier","value":"sign-in"}', '"native_id":{"kind":"ax_identifier","value":"sign-in"},"states":["focused"]'),
-    ) as Answer;
-    const { surface, fake } = await launched({ snapshot: [form, form, form, moved] });
-    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/lost keyboard focus after select all/) });
-    expect(inputs(fake)).toEqual(['selectAll']);
+  it('reports a delete the driver refused, since select all moved focus off the field, as possibly committed', async () => {
+    const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], press: [failure('ACTION_FAILED', 'not_delivered', 'the control lost keyboard focus before the key was sent, so nothing was sent')] });
+    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/^delete the selection: the control lost keyboard focus/) });
+    expect(fake.acted()).toEqual(['selectAll']);
   });
 
-  it('types nothing when the delete moved focus off the field, so the type never takes focus back from the app', async () => {
-    const form = renamed('macos/appkit-form', 'w-8032', 'w-mine');
-    const moved = JSON.parse(
-      JSON.stringify(form)
-        .replace('"states":["focused"]', '"states":[]')
-        .replace('"native_id":{"kind":"ax_identifier","value":"sign-in"}', '"native_id":{"kind":"ax_identifier","value":"sign-in"},"states":["focused"]'),
-    ) as Answer;
-    const { surface, fake } = await launched({ snapshot: [form, form, form, form, moved] });
-    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/lost keyboard focus after the delete/) });
-    expect(inputs(fake)).toEqual(['selectAll', 'press backspace']);
+  it('reports a type the driver refused, since the delete moved focus off the field, as possibly committed', async () => {
+    const lost = failure('ACTION_FAILED', 'not_delivered', 'the field lost keyboard focus before typing began, so nothing was typed');
+    const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], act: [{ ok: true, data: {} }, lost] });
+    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/type: .*lost keyboard focus before typing began/) });
+    expect(inputs(fake)).toEqual(['selectAll', 'press backspace', 'type']);
   });
 
   it('reports a type after a clear that changed the field as possibly committed', async () => {
     const { surface } = await launched({ act: [{ ok: true, data: {} }, failure('STALE_REF', 'not_delivered')] });
-    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false, message: expect.stringMatching(/^type: (?!type).* \(an earlier command of this step changed the app\)$/) });
+  });
+
+  it('names the type once when it runs out of time after the clear', async () => {
+    const { surface } = await launched({ act: [{ ok: true, data: {} }, { ok: true, data: {}, sleepMs: 3_000 }] });
+    await expect(surface.typeText('ada', { replace: true }, { ...operation(), timeoutMs: 600 })).rejects.toMatchObject({
+      code: 'ACTION_MAY_HAVE_COMMITTED',
+      message: 'type timed out before the driver answered; its input may have reached the app (an earlier command of this step changed the app)',
+    });
   });
 
   it('reads again, rather than find no focused field or nothing to scroll, when a read runs out of time', async () => {
@@ -1481,7 +1634,7 @@ describe('DesktopSurface: points', () => {
         snapshot: [button('w-a', 100), button('w-a', 100), button('w-a', 100), button('w-b', 500)],
         screenshot: [{ ok: true, writePng: { width: 200, height: 100 }, data: { scale_factor: 1 } }, failure('INTERNAL', 'not_delivered', 'capture failed')],
       },
-      { observe: false, options: { headed: true } },
+      { observe: false, options: { physicalInput: true } },
     );
     expect((await surface.observe(operation('agent'), { pixels: true })).pixels).toBeDefined();
     expect((await surface.observe(operation('agent'), { pixels: true })).pixels).toBeUndefined();
@@ -1491,7 +1644,7 @@ describe('DesktopSurface: points', () => {
 
   it("measures a test's point in the window of the newest read, though that read took no image", async () => {
     const both = (focused: string) => windows(() => [{ id: 'w-a', is_focused: focused === 'w-a', bounds: { x: 100, y: 0, width: 200, height: 100 } }, { id: 'w-b', is_focused: focused === 'w-b', bounds: { x: 500, y: 0, width: 200, height: 100 } }]);
-    const { surface, fake } = await launched({ listWindows: [both('w-a'), both('w-a'), both('w-b')], snapshot: [button('w-a', 100), button('w-a', 100), button('w-b', 500)] }, { observe: false, options: { headed: true } });
+    const { surface, fake } = await launched({ listWindows: [both('w-a'), both('w-a'), both('w-b')], snapshot: [button('w-a', 100), button('w-a', 100), button('w-b', 500)] }, { observe: false, options: { physicalInput: true } });
     await surface.locate({ kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'button', exact: true } } }, operation());
     await surface.observe(operation(), undefined);
     await surface.performAt({ x: 100, y: 50 }, { kind: 'tap' }, operation());
@@ -1500,7 +1653,7 @@ describe('DesktopSurface: points', () => {
 
   it('cancels pointer input at a point the call gave up on, so the driver sends no click after the step moved on', async () => {
     const placed = windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x: 300, y: 200, width: 400, height: 300 } }]);
-    const { surface, fake } = await launched({ listWindows: [placed], pointer: [{ ok: true, data: {}, sleepMs: 2_000 }] }, { observe: false, options: { headed: true } });
+    const { surface, fake } = await launched({ listWindows: [placed], pointer: [{ ok: true, data: {}, sleepMs: 2_000 }] }, { observe: false, options: { physicalInput: true } });
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 100);
     await expect(surface.performAt({ x: 20, y: 30 }, { kind: 'doubleTap' }, { ...operation(), signal: controller.signal })).rejects.toMatchObject({ code: 'CANCELLED' });
@@ -1511,10 +1664,10 @@ describe('DesktopSurface: points', () => {
 
   it('refuses a tap at a point when a sheet took focus as the window came forward, and taps one on a sheet already open', async () => {
     const at = (sheet: boolean) => windows(() => [{ id: 'w-mine', is_focused: true, ...(sheet ? { sheet_focused: true, sheet_id: 's-1' } : {}), bounds: { x: 100, y: 100, width: 400, height: 300 } }]);
-    const opened = await launched({ listWindows: [at(false), at(false), at(true)] }, { observe: false, options: { headed: true } });
+    const opened = await launched({ listWindows: [at(false), at(false), at(true)] }, { observe: false, options: { physicalInput: true } });
     await expect(opened.surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/sheet opened/) });
     expect(opened.fake.of('pointer')).toHaveLength(0);
-    const open = await launched({ listWindows: [at(true)] }, { observe: false, options: { headed: true } });
+    const open = await launched({ listWindows: [at(true)] }, { observe: false, options: { physicalInput: true } });
     await open.surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation());
     expect(open.fake.of('pointer').at(-1)?.args).toEqual([110, 150, 'tap']);
     // Bringing the window forward is input too: the call names it, so a cut-off cancels it.
@@ -1523,7 +1676,7 @@ describe('DesktopSurface: points', () => {
     expect(open.fake.pointerOptions.at(-1)?.target).toEqual({ pid: open.fake.pid, windowId: 'w-mine', sheet: true, sheetId: 's-1' });
     // A sheet the driver gave no key is never known to be the one the point was taken on.
     const unnamed = windows(() => [{ id: 'w-mine', is_focused: true, sheet_focused: true, bounds: { x: 100, y: 100, width: 400, height: 300 } }]);
-    const keyless = await launched({ listWindows: [unnamed] }, { observe: false, options: { headed: true } });
+    const keyless = await launched({ listWindows: [unnamed] }, { observe: false, options: { physicalInput: true } });
     await expect(keyless.surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
     expect(keyless.fake.of('pointer')).toHaveLength(0);
   });
@@ -1537,20 +1690,20 @@ describe('DesktopSurface: points', () => {
     ];
     for (const { before, now, message } of cases) {
       // The launch, the observation, then the tap's two reads of the window.
-      const { surface, fake } = await launched({ listWindows: [at(before), at(before), at(now), at(now)] }, { observe: false, options: { headed: true } });
+      const { surface, fake } = await launched({ listWindows: [at(before), at(before), at(now), at(now)] }, { observe: false, options: { physicalInput: true } });
       await surface.observe(operation(), undefined);
       await expect(surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(message) });
       expect(fake.of('pointer')).toHaveLength(0);
     }
     // The same sheet still there takes the tap, and the driver is told which sheet to check again after the move.
-    const same = await launched({ listWindows: [at('s-1'), at('s-1'), at('s-1'), at('s-1')] }, { observe: false, options: { headed: true } });
+    const same = await launched({ listWindows: [at('s-1'), at('s-1'), at('s-1'), at('s-1')] }, { observe: false, options: { physicalInput: true } });
     await same.surface.observe(operation(), undefined);
     await same.surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation());
     expect(same.fake.pointerOptions.at(-1)?.target).toEqual({ pid: same.fake.pid, windowId: 'w-8032', sheet: true, sheetId: 's-1' });
   });
 
   it('taps, double-taps, secondary-taps, and hovers a point in the window where it is now, with no observation first', async () => {
-    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x: 300, y: 200, width: 400, height: 300 } }])] }, { observe: false, options: { headed: true } });
+    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x: 300, y: 200, width: 400, height: 300 } }])] }, { observe: false, options: { physicalInput: true } });
     for (const kind of ['tap', 'doubleTap', 'secondaryTap', 'hover'] as const) await surface.performAt({ x: 20, y: 30 }, { kind }, operation());
     expect(fake.of('pointer').map((call) => call.args)).toEqual([[320, 230, 'tap'], [320, 230, 'doubleTap'], [320, 230, 'secondaryTap'], [320, 230, 'hover']]);
     expect(fake.of('focusWindow').every((call) => call.args[1] === 'w-mine')).toBe(true);
@@ -1561,7 +1714,7 @@ describe('DesktopSurface: points', () => {
     const form = renamed('macos/sign-in-form', 'w-8321', 'w-mine');
     const { width, height } = (form.data as { tree: { bounds: { width: number; height: number } } }).tree.bounds;
     // The open's read, the observation and the read after its capture list w-mine focused; then w-other takes focus, and w-mine comes back once brought forward.
-    const { surface, fake } = await launched({ snapshot: [form], screenshot: [{ ok: true, writePng: { width, height }, data: { scale_factor: 1 } }], listWindows: [pair(0), pair(0), pair(0), pair(1), pair(0)] }, { observe: false, options: { headed: true } });
+    const { surface, fake } = await launched({ snapshot: [form], screenshot: [{ ok: true, writePng: { width, height }, data: { scale_factor: 1 } }], listWindows: [pair(0), pair(0), pair(0), pair(1), pair(0)] }, { observe: false, options: { physicalInput: true } });
     expect((await surface.observe(operation(), { pixels: true })).pixels).toBeDefined();
     await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
     expect(fake.of('focusWindow').at(-1)?.args).toEqual([fake.pid, 'w-mine']);
@@ -1570,19 +1723,19 @@ describe('DesktopSurface: points', () => {
 
   it('measures a point in the window a locate read, after a dialog window took over', async () => {
     const pair = windows(() => [{ id: 'w-8032', is_focused: false, bounds: { x: 100, y: 100, width: 400, height: 300 } }, { id: 'w-dialog', is_focused: true, bounds: { x: 500, y: 100, width: 300, height: 200 } }]);
-    const { surface, fake } = await launched({ snapshot: [snapshotAnswer('macos/appkit-form'), snapshotAnswer('macos/appkit-form'), renamed('macos/appkit-form', 'w-8032', 'w-dialog')], listWindows: [pair] }, { options: { headed: true } });
+    const { surface, fake } = await launched({ snapshot: [snapshotAnswer('macos/appkit-form'), snapshotAnswer('macos/appkit-form'), renamed('macos/appkit-form', 'w-8032', 'w-dialog')], listWindows: [pair] }, { options: { physicalInput: true } });
     await surface.locate(testId('sign-in'), operation());
     await surface.performAt({ x: 11.5, y: 16.25 }, { kind: 'tap' }, operation());
     expect(fake.of('focusWindow').at(-1)?.args[1]).toBe('w-dialog');
     expect(fake.of('pointer').at(-1)?.args).toEqual([511.5, 116.25, 'tap']);
   });
 
-  it('taps a point in the window a test chose after a read of another one', async () => {
+  it('taps a point in the window a test made active after a read of another one', async () => {
     const pair = (panel = false) => windows(() => [{ id: 'w-8032', is_focused: !panel, bounds: { x: 100, y: 100, width: 400, height: 300 } }, { id: 'w-panel', is_focused: panel, bounds: { x: 600, y: 100, width: 300, height: 200 } }]);
     // The panel has focus once it is brought forward, the fifth listing.
-    const { surface, fake } = await launched({ listWindows: [pair(), pair(), pair(), pair(), pair(true)] }, { options: { headed: true } });
+    const { surface, fake } = await launched({ listWindows: [pair(), pair(), pair(), pair(), pair(true)] }, { options: { physicalInput: true } });
     await surface.locate(testId('sign-in'), operation());
-    await surface.useWindow('w-panel', signal, 5_000);
+    await surface.activateWindow('w-panel', { signal, timeoutMs: 5_000 });
     await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
     expect(fake.of('focusWindow').at(-1)?.args[1]).toBe('w-panel');
     expect(fake.of('pointer').at(-1)?.args).toEqual([610, 120, 'tap']);
@@ -1590,20 +1743,20 @@ describe('DesktopSurface: points', () => {
 
   it('refuses a point when another window took focus as the target came forward, since the click carries no window', async () => {
     const list = (sheet: boolean) => windows(() => [{ id: 'w-mine', is_focused: !sheet, bounds: { x: 100, y: 100, width: 400, height: 300 } }, ...(sheet ? [{ id: 'w-sheet', is_focused: true, bounds: { x: 100, y: 120, width: 400, height: 200 } }] : [])]);
-    const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [list(false), list(false), list(false), list(true)] }, { options: { headed: true } });
+    const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [list(false), list(false), list(false), list(true)] }, { options: { physicalInput: true } });
     await expect(surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/another window took focus/) });
     expect(fake.of('pointer')).toHaveLength(0);
   });
 
   it('measures a point from where the window is once it was brought forward', async () => {
     const at = (x: number) => windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x, y: 200, width: 400, height: 300 } }]);
-    const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [at(100), at(100), at(100), at(500)] }, { options: { headed: true } });
+    const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [at(100), at(100), at(100), at(500)] }, { options: { physicalInput: true } });
     await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
     expect(fake.of('pointer').at(-1)?.args).toEqual([510, 220, 'tap']);
   });
 
   it('refuses a point outside the window, which would land on another app', async () => {
-    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x: 100, y: 100, width: 100, height: 100 } }])] }, { observe: false, options: { headed: true } });
+    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x: 100, y: 100, width: 100, height: 100 } }])] }, { observe: false, options: { physicalInput: true } });
     await expect(surface.performAt({ x: 115, y: 20 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
     expect(fake.of('pointer')).toHaveLength(0);
     expect(fake.of('focusWindow')).toHaveLength(0);
@@ -1801,11 +1954,17 @@ describe('DesktopSurface: quitting', () => {
     expect(await gone(fake.pid)).toBe(true);
   });
 
-  it("presses a key into the app's window through desktop.press(), for an app with no control that takes focus", async () => {
+  it("presses a key into the app's window through desktop.keyboard.press(), for an app with no control that takes focus", async () => {
     const { surface, fake } = await launched({});
-    const context = { operation: () => operation(), fixture: <T,>(_name: string, value: T) => value } as unknown as Parameters<typeof createDesktopFixture>[1];
-    await createDesktopFixture(surface, context).press('ControlOrMeta+2');
+    await createDesktopFixture(surface, fixtureContext()).keyboard.press('ControlOrMeta+2');
     expect(last(fake, 'press')).toMatchObject({ windowId: 'w-mine', combo: 'cmd+2', physical: false });
+  });
+
+  it('types into the focused field through desktop.keyboard.type(), without clearing it', async () => {
+    const { surface, fake } = await launched({});
+    await createDesktopFixture(surface, fixtureContext()).keyboard.type('ada');
+    expect(last(fake, 'act')).toMatchObject({ action: 'type', value: 'ada', physical: false });
+    expect(fake.of('press')).toHaveLength(0);
   });
 
   it('kills nothing when the app already quit on its own', async () => {

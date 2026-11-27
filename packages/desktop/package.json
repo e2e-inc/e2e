@@ -59,8 +59,8 @@
     "@e2e-dev/desktop-darwin-x64": "workspace:*"
   },
   "peerDependencies": {
-    "@e2e-dev/core": ">=0.25.0 <1",
-    "e2e": ">=0.25.0 <1"
+    "@e2e-dev/core": ">=0.25.1 <1",
+    "e2e": ">=0.25.1 <1"
   },
   "peerDependenciesMeta": {
     "e2e": {

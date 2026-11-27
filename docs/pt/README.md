@@ -131,6 +131,15 @@ translation moves or goes with it in the same change.
 | trace | trace (keep in English, o trace) |
 | artifact | artefato |
 | matcher | matcher (keep in English, o matcher) |
+| soft assertion, soft failure | asserção suave, falha suave |
+| asymmetric matcher | matcher assimétrico |
+| poll (`expect.poll`) | fazer polling, polling |
+| try (one run of a `toPass` block) | rodada |
+| sample (a polled value) | amostra |
+| held test (paused at a step) | teste pausado |
+| attach, detach (an MCP session) | conectar, se desconectar |
+| plaintext | texto puro |
+| decimal and thousands separators | vírgula decimal, ponto de milhar (59,996; 8.192) |
 | timeout | tempo limite (`timeout` in code) |
 | headless, headed | headless, headed (keep in English; in a screen-reader `aria-label`, write "com interface visível" for headed) |
 | sign in, sign out | entrar (fazer login), sair (fazer logout) |
@@ -188,6 +197,14 @@ translation moves or goes with it in the same change.
 | persona | persona (a persona) |
 | pin (an agent) | fixar (agentes fixados) |
 | custom executor | executor personalizado |
+| step executor | executor de passos |
+| test filter, decision filter | filtro de testes, filtro de decisão |
+| setup file | arquivo de preparação |
+| priority band | faixa de prioridade |
+| merge base | base de merge |
+| key window (macOS) | key window (keep in English, a key window) |
+| device farm | fazenda de dispositivos |
+| macOS settings and menu labels | the pt-BR macOS names (Ajustes do Sistema, Privacidade e Segurança) |
 | budget (steps, model calls, time) | orçamento |
 | seeded data | dados pré-carregados (pré-carregar) |
 | signed in, start signed in | autenticado, com o login feito |

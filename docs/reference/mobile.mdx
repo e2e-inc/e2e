@@ -792,10 +792,12 @@ await device.enrollBiometrics('touchid', true);
 
 ```ts
 /**
- * Installs a build (an iOS `.app` bundle or an Android `.apk`, resolved
- * against the project root) on the device; without a path, the target's
- * `app.appPath`. The engine installs nothing on its own, so a suite that runs
- * against a build calls this once per device, in a fixture or a test.
+ * Installs an iOS `.app` bundle or Android `.apk` on the device. Relative paths
+ * resolve against the project root. With no path, installs the target's
+ * `app.appPath`. With a remote agent-device daemon from a device provider,
+ * a path absolute on the runner can also name a build on that daemon.
+ * The engine installs nothing on its own, so call this once per device in a
+ * fixture or test.
  * `reinstall: true` removes the app first so it starts with no data; a
  * plain install replaces the binary and keeps its data. Resolves to the
  * identity to `openApp` it by, which becomes the app `app.open()` launches
@@ -811,13 +813,17 @@ await device.openApp(app);
 ```
 
 - Use it for the run's build, or for another build on an upgrade path.
+- A remote daemon receives an upload when the build exists on the runner.
+  Otherwise it checks the absolute path on its own filesystem and reports
+  the install error if the build is missing. The runner uses its own
+  operating system to resolve paths before it sends them.
 - The resolved id is the bundle id or package agent-device read from the
   build, or the `app` passed in.
 
 | Throws | When |
 | --- | --- |
 | `INVALID_STATE` | No path was passed and the target has no `app.appPath`; or `reinstall: true` with no `app` passed and no app pinned (no `app.bundleId`, build not installed yet). |
-| `INVALID_ARGUMENT` | A path was passed and nothing exists at it on the machine running e2e, resolved against the project root. Fails before any device command. |
+| `INVALID_ARGUMENT` | The explicit path is empty or blank, or a required runner-side build is missing. Relative paths resolve against the project root. Fails before any device command. |
 | `ENGINE_FAILURE` | agent-device reported no id and no `app` was passed, instead of a file path posing as an id. See [Troubleshooting](/mobile#troubleshooting). |
 
 #### `uninstallApp`

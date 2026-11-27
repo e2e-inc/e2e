@@ -62,6 +62,9 @@ pub struct Launched {
     /// later one the OS gives the same id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started: Option<f64>,
+    /// The copies of the app that ran before the launch. An app that runs one copy at a time hands the launch to one
+    /// of them and exits, which the caller can then say.
+    pub running_before: Vec<i32>,
 }
 
 /// The folders an app named by its name is looked for in, in order.
@@ -213,26 +216,46 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
                 None => crate::process::holds_argument(*pid, &token_argument(&token)),
             };
             if ours {
-                return Ok(launched(*pid, &bundle, &bundle_id));
+                return Ok(launched(*pid, &bundle, &bundle_id, before));
             }
         }
         if Instant::now() >= claim_until {
-            return Err(Failure::unconfirmed(codes::TIMEOUT, format!("{bundle} was opened, but no new process carries this launch's token"))
-                .with_details(serde_json::json!({ "kind": "unclaimed" })));
+            return Err(unclaimed(&bundle, &before));
         }
         sleep(Duration::from_millis(50));
     }
 }
 
-fn launched(pid: i32, bundle: &str, bundle_id: &str) -> Launched {
+/// The failure of a launch none of whose new processes carries its token, with the copies that ran before it: the
+/// caller reads them from `running_before` to say a running copy may have taken the launch.
+fn unclaimed(bundle: &str, before: &[i32]) -> Failure {
+    Failure::unconfirmed(codes::TIMEOUT, format!("{bundle} was opened, but no new process carries this launch's token"))
+        .with_details(serde_json::json!({ "kind": "unclaimed", "running_before": before }))
+}
+
+fn launched(pid: i32, bundle: &str, bundle_id: &str, running_before: Vec<i32>) -> Launched {
     let name = NSRunningApplication::runningApplicationWithProcessIdentifier(pid).and_then(|app| app.localizedName()).map(|name| name.to_string());
     let app = name.unwrap_or_else(|| Path::new(bundle).file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default());
-    Launched { pid, app, bundle_id: Some(bundle_id.to_owned()), started: crate::process::started(pid).map(|started| started as f64) }
+    Launched { pid, app, bundle_id: Some(bundle_id.to_owned()), started: crate::process::started(pid).map(|started| started as f64), running_before }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{hidden_by, token_argument};
+    use super::{Launched, hidden_by, token_argument, unclaimed};
+
+    #[test]
+    fn names_the_copies_that_ran_before_the_launch() {
+        let launched = |running_before| Launched { pid: 7, app: "Form".to_owned(), bundle_id: None, started: None, running_before };
+        assert_eq!(serde_json::to_value(launched(vec![3, 5])).unwrap(), serde_json::json!({ "pid": 7, "app": "Form", "running_before": [3, 5] }));
+        assert_eq!(serde_json::to_value(launched(vec![])).unwrap(), serde_json::json!({ "pid": 7, "app": "Form", "running_before": [] }));
+    }
+
+    #[test]
+    fn names_the_copies_that_ran_before_an_unclaimed_launch() {
+        let failure = unclaimed("Form.app", &[3, 5]);
+        assert_eq!(failure.details, Some(serde_json::json!({ "kind": "unclaimed", "running_before": [3, 5] })));
+        assert_eq!(unclaimed("Form.app", &[]).details, Some(serde_json::json!({ "kind": "unclaimed", "running_before": [] })));
+    }
 
     #[test]
     fn spells_the_launch_token_as_one_argument() {

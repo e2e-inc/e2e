@@ -29,7 +29,7 @@ export interface Answer {
 export type Scripted = Answer | ((fake: FakeDriver, args: readonly unknown[]) => Answer);
 
 /** The async methods a scenario scripts. */
-type AsyncMethod = 'launch' | 'listWindows' | 'snapshot' | 'act' | 'press' | 'focusWindow' | 'pointer' | 'screenshot';
+type AsyncMethod = 'launch' | 'listWindows' | 'snapshot' | 'act' | 'press' | 'focusWindow' | 'closeWindow' | 'pointer' | 'screenshot';
 
 export type Scenario = Partial<Record<AsyncMethod, readonly Scripted[]>>;
 
@@ -188,6 +188,10 @@ export class FakeDriver implements DesktopDriver {
     return this.answer('focusWindow', [pid, windowId], ok({}));
   }
 
+  closeWindow(pid: number, windowId: string, _inputId?: number, _timeoutMs?: number): Promise<Envelope<unknown>> {
+    return this.answer('closeWindow', [pid, windowId], ok({}));
+  }
+
   /** The input id and budget of each `pointer` call, in order; its `args` keep the point and kind. */
   readonly pointerOptions: { readonly inputId: number | undefined; readonly timeoutMs: number | undefined; readonly target: PointerTarget | undefined }[] = [];
 
@@ -221,13 +225,14 @@ export function fakeDriver(scenario: Scenario = {}): FakeDriver {
 /**
  * A launch that starts a real process standing in for the app, carrying the
  * launch's token unless `token` is false, and reports it as the driver does.
+ * `runningBefore` are the copies the driver says ran before the launch.
  * `answer` replaces the success envelope: a failure the driver reports after
  * the process started.
  */
-export function spawnApp({ token = true, exits = false, sleepMs, answer }: { token?: boolean; exits?: boolean; sleepMs?: number; answer?: Answer } = {}): Scripted {
+export function spawnApp({ token = true, exits = false, sleepMs, answer, runningBefore = [] }: { token?: boolean; exits?: boolean; sleepMs?: number; answer?: Answer; runningBefore?: readonly number[] } = {}): Scripted {
   return (fake, args) => {
     const pid = fake.spawn({ token: token ? (args[0] as { token: string }).token : undefined, exits });
-    const reported = answer ?? { ok: true, data: { app: 'SpikeForm', pid, bundle_id: 'dev.e2e.spike.form', started: fake.processStarted(pid) ?? undefined } };
+    const reported = answer ?? { ok: true, data: { app: 'SpikeForm', pid, bundle_id: 'dev.e2e.spike.form', started: fake.processStarted(pid) ?? undefined, running_before: runningBefore } };
     return sleepMs === undefined ? reported : { ...reported, sleepMs };
   };
 }
