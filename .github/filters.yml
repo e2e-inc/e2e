@@ -33,6 +33,7 @@ web:
 
 mobile:
   - *runner
+  - '.github/scripts/prepare-android-emulator.mjs'
   - 'packages/mobile/**'
   - 'packages/limrun/**'
   - 'packages/github/**'
