@@ -101,7 +101,7 @@ pub fn back(pid: i32, input_id: Option<u32>, deadline: Instant) -> Outcome<Press
                 ));
             }
         };
-        let window = REVALIDATION.min(deadline.saturating_duration_since(Instant::now()).saturating_sub(super::ANSWER_MARGIN));
+        let window = watch_window(deadline.saturating_duration_since(Instant::now()).saturating_sub(super::ANSWER_MARGIN))?;
         let read = || match item.element.attribute("AXEnabled") {
             Ok(value) => Ok(value.boolean().unwrap_or(false)),
             Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT | ax::AX_API_DISABLED)) => Err(unread(error, "read whether Back is enabled")),
@@ -116,6 +116,15 @@ pub fn back(pid: i32, input_id: Option<u32>, deadline: Instant) -> Outcome<Press
         perform(&item.element, "AXPress", &format!("press {} in the {} menu", item.title, item.menu))?;
         Ok(Pressed { title: item.title.clone(), menu: item.menu.clone() })
     })
+}
+
+/// How long Back's enabled state is watched before the press: the whole validation, or a refusal when the budget left
+/// cannot hold it, since a press on a state not yet validated could go back from a page with nowhere to go.
+fn watch_window(left: Duration) -> Outcome<Duration> {
+    if left < REVALIDATION {
+        return Err(Failure::refused(codes::TIMEOUT, "too little time was left to see whether Back is enabled, so nothing was pressed"));
+    }
+    Ok(REVALIDATION)
 }
 
 /// The enabled state AppKit validated: `read` is polled every `poll` for `window`, and the first value that differs
@@ -240,6 +249,13 @@ mod tests {
         // No time left to watch: the state read is all there is.
         let fresh = revalidated(true, Duration::ZERO, Duration::from_millis(100), || Ok(false), |_| panic!("no pause"));
         assert!(fresh.expect("no read"));
+    }
+
+    #[test]
+    fn refuses_to_press_when_the_budget_cannot_hold_the_watch() {
+        assert_eq!(super::watch_window(Duration::from_secs(30)).ok(), Some(super::REVALIDATION));
+        let short = super::watch_window(super::REVALIDATION - Duration::from_millis(1)).expect_err("too short");
+        assert_eq!((short.code, short.delivery), (codes::TIMEOUT, crate::failure::Delivery::NotDelivered));
     }
 
     #[test]
