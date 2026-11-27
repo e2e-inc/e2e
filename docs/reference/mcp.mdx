@@ -311,13 +311,6 @@ Test lines: 2, 1 read not listed.
   drafted with the function's text and a comment: declare the variables it
   uses in the test. What the function itself calls is not drafted again. A
   passing `expect(value)` leaves no line.
-- A call whose argument holds only while the app runs is drafted the way
-  its engine says a test finds the same thing again. `desktop.useWindow(window)`
-  is drafted as
-  `desktop.useWindow((await desktop.windows()).find((window) => window.title === "Inbox") ?? "titled Inbox")`,
-  which fails when no window has that title rather than reading the focused
-  one; for an untitled window, or a window id passed as a string, the line keeps
-  the id and says in a comment that it holds only while the window is open.
 - Each action or matcher on `screen` waits `timeout` by default. A `timeout`
   in a line's own options replaces it. Without `timeout`, each waits 5000 ms,
   or the config's [`actionTimeout`](/reference/config#actiontimeout) or
@@ -702,8 +695,8 @@ The runner logs the saved path or the error. The MCP server logs the same
 result if it's still connected.
 
 [`run_code`](#run_code) gets the engine's fixture over the held test's app,
-as a normal session's code does, so `desktop.useWindow()` there changes the
-window the test reads after it resumes.
+as a normal session's code does, so a desktop window's `activate()` there
+changes the window the test reads after it resumes.
 
 The report and trace record the test's own steps. App logs and screen
 updates from an attached call can appear in the trace if they arrive after

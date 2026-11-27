@@ -11,10 +11,42 @@ import { frontmost, TESTBED_APP } from './frontmost.ts';
 test.describe('controls window', () => {
   test.beforeEach(async ({ app, screen, desktop }) => {
     await app.open();
-    await screen.getByRole('button', 'Controls…').tap();
-    await expect.poll(async () => (await desktop.windows()).map((window) => window.title).toSorted()).toEqual(['Controls', 'Sign In']);
-    const controls = (await desktop.windows()).find((window) => window.title === 'Controls');
-    await desktop.useWindow(controls);
+    await desktop.waitForWindow(() => screen.getByRole('button', 'Controls…').tap());
+  });
+
+  test('reads the window the trigger opened as the active one, and switches back by title', async ({ screen, desktop }) => {
+    const signIn = await desktop.window({ title: /^Sign/ });
+    const controls = await desktop.window({ title: 'Controls' });
+    expect(await desktop.windows()).toHaveLength(2);
+    expect([await controls.isActive(), await signIn.isActive(), await controls.isClosed()]).toEqual([true, false, false]);
+    await signIn.activate();
+    expect([await controls.isActive(), await signIn.isActive()]).toEqual([false, true]);
+    await expect(screen.getByRole('button', 'Sign in')).toBeVisible();
+    const missing = await desktop.window({ title: 'Settings' }, { timeout: 500 }).then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    expect(String(missing)).toMatch(/no window has the title "Settings"; open: /);
+  });
+
+  test('closes the active window, and reads the focused one again', async ({ screen, desktop }) => {
+    const controls = await desktop.window({ title: 'Controls' });
+    await controls.close();
+    expect(await controls.isClosed()).toBe(true);
+    const refused = await controls.activate().then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    expect(refused).toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/the window has closed/) });
+    await expect(screen.getByRole('button', 'Sign in')).toBeVisible();
+    expect(await desktop.windows()).toHaveLength(1);
+  });
+
+  test('types into the focused field through the desktop keyboard', async ({ screen, desktop }) => {
+    const note = screen.getByRole('textbox', 'Note');
+    await note.focus();
+    await desktop.keyboard.type('ada');
+    await expect(note).toHaveValue('ada');
   });
 
   test('scrolls a list until an item shows, and selects it', async ({ screen }) => {
@@ -102,8 +134,8 @@ test.describe('controls window', () => {
     );
     expect(String(failure)).toMatch(/typing stopped/);
     await expect(opener).toHaveValue('x');
-    const popup = (await desktop.windows()).find((window) => window.title === 'Popup');
-    await desktop.useWindow(popup);
+    const popup = await desktop.window({ title: 'Popup' });
+    await popup.activate();
     await expect(screen.getByRole('textbox', 'Popup field')).toHaveValue('');
   });
 
@@ -118,8 +150,8 @@ test.describe('controls window', () => {
       );
     expect(String(failure)).toMatch(/typing stopped/);
     await expect(screen.getByRole('textbox', 'Opener')).toHaveValue('x');
-    const popup = (await desktop.windows()).find((window) => window.title === 'Popup');
-    await desktop.useWindow(popup);
+    const popup = await desktop.window({ title: 'Popup' });
+    await popup.activate();
     await expect(screen.getByRole('textbox', 'Popup field')).toHaveValue('');
   });
 

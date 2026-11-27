@@ -29,7 +29,7 @@ export interface Answer {
 export type Scripted = Answer | ((fake: FakeDriver, args: readonly unknown[]) => Answer);
 
 /** The async methods a scenario scripts. */
-type AsyncMethod = 'launch' | 'listWindows' | 'snapshot' | 'act' | 'press' | 'focusWindow' | 'pointer' | 'screenshot';
+type AsyncMethod = 'launch' | 'listWindows' | 'snapshot' | 'act' | 'press' | 'focusWindow' | 'closeWindow' | 'pointer' | 'screenshot';
 
 export type Scenario = Partial<Record<AsyncMethod, readonly Scripted[]>>;
 
@@ -186,6 +186,10 @@ export class FakeDriver implements DesktopDriver {
   focusWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>> {
     this.focusOptions.push({ inputId, timeoutMs });
     return this.answer('focusWindow', [pid, windowId], ok({}));
+  }
+
+  closeWindow(pid: number, windowId: string, _inputId?: number, _timeoutMs?: number): Promise<Envelope<unknown>> {
+    return this.answer('closeWindow', [pid, windowId], ok({}));
   }
 
   /** The input id and budget of each `pointer` call, in order; its `args` keep the point and kind. */

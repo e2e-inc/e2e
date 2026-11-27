@@ -285,6 +285,17 @@ pub async fn focus_window(pid: i32, window_id_text: String, input_id: Option<u32
     .await
 }
 
+/// Closes a window as its close button does. `inputId` names it, so `cancelInput` stops it before the button is pressed.
+#[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
+pub async fn close_window(pid: i32, window_id_text: String, input_id: Option<u32>, timeout_ms: Option<f64>) -> Value {
+    let deadline = deadline(timeout_ms.unwrap_or(60_000.0));
+    blocking(move || {
+        actions::close_window(pid, window_id(&window_id_text)?, input_id, deadline)?;
+        Ok(serde_json::json!({}))
+    })
+    .await
+}
+
 /// The window a point was taken in, which must still take the click when it goes.
 #[napi(object)]
 pub struct PointerTarget {

@@ -2586,14 +2586,8 @@ recorded steps. Each operation takes:
 | `label` | `(...args) => string` | none |
 | `timeout` | milliseconds, a function of the arguments, or `false` when the method owns its deadline | `actionTimeout` |
 | `verifies` | `boolean` | `true` for assertions |
-| `testLine` | `(...args) => { args } \| { note } \| undefined` | the arguments as given |
 
 - Nested maps describe namespaces.
-- `testLine` is for an argument that holds only while the app runs, such as
-  a window id. `e2e mcp` writes a `run_code` call of the method in its test
-  lines with `args` in place of the arguments, code that finds the same
-  thing on the next run, or keeps the arguments and adds `note` as a
-  comment. Strings in the arguments it gets are already redacted.
 - Recording decorates the object in place, so create a fresh surface in each
   factory invocation.
 - The runner opens the step before calling a declared method, so attachments
@@ -2610,12 +2604,7 @@ export interface FixtureOperation<Args extends unknown[] = unknown[]> {
   readonly timeout?: number | false | ((...args: Args) => number | undefined);
   /** Assertions verify by default; waits may opt in as well. */
   readonly verifies?: boolean;
-  /** How a test line `e2e mcp` writes for this call spells it, for an argument that holds only while the app runs. */
-  readonly testLine?: (...args: Args) => FixtureTestLine | undefined;
 }
-
-/** What `FixtureOperation.testLine` writes in place of the arguments as given. */
-export type FixtureTestLine = { readonly args: string } | { readonly note: string };
 
 /** Only declared async methods are recorded. Sync accessors pass through unchanged. */
 export type FixtureOperations<T extends object> = {
