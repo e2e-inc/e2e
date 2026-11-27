@@ -1074,8 +1074,8 @@ describe('DesktopSurface: acting', () => {
     const top = every((await stuck.surface.observe(operation(), undefined)).root).find((node) => node.name === 'Top');
     await expect(stuck.surface.perform(top!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/not on screen/) });
     expect(stuck.fake.of('act')).toEqual([]);
-    // A scroll action: the driver scrolls it into view and answers once it shows, then it is pressed. A look-alike
-    // that the scroll moved is not looked for again by its place, which changed.
+    // A scroll action: the click goes to the driver alone, which waits for a disabled control first, then scrolls it into
+    // view and presses it once it shows. A look-alike that the scroll moved is not looked for again by its place.
     const twins = screen('w-mine', {
       name: 'Form',
       bounds: { x: 0, y: 0, width: 200, height: 200 },
@@ -1087,15 +1087,16 @@ describe('DesktopSurface: acting', () => {
     const scrolls = await launched({ snapshot: [twins] }, { observe: false });
     const second = every((await scrolls.surface.observe(operation(), undefined)).root).filter((node) => node.name === 'Delete')[1];
     await scrolls.surface.perform(second!.ref, { kind: 'tap' }, operation());
-    expect(scrolls.fake.of('act').map((call) => call.args[0] as { ref: string; action: string })).toEqual([
-      expect.objectContaining({ ref: '@s:e2', action: 'scrollTo' }),
-      expect.objectContaining({ ref: '@s:e2', action: 'click' }),
-    ]);
-    // The scroll changed the app: a click that then fails, even as a stale ref, is never retried as if nothing happened.
-    const moved = await launched({ snapshot: [twins], act: [ok({}), failure('STALE_REF', 'not_delivered')] }, { observe: false });
+    expect(scrolls.fake.of('act').map((call) => call.args[0] as { ref: string; action: string })).toEqual([expect.objectContaining({ ref: '@s:e2', action: 'click' })]);
+    // The driver counts a failure after its scroll as delivered: the click is never retried as if nothing happened.
+    const moved = await launched({ snapshot: [twins], act: [failure('STALE_REF', 'delivered_unverified')] }, { observe: false });
     const stale = every((await moved.surface.observe(operation(), undefined)).root).filter((node) => node.name === 'Delete')[1];
-    // The message names the click once.
-    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false, message: expect.stringMatching(/^click: (?!click).* \(an earlier command of this step changed the app\)$/) });
+    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+    // One that stays disabled is refused before the driver scrolls: nothing moved, and nothing was sent.
+    const disabled = await launched({ snapshot: [twins], act: [failure('ACTION_FAILED', 'not_delivered', 'the control is disabled')] }, { observe: false });
+    const off = every((await disabled.surface.observe(operation(), undefined)).root).filter((node) => node.name === 'Delete')[1];
+    await expect(disabled.surface.perform(off!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(disabled.fake.acted()).toEqual(['click']);
     // A secondary tap goes to the driver alone, which checks the context menu live before it scrolls: the observed
     // actions may come from a read that stalled.
     const plain = await launched({ snapshot: [twins] }, { observe: false });
@@ -1125,7 +1126,7 @@ describe('DesktopSurface: acting', () => {
     const nested = await launched({ snapshot: [inRow] }, { observe: false });
     const remove = every((await nested.surface.observe(operation(), undefined)).root).find((node) => node.name === 'Remove');
     await nested.surface.perform(remove!.ref, { kind: 'tap' }, operation());
-    expect(nested.fake.of('act').map((call) => (call.args[0] as { action: string }).action)).toEqual(['scrollTo', 'click']);
+    expect(nested.fake.of('act').map((call) => (call.args[0] as { action: string }).action)).toEqual(['click']);
     // Hidden for another reason than a scroll: no scroll shows a minimized window's control or one with no size, so
     // each is refused at once, though both offer ScrollTo.
     const minimized = await launched(

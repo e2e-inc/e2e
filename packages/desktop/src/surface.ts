@@ -967,13 +967,12 @@ export class DesktopSurface {
     }
     const binding = this.binding(ref);
     switch (action.kind) {
-      case 'tap': {
-        const scrolled = await this.shown(binding, 'tap', operation);
-        const click = (): Promise<void> => this.refCommand('click', binding, operation);
-        if (scrolled) await afterChange('click', click);
-        else await click();
+      case 'tap':
+        // The driver waits for a disabled control first, then scrolls one a list holds out of view into view, and counts a
+        // failure after that scroll as delivered: a control that stays disabled is refused with nothing sent.
+        reachable(binding, 'tap');
+        await this.refCommand('click', binding, operation);
         break;
-      }
       case 'secondaryTap':
         // The driver checks the control offers a context menu, live, before it scrolls one out of view into view (or
         // refuses one it cannot reach), and counts a failure after that scroll as delivered: the observed actions may be
@@ -1069,22 +1068,6 @@ export class DesktopSurface {
   /** The agent reads the screen right after acting, so its actions let the UI settle first; a test's own steps verify with `expect`. */
   private async settle(operation: OperationContext): Promise<void> {
     if (operation.origin === 'agent') await sleep(Math.min(this.options.settleMs, operation.timeoutMs), operation.signal);
-  }
-
-  /**
-   * Refuses a tap on a node the read found off screen, which accessibility would press all the same: one a scroll area
-   * holds out of view. When the driver can scroll it into view, it does, and answers only once the element shows: a
-   * fresh read could not tell a look-alike node that moved from its siblings.
-   */
-  private async shown(binding: NodeBinding, what: string, operation: OperationContext): Promise<boolean> {
-    if (binding.states?.hidden !== true) return false;
-    // Only a node a scroll area holds out of view is scrolled: the driver checks it shows by its frame and the scroll
-    // areas around it, which a minimized window or a collapsed control would pass unchanged.
-    if (binding.scrolledOut === true && binding.ref !== undefined && binding.actions.includes('ScrollTo')) {
-      await this.refCommand('scrollTo', binding, operation);
-      return true;
-    }
-    throw notActionable(`node ${binding.id} is not on screen, so a ${what} would reach a control the user cannot; scroll it into view first`);
   }
 
   /** One action on a node's ref, failures translated. */
@@ -1517,6 +1500,17 @@ function holds(rect: Rect, point: { readonly x: number; readonly y: number }): b
 /** The window a screen was read from, and the sheet that held its focus then: where a point taken in it was taken. */
 function pointIn(screen: ProjectedScreen): PointWindow | undefined {
   return screen.windowId === undefined ? undefined : { id: screen.windowId, sheet: screen.sheet };
+}
+
+/**
+ * Refuses a press on a node the read found off screen, which accessibility would press all the same, unless the driver
+ * can scroll it into view: one a scroll area holds out of view, with a ref and the scroll action. A minimized window's
+ * control or one with no size would pass the driver's check unchanged.
+ */
+function reachable(binding: NodeBinding, what: string): void {
+  if (binding.states?.hidden !== true) return;
+  if (binding.scrolledOut === true && binding.ref !== undefined && binding.actions.includes('ScrollTo')) return;
+  throw notActionable(`node ${binding.id} is not on screen, so a ${what} would reach a control the user cannot; scroll it into view first`);
 }
 
 /** Stands for a sheet the driver gave no key: it is never known to be the same sheet as any. */
