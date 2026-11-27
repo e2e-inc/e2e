@@ -870,8 +870,11 @@ describe('FileCacheStore', () => {
     expect((await store.read(OTHER_KEY, second)).status).toBe('invalid');
     expect((await store.read(KEY, step())).status).toBe('hit');
     expect(await store.write('c'.repeat(64), payload('ios'))).toBeUndefined();
-    await expect(store.delete(KEY, step())).rejects.toThrow(/does not read/u);
+    // Evicting the first leaves the YAML for a person to fix and drops the key from the lock alone: it no longer replays.
+    await store.delete(KEY, step());
     expect(await readFile(yamlPath(directory), 'utf8')).toBe(edited);
+    expect((await store.read(KEY, step())).status).toBe('miss');
+    expect((await store.read(OTHER_KEY, second)).status).toBe('invalid');
     // Not even the edited step's own key rewrites it: the edited block is not known to be that step's.
     expect(await store.write(OTHER_KEY, payload('web', { recordedFor: second }))).toBeUndefined();
     expect(await readFile(yamlPath(directory), 'utf8')).toBe(edited);

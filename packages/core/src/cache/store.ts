@@ -30,6 +30,7 @@ import { canonicalJson, timestamp } from '../internal/ids.ts';
 import { bound } from '../internal/text.ts';
 import { holdsFileLock, withFileLock } from './file-lock.ts';
 import {
+  lockWithout,
   parseLockAlone,
   parseRecordingFile,
   recordingNamesTest,
@@ -198,8 +199,14 @@ export class FileCacheStore implements CacheStore {
       // A pair that does not read replays nothing, so nothing in it needs evicting; it waits for a person.
       if (file === undefined || file.parsed.status === 'invalid') return;
       if (!file.parsed.recordings.some((recording) => recording.keyHash === keyHash)) return;
-      const problem = unreadable(file, keyHash);
-      if (problem !== undefined) throw new Error(`cannot evict ${keyHash.slice(0, 12)} without dropping a recording that does not read: ${problem}`);
+      // The YAML cannot be rewritten without dropping what does not read, a person's to fix; the lock alone can
+      // let the key go, so a flow a failure implicated stops replaying meanwhile.
+      if (unreadable(file, keyHash) !== undefined) {
+        if (!(await holdsFileLock(this.lockPath(file.name)))) throw new Error(`lost the lock on ${file.name} to another writer`);
+        const lock = this.path(file.name, LOCK_EXTENSION);
+        await writeFileAtomic(lock, lockWithout(await readFile(lock, 'utf8'), keyHash), { mode: 0o600 });
+        return;
+      }
       const next = hits(file.parsed).filter((recording) => recording.keyHash !== keyHash);
       if (next.length === 0) await this.remove(file.name);
       // A pair it could not write back (one rendered over the size cap, or the lock lost) still replays the key.
