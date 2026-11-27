@@ -450,6 +450,9 @@ fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
 fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
     enabled(element, deadline, "click")?;
+    // The engine checked the node shows before the call; the wait above can outlast that, as the window minimizes or
+    // a list scrolls meanwhile.
+    reveal(element, deadline, "click")?;
     let (ax_role, role) = role_of(element, "click")?;
     // A tap on a text field puts the keyboard there. AppKit's password field also offers AXConfirm, which the action
     // choice below would send in its place, leaving the keyboard in the field before.
@@ -1284,6 +1287,7 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         Action::Hover => physical(&entry, Pointer::Move),
         Action::RightClick => {
             enabled(element, deadline, "right click")?;
+            reveal(element, deadline, "right click")?;
             let names = action_names(element, "right click")?;
             if names.iter().any(|name| name == "AXShowMenu") {
                 let before = windows::open_menus(entry.pid);
