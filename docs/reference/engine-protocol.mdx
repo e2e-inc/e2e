@@ -218,8 +218,8 @@ export interface EngineManifest {
   readonly launchArgumentValues?: boolean;
   /** The engine opens an app whose `url` is a `file:` URL, read from the disk of the machine the harness runs on. */
   readonly fileApps?: boolean;
-  /** See `Engine.headed`. */
-  readonly headed?: boolean;
+  /** See `Engine.alwaysHeaded`. */
+  readonly alwaysHeaded?: boolean;
   /** See `Engine.isolation`; left out for `attempt`. */
   readonly isolation?: 'worker';
 }

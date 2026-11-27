@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { uuidv7 } from '@e2e-dev/core/lib/internal/ids';
+import { connectHeldTest } from '../../src/mcp/step-attachment.ts';
 import type { Report1Document } from '../../src/report/build.ts';
 import { AttachHello, AttachRequest, type AttachReply } from '../../src/run/step-attachment-wire.ts';
 import { parseLine, readSocketLines, stepAddress } from '../../src/run/step-socket.ts';
@@ -809,6 +811,17 @@ export default {
     expect(contentsUnder(path.join(dir, '.e2e/results')).map(([name]) => name)).not.toEqual(
       expect.arrayContaining([expect.stringMatching(/screenshots\/fake\.png$/)]),
     );
+  });
+
+  it('reports an attachment headed when the engine shows its surface itself, though the run did not ask', async () => {
+    const dir = project('await screen.pause();', CONFIG.replace('  video: true,', '  video: true,\n  alwaysHeaded: true,'));
+    const { id } = await pause(dir);
+    const attachment = await connectHeldTest(dir, e2e(dir, '--version').stdout.trim(), id, uuidv7(), new AbortController().signal, () => {});
+    try {
+      expect(attachment.opening.headed).toBe(true);
+    } finally {
+      await attachment.detach();
+    }
   });
 
   it('names both e2e versions when attachment protocols differ', async () => {

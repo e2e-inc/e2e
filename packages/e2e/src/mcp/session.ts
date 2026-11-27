@@ -18,6 +18,7 @@ import { openInteractiveStep, type InteractiveStep } from '../agent/interactive-
 import { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
 import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import { launchesPinnedApp } from '@e2e-dev/core/lib/config/targets';
+import { showsSurface } from '@e2e-dev/core/lib/engine/manifest';
 import { classifyError, ConfigurationError, errorMessage, InfrastructureError, serializeError, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
 import { NEVER_ABORTS, abortError, cancelledError } from '@e2e-dev/core/lib/internal/time';
 import { LocatorEngine } from '@e2e-dev/core/lib/locator/engine';
@@ -63,7 +64,7 @@ interface LiveSession {
   readonly target: ResolvedTarget;
   /** Where the session's config came from, as the opening summary says it. */
   readonly origin: string;
-  /** Whether the session shows its UI: asked for, or declared by the engine (`Engine.headed`). */
+  /** Whether the session shows its UI: asked for, or declared by the engine (`Engine.alwaysHeaded`). */
   readonly headed: boolean;
   readonly attempt: StandaloneAttempt;
   readonly step: InteractiveStep;
@@ -191,14 +192,14 @@ export class SessionHost {
    */
   open(options: OpenSessionOptions, signal?: AbortSignal): Promise<string> {
     const { attach, target, config, test, engine, app } = options;
-    const headed = attach === undefined ? options.headed ?? this.options.headed : false;
-    const usage = new SessionUsage(this.sessions.liveCount, headed, attach !== undefined);
+    const requested = attach === undefined ? options.headed ?? this.options.headed : false;
+    const usage = new SessionUsage(this.sessions.liveCount, requested, attach !== undefined);
     const clash = attach === undefined ? undefined : Object.entries({ target, config, test, engine, app, path: options.path, headed: options.headed })
       .find(([, value]) => value !== undefined)?.[0];
 
     const opening = clash === undefined
       ? this.sessions.admit((id) => attach === undefined
-        ? this.openSession(id, options, headed, usage, signal)
+        ? this.openSession(id, options, requested, usage, signal)
         : this.openAttachment(id, attach, usage, signal))
       : Promise.reject(new ConfigurationError('INVALID_ARGUMENT', `open_session: attach cannot be combined with ${clash}`));
 
@@ -418,7 +419,7 @@ export class SessionHost {
   private async openSession(
     id: string,
     options: OpenSessionOptions,
-    headed: boolean,
+    requested: boolean,
     usage: SessionUsage,
     request: AbortSignal | undefined,
   ): Promise<string> {
@@ -449,7 +450,7 @@ export class SessionHost {
     const named = 'file' in source ? (options.target ?? this.options.defaultTarget) : undefined;
     const { config, target } = await allocateTargetPorts(loaded, selectTarget(loaded, named, 'pass target to open_session, or start e2e mcp --target <name>'));
     // What the session line and the usage report say; the engine is still handed what was asked.
-    const shown = headed || target.engine?.headed === true;
+    const shown = showsSurface(target.engine, requested);
     usage.resolved(target.platform, target.engine, shown);
     this.sessions.claimEngine(id, target.name, target.engine);
     // Selected before anything boots: a name that selects no test, or several, costs no engine.
@@ -499,7 +500,7 @@ export class SessionHost {
         // record everything.
         config,
         target: { ...target, video: { mode: 'off', source: 'default' } },
-        headed,
+        headed: requested,
         env: this.options.env,
         signal: abort.signal,
         timeoutMs: ttlMs + CLOSE_GRACE_MS,

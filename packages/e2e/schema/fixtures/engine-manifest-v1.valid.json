@@ -32,6 +32,6 @@
   "grantsAllPermissions": true,
   "launchArgumentValues": true,
   "fileApps": true,
-  "headed": true,
+  "alwaysHeaded": true,
   "isolation": "worker"
 }

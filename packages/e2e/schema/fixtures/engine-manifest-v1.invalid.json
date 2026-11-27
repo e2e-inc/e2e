@@ -6,7 +6,7 @@
     "engine/viewportIntersection"
   ],
   "fileApps": "yes",
-  "headed": "yes",
+  "alwaysHeaded": "yes",
   "actions": [
     "scrollTo",
     "scrollToEdge"

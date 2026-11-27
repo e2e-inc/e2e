@@ -671,14 +671,14 @@ describe('engine protocol', () => {
       await expect(remote.init!(initInfo())).rejects.toThrow(/fileApps is false, declared true/);
     });
 
-    it('carries headed in the manifest, and refuses one that is not a boolean', () => {
-      const { local, remote } = overLoopback(toy({ headed: true }));
-      expect(describeEngine(local).headed).toBe(true);
-      expect(remote.headed).toBe(true);
+    it('carries alwaysHeaded in the manifest, and refuses one that is not a boolean', () => {
+      const { local, remote } = overLoopback(toy({ alwaysHeaded: true }));
+      expect(describeEngine(local).alwaysHeaded).toBe(true);
+      expect(remote.alwaysHeaded).toBe(true);
       const plain = overLoopback(toy({}));
-      expect(describeEngine(plain.local).headed).toBeUndefined();
-      expect(plain.remote.headed).not.toBe(true);
-      expect(() => defineEngine(toy({ headed: 'yes' as never }))).toThrow(/headed must be a boolean/);
+      expect(describeEngine(plain.local).alwaysHeaded).toBeUndefined();
+      expect(plain.remote.alwaysHeaded).not.toBe(true);
+      expect(() => defineEngine(toy({ alwaysHeaded: 'yes' as never }))).toThrow(/alwaysHeaded must be a boolean/);
     });
 
     it('refuses a fileApps flag that is not a boolean', () => {

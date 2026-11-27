@@ -141,7 +141,7 @@ rules:
 | `grantsAllPermissions` | Not a boolean. |
 | `launchArgumentValues` | Not a boolean. |
 | `fileApps` | Not a boolean. |
-| `headed` | Not a boolean. |
+| `alwaysHeaded` | Not a boolean. |
 | `isolation` | Anything but `'attempt'` or `'worker'`. |
 | `keyboard`, `state`, `artifacts`, `session` | An unknown key or a non-function member. `keyboard` without `type` and `press`; `state` without both `capture` and `restore`; `artifacts` without `screenshot`; `startVideo` without `stopVideo`, or the reverse. |
 | `secrets` | Not an array of `secrets.get()` handles. |
@@ -177,7 +177,7 @@ The body of one target. Every member but `name`, `version`, and
 | [`grantsAllPermissions`](#capabilities) | `boolean` |
 | [`launchArgumentValues`](#engineappinfo) | `boolean` |
 | [`fileApps`](#capabilities) | `boolean` |
-| [`headed`](#capabilities) | `boolean` |
+| [`alwaysHeaded`](#init) | `boolean` |
 | [`keyboard`](#keyboard) | `EngineKeyboard` |
 | [`fixtures`](#contributed-fixtures) | factories |
 | [`isolation`](#fixture-isolation) | `'attempt' \| 'worker'` |
@@ -309,12 +309,13 @@ export interface Engine {
    */
   readonly fileApps?: boolean;
   /**
-   * The engine shows its surface whatever the run asks, because an option of
-   * its own turned that on. The harness then reports a session on it as
-   * headed without `--headed`. An engine that follows the run's `headed`
-   * leaves this out.
+   * An option of the engine itself shows its surface on every run, whatever
+   * the run's `headed` asks. The harness reads it for one thing: an `e2e mcp`
+   * session on the engine is reported as headed without `--headed`. Leaving
+   * it out does not say the engine follows the run's `headed`; an engine may
+   * ignore that flag or be unable to honor it.
    */
-  readonly headed?: boolean;
+  readonly alwaysHeaded?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**
@@ -467,7 +468,6 @@ member. Two gaps end differently:
 | `grantsAllPermissions: true` | - | - | `app.permissions: 'all'`, which the engine receives as `EngineAppInfo.allPermissions`. Without it, config load refuses `'all'`, so an engine released before it never receives the string. |
 | `launchArgumentValues: true` | - | - | The object form of `app.launchArguments`, in `EngineAppInfo.launchArgumentValues`. |
 | `fileApps: true` | - | - | A target whose `app.url` is a `file:` URL. `validateApp` is told with `fileApp: true`. |
-| `headed: true` | - | - | Nothing a test calls. Declare it when an option of the engine shows its surface without `--headed`; an `e2e mcp` session on it is then reported as headed. |
 | `performAt` + `pointerActions` | `pointer` | `observe` | One pointer action at a viewport point, with no node behind it. |
 | `keyboard.{type,press,dismiss?}` | `keyboard` | `observe` | Input to whatever holds focus. |
 | `fixtures.<name>` | `<name>` | - | A contributed fixture. |
@@ -881,6 +881,10 @@ async init(info) {
 
 `init` never learns the app URL; URLs arrive through `session.open` only. A
 failure is an infrastructure error.
+
+`info.headed` is what the run asked for. An engine with an option of its own
+that shows its surface on every run declares `alwaysHeaded: true`, so an
+`e2e mcp` session on it is reported as headed without `--headed`.
 
 ```ts
 /** Run identity and harness-resolved facts handed to `init`, once per worker before the first step. */

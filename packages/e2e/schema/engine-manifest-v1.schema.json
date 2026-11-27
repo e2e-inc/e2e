@@ -137,8 +137,8 @@
       "description": "The engine opens an app whose url is a file: URL, read from the disk of the machine the harness runs on; without it the harness refuses a file app.url at config load.",
       "type": "boolean"
     },
-    "headed": {
-      "description": "The engine shows its surface whatever the run asks, because an option of its own turned that on; a session on it is reported as headed without --headed.",
+    "alwaysHeaded": {
+      "description": "An option of the engine itself shows its surface on every run, whatever the run asks; an e2e mcp session on it is reported as headed without --headed.",
       "type": "boolean"
     },
     "isolation": {

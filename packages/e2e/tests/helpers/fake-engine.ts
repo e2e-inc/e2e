@@ -83,8 +83,8 @@ export type RecordedCall = RecordedPerform | RecordedPointerAction | RecordedKey
 export interface FakeEngineBehavior {
   /** The worker cap `prepare` reports to the run; without it the engine has no `prepare`. */
   preparedWorkers?: number;
-  /** Declares `headed`: the engine shows its surface whatever the run asks. */
-  headed?: boolean;
+  /** Declares `alwaysHeaded`: an option of the engine shows its surface whatever the run asks. */
+  alwaysHeaded?: boolean;
   /** Throw to fail worker boot. Called before any attempt. */
   onInit?(info: EngineInitInfo): void | Promise<void>;
   /** Throw or hang to fail attempt launches. */
@@ -263,7 +263,7 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
     name: 'fake',
     version: '1.0.0',
     spiVersion: ENGINE_SPI_VERSION,
-    ...(behavior.headed === true ? { headed: true } : {}),
+    ...(behavior.alwaysHeaded === true ? { alwaysHeaded: true } : {}),
     ...(preparedWorkers === undefined ? {} : { prepare: async () => ({ workers: preparedWorkers }) }),
     async init(info) {
       events.push('init');

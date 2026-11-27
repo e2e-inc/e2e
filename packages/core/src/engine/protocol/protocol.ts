@@ -125,8 +125,8 @@ export interface EngineManifest {
   readonly launchArgumentValues?: boolean;
   /** See `Engine.fileApps`. */
   readonly fileApps?: boolean;
-  /** See `Engine.headed`. */
-  readonly headed?: boolean;
+  /** See `Engine.alwaysHeaded`. */
+  readonly alwaysHeaded?: boolean;
   /** See `Engine.isolation`; left out for `attempt`. */
   readonly isolation?: 'worker';
 }

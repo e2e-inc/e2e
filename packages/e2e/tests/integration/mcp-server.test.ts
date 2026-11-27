@@ -72,7 +72,7 @@ const SHOWN_CONFIG = `import type { E2EConfig } from 'e2e';
 import { createFakeEngine } from '../../helpers/fake-engine.ts';
 
 export default {
-  targets: [{ name: 'shown', platform: 'kiosk', engine: createFakeEngine({ headed: true }).engine }],
+  targets: [{ name: 'shown', platform: 'kiosk', engine: createFakeEngine({ alwaysHeaded: true }).engine }],
 } satisfies E2EConfig;
 `;
 

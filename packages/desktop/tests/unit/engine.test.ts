@@ -19,8 +19,8 @@ describe('desktop()', () => {
     expect(plain.workers).toBe(1);
     expect(describeEngine(plain).launchArgumentValues).toBe(true);
     // Its own option brings the app forward whatever the run asks, so the engine says so.
-    expect(headed.headed).toBe(true);
-    expect(plain.headed).toBeUndefined();
+    expect(headed.alwaysHeaded).toBe(true);
+    expect(plain.alwaysHeaded).toBeUndefined();
   });
 
   it('refuses options it does not take', () => {

@@ -162,7 +162,7 @@ describe('SessionHost', { timeout: 60_000 }, () => {
   });
 
   it('reports a session headed when its engine declares it, and still hands the engine what was asked', async () => {
-    const fake = createFakeEngine({ headed: true });
+    const fake = createFakeEngine({ alwaysHeaded: true });
     const summaries: McpSessionSummary[] = [];
     const shown = host(() => fake, { headed: false, onSessionEnd: (summary) => void summaries.push(summary) });
     expect(await shown.open({ headed: false })).toContain('), headed;');

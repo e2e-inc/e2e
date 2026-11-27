@@ -859,12 +859,13 @@ export interface Engine {
    */
   readonly fileApps?: boolean;
   /**
-   * The engine shows its surface whatever the run asks, because an option of
-   * its own turned that on. The harness then reports a session on it as
-   * headed without `--headed`. An engine that follows the run's `headed`
-   * leaves this out.
+   * An option of the engine itself shows its surface on every run, whatever
+   * the run's `headed` asks. The harness reads it for one thing: an `e2e mcp`
+   * session on the engine is reported as headed without `--headed`. Leaving
+   * it out does not say the engine follows the run's `headed`; an engine may
+   * ignore that flag or be unable to honor it.
    */
-  readonly headed?: boolean;
+  readonly alwaysHeaded?: boolean;
   /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
   /**

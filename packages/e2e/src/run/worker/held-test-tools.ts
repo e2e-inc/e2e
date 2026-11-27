@@ -10,6 +10,7 @@ import { executorRedactors } from '@e2e-dev/core/lib/agent/redaction';
 import { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
 import { createStepExecution } from '@e2e-dev/core/lib/agent/step-execution';
 import type { ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
+import { showsSurface } from '@e2e-dev/core/lib/engine/manifest';
 import { classifyError, ConfigurationError, errorMessage, InfrastructureError } from '@e2e-dev/core/lib/internal/errors';
 import { abortError, cancelledError, Deadline, withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
 import { LocatorEngine } from '@e2e-dev/core/lib/locator/engine';
@@ -197,7 +198,7 @@ export class HeldTestTools {
             name: redact(engine.name),
             version: redact(engine.version),
           },
-          headed: this.options.headed,
+          headed: showsSurface(engine, this.options.headed),
           projectTools: [...catalog.project].map(redact),
           summary: redact(summary),
           catalog: Object.entries(catalog.tools).map(([name, tool]) =>

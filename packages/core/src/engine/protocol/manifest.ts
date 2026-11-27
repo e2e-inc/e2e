@@ -32,7 +32,7 @@ export function describeEngine(engine: EngineHandle): EngineManifest {
     grantsAllPermissions: engine.grantsAllPermissions === true ? true : undefined,
     launchArgumentValues: engine.launchArgumentValues === true ? true : undefined,
     fileApps: engine.fileApps === true ? true : undefined,
-    headed: engine.headed === true ? true : undefined,
+    alwaysHeaded: engine.alwaysHeaded === true ? true : undefined,
     isolation: engine.isolation === 'worker' ? ('worker' as const) : undefined,
   });
 }
@@ -88,7 +88,7 @@ function comparable(manifest: EngineManifest) {
     grantsAllPermissions: manifest.grantsAllPermissions === true,
     launchArgumentValues: manifest.launchArgumentValues === true,
     fileApps: manifest.fileApps === true,
-    headed: manifest.headed === true,
+    alwaysHeaded: manifest.alwaysHeaded === true,
     isolation: manifest.isolation === 'worker' ? 'worker' : 'attempt',
   };
 }
