@@ -4,7 +4,7 @@
  * `desktop.<method>` step bounded by the action timeout.
  */
 
-import { TestError, type EngineFixtureContext } from '@e2e-dev/core/engine';
+import { TestError, type EngineFixtureContext, type FixtureTestLine } from '@e2e-dev/core/engine';
 import type { DesktopPlatform } from './options.ts';
 import type { DesktopSurface } from './surface.ts';
 import { choiceLabel, windowChoice, type DesktopWindow, type WindowArgument } from './window-choice.ts';
@@ -61,8 +61,22 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
   return context.fixture('desktop', desktop, {
     windows: { kind: 'resource' },
     // The wait for a title owns the deadline, so a window that never shows fails with the titles the app has; an id is looked up in one window list, which the driver call bounds.
-    useWindow: { kind: 'resource', timeout: false, label: (window) => choiceLabel(windowChoice(window)) },
+    // A window id holds only while the window stays open: a test line from `e2e mcp` names the window by its title instead.
+    useWindow: { kind: 'resource', timeout: false, label: (window) => choiceLabel(windowChoice(window)), testLine: windowLine },
     press: { kind: 'resource', label: (key) => key },
     closeApp: { kind: 'resource' },
   });
+}
+
+/**
+ * How a test line names the window `useWindow` got: by its title, which holds
+ * on the next launch, where its id does not. A title or a pattern is written
+ * as given. A window with no title, or one named only by its id, keeps its
+ * arguments, with a note that they may not hold.
+ */
+function windowLine(window?: WindowArgument): FixtureTestLine | undefined {
+  if (window === undefined || typeof window !== 'object' || window instanceof RegExp) return undefined;
+  const title: unknown = 'title' in window ? window.title : undefined;
+  if (typeof title === 'string' && title.trim() !== '') return { args: JSON.stringify(title) };
+  return { note: 'a window id holds only while the window stays open; on the next launch, pick the window by its title' };
 }

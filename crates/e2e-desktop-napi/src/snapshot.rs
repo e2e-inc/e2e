@@ -322,7 +322,7 @@ pub(crate) enum Placement {
 /// Where an element is now, by the test the snapshot reads `offscreen` with: its frame against the window and every
 /// scroll area it is in, up to a menu or popover, which floats above the window. A minimized window shows nothing,
 /// whatever its frames say. An element with no frame has no place to judge, and shows. `Err` when the app did not
-/// answer in time.
+/// answer in time, or with `AX_INVALID_ELEMENT` when the element or an ancestor is gone: a gone element shows nowhere.
 pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
     // Every frame is read so that a stall fails the placement: a frame the app did not answer is no proof it shows.
     let frame = element.read_frame()?;
@@ -332,7 +332,7 @@ pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
         // A count the app did not answer in time is no proof the control holds nothing.
         let empty = match element.count("AXChildren") {
             Ok(count) => count == 0,
-            Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+            Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => return Err(error),
             Err(_) => true,
         };
         if empty {
@@ -344,7 +344,7 @@ pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
     // the walk as if the window were reached.
     let parent_of = |element: &Element| match element.attribute("AXParent") {
         Ok(Value::Element(parent)) => Ok(Some(parent)),
-        Err(ax::AX_CANNOT_COMPLETE) => Err(ax::AX_CANNOT_COMPLETE),
+        Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => Err(error),
         _ => Ok(None),
     };
     let mut next = parent_of(element)?;
@@ -352,7 +352,7 @@ pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
         let Some(parent) = next else { break };
         let role = match parent.attribute("AXRole") {
             Ok(value) => value.text().unwrap_or_default().to_owned(),
-            Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+            Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => return Err(error),
             Err(_) => String::new(),
         };
         if floats(roles::role(&role, None)) {

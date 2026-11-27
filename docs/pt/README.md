@@ -118,6 +118,16 @@ translation moves or goes with it in the same change.
 | lease (a device or browser) | reserva, reservar (`DeviceLease` in code) |
 | boot, booted | boot (fazer o boot), inicializado |
 | tap, swipe | toque (tocar), gesto de deslizar |
+| phone (a connected device) | aparelho (aparelhos conectados), celular |
+| press (a hardware button) | pressionar, botão físico |
+| lock, unlock (the screen), lock screen | bloquear, desbloquear, tela de bloqueio |
+| shake | sacudir |
+| warm-up (devices) | aquecimento |
+| pinned app, fresh launch | app fixado, nova inicialização |
+| home screen | tela inicial |
+| logical pixels | pixels lógicos |
+| stop (a recording) | encerrar, encerramento |
+| shorthand (`request.get`) | atalho |
 | trace | trace (keep in English, o trace) |
 | artifact | artefato |
 | matcher | matcher (keep in English, o matcher) |
@@ -155,6 +165,16 @@ translation moves or goes with it in the same change.
 | job, workflow | job, workflow (keep in English, o job, o workflow) |
 | viewport | viewport (keep in English, o viewport) |
 | origin, cross-origin | origem, de origem cruzada |
+| route (network), fulfill, abort | rota, responder, abortar |
+| predicate, trigger (a `waitFor*` callback) | predicado, gatilho |
+| accessor (`surfaceOf`) | acessor |
+| dismiss (a dialog) | dispensar |
+| wildcard | curinga |
+| persistent context (a browser's) | contexto persistente |
+| init script | script de inicialização |
+| container | contêiner |
+| error class (`category` values) | classe de erro (the class names stay in English) |
+| first-party (a package) | oficial |
 | Next (closing section heading) | Próximos passos |
 | MCP | MCP (keep in English) |
 | CI | CI (keep in English, a CI) |
@@ -197,6 +217,16 @@ translation moves or goes with it in the same change.
 | registry, dist-tag | registry, dist-tag (keep in English, o registry, a dist-tag) |
 | opt in, opt out | ativação, desativação |
 | wins (over another value) | prevalece |
+| built-in fixture | fixture embutida |
+| skip (noun), skip reason | pulo, motivo do pulo (pular, pulado) |
+| expected failure, unexpected pass | falha esperada, sucesso inesperado |
+| row (`test.each`) | linha |
+| lazy (acquired on demand) | sob demanda |
+| truthy, falsy | truthy, falsy (keep in English) |
+| observation (a screen read) | observação |
+| evidence (sent to the judge) | evidências |
+| repair round | rodada de reparo |
+| windowed list | lista virtualizada |
 | stored screenshot | captura de tela armazenada |
 | the agent takes over | o agente assume |
 | cache miss | cache miss (keep in English, o cache miss) |
@@ -204,6 +234,16 @@ translation moves or goes with it in the same change.
 | store (`cache.store`) | armazenamento |
 | stale | desatualizado |
 | gap (an action the cache can't replay) | lacuna (`gap` in code) |
+| engine spec (`defineEngine`) | especificação (da engine) |
+| handle (`EngineHandle`), factory | handle, factory (keep in English, o handle, a factory) |
+| capability (an engine's) | capability (keep in English, a capability) |
+| retryable (an error code) | que permite nova tentativa |
+| drive (an app or device) | controlar |
+| steering (hooks, methods) | de controle (hooks de controle) |
+| surface (under test) | superfície |
+| withheld (pixels) | retido |
+| semantic capture | captura semântica |
+| dispose, disposal | descartar, descarte |
 | label (text on a control) | rótulo |
 | edge case | caso de borda |
 | checkout (a git working copy) | checkout (keep in English, o checkout) |
@@ -280,3 +320,12 @@ translation moves or goes with it in the same change.
 | below the fold | abaixo da dobra |
 | port reverse | redirecionamento reverso de portas |
 | dashboard | dashboard (keep in English, o dashboard) |
+| merge (reports, `e2e merge-reports`) | mesclar, mesclagem (relatório mesclado) |
+| folded report (`report-with-reruns.json`) | relatório combinado |
+| service (`services`) | serviço |
+| workspace (pnpm, Yarn) | workspace (keep in English, o workspace) |
+| helper (a test helper) | função auxiliar |
+| step boundary | fronteira de passo |
+| hide (a model, a key) | esconder (`ocultar` is for redact) |
+| async generator, yield | gerador assíncrono, fazer yield |
+| plain object | objeto simples |

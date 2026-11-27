@@ -83,9 +83,9 @@ fn environment(pid: i32) -> Option<Vec<String>> {
     procargs(pid)?.1
 }
 
-/// Whether a process's arguments hold `name` followed by `value`.
-pub fn argument_pair(pid: i32, name: &str, value: &str) -> bool {
-    procargs(pid).is_some_and(|(arguments, _)| arguments.windows(2).any(|pair| pair[0] == name && pair[1] == value))
+/// Whether one of a process's arguments is `argument`, whole.
+pub fn holds_argument(pid: i32, argument: &str) -> bool {
+    procargs(pid).is_some_and(|(arguments, _)| arguments.iter().any(|entry| entry == argument))
 }
 
 /// Whether a process's environment holds `marker` (`NAME=value`); `None` when it cannot be read.
@@ -93,8 +93,9 @@ pub fn carries(pid: i32, marker: &str) -> Option<bool> {
     environment(pid).map(|entries| entries.iter().any(|entry| entry == marker))
 }
 
-/// Every process of this user whose environment holds `marker`; `None` when the processes cannot be listed.
-pub fn carrying(marker: &str) -> Option<Vec<i32>> {
+/// Every process of this user that carries the launch `token`, in its environment or, where macOS hides that, in its
+/// arguments; `None` when the processes cannot be listed.
+pub fn carrying(token: &str) -> Option<Vec<i32>> {
     let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
     if count <= 0 {
         return None;
@@ -106,11 +107,11 @@ pub fn carrying(marker: &str) -> Option<Vec<i32>> {
     }
     pids.truncate(filled as usize);
     let own = std::process::id() as i32;
-    // A launch token also rides in the arguments of an app whose environment macOS hides.
-    let token = marker.strip_prefix(crate::launch::TOKEN_VARIABLE).and_then(|rest| rest.strip_prefix('='));
-    let holds = |pid: i32| match carries(pid, marker) {
+    let marker = crate::launch::token_marker(token);
+    let argument = crate::launch::token_argument(token);
+    let holds = |pid: i32| match carries(pid, &marker) {
         Some(carried) => carried,
-        None => token.is_some_and(|token| argument_pair(pid, crate::launch::TOKEN_ARGUMENT, token)),
+        None => holds_argument(pid, &argument),
     };
     Some(pids.into_iter().filter(|pid| *pid > 0 && *pid != own && holds(*pid)).collect())
 }
@@ -142,8 +143,8 @@ mod tests {
 
     #[test]
     fn reads_a_hidden_environment_as_none_and_keeps_the_arguments() {
-        let (arguments, environment) = parse_procargs(&buffer("/System/App", &["/System/App", "-E2EDesktopLaunch", "tok"], &[])).unwrap();
-        assert_eq!(arguments, ["-E2EDesktopLaunch", "tok"]);
+        let (arguments, environment) = parse_procargs(&buffer("/System/App", &["/System/App", "-E2EDesktopLaunch=tok"], &[])).unwrap();
+        assert_eq!(arguments, ["-E2EDesktopLaunch=tok"]);
         assert!(environment.is_none());
     }
 
