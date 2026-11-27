@@ -289,8 +289,17 @@ export async function settleStagedTraces(context: AgentCacheContext, settlement:
       }
       // Masked right before the write, so a value learned while the store read ran is masked too; the flow ignores locations.
       const trace = entry.redact === undefined ? entry.trace : redactLocations(entry.trace, entry.redact);
-      // Where actions ran is provenance: a recording that fits the store only without it is written without it, as an earlier version wrote it.
-      const written = (await context.store.write(entry.keyHash, trace)) ?? (placed(trace) ? await context.store.write(entry.keyHash, withoutProvenance(trace)) : undefined);
+      let written = await context.store.write(entry.keyHash, trace);
+      if (written === undefined && placed(trace)) {
+        // Where actions ran is provenance: a recording that fits the store only without it is written without it, as an earlier version wrote it,
+        // and kept when the store holds it so already.
+        const unplaced = withoutProvenance(trace);
+        if (await holdsSameFlow(context.store, entry.keyHash, unplaced)) {
+          outcomes.set(entry.stepIndex, 'kept');
+          continue;
+        }
+        written = await context.store.write(entry.keyHash, unplaced);
+      }
       outcomes.set(entry.stepIndex, written === undefined ? 'not-written' : 'saved');
     } catch {
       // The cache is disposable; a failed flush is a slower next run only.

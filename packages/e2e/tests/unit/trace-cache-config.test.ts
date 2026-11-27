@@ -318,6 +318,10 @@ describe('settleStagedTraces', () => {
       expect(read.entry.payload.actions).toHaveLength(50);
       expect(read.entry.payload.actions.some((action) => action.at !== undefined || 'controlRole' in action)).toBe(false);
       expect(read.entry.payload).not.toHaveProperty('detours');
+      // The same flow recorded again is kept as stored, not written again.
+      const again = contextWith(store);
+      again.staged.push({ kind: 'write', keyHash: KEY_A, trace: { ...trace('large'), actions: [...actions.slice(1), switchTap], detours: [] }, stepIndex: 1 });
+      expect((await settleStagedTraces(again, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true })).get(1)).toBe('kept');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
