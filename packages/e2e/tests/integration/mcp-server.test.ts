@@ -603,8 +603,6 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
       'node_modules/dual-engine/package.json': JSON.stringify({ name: 'dual-engine', version: '0.0.0', type: 'module', exports: { import: './index.js', require: './index.cjs' } }),
       'node_modules/dual-engine/index.js': "export { web as default } from '@e2e-dev/web';\n",
       'node_modules/dual-engine/index.cjs': "throw new Error('the require entry was loaded');\n",
-      'node_modules/kiosk-engine/package.json': JSON.stringify({ name: 'kiosk-engine', version: '0.0.0', type: 'module', exports: './index.js' }),
-      'node_modules/kiosk-engine/index.js': KIOSK_ENGINE,
     });
     const other = new Client({ name: 'e2e-mcp-bare-test', version: '0.0.0' });
     await other.connect(new StdioClientTransport({ command: process.execPath, args: [CLI, 'mcp'], cwd: bare.dir, env: { ...(process.env as Record<string, string>), CI: '' }, stderr: 'ignore' }));
@@ -630,7 +628,42 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
       const closed = (await other.callTool({ name: 'close_session', arguments: {} })) as { isError?: boolean };
       expect(closed.isError).not.toBe(true);
 
-      // Both forms of launchArguments pass the schema and reach the config's own checks, which a web target fails.
+      const dual = await open({ engine: 'dual-engine', app: { url: app.url } });
+      expect(dual.isError, dual.text).toBe(false);
+      expect(dual.text).toMatch(/^Session \S+ open on target "web" \(platform web, engine web [^)]+\), headless; no config file: one target on dual-engine, every other setting at its default\./);
+      expect(dual.text).toMatch(/\n\nScreen: revision b\d+, path \/, \d+ nodes, not listed\..*$/);
+      const closedDual = (await other.callTool({ name: 'close_session', arguments: {} })) as { isError?: boolean };
+      expect(closedDual.isError).not.toBe(true);
+    } finally {
+      await other.close();
+      bare.cleanup();
+    }
+  });
+
+  it('hands launchArguments to the engine of a session opened with no config, checked as a config target\'s are', async () => {
+    const bare = createProject({
+      'node_modules/kiosk-engine/package.json': JSON.stringify({ name: 'kiosk-engine', version: '0.0.0', type: 'module', exports: './index.js' }),
+      'node_modules/kiosk-engine/index.js': KIOSK_ENGINE,
+    });
+    const other = new Client({ name: 'e2e-mcp-launch-arguments-test', version: '0.0.0' });
+    await other.connect(new StdioClientTransport({ command: process.execPath, args: [CLI, 'mcp'], cwd: bare.dir, env: { ...(process.env as Record<string, string>), CI: '' }, stderr: 'ignore' }));
+    const open = async (args: Record<string, unknown>): Promise<{ text: string; isError: boolean }> => {
+      const result = (await other.callTool({ name: 'open_session', arguments: args }, { timeout: 110_000 })) as { content: { text?: string }[]; isError?: boolean };
+      return { text: result.content.map((part) => part.text ?? '').join('\n'), isError: result.isError === true };
+    };
+    const received = (): unknown => JSON.parse(readFileSync(path.join(bare.dir, 'node_modules/kiosk-engine/init.json'), 'utf8'));
+    try {
+      const device = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'] } });
+      expect(device.isError, device.text).toBe(false);
+      expect(received()).toMatchObject({ bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'] });
+      const closed = (await other.callTool({ name: 'close_session', arguments: {} })) as { isError?: boolean };
+      expect(closed.isError).not.toBe(true);
+
+      const dashed = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', launchArguments: { '-profile': 'a' } } });
+      expect(dashed.isError).toBe(true);
+      expect(dashed.text).toContain('app.launchArguments argument name "-profile" starts with a dash');
+
+      // Both forms pass the schema and reach the config's own checks, which a web target fails.
       const list = await open({ engine: '@e2e-dev/web', app: { url: app.url, launchArguments: ['-e2e', 'YES'] } });
       expect(list.isError).toBe(true);
       expect(list.text).toContain('INVALID_CONFIG');
@@ -642,25 +675,6 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
       const nested = await open({ engine: '@e2e-dev/web', app: { url: app.url, launchArguments: { e2e: { on: true } } } });
       expect(nested.isError).toBe(true);
       expect(nested.text).toContain('Invalid arguments for tool open_session');
-
-      const device = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'] } });
-      expect(device.isError, device.text).toBe(false);
-      expect(JSON.parse(readFileSync(path.join(bare.dir, 'node_modules/kiosk-engine/init.json'), 'utf8'))).toMatchObject({
-        bundleId: 'com.example.greeter',
-        launchArguments: ['--profile', 'a b'],
-      });
-      const closedDevice = (await other.callTool({ name: 'close_session', arguments: {} })) as { isError?: boolean };
-      expect(closedDevice.isError).not.toBe(true);
-      const dashed = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', launchArguments: { '-profile': 'a' } } });
-      expect(dashed.isError).toBe(true);
-      expect(dashed.text).toContain('app.launchArguments argument name "-profile" starts with a dash');
-
-      const dual = await open({ engine: 'dual-engine', app: { url: app.url } });
-      expect(dual.isError, dual.text).toBe(false);
-      expect(dual.text).toMatch(/^Session \S+ open on target "web" \(platform web, engine web [^)]+\), headless; no config file: one target on dual-engine, every other setting at its default\./);
-      expect(dual.text).toMatch(/\n\nScreen: revision b\d+, path \/, \d+ nodes, not listed\..*$/);
-      const closedDual = (await other.callTool({ name: 'close_session', arguments: {} })) as { isError?: boolean };
-      expect(closedDual.isError).not.toBe(true);
     } finally {
       await other.close();
       bare.cleanup();
