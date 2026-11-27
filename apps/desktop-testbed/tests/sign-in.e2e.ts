@@ -86,6 +86,19 @@ test.describe('sign-in form', () => {
     await expect(screen.getByTestId('username')).toHaveValue('');
   });
 
+  test('presses the shortcut of a menu item the app has just enabled', async ({ screen, desktop }) => {
+    // AppKit validates a menu for an accessibility read at most once a second, so right after the box is checked the item still reads as disabled.
+    const refused = await desktop.press('ControlOrMeta+Shift+f').then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    expect(String(refused)).toMatch(/the menu item "Form > Forget Me" this shortcut triggers is disabled/);
+    await screen.getByTestId('remember').check();
+    await desktop.press('ControlOrMeta+Shift+f');
+    await expect(screen.getByTestId('status')).toHaveText('Forgot from the menu');
+    await expect(screen.getByTestId('remember')).not.toBeChecked();
+  });
+
   test('refuses a shortcut whose menu item the background disables', async ({ screen }) => {
     // Select All is the focused field's command: with the app in the background AppKit disables it, and the key would do nothing.
     const username = screen.getByTestId('username');

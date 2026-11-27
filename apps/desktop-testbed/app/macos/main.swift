@@ -5,14 +5,15 @@
 // (a scrolling list, a key handler, a context menu, a slider, a disabled
 // button, a SwiftUI alert, and double-click and hover targets for physical
 // input), each writing what happened into that window's status line. The
-// menu bar has one command the app handles itself (Form > Reset) and one the
+// menu bar has one command the app handles itself (Form > Reset), one it
+// enables only while "Remember me" is checked (Form > Forget Me), and one the
 // focused control handles (Edit > Select All), which AppKit disables while
 // the app is in the background.
 
 import AppKit
 import SwiftUI
 
-final class Controller: NSObject, NSApplicationDelegate {
+final class Controller: NSObject, NSApplicationDelegate, NSMenuItemValidation {
   var window: NSWindow!
   let username = NSTextField()
   let password = NSSecureTextField()
@@ -72,10 +73,24 @@ final class Controller: NSObject, NSApplicationDelegate {
     }
     menu("SignInForm").addItem(withTitle: "Quit SignInForm", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
     menu("Edit").addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-    let reset = menu("Form").addItem(withTitle: "Reset", action: #selector(reset(_:)), keyEquivalent: "r")
-    reset.keyEquivalentModifierMask = [.command, .shift]
-    reset.target = self
+    let form = menu("Form")
+    for (title, action, key) in [("Reset", #selector(reset(_:)), "r"), ("Forget Me", #selector(forget(_:)), "f")] {
+      let item = form.addItem(withTitle: title, action: action, keyEquivalent: key)
+      item.keyEquivalentModifierMask = [.command, .shift]
+      item.target = self
+    }
     return bar
+  }
+
+  // AppKit asks when it validates the menu, not when the box changes: Forget Me can read as disabled for a while after
+  // the box is checked.
+  func validateMenuItem(_ item: NSMenuItem) -> Bool {
+    item.action != #selector(forget(_:)) || remember.state == .on
+  }
+
+  @objc func forget(_ sender: Any?) {
+    remember.state = .off
+    status.stringValue = "Forgot from the menu"
   }
 
   @objc func reset(_ sender: Any?) {
