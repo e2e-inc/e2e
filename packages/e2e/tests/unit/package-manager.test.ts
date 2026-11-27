@@ -145,6 +145,14 @@ describe('a devEngines pin', () => {
     expect(detectWorkspacePackageManager(member, {})).toEqual({ manager: 'pnpm', root: dir, yarnBerry: false });
   });
 
+  it("names the manager of a member whose workspace root names none", () => {
+    writeFileSync(path.join(dir, 'package.json'), '{"private":true,"workspaces":["apps/*"]}');
+    const member = path.join(dir, 'apps', 'web');
+    mkdirSync(member, { recursive: true });
+    writeFileSync(path.join(member, 'package.json'), '{"name":"web","devEngines":{"packageManager":{"name":"pnpm"}}}');
+    expect(detectWorkspacePackageManager(member, {})).toEqual({ manager: 'pnpm', root: dir, yarnBerry: false });
+  });
+
   it('names the manager of a workspace whose root has no field and no lockfile yet', () => {
     writeFileSync(path.join(dir, 'package.json'), '{"private":true,"workspaces":["apps/*"],"devEngines":{"packageManager":{"name":"yarn","version":"^4.0.0"}}}');
     const member = path.join(dir, 'apps', 'web');
@@ -188,6 +196,8 @@ describe('Yarn flavor', () => {
     ['Yarn 1 under a devEngines pin on Yarn 4', 'yarn/1.22.22', { 'package.json': '{"devEngines":{"packageManager":{"name":"yarn","version":"^4.0.0"}}}' }, true],
     ['Yarn 4 under a devEngines pin on Yarn 1', 'yarn/4.19.0', { 'package.json': '{"devEngines":{"packageManager":{"name":"yarn","version":"1.22.22"}}}' }, false],
     ['Yarn 4 under a devEngines pin that leaves the major open', 'yarn/4.19.0', { 'package.json': '{"devEngines":{"packageManager":{"name":"yarn","version":">=1"}}}' }, true],
+    ['Yarn 4 under a devEngines pin that allows two majors', 'yarn/4.19.0', { 'package.json': '{"devEngines":{"packageManager":{"name":"yarn","version":"^1.22.0 || ^4.0.0"}}}' }, true],
+    ['Yarn 1 under a devEngines pin that allows two majors', 'yarn/1.22.22', { 'package.json': '{"devEngines":{"packageManager":{"name":"yarn","version":"^4 || ^1"}}}' }, false],
   ] as const)('reads the Yarn that started the process only when no project file decides: %s', (_name, invoking, files, expected) => {
     expect(flavor(files, invoking)).toBe(expected);
   });

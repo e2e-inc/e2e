@@ -84,7 +84,7 @@ export function detectWorkspacePackageManager(
     if (workspace !== undefined) {
       const member = includesPackage(workspace.globs, path.relative(current, project).split(path.sep).join('/'));
       if (member) {
-        return projectManager(managerAt(current) ?? workspace.manager ?? pinnedManager(current)?.name ?? invokingManager(env), current, env);
+        return projectManager(managerAt(current) ?? workspace.manager ?? pinnedManager(current)?.name ?? pinnedManager(project)?.name ?? invokingManager(env), current, env);
       }
       break;
     }
@@ -160,7 +160,7 @@ function lockfileYarnMajor(root: string): string | undefined {
 /** The major a `devEngines` pin on Yarn in `root` starts with, as `4.19.0`, `^4.0.0`, and `~4.1` do; undefined for a range that leaves the major open. */
 function pinnedYarnMajor(root: string): string | undefined {
   const pin = pinnedManager(root);
-  return pin?.name === 'yarn' ? /^[\^~=v]?(\d+)/u.exec(pin.version?.trim() ?? '')?.[1] : undefined;
+  return pin?.name === 'yarn' ? /^[\^~=v]?(\d+)(?:\.[\dx*]+)*$/u.exec(pin.version?.trim() ?? '')?.[1] : undefined;
 }
 
 /** The package.json in `dir` as an object, or undefined when it is missing or not one. */
