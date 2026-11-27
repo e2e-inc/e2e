@@ -45,6 +45,12 @@ export function engineArguments(args: readonly string[], platform: NodeJS.Platfo
     '--remote-debugging-pipe',
     // Captures in sRGB whatever the display: a wide-gamut screen would otherwise give other pixels for the same page.
     ...(args.some((argument) => argument.startsWith('--force-color-profile')) ? [] : ['--force-color-profile=srgb']),
+    // A window another one covers, or the app keeps hidden, still draws and runs its timers: Chromium would
+    // otherwise stop both, and a capture of such a window never returns. Parallel workers cover each other's windows.
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    '--disable-background-timer-throttling',
+    ...(args.some((argument) => argument.startsWith('--disable-features')) ? [] : ['--disable-features=CalculateNativeWinOcclusion']),
     // Chromium's sandbox needs a setuid helper or user namespaces, which a CI container rarely has.
     ...(platform === 'linux' && !args.includes('--no-sandbox') ? ['--no-sandbox'] : []),
   ];

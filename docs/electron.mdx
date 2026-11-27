@@ -237,7 +237,7 @@ The engine adds `--no-sandbox` on Linux automatically.
 
 | Area | On Electron |
 | --- | --- |
-| Launch arguments | The engine adds `--inspect=0`, `--remote-debugging-pipe`, `--force-color-profile=srgb`, `--user-data-dir=...`, and `--no-sandbox` on Linux. Strict argument parsers must allow them |
+| Launch arguments | The engine adds `--inspect=0`, `--remote-debugging-pipe`, `--force-color-profile=srgb`, `--user-data-dir=...`, switches that keep a covered or hidden window drawing, and `--no-sandbox` on Linux. Strict argument parsers must allow them |
 | Parallel workers | Each test gets its own user-data directory, so tests run in parallel. If your app overrides `app.setPath('userData', ...)`, set `workers: 1` |
 | Clipboard | The app uses your OS clipboard, so a test's copy overwrites yours. Set `workers: 1` for clipboard tests |
 | Theme and locale | `prefers-color-scheme` follows `nativeTheme` and the OS. Chromium UI strings follow the OS locale; pass `args: ['--lang=en-US']` to pin English |
