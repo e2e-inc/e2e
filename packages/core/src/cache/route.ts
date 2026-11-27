@@ -290,16 +290,21 @@ function unparsedLocation(location: string): string {
   return parts === undefined ? location : `${parts.authority}${routeLocation(parts.path)}`;
 }
 
+/** A secret's marker standing for a whole origin, then the path, query, or fragment. */
+const MARKER_ORIGIN = /^\s*<secret:[A-Za-z0-9_.-]*>(?=[/?#])/;
+
 /**
  * An address the route rule reads as opaque that is still a web address:
- * a `file:` URL (a file app), or an address with a secret's marker the
- * ledger put in its host (`https://<secret:tenant>.example.org`), which is
- * no host a parser takes. Its scheme and authority, and the rest as a path;
- * undefined for any other location (a device screen title).
+ * a `file:` URL (a file app), an address with a secret's marker the ledger
+ * put in its host (`https://<secret:tenant>.example.org`), which is no host
+ * a parser takes, or one whose whole origin is a secret's marker
+ * (`<secret:gateway>/about?token=...`). Its scheme and authority, or the
+ * marker, and the rest as a path; undefined for any other location (a
+ * device screen title).
  */
 function unparsedParts(location: string): { readonly authority: string; readonly path: string } | undefined {
-  if (!/^\s*(?:https?|file):/i.test(location)) return undefined;
-  const authority = URL_ORIGIN_PREFIX.exec(location)?.[0] ?? '';
+  const authority = /^\s*(?:https?|file):/i.test(location) ? (URL_ORIGIN_PREFIX.exec(location)?.[0] ?? '') : MARKER_ORIGIN.exec(location)?.[0];
+  if (authority === undefined) return undefined;
   const rest = location.slice(authority.length);
   return { authority, path: rest.startsWith('/') ? rest : `/${rest}` };
 }

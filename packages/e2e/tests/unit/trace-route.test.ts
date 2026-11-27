@@ -141,6 +141,12 @@ describe('routeLocation', () => {
     expect(routeLocation('/settings/\ud800')).toBe('/settings/%EF%BF%BD');
   });
 
+  it('keeps the query values out of an address whose whole origin is a secret marker', () => {
+    expect(routeLocation('<secret:gateway>/about?token=super-secret-token#frag')).toBe('<secret:gateway>/about?token=:id');
+    // A device title that opens with a marker is no address.
+    expect(routeLocation('<secret:app> › Settings')).toBe('<secret:app> › Settings');
+  });
+
   it('tells a location spelled as an entry keeps it from one the app showed', () => {
     expect(spelledAsRoute(routeLocation('/orders/123/edit'))).toBe(true);
     expect(spelledAsRoute(routeLocation('/callback?code=482913'))).toBe(true);
@@ -168,6 +174,7 @@ describe('routeLocation', () => {
       '/invite/<secret:token>',
       '/app/#/orders/123?x=abc',
       'https://<secret:tenant>.example.org/callback?code=abc',
+      '<secret:gateway>/orders/123?token=abc',
       'file:///srv/app/about.html?tab=summary',
       '/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fw',
     ]) {
