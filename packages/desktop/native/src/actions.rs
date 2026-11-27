@@ -306,8 +306,8 @@ fn takes_click(ax_role: &str, actions: impl FnOnce() -> Result<Vec<String>, AXEr
     if presses(ax_role) {
         return Ok(true);
     }
-    // A role that never takes input (text, a separator) is content. Any other one (an image, a group a custom control
-    // draws itself in) is a control of its own when it offers a press, as the snapshot gives it a ref for one.
+    // A role that never takes input (a separator, a splitter) is content. Any other one (a text label, an image, a group
+    // a custom control draws itself in) is a control of its own when it offers a press, as the snapshot gives it a ref for one.
     if roles::inert(roles::role(ax_role, None)) {
         return Ok(false);
     }
@@ -1305,6 +1305,17 @@ fn window_takes_point(target: &PointTarget, x: f64, y: f64) -> Outcome<()> {
     point_lands(aim_at(&window, x, y), content)
 }
 
+/// For a hover: the point is on the window it was taken in, not on another app's or window's over it, which the move
+/// would reach. A hover presses nothing, so a control under the point, focus, and sheets are not checked.
+fn window_on_point(target: &PointTarget, x: f64, y: f64) -> Outcome<()> {
+    let window = windows::find(target.pid, target.window)?;
+    match aim_at(&window, x, y) {
+        Ok(Aim::Target | Aim::Control) => Ok(()),
+        Ok(Aim::Other) => Err(Failure::refused(codes::ACTION_FAILED, "another window or app is on top at the point, so the pointer was not moved")),
+        Err(error) => Err(unread(error, "find the element under the pointer")),
+    }
+}
+
 /// Whether a click at a point may go where the hit test (relative to the window) says it lands. A tap at a point names
 /// no element, so any control of the window may be there, unless the point was taken on `content`, a node that takes
 /// no click of its own: a control there now (one coming forward revealed) would take the click.
@@ -1335,11 +1346,14 @@ pub fn pointer_at(x: f64, y: f64, kind: &str, input_id: Option<u32>, deadline: I
     };
     guarded(input_id, deadline, || {
         // A point another window or app already covers is refused before the move, which would reach that window: nothing
-        // is sent. The check after the move is for one that opens meanwhile. A hover clicks nothing, and is checked by
-        // neither, as the checks are about where a click lands.
-        if let Some(target) = target.as_ref().filter(|_| matches!(action, Pointer::Click { .. })) {
+        // is sent. The check after the move is for one that opens meanwhile, before a click. A hover presses nothing, so
+        // it is checked only for a window or app over the point, which the move alone would reach.
+        if let Some(target) = target.as_ref() {
             go("pointer")?;
-            window_takes_point(target, x, y)?;
+            match action {
+                Pointer::Click { .. } => window_takes_point(target, x, y)?,
+                Pointer::Move => window_on_point(target, x, y)?,
+            }
         }
         input::pointer(x, y, action, &|click| {
             go("pointer")?;
