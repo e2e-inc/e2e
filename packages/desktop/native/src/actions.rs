@@ -426,11 +426,11 @@ fn enabled(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
 
 /// Brings an element a scroll area holds out of view into view (`AXScrollToVisible`), and waits for it to show. An
 /// element already on screen gets nothing; one in a minimized window, one with no size, or one that cannot be scrolled, is refused, as an
-/// action on it would reach a control the user cannot.
-fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
+/// action on it would reach a control the user cannot. `Ok(true)` when it scrolled the list.
+fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<bool> {
     use crate::snapshot::{Placement, placement};
     match placement(element).map_err(|error| unread(error, what))? {
-        Placement::Shown => return Ok(()),
+        Placement::Shown => return Ok(false),
         Placement::Minimized => {
             return Err(Failure::refused(codes::ACTION_FAILED, "the element's window is minimized, so the user cannot reach it; restore the window first"));
         }
@@ -442,9 +442,15 @@ fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
     }
     perform(element, "AXScrollToVisible", "scroll into view")?;
     if until(deadline, || placement(element) == Ok(Placement::Shown)) {
-        return Ok(());
+        return Ok(true);
     }
     Err(Failure::unconfirmed(codes::ACTION_FAILED, "the element is still off screen after it was scrolled into view"))
+}
+
+/// What an action did once `reveal` scrolled its list: the scroll moved the app's content, so a failure after it is no
+/// longer "nothing sent".
+fn after_scroll<T>(scrolled: bool, outcome: Outcome<T>) -> Outcome<T> {
+    outcome.map_err(|failure| if scrolled { failure.delivered() } else { failure })
 }
 
 fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
@@ -452,7 +458,13 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     enabled(element, deadline, "click")?;
     // The engine checked the node shows before the call; the wait above can outlast that, as the window minimizes or
     // a list scrolls meanwhile.
-    reveal(element, deadline, "click")?;
+    let scrolled = reveal(element, deadline, "click")?;
+    after_scroll(scrolled, click_shown(entry, deadline))
+}
+
+/// `click` on an element that shows.
+fn click_shown(entry: &Entry, deadline: Instant) -> Outcome<()> {
+    let element = &entry.element;
     let (ax_role, role) = role_of(element, "click")?;
     // A tap on a text field puts the keyboard there. AppKit's password field also offers AXConfirm, which the action
     // choice below would send in its place, leaving the keyboard in the field before.
@@ -547,20 +559,21 @@ fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
     if clears_only_by_another(role, wanted, shown) {
         return Err(Failure::refused(codes::ACTION_FAILED, "a selected radio button is cleared only by selecting another one; nothing was pressed"));
     }
-    if shown != Some(target) {
-        // A box a scroll area holds out of view is pressed all the same through accessibility, out of the user's reach.
-        reveal(element, deadline, what)?;
-    }
-    let reached = press_to_state(
-        target,
-        shown,
-        || perform(element, "AXPress", what),
-        || {
-            let before = shown;
-            until(deadline, || toggle_state(element) != before);
-            shown = toggle_state(element);
-            shown
-        },
+    // A box a scroll area holds out of view is pressed all the same through accessibility, out of the user's reach.
+    let scrolled = if shown != Some(target) { reveal(element, deadline, what)? } else { false };
+    let reached = after_scroll(
+        scrolled,
+        press_to_state(
+            target,
+            shown,
+            || perform(element, "AXPress", what),
+            || {
+                let before = shown;
+                until(deadline, || toggle_state(element) != before);
+                shown = toggle_state(element);
+                shown
+            },
+        ),
     )?;
     if reached {
         Ok(())
@@ -1301,21 +1314,20 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         Action::Hover => physical(&entry, Pointer::Move),
         Action::RightClick => {
             enabled(element, deadline, "right click")?;
-            reveal(element, deadline, "right click")?;
-            let names = action_names(element, "right click")?;
-            if names.iter().any(|name| name == "AXShowMenu") {
-                let before = windows::open_menus(entry.pid);
-                perform(element, "AXShowMenu", "right click")?;
-                menu_shown(entry.pid, before, deadline);
-                Ok(())
-            } else {
-                Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "this element has no context menu"))
+            // Refused before the scroll below, which would move the list for nothing.
+            if !action_names(element, "right click")?.iter().any(|name| name == "AXShowMenu") {
+                return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "this element has no context menu"));
             }
+            let scrolled = reveal(element, deadline, "right click")?;
+            let before = windows::open_menus(entry.pid);
+            after_scroll(scrolled, perform(element, "AXShowMenu", "right click"))?;
+            menu_shown(entry.pid, before, deadline);
+            Ok(())
         }
         Action::Focus => focus(element, deadline),
         Action::Clear => set_value(element, "", deadline),
         Action::Check(wanted) => check(element, wanted, deadline),
-        Action::ScrollTo => reveal(element, deadline, "scroll into view"),
+        Action::ScrollTo => reveal(element, deadline, "scroll into view").map(|_| ()),
         Action::SetValue(text) => set_value(element, &text, deadline),
         Action::SelectAll => select_all(element, deadline),
         Action::Select(label) => select(&entry, &label, deadline),
