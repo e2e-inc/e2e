@@ -296,7 +296,9 @@ jobs:
         run: pnpm --filter @e2e-dev/electron test
       - name: Electron integration tests
         run: pnpm --filter @e2e-dev/electron run test:integration
+      # Each suite reports on its own: one failing does not hide the other.
       - name: Electron testbed
+        if: ${{ !cancelled() }}
         run: pnpm --filter @e2e-dev/electron-testbed test
 
   # The one check the ruleset requires from this workflow. A skipped job

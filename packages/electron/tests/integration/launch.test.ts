@@ -21,6 +21,8 @@ import { Windows } from '../../src/windows.ts';
 import { electronBinary } from './electron-binary.ts';
 
 const LOADED = `new BrowserWindow({ show: false }).loadURL('data:text/html,<title>Loaded</title><h1>Loaded</h1>')`;
+/** Whether a window whose pixels a test reads is shown: Windows captures nothing of a hidden one, and Linux draws on a virtual display. Hidden on macOS, where a shown one would take the developer's screen. */
+const SHOWN = process.platform !== 'darwin';
 const directories: string[] = [];
 const apps: AppProcess[] = [];
 
@@ -281,7 +283,7 @@ describe('an app with no inspector', () => {
 describe('pixels', () => {
   it('withholds the pixels when the page takes the masks away', async () => {
     const page = `<body style="margin:0"><iframe style="border:0;width:300px;height:200px" srcdoc="<body style=margin:0;background:red>"></iframe><script>new MutationObserver((records) => { for (const record of records) for (const node of record.addedNodes) if (node.popover) node.remove(); }).observe(document.documentElement, { childList: true });</script></body>`;
-    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);
+    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);
     await launch();
     const window = windows.require();
     const devtools = new DevTools();
@@ -292,7 +294,7 @@ describe('pixels', () => {
 
   it('masks a nested document in a page its root zooms', async () => {
     const page = `<html style="zoom:2"><body style="margin:0"><div style="height:20px"></div><iframe style="border:0;margin-left:30px;width:100px;height:50px" srcdoc="<body style=margin:0;background:red>"></iframe></body></html>`;
-    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 400, height: 300 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);
+    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);
     await launch();
     const window = windows.require();
     const devtools = new DevTools();
@@ -305,7 +307,7 @@ describe('pixels', () => {
 
   /** An observation with pixels of a window showing `page`, and how many of its pixels are red. */
   async function observed(page: string): Promise<{ readonly pixels: boolean; readonly red: number; readonly masked: number | undefined }> {
-    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);
+    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);
     await launch();
     const window = windows.require();
     const devtools = new DevTools();
@@ -329,7 +331,7 @@ describe('pixels', () => {
 
   it('refuses a screenshot when a password field appears, or a masked element moves, after the masks are placed', async () => {
     const refusal = async (reaction: string): Promise<string> => {
-      const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(`<body style="margin:0">${RED_FRAME}${onMasks(reaction)}</body>`))}));`);
+      const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(`<body style="margin:0">${RED_FRAME}${onMasks(reaction)}</body>`))}));`);
       await launch();
       return String(await screenshotFile(new DevTools(), windows.require(), directory, 'shot.png').then(() => 'taken', (error: unknown) => error));
     };
@@ -338,7 +340,7 @@ describe('pixels', () => {
   });
 
   it('gives each of two captures taken at once its own masks', async () => {
-    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,<body style="margin:0"><iframe style="border:0;width:300px;height:200px" srcdoc="<body style=margin:0;background:red>"></iframe></body>'));`);
+    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,<body style="margin:0"><iframe style="border:0;width:300px;height:200px" srcdoc="<body style=margin:0;background:red>"></iframe></body>'));`);
     await launch();
     const window = windows.require();
     const devtools = new DevTools();
@@ -354,7 +356,7 @@ describe('pixels', () => {
   it('captures the part of the document the window shows, one image pixel per CSS pixel, on a dense display', async () => {
     const page = `<body style="margin:0"><div style="height:2000px;background:rgb(255,0,0)"></div><div style="height:2000px;background:rgb(0,128,0)"></div></body>`;
     // Shown where it can be without taking the screen: a window never shown draws no frame under xvfb, and a capture waits seconds for one.
-    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 400, height: 300 }).loadURL('data:text/html,${page}'));`, { args: ['--force-device-scale-factor=2'] });
+    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL('data:text/html,${page}'));`, { args: ['--force-device-scale-factor=2'] });
     await launch();
     const window = windows.require();
     expect(await window.page.evaluate(() => devicePixelRatio)).toBe(2);
@@ -372,11 +374,10 @@ describe('pixels', () => {
 });
 
 describe('video', () => {
-  const SHOW = process.platform === 'linux';
   const page = (title: string, colour: string): string => `'data:text/html,' + ${JSON.stringify(encodeURIComponent(`<title>${title}</title><body style="margin:0;background:${colour}">`))}`;
   const TWO_WINDOWS = `app.whenReady().then(async () => {
-    await new BrowserWindow({ show: ${SHOW}, width: 300, height: 200 }).loadURL(${page('One', 'rgb(255,0,0)')});
-    await new BrowserWindow({ show: ${SHOW}, width: 300, height: 200 }).loadURL(${page('Two', 'rgb(0,0,255)')});
+    await new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL(${page('One', 'rgb(255,0,0)')});
+    await new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL(${page('Two', 'rgb(0,0,255)')});
   });`;
 
   /** Each frame of a video as one averaged colour. */
