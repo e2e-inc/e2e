@@ -11,6 +11,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { EngineAttemptContext, OperationContext } from '@e2e-dev/core/engine';
 import { AppProcess, type LaunchSetup } from '../../src/app-process.ts';
+import { Budget } from '../../src/budget.ts';
 import { screenshotFile, withPixels } from '../../src/capture.ts';
 import { DevTools } from '../../src/devtools.ts';
 import { ensureFfmpeg } from '../../src/ffmpeg.ts';
@@ -33,7 +34,8 @@ interface Launched {
   readonly dialogs: DialogRouter;
   readonly logs: string[];
   readonly directory: string;
-  launch(timeoutMs?: number, signal?: AbortSignal): Promise<void>;
+  /** Launches; with `spentMs`, after the operation spent that much of its time, as a restart's quit does. */
+  launch(timeoutMs?: number, signal?: AbortSignal, spentMs?: number): Promise<void>;
 }
 
 /** An app whose main script runs `body` once Electron is ready, with `electron`'s exports in scope. */
@@ -55,7 +57,13 @@ function appWith(body: string, launchArguments: readonly string[] = []): Launche
     dialogs,
     logs,
     directory,
-    launch: (timeoutMs = 20_000, signal = new AbortController().signal) => app.launch(setup, { signal, timeoutMs, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext),
+    launch: async (timeoutMs = 20_000, signal = new AbortController().signal, spentMs) => {
+      const operation = { signal, timeoutMs, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext;
+      if (spentMs === undefined) return await app.launch(setup, operation);
+      const budget = new Budget(operation, 'app.open');
+      await new Promise((resolve) => setTimeout(resolve, spentMs));
+      await app.launch(setup, operation, budget);
+    },
   };
 }
 
@@ -158,6 +166,14 @@ describe('launch', () => {
     const failure = await launch(2000).then(() => undefined, (error: unknown) => error);
     expect(String(failure)).toMatch(/opened no window that loaded a page within \d+ms: 1 window has loaded nothing yet/);
     expect(await gone(directory)).toBe(true);
+  });
+
+  it('says why a launch failed when the operation spent part of its time before it, as a restart\'s quit does', async () => {
+    const { launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: false }));`);
+    // The operation's signal ends with its time, as the runner's does; the quit before the launch spent half of it.
+    const failure = await launch(4000, AbortSignal.timeout(4000), 2000).then(() => undefined, (error: unknown) => error);
+    expect(failure).not.toMatchObject({ code: 'CANCELLED' });
+    expect(String(failure)).toMatch(/1 window has loaded nothing yet/);
   });
 
   it('kills the whole app when its launch is cancelled', async () => {
