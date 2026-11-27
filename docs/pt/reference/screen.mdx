@@ -79,7 +79,11 @@ acessibilidade: um nó que não é renderizado, ou um nó sob `aria-hidden`. Nos
 outros tipos de consulta, `visible: true` mantém só os nós que são
 renderizados, a mesma verificação que `toBeVisible()` faz, então um nó
 `aria-hidden` que mesmo assim é pintado conta como visível. Veja
-[Duplicatas ocultas](#hidden-duplicates).
+[Duplicatas ocultas](#hidden-duplicates). Em um dispositivo ou em um app
+desktop, uma consulta por papel pula todo nó que a engine marca como oculto, o
+que pode incluir um nó rolado para fora da área visível: veja
+[mobile](/reference/mobile#visibility) e
+[desktop](/desktop#what-differs-from-the-web) para saber o que cada uma marca.
 </Note>
 
 ##### Alias `img`

@@ -800,6 +800,7 @@ type StepProgress = (
       status: 'passed' | 'failed' | 'blocked' | 'timed-out' | 'cancelled';
       durationMs: number;
       modelCalls: number;
+      cache?: Pick<StepCacheInfo, 'mode' | 'reason'>;
       error?: SerializedError;
       explanation?: string;
     }
@@ -817,6 +818,11 @@ chamada está fora do projeto.
 Em uma fase `end`, `error` e `explanation` passam pela ocultação. Mantenha o
 `status` dela, incluindo `blocked` e `cancelled`. Não trate todo passo que
 não passou como uma falha do produto.
+
+Em uma fase `end`, o `cache` é o `mode` e o `reason` do
+[`StepCacheInfo`](/reference/agent#types) do passo: o
+[papel do cache de replay](/cache#why-a-step-was-not-replayed) em um passo de
+`agent.act`. Ele fica ausente quando o cache não foi consultado.
 
 Toda fase de passo que o runner emite inclui `progress.identity`:
 
