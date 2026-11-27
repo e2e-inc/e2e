@@ -319,6 +319,41 @@ require('./server.cjs');
     await pool.drained();
   });
 
+  it('stops a process whose start settled one microtask before the abort won the wait', async () => {
+    const pool = new SharedProcesses({ waitForAbandonedStart: true });
+    const cancel = new AbortController();
+    let stopCalls = 0;
+    let resolveStart!: (held: AppProcesses) => void;
+    const starting = new Promise<AppProcesses>((resolve) => {
+      resolveStart = resolve;
+    });
+    const pending = pool.acquire('app:late-race', () => starting, cancel.signal);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Registered after the pool's own wait on the start, so the abort lands right after the start settled.
+    void starting.then(() => cancel.abort());
+    resolveStart({
+      async stop() {
+        stopCalls += 1;
+      },
+    });
+
+    await expect(pending).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(stopCalls).toBe(1);
+
+    let freshStarts = 0;
+    const fresh = await pool.acquire(
+      'app:late-race',
+      async () => {
+        freshStarts += 1;
+        return { stop: async () => undefined };
+      },
+      new AbortController().signal,
+    );
+    await fresh.stop(() => undefined);
+    expect(freshStarts).toBe(1);
+    expect(stopCalls).toBe(1);
+  });
+
   it('clears settled abandoned starts from draining so ephemeral keys are not retained', async () => {
     const pool = new SharedProcesses({ waitForAbandonedStart: true });
     for (let index = 0; index < 3; index += 1) {

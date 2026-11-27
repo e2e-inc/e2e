@@ -125,9 +125,23 @@ export class SharedProcesses<Held extends AppProcesses = AppProcesses> implement
         throw new InfrastructureError('CANCELLED', 'gave up waiting on a shared process start');
       }
     } catch (cause) {
-      shared.users -= 1;
-      if (this.options.waitForAbandonedStart && abandoned !== undefined) {
-        await abandoned.catch(() => undefined);
+      if (abandoned !== undefined) {
+        shared.users -= 1;
+        if (this.options.waitForAbandonedStart) {
+          await abandoned.catch(() => undefined);
+        }
+        throw cause;
+      }
+      // The start can settle a tick before this attempt's abort wins the race: nothing was
+      // abandoned then, so the attempt gives back its hold like any other, or nobody stops the process.
+      const held = shared.settled && !shared.abandon.signal.aborted ? await shared.started.catch(() => undefined) : undefined;
+      if (held === undefined) {
+        shared.users -= 1;
+        throw cause;
+      }
+      const released = this.release(key, shared, held, () => undefined).catch(() => undefined);
+      if (this.options.waitForAbandonedStart) {
+        await released;
       }
       throw cause;
     } finally {
@@ -135,30 +149,30 @@ export class SharedProcesses<Held extends AppProcesses = AppProcesses> implement
       if (!signal.aborted) shared.waiting -= 1;
     }
 
-    return {
-      ...processes,
-      stop: async (onFailure) => {
-        shared.users -= 1;
+    return { ...processes, stop: (onFailure) => this.release(key, shared, processes, onFailure) };
+  }
 
-        if (shared.users > 0) {
-          return;
-        }
+  /** Gives back one hold on `entry`; the last one stops the process and keeps the stop in `draining` until it is done. */
+  private async release(key: string, entry: SharedEntry<Held>, processes: Held, onFailure: Parameters<Held['stop']>[0]): Promise<void> {
+    entry.users -= 1;
 
-        this.forget(key, shared);
+    if (entry.users > 0) {
+      return;
+    }
 
-        const stopping = processes.stop(onFailure);
+    this.forget(key, entry);
 
-        this.draining.set(key, stopping);
+    const stopping = processes.stop(onFailure);
 
-        try {
-          await stopping;
-        } finally {
-          if (this.draining.get(key) === stopping) {
-            this.draining.delete(key);
-          }
-        }
-      },
-    };
+    this.draining.set(key, stopping);
+
+    try {
+      await stopping;
+    } finally {
+      if (this.draining.get(key) === stopping) {
+        this.draining.delete(key);
+      }
+    }
   }
 
   /**
