@@ -176,6 +176,14 @@ describe('findDetours by recorded locations', () => {
     expect(findDetours({ ...stored, detours: [{ from: 0, to: 3 }] })).toEqual(found);
   });
 
+  it('reads an anchor on a file app\'s page as the same page, and another file as another', () => {
+    const page = 'file:///srv/app/page.html';
+    expect(findDetours(flow([tap('Details', page, 'link'), back(`${page}#details`)], { endPath: page }))).toEqual([]);
+    expect(findDetours(flow([tap('About', page, 'link'), back('file:///srv/app/about.html?tab=summary')], { endPath: page }))).toEqual([
+      { from: 0, to: 2, at: page, via: 'file:///srv/app/about.html?tab=:id', evidence: 'locations' },
+    ]);
+  });
+
   it('tells two documents that route the same fragment apart', () => {
     expect(findDetours(flow([tap('About', '/#/menu', 'link'), tap('Home', '/about#/menu', 'link')], { endPath: '/#/menu' }))).toEqual([
       { from: 0, to: 2, at: '/#/menu', via: '/about#/menu', evidence: 'locations' },

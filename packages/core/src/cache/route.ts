@@ -215,19 +215,29 @@ function routeKey(location: string): string {
  */
 export function spelledAsRoute(location: string): boolean {
   const route = routeOf(location, false);
-  return route.kind === 'url' && (route.segments.includes(PARAM) || route.query.some(([key, value]) => key === PARAM || value === PARAM));
+  if (route.kind === 'opaque') {
+    const parts = unparsedParts(location);
+    return parts !== undefined && spelledAsRoute(parts.path);
+  }
+  return route.segments.includes(PARAM) || route.query.some(([key, value]) => key === PARAM || value === PARAM);
 }
 
 /**
  * A location's address as one string, nothing read as minted: two
  * locations have equal keys only when they name the same record too
  * (`/orders/123/edit` is not `/orders/456/edit`). The fragment is dropped
- * as a route drops it, and the query's order does not count.
+ * as a route drops it, and the query's order does not count. A web address
+ * the route rule does not read (a file app's) compares by its authority and
+ * the rest read as a path, so an anchor on the page is no other page.
  */
 export function addressKey(location: string): string {
   const route = routeOf(location, false);
+  if (route.kind === 'opaque') {
+    const parts = unparsedParts(location);
+    return parts === undefined ? routeIdentity(route) : JSON.stringify([parts.authority, addressKey(parts.path)]);
+  }
   // Two documents that route the same fragment (`/#/menu`, `/about#/menu`) are two pages.
-  return route.kind === 'url' && route.document !== undefined ? JSON.stringify([route.document, routeIdentity(route)]) : routeIdentity(route);
+  return route.document === undefined ? routeIdentity(route) : JSON.stringify([route.document, routeIdentity(route)]);
 }
 
 /**
@@ -265,18 +275,28 @@ function storedSegment(segment: string): string {
 }
 
 /**
- * A web address the route rule does not read, as a recording keeps it: a
- * `file:` URL (a file app), or an address with a secret's marker the
- * ledger put in its host (`https://<secret:tenant>.example.org`), which is
- * no host a parser takes. Its scheme and authority stay as they read and
- * the rest is spelled as a path on them, so a query value it carries is
- * not kept either. Any other location is kept as it is.
+ * A web address the route rule does not read, as a recording keeps it: its
+ * scheme and authority as they read and the rest spelled as a path on
+ * them (`unparsedParts`), so a query value it carries is not kept either.
+ * Any other location is kept as it is.
  */
 function unparsedLocation(location: string): string {
-  if (!/^\s*(?:https?|file):/i.test(location)) return location;
+  const parts = unparsedParts(location);
+  return parts === undefined ? location : `${parts.authority}${routeLocation(parts.path)}`;
+}
+
+/**
+ * An address the route rule reads as opaque that is still a web address:
+ * a `file:` URL (a file app), or an address with a secret's marker the
+ * ledger put in its host (`https://<secret:tenant>.example.org`), which is
+ * no host a parser takes. Its scheme and authority, and the rest as a path;
+ * undefined for any other location (a device screen title).
+ */
+function unparsedParts(location: string): { readonly authority: string; readonly path: string } | undefined {
+  if (!/^\s*(?:https?|file):/i.test(location)) return undefined;
   const authority = URL_ORIGIN_PREFIX.exec(location)?.[0] ?? '';
   const rest = location.slice(authority.length);
-  return `${authority}${routeLocation(rest.startsWith('/') ? rest : `/${rest}`)}`;
+  return { authority, path: rest.startsWith('/') ? rest : `/${rest}` };
 }
 
 /** A secret's marker as the ledger writes it (`internal/redact.ts`). */
