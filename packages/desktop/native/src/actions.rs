@@ -1055,8 +1055,12 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         let items = all(&menu, "AXChildren", "read the list's options").map_err(unchosen)?;
         // A title the app did not answer in time may be the option asked for: that is no proof it is missing.
         let (found, stalled) =
-            scan(items, "read the list's options", 1, |candidate| candidate.attribute("AXTitle").map(|title| title.text() == Some(label))).map_err(unchosen)?;
-        let Some(item) = found.into_iter().next() else {
+            scan(items, "read the list's options", usize::MAX, |candidate| candidate.attribute("AXTitle").map(|title| title.text() == Some(label)))
+                .map_err(unchosen)?;
+        // An enabled option of that title is the one; a disabled one that comes first must not hide it. With none
+        // enabled, the first is waited for below.
+        let chosen = found.iter().find(|candidate| candidate.boolean("AXEnabled") != Some(false)).or(found.first()).cloned();
+        let Some(item) = chosen else {
             return Err(unchosen(if stalled {
                 unread(ax::AX_CANNOT_COMPLETE, "read the list's options")
             } else {
