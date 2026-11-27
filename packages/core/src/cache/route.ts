@@ -246,13 +246,12 @@ export function addressKey(location: string): string {
  */
 export function routeLocation(location: string): string {
   // An address spelled through a URL parser holds a marker percent-encoded (`/%3Csecret:cb%3ESampleCode`).
-  location = location.replace(ENCODED_MARKER, (_encoded: string, name: string) => `<secret:${name}>`);
-  if (!SECRET_MARKER.test(location)) return spelledLocation(location);
-  // A marker that took part of an address's punctuation with it (`http://app.test<secret:cb>color=...`, a secret ending in `?`)
-  // leaves no boundary to read the rest by: the location is stored as its markers alone.
-  if (webAddress(location) && !markersBounded(location)) return (location.match(SECRET_MARKERS) ?? []).join('');
-  // One between delimiters can still leave a value outside its query (`/<secret:cb>&state=...`): every named value reads `:id`.
-  return spelledLocation(location.replace(NAMED_VALUE, (_named: string, query?: string, parameter?: string) => `${query ?? parameter}=${PARAM}`));
+  const marked = location.replace(ENCODED_MARKER, (_encoded: string, name: string) => `<secret:${name}>`);
+  if (!SECRET_MARKER.test(marked)) return spelledLocation(location);
+  // A secret can hold part of an address's punctuation (`/about?code=`), so a marker in a web address leaves no boundary to
+  // read the rest by, whatever stands beside it (`http://app.test<secret:cb>color=...`, `/<secret:cb>/nonce`): such a
+  // location is stored as its markers alone. Any other location (a device screen title) is kept as it is.
+  return webAddress(marked) ? (marked.match(SECRET_MARKERS) ?? []).join('') : marked;
 }
 
 /** A secret's marker as a URL parser spells it, its angle brackets percent-encoded. */
@@ -261,25 +260,12 @@ const ENCODED_MARKER = /%3Csecret:([A-Za-z0-9_.-]*)%3E/gi;
 /** Every secret marker in a text. */
 const SECRET_MARKERS = /<secret:[A-Za-z0-9_.-]*>/g;
 
-/** What may stand beside a marker in an address without a part of its punctuation having gone into it. */
-const ADDRESS_DELIMITERS = new Set(['/', '?', '#', '&', '=', ';', ':', '.']);
-
 /** Whether a location is a web address: one with a web scheme, a path, or a marker standing for its origin. */
 function webAddress(location: string): boolean {
   return /^\s*(?:https?|file):/i.test(location) || location.startsWith('/') || /^\s*<secret:[A-Za-z0-9_.-]*>\S/.test(location);
 }
 
-/** Whether every marker in a location stands between delimiters, the start, or the end. */
-function markersBounded(location: string): boolean {
-  for (const { index, 0: marker } of location.matchAll(SECRET_MARKERS)) {
-    const before = location[index - 1];
-    const after = location[index + marker.length];
-    if ((before !== undefined && !ADDRESS_DELIMITERS.has(before)) || (after !== undefined && !ADDRESS_DELIMITERS.has(after))) return false;
-  }
-  return true;
-}
-
-/** `routeLocation` of a location whose named values a marker could have left loose are masked already. */
+/** `routeLocation` of a location that holds no secret marker. */
 function spelledLocation(location: string): string {
   const route = routeOf(location);
   if (route.kind === 'opaque') return unparsedLocation(location);
@@ -312,14 +298,6 @@ function unparsedLocation(location: string): string {
   const parts = unparsedParts(location);
   return parts === undefined ? location : `${parts.authority}${spelledLocation(parts.path)}`;
 }
-
-/**
- * A value a `?`, `&`, or `#` names (`?code=...`, `&state=...`,
- * `#access_token=...`), which runs to the next `&` or `#`, a `/` included,
- * or one a `;` names in a path (`;jsessionid=...`), which ends with its
- * segment; its name kept.
- */
-const NAMED_VALUE = /([?&#][^=?&;#/]*)=[^&#]*|(;[^=?&;#/]*)=[^&;#/?]*/g;
 
 /** A `file:` URL's scheme and host, empty for a local file: the path starts at the next slash, its first segment included. */
 const FILE_ORIGIN = /^\s*file:(?:\/\/[^/?#\\]*)?/i;

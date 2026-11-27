@@ -106,22 +106,29 @@ describe('routeLocation', () => {
     expect(routeLocation('/orders/123/?code=SplxlOBeZQQYbYSWxSbIAqrTuvXyz')).toBe('/orders/:id?code=:id');
   });
 
-  it('keeps a secret marker readable', () => {
-    expect(routeLocation('/invite/<secret:token>/accept')).toBe('/invite/<secret:token>/accept');
-    // A marker beside other text may have taken punctuation with it: the location is its markers alone.
-    expect(routeLocation('/invite/x<secret:token>y')).toBe('<secret:token>');
+  it('stores a web address that holds a secret marker as its markers alone, since the secret may hold its punctuation', () => {
+    for (const location of [
+      '/invite/<secret:token>/accept',
+      '/invite/x<secret:token>y',
+      'https://idp.test/invite/<secret:token>',
+      '<secret:token>/accept?code=Xy9',
+      // A secret that ended in `?code=`: the value after it reads as a path segment.
+      '/<secret:token>/SyntheticNonce',
+      'http://127.0.0.1:4280<secret:token>color=Lavender',
+    ]) {
+      expect(routeLocation(location)).toBe('<secret:token>');
+    }
+    expect(routeLocation('https://<secret:tenant>.example.org/callback?code=SampleOnlyDoNotUse')).toBe('<secret:tenant>');
+    expect(routeLocation('<secret:gateway>:8443/callback?code=SyntheticCallbackValue')).toBe('<secret:gateway>');
     // A URL parser spells a marker percent-encoded.
     expect(routeLocation('/%3Csecret:callback%3ESampleCallbackWord')).toBe('<secret:callback>');
-    expect(routeLocation('/invite?code=<secret:token>')).toBe('/invite?code=:id');
-    expect(routeLocation('https://idp.test/invite/<secret:token>')).toBe('https://idp.test/invite/<secret:token>');
+    // A query value that is a marker is a query value.
+    expect(routeLocation('/invite?code=<secret:token>')).toBe('<secret:token>');
+    // A device title that opens with a marker is no address.
+    expect(routeLocation('<secret:app> › Settings')).toBe('<secret:app> › Settings');
+    expect(routeLocation('<secret:app> › Delete it?')).toBe('<secret:app> › Delete it?');
   });
 
-  it('keeps the query values out of a web address whose host holds a secret marker', () => {
-    // A secret configured as a tenant name, masked in the host: no URL parser takes that host.
-    expect(routeLocation('https://<secret:tenant>.example.org/callback?code=SampleOnlyDoNotUse')).toBe('https://<secret:tenant>.example.org/callback?code=:id');
-    expect(routeLocation('https://<secret:tenant>.example.org/orders/123?tab=notes#top')).toBe('https://<secret:tenant>.example.org/orders/:id?tab=:id');
-    expect(routeLocation('https://<secret:tenant>.example.org?code=Sample')).toBe('https://<secret:tenant>.example.org/?code=:id');
-  });
 
   it('keeps the query values out of a file app\'s location, and spells its path as a route', () => {
     expect(routeLocation('file:///srv/app/about.html?tab=summary')).toBe('file:///srv/app/about.html?tab=:id');
@@ -151,26 +158,6 @@ describe('routeLocation', () => {
     expect(routeLocation('/settings/\ud800')).toBe('/settings/%EF%BF%BD');
   });
 
-  it('keeps the query values out of an address whose whole origin is a secret marker', () => {
-    expect(routeLocation('<secret:gateway>/about?token=super-secret-token#frag')).toBe('<secret:gateway>/about?token=:id');
-    // A port the URL names stays beside the marker.
-    expect(routeLocation('<secret:gateway>:8443/callback?code=SyntheticCallbackValue')).toBe('<secret:gateway>:8443/callback?code=:id');
-    // A marker that took a delimiter with it leaves no boundary to read the rest by: only the markers are kept.
-    expect(routeLocation('<secret:gateway>about?token=super-secret-token#frag')).toBe('<secret:gateway>');
-    expect(routeLocation('<secret:gateway>checkout;jsessionid=SampleSessionTokenOnly')).toBe('<secret:gateway>');
-    expect(routeLocation('http://127.0.0.1:4280<secret:cb>&state=SyntheticCallbackStateValue')).toBe('<secret:cb>');
-    expect(routeLocation('http://127.0.0.1:4280<secret:callback>color=Lavender')).toBe('<secret:callback>');
-    expect(routeLocation('<secret:app>welcome?sig=Ab3/xY9+Qz7Lm2Pq=&state=ok')).toBe('<secret:app>');
-    expect(routeLocation('<secret:invite>welcome?code=MockCallbackCode')).toBe('<secret:invite>');
-    // A fragment after an origin marker is dropped as any fragment is.
-    expect(routeLocation('<secret:app>#access_token=abc&state=x')).toBe('<secret:app>/');
-    // A marker between delimiters can still leave a value loose in a path that parses; it reads :id, past a `/` too.
-    expect(routeLocation('https://app.test/<secret:cb>&code=CallbackCodeWord')).not.toContain('CallbackCodeWord');
-    expect(routeLocation('https://app.test/<secret:cb>&sig=Ab3/xY9+Qz7Lm2Pq=')).not.toContain('xY9');
-    expect(routeLocation('<secret:app> › Delete it?')).toBe('<secret:app> › Delete it?');
-    // A device title that opens with a marker is no address.
-    expect(routeLocation('<secret:app> › Settings')).toBe('<secret:app> › Settings');
-  });
 
   it('keeps a location that is not a web address as it is', () => {
     expect(routeLocation('com.example / Settings')).toBe('com.example / Settings');
