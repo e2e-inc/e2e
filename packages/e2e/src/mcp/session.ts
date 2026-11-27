@@ -753,7 +753,7 @@ export class SessionHost {
         headed: z
           .boolean()
           .optional()
-          .describe('Show the browser or simulator; pass true when the user wants to watch. Default: headless, unless the server was started with --headed'),
+          .describe('Show the browser or simulator; pass true when the user wants to watch. Default: headless, unless the server was started with --headed. An engine set to show its app in its own options is headed either way'),
         path: z
           .string()
           .min(1)

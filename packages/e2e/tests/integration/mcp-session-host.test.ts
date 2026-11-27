@@ -161,6 +161,16 @@ describe('SessionHost', { timeout: 60_000 }, () => {
     expect(summaries.map((summary) => summary.headed)).toEqual([true, false]);
   });
 
+  it('reports a session headed when its engine declares it, and still hands the engine what was asked', async () => {
+    const fake = createFakeEngine({ headed: true });
+    const summaries: McpSessionSummary[] = [];
+    const shown = host(() => fake, { headed: false, onSessionEnd: (summary) => void summaries.push(summary) });
+    expect(await shown.open({ headed: false })).toContain('), headed;');
+    await shown.close('done');
+    expect(fake.inits.map((init) => init.headed)).toEqual([false]);
+    expect(summaries.map((summary) => summary.headed)).toEqual([true]);
+  });
+
   it('closes an idle session and disposes the engine', async () => {
     const fakes = engines();
     const idle = host(fakes.next, { idleMs: 100 });

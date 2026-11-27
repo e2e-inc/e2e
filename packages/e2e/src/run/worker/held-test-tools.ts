@@ -197,7 +197,7 @@ export class HeldTestTools {
             name: redact(engine.name),
             version: redact(engine.version),
           },
-          headed: this.options.headed || engine?.headed === true,
+          headed: this.options.headed,
           projectTools: [...catalog.project].map(redact),
           summary: redact(summary),
           catalog: Object.entries(catalog.tools).map(([name, tool]) =>

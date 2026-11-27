@@ -120,7 +120,7 @@ open_session {target: "web", headed: true}
 | --- | --- | --- | --- |
 | `target` | string | no | The target to open. Falls back to `--target`, then the sole target. |
 | `config` | string (path) | no | The config for this session, absolute or relative to the server's working directory (`cwd` in the client's MCP config). Falls back to `--config`, then normal `e2e run` discovery. |
-| `headed` | boolean | no | `true` shows this session's browser or simulator, `false` hides it. Without it the session follows `--headed`. |
+| `headed` | boolean | no | `true` shows this session's browser or simulator, `false` hides it. Without it the session follows `--headed`. An engine whose own option shows the app, such as `desktop({ headed: true })`, is headed either way. |
 | `path` | string | no | Where on the app URL to open instead of its root, such as `/settings/members`. The session opens on that page. Not with `test`. |
 | `test` | string | no | One test to run first, named like an `e2e run` positional. The session stops where the test stopped. See [Running a test](#running-a-test). |
 | `engine` | string or object | no | The session's engine in a directory with no config file, as a package name or `{package, export, options}`. See [Without a config](#without-a-config). |
