@@ -383,12 +383,18 @@ describe('FileCacheStore', () => {
     }
   });
 
-  it('names tests of same-named files in different folders apart', async () => {
+  it('names tests of same-named files in different folders, or files told apart by a dot, apart', async () => {
     const { directory, store } = await makeStore();
-    for (const [index, folder] of ['admin', 'shop'].entries()) {
-      await store.write(String(index).repeat(64), payload('web', { recordedFor: step('web', { testId: `tests/${folder}/login.e2e.ts::signs%20in` }) }));
+    const files = ['tests/admin/login.e2e.ts', 'tests/shop/login.e2e.ts', 'tests/login.web.e2e.ts', 'tests/login.mobile.e2e.ts'];
+    for (const [index, file] of files.entries()) {
+      await store.write(String(index).repeat(64), payload('web', { recordedFor: step('web', { testId: `${file}::signs%20in` }) }));
     }
-    expect((await readdir(directory)).filter((name) => name.endsWith('.yml')).toSorted()).toEqual(['admin-login-signs-in.yml', 'shop-login-signs-in.yml']);
+    expect((await readdir(directory)).filter((name) => name.endsWith('.yml')).toSorted()).toEqual([
+      'admin-login-signs-in.yml',
+      'login-mobile-signs-in.yml',
+      'login-web-signs-in.yml',
+      'shop-login-signs-in.yml',
+    ]);
   });
 
   it('writes a test whose name carries its hash under the lock that clearing and evicting take', async () => {

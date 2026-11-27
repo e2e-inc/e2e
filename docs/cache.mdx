@@ -299,8 +299,10 @@ steps:
   reads. Where both sides recorded the same step under the same key, keep
   one side's step in the YAML and its entry in the lock: a lock that lists
   a key twice doesn't read.
-- Two tests whose names come out the same get one name each: the second to
-  record adds `--` and a hash of its test id. A name that leaves part of
+- A name is the test file's folders below the top one, the file's name
+  without `.e2e.ts`, and the test's titles. Two tests whose names come out
+  the same (`tests/login.e2e.ts` and `e2e/login.e2e.ts`, say) get one name
+  each: the second to record adds `--` and a hash of its test id. A name that leaves part of
   the test out (a title in Japanese, say, since names use ASCII letters
   and digits only, or a name cut at 80 characters) always ends in that
   hash, so it doesn't depend on which test records first.

@@ -3,16 +3,17 @@
  * file list, so it says which test it is (`checkout-buys-a-mug`) instead of
  * a digest.
  *
- * The name is the test file's folders below the top one, its stem, and the
+ * The name is the test file's folders below the top one, its name without
+ * its last two extensions (`checkout.web.e2e.ts` is `checkout-web`), and the
  * test's titles, from the test id as an entry stores it (redacted), in
- * lowercase ASCII kebab case. Two tests
- * whose names come out the same share no file: the store gives the second
- * the name with `--` and 12 hex characters of its test id's SHA-256 after
- * it (`collisionName`), and each file's lock names the test it holds, so a
- * reader opens the one that is its own. A name that leaves part of the test
- * out (letters or digits outside ASCII, or a name cut short) would
- * collide with the file's other such tests, which of them records first
- * deciding who has the bare name, so it carries the suffix from the start.
+ * lowercase ASCII kebab case. Two tests whose names come out the same share
+ * no file: the store gives the second the name with `--` and 12 hex
+ * characters of its test id's SHA-256 after it (`collisionName`), and each
+ * file's lock names the test it holds, so a reader opens the one that is its
+ * own. A name that leaves part of the test out (letters or digits outside
+ * ASCII, or a name cut short) would collide with the file's other such
+ * tests, which of them records first deciding who has the bare name, so it
+ * carries the suffix from the start.
  */
 
 import { sha256Hex, STANDALONE_TEST_ID_PREFIX } from '../internal/ids.ts';
@@ -90,7 +91,9 @@ export function recordingName(testId: string): string {
     // `tests/admin/login.e2e.ts` and `tests/shop/login.e2e.ts`.
     const folders = file.split('/').slice(1, -1);
     const base = file.split('/').pop() ?? '';
-    const stem = kebab(base.split('.')[0] ?? '');
+    // The file name without its kind and language (`.e2e.ts`): `checkout.web.e2e.ts` is `checkout-web`.
+    const segments = base.split('.');
+    const stem = kebab(segments.slice(0, segments.length > 2 ? -2 : segments.length > 1 ? -1 : undefined).join('.'));
     const named = titles.map(kebab);
     partial = [...folders, base, ...titles].some(dropsWords);
     words = [...folders.map(kebab), stem, ...(named[0] === stem ? named.slice(1) : named), ...(setup ? ['setup'] : [])];
