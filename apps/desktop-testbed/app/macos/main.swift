@@ -54,7 +54,7 @@ final class Controller: NSObject, NSApplicationDelegate {
     password.widthAnchor.constraint(equalToConstant: 260).isActive = true
     status.widthAnchor.constraint(equalToConstant: 360).isActive = true
     window.contentView = stack
-    // No activation: the engine launches the app in the background unless the run is headed, and the suites drive it there.
+    // No activation: the engine launches the app in the background unless the run is headed or allows physical input, and the suites drive it there.
     window.makeKeyAndOrderFront(nil)
   }
 
@@ -147,7 +147,7 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
   let opener = NSTextField()
   let popupField = NSTextField()
   let status = NSTextField(labelWithString: "Nothing yet")
-  // The hover target reports to a label of its own: a pointer left over it (by the headed suite) enters it again when a
+  // The hover target reports to a label of its own: a pointer left over it (by the physical-input suite) enters it again when a
   // menu closes, and must not overwrite what another test reads from the status line.
   let hoverStatus = NSTextField(labelWithString: "Not hovered")
   let items = (1...40).map { "Item \($0)" }

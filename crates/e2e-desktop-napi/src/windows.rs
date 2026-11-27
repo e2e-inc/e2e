@@ -287,6 +287,16 @@ fn complete(listed: usize, unresolved: usize) -> Outcome<()> {
     Ok(())
 }
 
+/// Whether a window of `pid` has left both lists `list` reads: the app's accessibility windows, and the window server's
+/// windows on screen, which keeps a closing window through its animation. An app that quit took the window with it.
+pub fn closed(pid: i32, id: u32) -> bool {
+    let listed = match ax_windows(&Element::application(pid)) {
+        Ok(open) => open.iter().any(|(_, window)| *window == Some(id)),
+        Err(failure) => failure.code != codes::APP_NOT_FOUND,
+    };
+    !listed && !server_windows().iter().any(|window| window.pid == pid && window.id == id && window.onscreen)
+}
+
 /// The accessibility element of a window of `pid` by its window server id.
 pub fn find(pid: i32, id: u32) -> Outcome<Element> {
     let app = Element::application(pid);

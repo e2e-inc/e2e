@@ -624,6 +624,29 @@ pub fn focus_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Inst
     })
 }
 
+/// Closes a window of `pid` as its close button does, and waits for it to leave the app's windows. A window that asks
+/// before it closes (unsaved changes) stays open: the press landed, and the failure says so.
+pub fn close_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
+    guarded(input_id, deadline, || {
+        // A call given up on before it began reads nothing either.
+        go("close the window")?;
+        let element = windows::find(pid, window)?;
+        let Some(button) = element.element("AXCloseButton") else {
+            return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "the window has no close button"));
+        };
+        if button.boolean("AXEnabled") == Some(false) {
+            return Err(Failure::refused(codes::ACTION_FAILED, "the window's close button is disabled, as it is while a sheet is open on the window"));
+        }
+        // A press that closes its own window may answer with an error: the window lists tell whether it closed.
+        let pressed = perform(&button, "AXPress", "close the window");
+        if until(deadline, || windows::closed(pid, window)) {
+            return Ok(());
+        }
+        pressed?;
+        Err(Failure::unconfirmed(codes::ACTION_FAILED, "the window stayed open after its close button was pressed; it may be asking to save its changes"))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{press_to_state, step_to};
