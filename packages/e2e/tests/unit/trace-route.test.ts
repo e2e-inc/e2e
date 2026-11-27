@@ -94,7 +94,7 @@ describe('routeLocation', () => {
     expect(routeLocation('/callback?state=eyJhbGciOi.x1.y2&code=482913')).toBe('/callback?code=:id&state=:id');
     expect(routeLocation('/settings?tab=notes#top')).toBe('/settings?tab=:id');
     expect(routeLocation('/search?q=&page=2')).toBe('/search?page=:id&q=');
-    expect(routeLocation('/#/companies/1?view=list')).toBe('/companies/:id?view=:id');
+    expect(routeLocation('/#/companies/1?view=list')).toBe('/#/companies/:id?view=:id');
     expect(routeLocation('https://idp.test/authorize?client_id=app&nonce=n0nce4c0ffee99')).toBe('https://idp.test/authorize?client_id=:id&nonce=:id');
     expect(routeLocation('/files/a%2Fb/caf%C3%A9')).toBe('/files/a%2Fb/caf%C3%A9');
   });
@@ -118,6 +118,12 @@ describe('routeLocation', () => {
     expect(routeLocation('https://<secret:tenant>.example.org/callback?code=SampleOnlyDoNotUse')).toBe('https://<secret:tenant>.example.org/callback?code=:id');
     expect(routeLocation('https://<secret:tenant>.example.org/orders/123?tab=notes#top')).toBe('https://<secret:tenant>.example.org/orders/:id?tab=:id');
     expect(routeLocation('https://<secret:tenant>.example.org?code=Sample')).toBe('https://<secret:tenant>.example.org/?code=:id');
+  });
+
+  it('spells a fragment route with its document path, so the location names a page the app serves', () => {
+    expect(routeLocation('/#/list')).toBe('/#/list');
+    expect(routeLocation('/app/#/orders/123?x=abc')).toBe('/app/#/orders/:id?x=:id');
+    expect(routeLocation('https://other.test/app/#/orders/123')).toBe('https://other.test/app/#/orders/:id');
   });
 
   it('spells a lone surrogate a cache file holds as a URL parser does, without throwing', () => {
@@ -146,6 +152,7 @@ describe('routeLocation', () => {
       '/',
       'https://idp.test/a b/c',
       '/invite/<secret:token>',
+      '/app/#/orders/123?x=abc',
       'https://<secret:tenant>.example.org/callback?code=abc',
     ]) {
       expect(routeLocation(routeLocation(location))).toBe(routeLocation(location));

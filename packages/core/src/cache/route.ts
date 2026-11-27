@@ -40,6 +40,8 @@ type Route =
       readonly kind: 'url';
       /** The origin, absent for a location on the app's own origin (`appLocation`). */
       readonly origin?: string;
+      /** The document's own path, for an app that routes in the fragment (`/app/#/orders/1`): not part of the route, kept to spell it. */
+      readonly document?: string;
       readonly segments: readonly string[];
       /** One `[key, value]` pair per query parameter, minted keys and values as `:id`, sorted. */
       readonly query: readonly (readonly [string, string])[];
@@ -123,7 +125,7 @@ export function appNavigation(url: string, appOrigin: string | undefined): strin
  * location is not a web address (a device engine's screen title, a
  * browser's own page).
  */
-function locationParts(location: string): { readonly origin?: string; readonly pathname: string; readonly search: string } | undefined {
+function locationParts(location: string): { readonly origin?: string; readonly document?: string; readonly pathname: string; readonly search: string } | undefined {
   let origin: string | undefined;
   let rest = location;
   if (URL.canParse(location)) {
@@ -141,6 +143,7 @@ function locationParts(location: string): { readonly origin?: string; readonly p
   const [fragmentPath, fragmentSearch] = splitOnce(fragment, '?');
   return {
     ...(origin === undefined ? {} : { origin }),
+    document: documentPath,
     pathname: fragmentPath,
     search: [documentSearch, fragmentSearch].filter((part) => part !== '').join('&'),
   };
@@ -178,11 +181,20 @@ function routeOf(location: string, mint = true): Route {
   const segments = parts.pathname
     .split('/')
     .filter((raw) => raw !== '')
-    .map((raw) => {
-      const text = decodeSegment(raw);
-      return mint && MINTED_SEGMENT.some((pattern) => pattern.test(text)) ? PARAM : text;
-    });
-  return { kind: 'url', ...(parts.origin === undefined ? {} : { origin: parts.origin }), segments, query: queryPairs(parts.search, mint) };
+    .map((raw) => segmentOf(raw, mint));
+  return {
+    kind: 'url',
+    ...(parts.origin === undefined ? {} : { origin: parts.origin }),
+    ...(parts.document === undefined ? {} : { document: parts.document }),
+    segments,
+    query: queryPairs(parts.search, mint),
+  };
+}
+
+/** One path segment as a route reads it: decoded, and with `mint` `:id` when it is shaped like a minted value. */
+function segmentOf(raw: string, mint: boolean): string {
+  const text = decodeSegment(raw);
+  return mint && MINTED_SEGMENT.some((pattern) => pattern.test(text)) ? PARAM : text;
 }
 
 /** Whether two locations name the same screen: one origin, and segments and query that read alike. */
@@ -222,7 +234,8 @@ export function addressKey(location: string): string {
  * callback), and one of letters only reads as a word to the route rule, so
  * no query value is written to an entry or a report. A path segment of
  * letters only reads as a route word and stays. A `<secret:name>` marker
- * the ledger put in its place stays readable. A device screen title, or any
+ * the ledger put in its place stays readable. An app that routes in the
+ * fragment keeps its document path and `#`. A device screen title, or any
  * other location that is not a web address, is kept as it is.
  *
  * The stored location names the screen for a reader; detours are found on
@@ -231,9 +244,11 @@ export function addressKey(location: string): string {
 export function routeLocation(location: string): string {
   const route = routeOf(location);
   if (route.kind === 'opaque') return unparsedLocation(location);
+  // An app that routes in the fragment is spelled with its document path and `#`, so the location names a page it serves.
+  const document = route.document === undefined ? '' : `${route.document.split('/').map((raw) => (raw === '' ? raw : spellPart(segmentOf(raw, true)))).join('/')}#`;
   const path = `/${route.segments.map(spellPart).join('/')}`;
   const query = route.query.map(([key, value]) => `${spellPart(key)}=${value === '' ? '' : PARAM}`).join('&');
-  return `${route.origin ?? ''}${path}${query === '' ? '' : `?${query}`}`;
+  return `${route.origin ?? ''}${document}${path}${query === '' ? '' : `?${query}`}`;
 }
 
 /**
