@@ -1946,6 +1946,7 @@ void host.openSession({
   onStep: (step) => {
     step satisfies StepProgress;
     if (step.phase === 'end') step.status satisfies StepRecord['status'];
+    if (step.phase === 'end') step.cache?.mode satisfies 'self-finalized' | 'agent-concluded' | 'missed' | undefined;
   },
 } satisfies OpenSessionOptions);
 // @ts-expect-error every hosted session requires options with a name
