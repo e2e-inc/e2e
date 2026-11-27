@@ -73,6 +73,8 @@ Everything a session does is a catalog tool run through
   The reply names the first screen (path, node count) without listing it,
   and action results report changes against it: `observe` when you need
   its nodes.
+- `close_session`: frees the session's slot once its cleanup finishes, even
+  while an unrelated app is still stopping.
 - `observe`: one node per line as `#id role "name" ...`, plus the path. Use
   ids from the newest observation; an older id works only when exactly one
   node on the newest screen reads like its node.

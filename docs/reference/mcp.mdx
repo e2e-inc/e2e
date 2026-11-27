@@ -171,8 +171,10 @@ call {tool: "tap", args: {target: "n42"}, session: "<id>"}
 #### `close_session`
 
 Saves a recording still running, ends the attempt, and disposes the engine.
-It stops the app processes the session started once no other session uses
-them. Use it on an attachment to detach and leave the test held.
+It stops app processes and services when the session is their last user,
+with app processes stopping before services. The session frees its slot
+when its own cleanup finishes, even while another app is still stopping.
+Use it on an attachment to detach and leave the test held.
 
 ```txt
 close_session {session: "<id>"}

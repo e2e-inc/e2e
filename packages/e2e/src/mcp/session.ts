@@ -150,8 +150,8 @@ export interface SessionHostOptions {
 /** Owns the live sessions, up to the server's limit, and the fixed MCP tools that drive them. */
 export class SessionHost {
   private readonly sessions: SessionRegistry<Session>;
-  /** Sessions on one app command share its process: the last one to close stops it. */
-  private readonly apps = new SharedProcesses();
+  /** Sessions share app commands and keep their services until an abandoned app start has stopped. */
+  private readonly apps = new SharedProcesses({ waitForAbandonedStart: true });
   /**
    * Sessions on the same config file share its services, keyed by the file's
    * absolute path. The first session starts them, and the last one to close
@@ -279,11 +279,6 @@ export class SessionHost {
     );
 
     const cleanupErrors = attempt === undefined ? [] : [...await attempt.close()];
-
-    // An open that was cancelled while its app command was starting leaves
-    // that start to stop in the background, so wait for it before the last
-    // hold on the services can stop them under the app.
-    await this.apps.drained();
 
     await services.stop((cause) => {
       cleanupErrors.push(serializeError(classifyError(cause), { phase: 'cleanup', redact: processSecrets.redact }));
