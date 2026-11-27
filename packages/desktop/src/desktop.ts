@@ -27,6 +27,14 @@ export interface Desktop {
    * `headed` the window must be the app's key window.
    */
   press(key: string): Promise<void>;
+  /**
+   * Chooses an item of the app's menu bar by its titles, from the menu bar
+   * down: `desktop.menu('Edit', 'Find', 'Find…')`. No menu opens on screen.
+   * Without `headed`, an item macOS disables while the app is in the
+   * background (one the focused control handles, such as Select All) is
+   * refused.
+   */
+  menu(...path: string[]): Promise<void>;
   /** Quits the app. `app.open()` launches it again; every test ends with it quit. */
   closeApp(): Promise<void>;
 }
@@ -45,6 +53,9 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
     async press(key) {
       await surface.pressKey(key, context.operation());
     },
+    async menu(...path) {
+      await surface.chooseMenu(path, context.operation());
+    },
     async closeApp() {
       const operation = context.operation();
       await surface.closeApp(operation.signal, operation.timeoutMs);
@@ -54,6 +65,7 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
     windows: { kind: 'resource' },
     useWindow: { kind: 'resource' },
     press: { kind: 'resource', label: (key) => key },
+    menu: { kind: 'resource', label: (...path) => path.join(' > ') },
     closeApp: { kind: 'resource' },
   });
 }

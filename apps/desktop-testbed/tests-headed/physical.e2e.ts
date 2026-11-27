@@ -47,6 +47,15 @@ test.describe('physical input', () => {
     await expect(note).toHaveValue('x');
   });
 
+  test('chooses a menu item the focused field handles', async ({ screen, desktop }) => {
+    const note = screen.getByRole('textbox', 'Note');
+    await note.fill('first draft');
+    await note.focus();
+    await desktop.menu('Edit', 'Select All');
+    await note.pressSequentially('x');
+    await expect(note).toHaveValue('x');
+  });
+
   test('taps a point in the window and types through the real keyboard', async ({ screen }) => {
     const note = screen.getByRole('textbox', 'Note');
     const box = await note.boundingBox();

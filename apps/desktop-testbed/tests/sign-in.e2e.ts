@@ -98,6 +98,24 @@ test.describe('sign-in form', () => {
     await expect(username).toHaveValue('grace');
   });
 
+  test('chooses a menu item the app handles itself, in the background', async ({ screen, desktop }) => {
+    await screen.getByTestId('username').fill('grace');
+    await desktop.menu('Form', 'Reset');
+    await expect(screen.getByTestId('status')).toHaveText('Reset from the menu');
+  });
+
+  test('refuses a menu item the background disables, a missing one, and a menu', async ({ screen, desktop }) => {
+    const refusal = (path: string[]): Promise<string> =>
+      desktop.menu(...path).then(
+        () => 'chosen',
+        (cause: unknown) => String(cause),
+      );
+    expect(await refusal(['Edit', 'Select All'])).toMatch(/the menu item "Edit > Select All" is disabled, so nothing was sent/);
+    expect(await refusal(['Form', 'Restart'])).toMatch(/the menu "Form" has no item "Restart"; it has "Reset"/);
+    expect(await refusal(['Form'])).toMatch(/"Form" opens a menu; name one of its items: "Reset"/);
+    await expect(screen.getByTestId('status')).toHaveText('Not signed in');
+  });
+
   test('reads controls by test id and refuses an empty password', async ({ screen }) => {
     await screen.getByTestId('username').fill('grace');
     await expect(screen.getByTestId('username')).toHaveValue('grace');

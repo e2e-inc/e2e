@@ -1197,6 +1197,36 @@ describe('DesktopSurface: select', () => {
   });
 });
 
+describe('DesktopSurface: the menu bar', () => {
+  it('chooses a menu item by its path, without bringing the app forward', async () => {
+    const { surface, fake } = await launched({});
+    await surface.chooseMenu(['Edit', 'Find', 'Find…'], operation());
+    expect(last(fake, 'menu')).toEqual({ pid: fake.pid, path: ['Edit', 'Find', 'Find…'], physical: false, inputId: expect.any(Number), timeoutMs: expect.any(Number) });
+  });
+
+  it('brings the app forward with the window in use first, with headed', async () => {
+    const { surface, fake } = await launched({}, { options: { headed: true } });
+    await surface.chooseMenu(['Edit', 'Select All'], operation());
+    expect(last(fake, 'menu')).toMatchObject({ physical: true, windowId: 'w-mine' });
+  });
+
+  it('refuses an item the driver found disabled, and says nothing was sent', async () => {
+    const disabled = failure('ACTION_FAILED', 'not_delivered', 'the menu item "Edit > Select All" is disabled, so nothing was sent');
+    const { surface } = await launched({ menu: [disabled] });
+    await expect(surface.chooseMenu(['Edit', 'Select All'], operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/^menu Edit > Select All: the menu item .* is disabled/) });
+  });
+
+  it('reports a press the app did not answer as one that may have landed', async () => {
+    const { surface } = await launched({ menu: [failure('APP_UNRESPONSIVE', 'delivered_unverified', 'the app did not answer the action')] });
+    await expect(surface.chooseMenu(['File', 'Save'], operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+  });
+
+  it('refuses a menu item before the app is open', async () => {
+    const { surface } = await initialized({});
+    await expect(surface.chooseMenu(['Edit', 'Copy'], operation())).rejects.toMatchObject({ code: 'INVALID_STATE' });
+  });
+});
+
 describe('DesktopSurface: keys', () => {
   it('presses keys as driver combos into the window of the launched process, without physical input', async () => {
     const { surface, fake } = await launched({});

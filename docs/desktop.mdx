@@ -138,7 +138,8 @@ by its placeholder, so find that field with
 The `desktop` fixture lists the app's windows (`desktop.windows()`), picks
 the one `screen` reads (`desktop.useWindow(window)`), presses a key into the
 app's window for an app with no control that takes keyboard focus
-(`desktop.press('ControlOrMeta+2')`), and quits the app
+(`desktop.press('ControlOrMeta+2')`), chooses a menu item
+(`desktop.menu('Edit', 'Find', 'Find…')`), and quits the app
 (`desktop.closeApp()`).
 
 ## What differs from the web
@@ -151,7 +152,7 @@ app's window for an app with no control that takes keyboard focus
 | Select | `selectOption` matches by option label, not index. A table row's label is all the text it shows, cell by cell, as its accessible name is; a label that two rows show is refused. On a pop-up button it checks that the button shows the chosen option. A disabled option waits within the action's timeout for the app to enable it, then fails with `ACTION_FAILED` naming the option, and the menu closes; of two options with one title, the select chooses an enabled one from the menu, and a pop-up that already shows the title is left as it is, since a closed pop-up shows no item to tell them apart. For editable combo boxes, use `fill()` instead; a combo box that takes no typed value is refused, so tap it and then the option. |
 | Windows | `screen` reads the window picked with `desktop.useWindow()`, otherwise the focused window, otherwise the app's main window, otherwise the first visible window. The Siri dialog macOS 27 can put over an app is read only when picked. A window with a sheet open counts as focused. Sheets and open context or pop-up menus are included, so `getByRole('menuitem', 'Copy')` finds a menu's items; window chrome (Close/Minimize/Zoom) is excluded. Minimized windows and rows scrolled out of their list read as hidden; a tap, secondary tap, `check`, or `uncheck` on a hidden node scrolls it into view first, or is refused, and a failure after that scroll fails with `ACTION_FAILED` as an action that may have taken effect, never retried, since the list moved. Windows on another macOS Space stay readable. |
 | Reading | Only an app with no open windows reads as empty. If the screen is locked, the window tree is deeper than `maxDepth`, or the window holds more than the 8,000 elements a read takes, locators keep retrying until timeout instead of returning false negatives, and screenshots of that window are refused. `app.open()` fails on a locked screen. |
-| Menu bar | The app's menu bar isn't readable yet; trigger menu items with a key shortcut (`press`). Most shortcuts need `headed: true` (see Keys). |
+| Menu bar | `desktop.menu('Edit', 'Find', 'Find…')` chooses a menu item by its titles, from the menu bar down, without opening the menu on screen. A title must match exactly, `…` included; a miss fails with `ACTION_FAILED` and lists the titles the menu has. Without `headed`, an item macOS disables in the background (see Keys) is refused; with `headed` the app comes forward first, and a disabled item waits within the action's timeout for the app to enable it. The Apple menu is not searched, and `screen` and the agent don't read the menu bar. |
 | Web content | Browser windows, Electron apps, and web views aren't supported. Use `@e2e-dev/web` for those. |
 | Workers | Limited to one worker per desktop target. If you run two desktop targets with `headed: true`, set `workers: 1` so they don't fight over the cursor and keyboard. |
 | Scrolling | `scrollTo(edge)` isn't supported and fails with `UNSUPPORTED_CAPABILITY`. Use `scrollUntilVisible` instead. |

@@ -127,6 +127,11 @@ export interface DesktopDriver {
   cancelInput(inputId: number): void;
   /** `inputId` names the press, so `cancelInput` can stop it before it sends the key. */
   press(options: { pid: number; windowId: string; combo: string; physical: boolean; inputId?: number; timeoutMs: number; focusedRef?: string }): Promise<Envelope<unknown>>;
+  /**
+   * Presses the item of the app's menu bar that `path` names by its titles, from the menu bar down. With `physical` the app comes forward first,
+   * with `windowId` when it has a window. `inputId` names the call, so `cancelInput` can stop it before the item is pressed.
+   */
+  menu(options: { pid: number; path: string[]; windowId?: string; physical: boolean; inputId?: number; timeoutMs: number }): Promise<Envelope<unknown>>;
   /** Fails as `press` would for a combo this Mac's keyboard layout cannot type, and sends nothing. */
   checkCombo(combo: string): Promise<Envelope<unknown>>;
   /** `inputId` names the call, so `cancelInput` stops it before it changes the focus. */

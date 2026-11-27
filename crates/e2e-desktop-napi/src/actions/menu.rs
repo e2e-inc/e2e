@@ -1,5 +1,5 @@
-//! The app's menu bar, read through accessibility: which item a key equivalent triggers, and whether the app has it
-//! enabled.
+//! The app's menu bar, read through accessibility: which item a key equivalent triggers, whether the app has it
+//! enabled, and a press of the item a path of titles names.
 
 use super::*;
 use crate::input::{Combo, KeyEquivalent};
@@ -118,6 +118,75 @@ pub(super) fn refuse_disabled_shortcut(pid: i32, combo: &Combo, deadline: Instan
             path.join(" > ")
         ),
     ))
+}
+
+/// Why a menu item is disabled while its app is in the background, for a refusal that names one.
+const BACKGROUND_DISABLES: &str = "macOS disables a menu command of the focused control or window (Select All, Find) while the app is in the background; choose it with desktop({ headed: true })";
+
+/// The titles a menu shows, for a refusal that names what it has instead of what was asked; separators have none.
+fn titles(items: &[(Element, Item)]) -> String {
+    const SHOWN: usize = 30;
+    let named: Vec<&str> = items.iter().map(|(_, item)| item.title.as_str()).filter(|title| !title.is_empty()).collect();
+    let more = if named.len() > SHOWN { format!(", and {} more", named.len() - SHOWN) } else { String::new() };
+    format!("{}{more}", named.iter().take(SHOWN).map(|title| format!("\"{title}\"")).collect::<Vec<_>>().join(", "))
+}
+
+/// Chooses the item of the app's menu bar that `path` names, title by title from the menu bar down, with a press of the
+/// item itself: no menu opens on screen, so it works on an app in the background, for an item the app has enabled there.
+/// With `physical` the app comes forward first, with `window` when it has one, so the items its focused control
+/// handles are enabled; an item still disabled is waited for within the budget, as a disabled control is. Without it a
+/// disabled item is refused at once: it stays disabled for as long as the app is in the background. Of two items of
+/// one title, an enabled one is chosen. The Apple menu is the system's and is not searched.
+pub fn choose(pid: i32, path: &[String], window: Option<u32>, physical: bool, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
+    if path.is_empty() {
+        return Err(Failure::refused(codes::INVALID_ARGS, "a menu item is named by its path of titles, such as Edit, Select All"));
+    }
+    guarded(input_id, deadline, || {
+        let app = Element::application(pid);
+        if physical {
+            match window {
+                Some(id) => raise(pid, &windows::find(pid, id)?)?,
+                None => {
+                    go("bring the app forward")?;
+                    let _ = app.set_bool("AXFrontmost", true);
+                    if !until(deadline, || app.boolean("AXFrontmost") == Some(true)) {
+                        return Err(Failure::refused(codes::ACTION_FAILED, "the app could not be brought forward"));
+                    }
+                }
+            }
+        }
+        let bar = app.element("AXMenuBar").ok_or_else(|| Failure::refused(codes::ACTION_FAILED, "the app has no menu bar"))?;
+        let mut level: Vec<Element> = below(&bar)?.into_iter().skip(1).collect();
+        let mut holder = "the menu bar".to_owned();
+        let mut chosen = None;
+        for title in path {
+            let items = level.iter().map(|element| Ok((element.clone(), read(element)?))).collect::<Outcome<Vec<_>>>()?;
+            let named = || items.iter().filter(|(_, item)| item.title == *title);
+            let Some((element, item)) = named().find(|(_, item)| item.enabled).or_else(|| named().next()) else {
+                return Err(Failure::refused(codes::ACTION_FAILED, format!("{holder} has no item \"{title}\"; it has {}", titles(&items))));
+            };
+            level = Vec::new();
+            for menu in below(element)? {
+                level.extend(below(&menu)?);
+            }
+            holder = format!("the menu \"{title}\"");
+            chosen = Some((element.clone(), item.enabled));
+        }
+        let Some((element, enabled_now)) = chosen else { return Err(Failure::refused(codes::INVALID_ARGS, "no menu item was named")) };
+        let name = path.join(" > ");
+        if !level.is_empty() {
+            let items = level.iter().map(|element| Ok((element.clone(), read(element)?))).collect::<Outcome<Vec<_>>>()?;
+            return Err(Failure::refused(codes::ACTION_FAILED, format!("\"{name}\" opens a menu; name one of its items: {}", titles(&items))));
+        }
+        if physical {
+            enabled(&element, deadline, "choose the menu item").map_err(|failure| {
+                if failure.code == codes::ACTION_FAILED { Failure { message: format!("the menu item \"{name}\" is disabled"), ..failure } } else { failure }
+            })?;
+        } else if !enabled_now {
+            return Err(Failure::refused(codes::ACTION_FAILED, format!("the menu item \"{name}\" is disabled, so nothing was sent. {BACKGROUND_DISABLES}")));
+        }
+        perform(&element, "AXPress", "choose the menu item")
+    })
 }
 
 #[cfg(test)]

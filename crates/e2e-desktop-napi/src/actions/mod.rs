@@ -13,6 +13,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 mod menu;
+pub use menu::choose as choose_menu_item;
 mod pointer;
 mod scroll;
 mod select;

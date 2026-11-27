@@ -274,6 +274,32 @@ pub async fn press(options: PressOptions) -> Value {
     .await
 }
 
+#[napi(object)]
+pub struct MenuOptions {
+    pub pid: i32,
+    /// The titles from the menu bar down to the item, such as `["Edit", "Find", "Find…"]`.
+    pub path: Vec<String>,
+    /// The window to bring forward with the app when `physical`; none for an app with no window.
+    pub window_id: Option<String>,
+    /// Brings the app forward first, which enables the items its focused control handles.
+    pub physical: bool,
+    /// Names this call, so `cancelInput` can stop it before it presses the item.
+    pub input_id: Option<u32>,
+    pub timeout_ms: f64,
+}
+
+/// Chooses an item of the app's menu bar by its path of titles.
+#[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
+pub async fn menu(options: MenuOptions) -> Value {
+    let deadline = deadline(options.timeout_ms);
+    blocking(move || {
+        let window = options.window_id.as_deref().map(window_id).transpose()?;
+        actions::choose_menu_item(options.pid, &options.path, window, options.physical, options.input_id, deadline)?;
+        Ok(serde_json::json!({}))
+    })
+    .await
+}
+
 /// Brings a window and its app forward. `inputId` names it, so `cancelInput` stops it before it changes the focus.
 #[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
 pub async fn focus_window(pid: i32, window_id_text: String, input_id: Option<u32>, timeout_ms: Option<f64>) -> Value {

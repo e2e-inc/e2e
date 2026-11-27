@@ -1343,6 +1343,28 @@ export class DesktopSurface {
   }
 
   /**
+   * `desktop.menu()`: chooses the item of the app's menu bar a path of titles names. The driver presses the item
+   * itself, so no menu opens on screen; with `headed` it brings the app forward first, which enables the items the
+   * focused control handles.
+   */
+  async chooseMenu(titles: readonly string[], context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    const pid = this.pid;
+    if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
+    const label = `menu ${titles.join(' > ')}`;
+    const window = this.options.headed ? await this.ownWindow(operation) : undefined;
+    const inputId = this.requireDriver().inputId();
+    await this.input((driver, timeoutMs) => driver.menu({ pid, path: [...titles], physical: this.options.headed, inputId, timeoutMs, ...(window === undefined ? {} : { windowId: window.id }) }), {
+      label,
+      input: true,
+      signal: operation.signal,
+      timeoutMs: operation.timeoutMs,
+      onCutOff: () => this.driver?.cancelInput(inputId),
+    }).catch((cause: unknown) => Promise.reject(translate(cause, label, true)));
+    await this.settle(operation);
+  }
+
+  /**
    * Sends one key combo to the launched process's window; with `focusedRef`, only while that control still holds the
    * app's focus, checked by the driver right before the key goes. Without `headed`
    * the key goes into the process's event queue, which hands it to its key
