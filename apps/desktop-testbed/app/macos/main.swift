@@ -6,14 +6,15 @@
 // button, a SwiftUI alert, and double-click and hover targets for physical
 // input), each writing what happened into that window's status line. The
 // menu bar has one command the app handles itself (Form > Reset), one it
-// enables only while "Remember me" is checked (Form > Forget Me), and one the
+// enables only while "Remember me" is checked (Form > Forget Me), one the
 // focused control handles (Edit > Select All), which AppKit disables while
-// the app is in the background.
+// the app is in the background, and a menu the app fills when AppKit asks
+// (Remembered, which has Clear only while the box is checked).
 
 import AppKit
 import SwiftUI
 
-final class Controller: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+final class Controller: NSObject, NSApplicationDelegate, NSMenuItemValidation, NSMenuDelegate {
   var window: NSWindow!
   let username = NSTextField()
   let password = NSSecureTextField()
@@ -79,7 +80,23 @@ final class Controller: NSObject, NSApplicationDelegate, NSMenuItemValidation {
       item.keyEquivalentModifierMask = [.command, .shift]
       item.target = self
     }
+    menu("Remembered").delegate = self
     return bar
+  }
+
+  // As a menu of recent documents is: filled when AppKit is about to show or validate it, not when the box changes.
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    menu.removeAllItems()
+    if remember.state == .on {
+      menu.addItem(withTitle: "Clear", action: #selector(clearRemembered(_:)), keyEquivalent: "").target = self
+    } else {
+      menu.addItem(withTitle: "Nothing Remembered", action: nil, keyEquivalent: "")
+    }
+  }
+
+  @objc func clearRemembered(_ sender: Any?) {
+    remember.state = .off
+    status.stringValue = "Cleared from the menu"
   }
 
   // AppKit asks when it validates the menu, not when the box changes: Forget Me can read as disabled for a while after

@@ -2,31 +2,71 @@
 
 use super::*;
 
+/// What one read of an option's `AXEnabled` says. An option that does not say counts as enabled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Read {
+    Enabled,
+    Disabled,
+    /// The menu dropped the option since the scan.
+    Gone,
+}
+
+/// How a wait for an enabled option ended.
+#[derive(Debug, PartialEq, Eq)]
+enum Waited {
+    /// The place of the first enabled option.
+    Enabled(usize),
+    /// None was enabled in time.
+    Disabled,
+    /// Every option is gone: the menu changed under the action.
+    Gone,
+}
+
+/// The first of `count` options that `read` says is enabled. While none is, every option is read again after each
+/// `again`, which waits and says whether there is time left: any of them may be the one the app enables. An option
+/// the menu dropped is skipped, since a live one of the title may still be enabled.
+fn first_enabled(count: usize, mut read: impl FnMut(usize) -> Outcome<Read>, mut again: impl FnMut() -> Outcome<bool>) -> Outcome<Waited> {
+    loop {
+        let mut live = false;
+        for index in 0..count {
+            match read(index)? {
+                Read::Enabled => return Ok(Waited::Enabled(index)),
+                Read::Disabled => live = true,
+                Read::Gone => {}
+            }
+        }
+        if !live {
+            return Ok(Waited::Gone);
+        }
+        if !again()? {
+            return Ok(Waited::Disabled);
+        }
+    }
+}
+
 /// The first of `options` (the items of one title) that is enabled, waited for within the action's budget, as
 /// `enabled` waits for one control; refused with `disabled`, which names the option, when none is enabled in time.
 /// `what` names the action in a failure of the wait itself.
 pub(super) fn enabled_of(options: &[Element], deadline: Instant, what: &str, disabled: &str) -> Outcome<Element> {
     let refuse_at = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
-    loop {
-        // An option the menu dropped since the scan is skipped: a live one of the title may still be enabled. With every
-        // one gone, the menu changed under the action.
-        let mut live = 0;
-        for option in options {
-            match option.attribute("AXEnabled") {
-                Ok(value) if value.boolean() == Some(false) => live += 1,
-                Err(ax::AX_INVALID_ELEMENT) => {}
-                Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_API_DISABLED)) => return Err(unread(error, what)),
-                _ => return Ok(option.clone()),
-            }
-        }
-        if live == 0 {
-            return Err(unread(ax::AX_INVALID_ELEMENT, what));
-        }
+    let read = |index: usize| match options[index].attribute("AXEnabled") {
+        Ok(value) if value.boolean() == Some(false) => Ok(Read::Disabled),
+        Err(ax::AX_INVALID_ELEMENT) => Ok(Read::Gone),
+        Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_API_DISABLED)) => Err(unread(error, what)),
+        _ => Ok(Read::Enabled),
+    };
+    let again = || {
         if Instant::now() + POLL >= refuse_at {
-            return Err(Failure::refused(codes::ACTION_FAILED, disabled));
+            return Ok(false);
         }
         go(what)?;
         sleep(POLL);
+        Ok(true)
+    };
+    match first_enabled(options.len(), read, again)? {
+        Waited::Enabled(index) => Ok(options[index].clone()),
+        Waited::Disabled => Err(Failure::refused(codes::ACTION_FAILED, disabled)),
+        Waited::Gone => Err(unread(ax::AX_INVALID_ELEMENT, what)),
     }
 }
 
@@ -320,4 +360,48 @@ pub(super) fn choose_row(list: Option<&Element>, row: &Element, deadline: Instan
         return Ok(true);
     }
     Err(Failure::unconfirmed(codes::ACTION_FAILED, unselected))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Read::{Disabled, Enabled, Gone};
+    use super::*;
+    use std::cell::Cell;
+
+    /// A wait over `rounds` of reads, one state per option: each `again` moves on to the next round, and says the time
+    /// is up after the last.
+    fn waited(rounds: &[&[Read]]) -> Waited {
+        let round = Cell::new(0);
+        let again = || {
+            round.set(round.get() + 1);
+            Ok(round.get() < rounds.len())
+        };
+        first_enabled(rounds[0].len(), |index| Ok(rounds[round.get()][index]), again).unwrap()
+    }
+
+    #[test]
+    fn chooses_the_second_of_two_disabled_options_once_the_app_enables_it() {
+        assert_eq!(waited(&[&[Disabled, Disabled], &[Disabled, Disabled], &[Disabled, Enabled]]), Waited::Enabled(1));
+        assert_eq!(waited(&[&[Disabled, Disabled], &[Enabled, Disabled]]), Waited::Enabled(0));
+    }
+
+    #[test]
+    fn chooses_the_first_enabled_option_and_refuses_when_none_is_enabled_in_time() {
+        assert_eq!(waited(&[&[Disabled, Enabled, Enabled]]), Waited::Enabled(1));
+        assert_eq!(waited(&[&[Disabled, Disabled], &[Disabled, Disabled]]), Waited::Disabled);
+    }
+
+    #[test]
+    fn skips_an_option_the_menu_dropped_and_stops_when_every_one_is_gone() {
+        assert_eq!(waited(&[&[Gone, Disabled], &[Gone, Enabled]]), Waited::Enabled(1));
+        assert_eq!(waited(&[&[Disabled, Disabled], &[Gone, Gone], &[Enabled, Enabled]]), Waited::Gone);
+    }
+
+    #[test]
+    fn ends_the_wait_on_a_read_the_app_did_not_answer_and_on_a_cancel() {
+        let stalled = first_enabled(2, |index| if index == 0 { Ok(Disabled) } else { Err(unread(ax::AX_CANNOT_COMPLETE, "select")) }, || Ok(true));
+        assert_eq!(stalled.unwrap_err().code, codes::APP_UNRESPONSIVE);
+        let cancelled = first_enabled(1, |_| Ok(Disabled), || Err(Failure::refused(codes::TIMEOUT, "cancelled")));
+        assert_eq!(cancelled.unwrap_err().code, codes::TIMEOUT);
+    }
 }

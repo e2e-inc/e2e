@@ -178,16 +178,87 @@ fn titles_of(items: &[Element]) -> Outcome<Vec<String>> {
     items.iter().map(|item| read(item).map(|item| item.title)).collect()
 }
 
-/// Every item of `level` titled `title`; with none, a refusal that lists what `holder` has.
-fn titled(level: &[Element], title: &str, holder: &str) -> Outcome<Vec<Element>> {
+/// What a path names in the menu bar as one read gives it, or why it names no item to press there: a title a menu
+/// lacks, an item where the path goes on, a menu where it ends. AppKit may not have validated the menus for that read
+/// (`VALIDATED_FOR`), so the reason is not yet a refusal.
+type Named<T> = Result<T, String>;
+
+/// Every item of `level` titled `title`; with none, the titles `holder` has.
+fn titled(level: &[Element], title: &str, holder: &str) -> Outcome<Named<Vec<Element>>> {
     let titles = titles_of(level)?;
     let found: Vec<Element> = level.iter().zip(&titles).filter(|(_, own)| *own == title).map(|(item, _)| item.clone()).collect();
-    if found.is_empty() {
-        // Not a select's ELEMENT_NOT_FOUND for a missing option: the engine reads that code as a stale node and
-        // retries, and the menu will lack the title again.
-        return Err(Failure::refused(codes::ACTION_FAILED, format!("{holder} has no item \"{title}\"; it has {}", listed(&titles))));
+    Ok(if found.is_empty() { Err(format!("{holder} has no item \"{title}\"; it has {}", listed(&titles))) } else { Ok(found) })
+}
+
+/// The items `path` names, title by title from the menu bar down: every one that has the last title and opens no
+/// menu.
+fn named(pid: i32, path: &[String]) -> Outcome<Named<Vec<Element>>> {
+    let (leaf, parents) = split(path)?;
+    let mut level = app_menus(pid)?;
+    let mut holder = "the menu bar".to_owned();
+    for (depth, title) in parents.iter().enumerate() {
+        let items = match titled(&level, title, &holder)? {
+            Ok(items) => items,
+            Err(why) => return Ok(Err(why)),
+        };
+        let mut opened = None;
+        for item in items {
+            opened = items_under(&item)?;
+            if opened.is_some() {
+                break;
+            }
+        }
+        let Some(items) = opened else {
+            return Ok(Err(format!("\"{}\" is a menu item, not a menu, so it has no item \"{}\"", path[..=depth].join(" > "), path[depth + 1])));
+        };
+        level = items;
+        holder = format!("the menu \"{title}\"");
     }
-    Ok(found)
+    let items = match titled(&level, leaf, &holder)? {
+        Ok(items) => items,
+        Err(why) => return Ok(Err(why)),
+    };
+    let mut found = Vec::new();
+    let mut submenu = None;
+    for item in items {
+        match items_under(&item)? {
+            Some(items) => submenu = submenu.or(Some(items)),
+            None => found.push(item),
+        }
+    }
+    // A press of an item that opens a menu would open it on screen.
+    Ok(match submenu.filter(|_| found.is_empty()) {
+        Some(items) => Err(format!("\"{}\" opens a menu; name one of its items: {}", path.join(" > "), listed(&titles_of(&items)?))),
+        None => Ok(found),
+    })
+}
+
+/// Whether a read that named no item is the last: one AppKit validated the menus for, having started at `fresh_at`
+/// or later, or one after which no time is left for another.
+fn last_read(started: Instant, fresh_at: Instant, now: Instant, stop: Instant) -> bool {
+    started >= fresh_at || now + POLL >= stop
+}
+
+/// What `read` names, read again while it names no item, until a read AppKit validated the menus for: an item the
+/// app added or a menu it filled since the last validation is found, not refused as missing.
+fn settled(mut read: impl FnMut() -> Outcome<Named<Vec<Element>>>, deadline: Instant) -> Outcome<Vec<Element>> {
+    let stop = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
+    let mut fresh_at = None;
+    loop {
+        let started = Instant::now();
+        let why = match read()? {
+            Ok(found) => return Ok(found),
+            Err(why) => why,
+        };
+        let now = Instant::now();
+        if last_read(started, *fresh_at.get_or_insert(now + VALIDATED_FOR), now, stop) {
+            // Not a select's ELEMENT_NOT_FOUND for a missing option: the engine reads that code as a stale node and
+            // retries, and the menu will lack the title again.
+            return Err(Failure::refused(codes::ACTION_FAILED, why));
+        }
+        go("choose the menu item")?;
+        sleep(POLL);
+    }
 }
 
 /// A path's last title, the item's, and the titles of the menus above it. A path with no title names nothing, and an
@@ -206,10 +277,11 @@ fn split(path: &[String]) -> Outcome<(&String, &[String])> {
 /// item itself: no menu opens on screen, so it works on an app in the background, for an item the app has enabled there.
 /// With `physical` the app comes forward first, with `window` when it has one, so the items its focused control
 /// handles are enabled; an item still disabled is waited for within the budget, as a disabled option is. Without it a
-/// disabled item is refused at once: it stays disabled for as long as the app is in the background. Of two items of
-/// one title, the first enabled one is chosen. The Apple menu is the system's and is not searched.
+/// disabled item is refused once AppKit has validated it again (`VALIDATED_FOR`): it stays disabled for as long as the
+/// app is in the background. Of two items of one title, the first enabled one is chosen. The Apple menu is the
+/// system's and is not searched.
 pub fn choose(pid: i32, path: &[String], window: Option<u32>, physical: bool, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
-    let (leaf, parents) = split(path)?;
+    split(path)?;
     guarded(input_id, deadline, || {
         if physical {
             match window {
@@ -222,43 +294,17 @@ pub fn choose(pid: i32, path: &[String], window: Option<u32>, physical: bool, in
                 }
             }
         }
-        let mut level = app_menus(pid)?;
-        let mut holder = "the menu bar".to_owned();
-        for (depth, title) in parents.iter().enumerate() {
-            let mut opened = None;
-            for item in titled(&level, title, &holder)? {
-                opened = items_under(&item)?;
-                if opened.is_some() {
-                    break;
-                }
-            }
-            let Some(items) = opened else {
-                let next = &path[depth + 1];
-                return Err(Failure::refused(
-                    codes::ACTION_FAILED,
-                    format!("\"{}\" is a menu item, not a menu, so it has no item \"{next}\"", path[..=depth].join(" > ")),
-                ));
-            };
-            level = items;
-            holder = format!("the menu \"{title}\"");
-        }
+        let found = settled(|| named(pid, path), deadline)?;
         let name = path.join(" > ");
-        let mut found = Vec::new();
-        let mut submenu = None;
-        for item in titled(&level, leaf, &holder)? {
-            match items_under(&item)? {
-                Some(items) => submenu = submenu.or(Some(items)),
-                None => found.push(item),
-            }
-        }
-        // A press of an item that opens a menu would open it on screen.
-        if let Some(items) = submenu.filter(|_| found.is_empty()) {
-            return Err(Failure::refused(codes::ACTION_FAILED, format!("\"{name}\" opens a menu; name one of its items: {}", listed(&titles_of(&items)?))));
-        }
+        // Without `physical` an item is not waited for, but a read can say what it was `VALIDATED_FOR` ago: the items
+        // are read for that long, and `enabled_of` gives up a poll and the answer margin before the time it is given.
         let (wait_until, disabled) = if physical {
             (deadline, format!("the menu item \"{name}\" is disabled"))
         } else {
-            (Instant::now(), format!("the menu item \"{name}\" is disabled, so nothing was sent. {BACKGROUND_DISABLES}"))
+            (
+                deadline.min(Instant::now() + VALIDATED_FOR + POLL + ANSWER_MARGIN),
+                format!("the menu item \"{name}\" is disabled, so nothing was sent. {BACKGROUND_DISABLES}"),
+            )
         };
         let item = enabled_of(&found, wait_until, "choose the menu item", &disabled)?;
         perform(&item, "AXPress", "choose the menu item")
@@ -267,7 +313,8 @@ pub fn choose(pid: i32, path: &[String], window: Option<u32>, physical: bool, in
 
 #[cfg(test)]
 mod tests {
-    use super::{key_character, listed, split};
+    use super::{ANSWER_MARGIN, POLL, VALIDATED_FOR, key_character, last_read, listed, split};
+    use std::time::{Duration, Instant};
 
     fn path(titles: &[&str]) -> Vec<String> {
         titles.iter().map(|title| (*title).to_owned()).collect()
@@ -288,6 +335,20 @@ mod tests {
         assert!(split(&[]).is_err());
         assert!(split(&path(&["Edit", ""])).is_err());
         assert!(split(&path(&["", "Copy"])).is_err());
+    }
+
+    #[test]
+    fn refuses_a_missing_item_only_on_a_read_appkit_validated_the_menus_for() {
+        let first_ended = Instant::now();
+        let fresh_at = first_ended + VALIDATED_FOR;
+        let stop = first_ended + Duration::from_secs(30) - ANSWER_MARGIN;
+        let started = |after: Duration| first_ended + after;
+        // The first read, and one that started within the second AppKit keeps its validation for, may be stale.
+        assert!(!last_read(first_ended - POLL, fresh_at, first_ended, stop));
+        assert!(!last_read(started(Duration::from_millis(990)), fresh_at, started(Duration::from_millis(1_010)), stop));
+        assert!(last_read(started(VALIDATED_FOR), fresh_at, started(VALIDATED_FOR + POLL), stop));
+        // With no time for another read, the one at hand is the last.
+        assert!(last_read(first_ended - POLL, fresh_at, first_ended, first_ended + POLL));
     }
 
     #[test]

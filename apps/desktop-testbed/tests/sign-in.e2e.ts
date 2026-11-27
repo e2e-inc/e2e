@@ -3,6 +3,15 @@ import { readFileSync } from 'node:fs';
 import { Transformer } from '@napi-rs/image';
 import { credentials, expect } from 'e2e';
 
+/** What `desktop.menu` refused a path with, or `chosen`. */
+const refusalOf =
+  (desktop: { menu(...path: [string, ...string[]]): Promise<void> }) =>
+  (path: [string, ...string[]]): Promise<string> =>
+    desktop.menu(...path).then(
+      () => 'chosen',
+      (cause: unknown) => String(cause),
+    );
+
 test.describe('sign-in form', () => {
   test.beforeEach(async ({ app }) => {
     await app.open();
@@ -117,12 +126,22 @@ test.describe('sign-in form', () => {
     await expect(screen.getByTestId('status')).toHaveText('Reset from the menu');
   });
 
+  test('chooses a menu item the app has just enabled, and one a menu has just gained', async ({ screen, desktop }) => {
+    // AppKit validates a menu for an accessibility read at most once a second: right after the box is checked, Forget Me still reads as disabled and Remembered as not yet filled.
+    const refusal = refusalOf(desktop);
+    const remember = screen.getByTestId('remember');
+    expect(await refusal(['Form', 'Forget Me'])).toMatch(/the menu item "Form > Forget Me" is disabled, so nothing was sent/);
+    await remember.check();
+    await desktop.menu('Form', 'Forget Me');
+    await expect(screen.getByTestId('status')).toHaveText('Forgot from the menu');
+    expect(await refusal(['Remembered', 'Clear'])).toMatch(/the menu "Remembered" has no item "Clear"; it has "Nothing Remembered"/);
+    await remember.check();
+    await desktop.menu('Remembered', 'Clear');
+    await expect(screen.getByTestId('status')).toHaveText('Cleared from the menu');
+  });
+
   test('refuses a menu item the background disables, a missing one, a menu, and a path past an item', async ({ screen, desktop }) => {
-    const refusal = (path: [string, ...string[]]): Promise<string> =>
-      desktop.menu(...path).then(
-        () => 'chosen',
-        (cause: unknown) => String(cause),
-      );
+    const refusal = refusalOf(desktop);
     expect(await refusal(['Edit', 'Select All'])).toMatch(/the menu item "Edit > Select All" is disabled, so nothing was sent/);
     expect(await refusal(['Form', 'Restart'])).toMatch(/the menu "Form" has no item "Restart"; it has "Reset"/);
     expect(await refusal(['Form'])).toMatch(/"Form" opens a menu; name one of its items: "Reset"/);
