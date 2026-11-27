@@ -19,6 +19,13 @@ export const FRAME_PAGES: Record<string, PageRenderer> = {
   <iframe id="outer" name="outer" src="/frame" title="outer"></iframe>
 </body>
 </html>`),
+  '/shadow-frame': constant(`<!doctype html>
+<style>my-panel, body > iframe { position: absolute; inset: 0 auto auto 0 } my-panel { z-index: 1 }</style>
+<my-panel></my-panel><iframe name="panel" src="/child"></iframe>
+<script>
+  document.querySelector('my-panel').attachShadow({ mode: location.search === '?closed' ? 'closed' : 'open' })
+    .innerHTML = '<iframe name="panel" src="/child"></iframe>';
+</script>`),
   '/child': constant(`<!doctype html>
 <html>
 <head><title>Child frame</title></head>

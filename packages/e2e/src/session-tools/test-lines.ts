@@ -410,7 +410,10 @@ export class SessionTestLines {
     const listed = this.listed(id);
     if (listed === undefined) return { reason: `#${id.replace(/^#/, '')} is not on the newest screen` };
     const frames = listed.node.framePath ?? [];
-    if (frames.length === 0) return this.findLocator(listed, (expression) => expression);
+    if (frames.length === 0) {
+      if (listed.ancestors.some((ancestor) => ancestor.role === 'iframe')) return { reason: 'the observed iframe has no document-scoped locator' };
+      return this.findLocator(listed, (expression) => expression);
+    }
     if (!this.options.engineFixtures?.includes('browser')) return { reason: 'no browser fixture to scope the locator to its frame' };
     if (frames.some((selector) => this.options.redact(selector) !== selector || selector.includes('<secret:'))) {
       return { reason: 'the frame selector contains a redacted secret' };
