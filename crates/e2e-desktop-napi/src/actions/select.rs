@@ -46,7 +46,8 @@ pub(super) fn row_label<E: Accessible>(element: &E) -> Result<Option<String>, AX
 }
 
 /// An element's own name, as the snapshot gives it: its title, else the text of the element that labels it
-/// (`AXTitleUIElement`), else its description, else, for a text, its value.
+/// (`AXTitleUIElement`), else its description, else, for a text, its value as it shows: a number formatter's cell
+/// holds a number, which the snapshot names the row by too (`Value::display`).
 pub(super) fn own_label<E: Accessible>(element: &E) -> Result<Option<String>, AXError> {
     let values = match element.attributes(&["AXRole", "AXTitle", "AXDescription", "AXValue", "AXTitleUIElement"]) {
         Ok(values) => values,
@@ -54,12 +55,13 @@ pub(super) fn own_label<E: Accessible>(element: &E) -> Result<Option<String>, AX
         Err(_) => return Ok(None),
     };
     let text = |index: usize| values[index].as_ref().and_then(Value::text).map(str::to_owned).filter(|text| !text.trim().is_empty());
+    let shown = || values[3].as_ref().and_then(Value::display).filter(|text| !text.trim().is_empty());
     let role = values[0].as_ref().and_then(Value::text).unwrap_or_default();
     let labelled = match &values[4] {
         Some(Value::Element(label)) => crate::snapshot::label_of(label)?,
         _ => None,
     };
-    Ok(text(1).or(labelled).or_else(|| text(2)).or_else(|| if roles::text(roles::role(role, None)) { text(3) } else { None }))
+    Ok(text(1).or(labelled).or_else(|| text(2)).or_else(|| if roles::text(roles::role(role, None)) { shown() } else { None }))
 }
 
 /// The texts inside an element, in reading order, as the snapshot gathers a row's name from them.
@@ -343,4 +345,21 @@ pub(super) fn choose_row<E: Accessible>(list: Option<&E>, row: &E, deadline: Ins
         return Ok(true);
     }
     Err(Failure::unconfirmed(codes::ACTION_FAILED, unselected))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::row_label;
+    use crate::ax::Value;
+    use crate::fake::Fake;
+
+    #[test]
+    fn names_a_row_by_a_numeric_cell_as_the_snapshot_does() {
+        // An `NSNumberFormatter` cell's static text holds a number, not a string: the snapshot shows it as "2".
+        let row = Fake::new("AXRow").children(vec![
+            Fake::new("AXCell").children(vec![Fake::new("AXStaticText").text("AXValue", "Plan")]),
+            Fake::new("AXCell").children(vec![Fake::new("AXStaticText").with("AXValue", Value::Number(2.0))]),
+        ]);
+        assert_eq!(row_label(&row).unwrap().as_deref(), Some("Plan 2"));
+    }
 }
