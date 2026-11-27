@@ -535,7 +535,7 @@ export interface SwipePathOptions {
   from: ScreenPoint;
   /** Where it lifts. */
   to: ScreenPoint;
-  /** Gesture duration in milliseconds; omitted = the engine's default. */
+  /** Gesture duration, an integer from 16 through 10000 ms; omitted = the engine's default. */
   duration?: number;
   direction?: never;
   momentum?: never;

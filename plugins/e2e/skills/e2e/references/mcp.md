@@ -26,8 +26,12 @@ screen where it failed.
 The server ships with the project's `e2e` dependency. The e2e plugin for
 Codex and Cursor registers it; the Claude Code plugin does not. Otherwise
 `e2e init` offers to register it for Claude Code, Cursor, and Codex. Reuse
-an existing registration, and start the MCP client in the project so `npx`
-uses the installed e2e version (`bunx` in a Bun project). For Claude Code:
+an existing registration, and start the MCP client in the project so the
+command uses the installed e2e version. Use the project's package manager: `pnpm
+exec e2e mcp` in a pnpm project (`npx` fails there with `EBADDEVENGINES`
+when `devEngines` pins pnpm, and the client shows only `Connection
+closed`), `yarn exec e2e mcp` with Yarn (`yarn --silent exec -- e2e mcp` on Yarn 1), `bunx e2e mcp` with Bun.
+For Claude Code:
 
 ```bash
 claude mcp add --scope project e2e -- npx e2e mcp
@@ -73,6 +77,8 @@ Everything a session does is a catalog tool run through
   The reply names the first screen (path, node count) without listing it,
   and action results report changes against it: `observe` when you need
   its nodes.
+- `close_session`: frees the session's slot once its cleanup finishes, even
+  while an unrelated app is still stopping.
 - `observe`: one node per line as `#id role "name" ...`, plus the path. Node
   ids are valid only for the newest observation.
 - The grammar verbs (`tap`, `type`, `press`, `select`, `check`, `scroll`,
