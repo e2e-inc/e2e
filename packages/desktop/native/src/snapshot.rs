@@ -645,9 +645,14 @@ impl Walk {
             states.push("offscreen");
         }
 
+        // A table's row gets a ref whatever it offers: an NSTableView selects it through the table's AXSelectedRows,
+        // which a tap uses, not an action of the row. So does an element whose one action scrolls it into view.
         let ref_id = if !root
             && (roles::interactive(role)
-                || actions.iter().any(|action| matches!(*action, "Click" | "SetValue" | "Select" | "Scroll" | "RightClick" | "TypeText" | "Expand")))
+                || role == "row"
+                || actions
+                    .iter()
+                    .any(|action| matches!(*action, "Click" | "SetValue" | "Select" | "Scroll" | "RightClick" | "TypeText" | "Expand" | "ScrollTo")))
         {
             let reference = format!("@{}:e{}", self.snapshot, self.refs.len() + 1);
             self.refs.push((reference.clone(), Entry { element: element.clone(), pid: self.pid, window: self.window }));
