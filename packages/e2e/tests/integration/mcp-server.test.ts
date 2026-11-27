@@ -640,7 +640,7 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
     }
   });
 
-  it('hands launchArguments to the engine of a session opened with no config, checked as a config target\'s are', async () => {
+  it('hands the app of a session opened with no config to the config\'s own checks, whatever its keys', async () => {
     const bare = createProject({
       'node_modules/kiosk-engine/package.json': JSON.stringify({ name: 'kiosk-engine', version: '0.0.0', type: 'module', exports: './index.js' }),
       'node_modules/kiosk-engine/index.js': KIOSK_ENGINE,
@@ -653,9 +653,12 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
     };
     const received = (): unknown => JSON.parse(readFileSync(path.join(bare.dir, 'node_modules/kiosk-engine/init.json'), 'utf8'));
     try {
-      const device = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'] } });
+      const device = await open({
+        engine: 'kiosk-engine',
+        app: { bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'], permissions: { camera: 'grant' } },
+      });
       expect(device.isError, device.text).toBe(false);
-      expect(received()).toMatchObject({ bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'] });
+      expect(received()).toMatchObject({ bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'], permissions: { camera: 'grant' } });
       const closed = (await other.callTool({ name: 'close_session', arguments: {} })) as { isError?: boolean };
       expect(closed.isError).not.toBe(true);
 
@@ -663,7 +666,16 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
       expect(dashed.isError).toBe(true);
       expect(dashed.text).toContain('app.launchArguments argument name "-profile" starts with a dash');
 
-      // Both forms pass the schema and reach the config's own checks, which a web target fails.
+      // The schema names no key but the three it describes: a typo and a bad value are the config's to refuse.
+      const typo = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', launchArgument: ['-e2e'] } });
+      expect(typo.isError).toBe(true);
+      expect(typo.text).toContain('INVALID_CONFIG');
+      expect(typo.text).toContain('unknown key "launchArgument"');
+      expect(typo.text).toContain('launchArguments');
+      const denied = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', permissions: { camera: 'yes' } } });
+      expect(denied.isError).toBe(true);
+      expect(denied.text).toContain('app.permissions.camera must be grant, deny, or reset');
+
       const list = await open({ engine: '@e2e-dev/web', app: { url: app.url, launchArguments: ['-e2e', 'YES'] } });
       expect(list.isError).toBe(true);
       expect(list.text).toContain('INVALID_CONFIG');
@@ -674,7 +686,8 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
       expect(named.text).toContain('app.launchArguments is an object, and engine "web" takes only a list of strings');
       const nested = await open({ engine: '@e2e-dev/web', app: { url: app.url, launchArguments: { e2e: { on: true } } } });
       expect(nested.isError).toBe(true);
-      expect(nested.text).toContain('Invalid arguments for tool open_session');
+      expect(nested.text).toContain('INVALID_CONFIG');
+      expect(nested.text).toContain('app.launchArguments');
     } finally {
       await other.close();
       bare.cleanup();

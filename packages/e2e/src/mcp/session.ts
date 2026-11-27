@@ -780,18 +780,15 @@ export class SessionHost {
             'Only where the project has no config file: the engine to open on. A package name calls its default export with no options: "@e2e-dev/web". An object passes options, and an option of this same shape is called first and replaced by its result, which is how an engine gets a device or browser provider: {package: "@e2e-dev/mobile", options: {platform: "ios", device: {package: "@e2e-dev/limrun", export: "limrun", options: {region: "eu"}}}}. Excludes target, config, and test',
           ),
         app: z
-          .object({
+          .looseObject({
             url: z.string().min(1).optional().describe('The URL the session opens, and the base of relative navigation'),
             bundleId: z.string().min(1).optional().describe('An installed app to launch: its bundle id, package, or display name'),
             appPath: z.string().min(1).optional().describe("A build to install and launch: an .app, .ipa, or .apk, relative to the server's working directory"),
-            launchArguments: z
-              .union([z.array(z.string()), z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))])
-              .optional()
-              .describe('Arguments a device or desktop app launches with: a list, or {name: value}'),
           })
-          .strict()
           .optional()
-          .describe('With engine: the app under test. @e2e-dev/web needs url; @e2e-dev/mobile and @e2e-dev/desktop need bundleId or appPath'),
+          .describe(
+            "With engine: the app under test, with any key of a config target's app, such as launchArguments, permissions, or command. @e2e-dev/web needs url; @e2e-dev/mobile and @e2e-dev/desktop need bundleId or appPath",
+          ),
       }).strict(),
       readOnly: false,
       call: async (args, extra) => textResult(await this.open(args, extra.signal)),
