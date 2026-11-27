@@ -294,7 +294,7 @@ model (else `MODEL_UNAVAILABLE`, topic `agent`); `request` for HTTP calls;
 `platform` (`web`, `ios`, `android`, or an engine's label); `services`, the
 values the config's services yield (topic `setup`); `browser` from
 `@e2e-dev/web`, `device` from `@e2e-dev/mobile`, `desktop` from
-`@e2e-dev/desktop`; `session` only in `test.setup`. `app` opens the app
+`@e2e-dev/desktop`, `electron` from `@e2e-dev/electron`; `session` only in `test.setup`. `app` opens the app
 (`open(path?)`, `back()`, `restart()`, `clearState()`), takes screenshots,
 and records video. Full reference: docs/fixtures.mdx, docs/reference/app.mdx,
 docs/reference/request.mdx.
@@ -525,7 +525,10 @@ background: `waitForPopup(() => trigger)` makes it active and returns it.
   `screen` locator.
 
 Patterns use Playwright's glob grammar (`*` within one path segment, `**`
-across `/`); a relative one resolves against the base URL. Full reference:
+across `/`); a relative one resolves against the base URL. In strings that
+use glob syntax, e2e matches raw `"`, `<`, `>`, `` ` ``, `^`, `'`, and escaped `\{` and `\}`
+as the browser encodes them in paths, queries, and fragments. For example,
+a query apostrophe in an HTTP URL matches `%27`. Full reference:
 docs/reference/web.mdx, docs/browser.mdx.
 
 ## Habits

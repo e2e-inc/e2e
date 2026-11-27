@@ -164,6 +164,30 @@ the way a user would.
   run the desktop testbed; after a dependency change, also
   `pnpm --filter @e2e-dev/desktop licenses:native`, which CI checks. A prototype that runs on macOS only: `prepare`
   and `init` refuse any other OS.
+- `packages/electron` - the published `@e2e-dev/electron` package: the
+  Electron engine, contributing the `electron` fixture, and the reference
+  for an engine built outside this repository (ENG-892): it imports
+  `@e2e-dev/core/engine` and nothing else at run time: it starts the binary
+  and speaks the DevTools protocol itself (`src/cdp/`, typed by
+  `devtools-protocol`), never another engine or an automation library. What it needs from core becomes public
+  contract (`expressionSelectors` came from it); `docs/engines.mdx` lists the
+  assumptions it broke. `app.open()` launches the project's `electron`
+  package on `app.appPath` (or `executablePath`) with a private
+  `--user-data-dir` per attempt; `prepare` downloads the Electron binary,
+  since Electron 45 has no install script. Reads join
+  `Accessibility.getFullAXTree` and one `DOMSnapshot` on backend node ids
+  (`src/tree.ts`, pure, tested on a captured read); actions run in an
+  isolated world and send trusted input; the page-side code is typed
+  functions in `src/in-page/`, sent as source text (`toString()`) and tested
+  in Chromium (`tests/integration/`). Windows are the tabs. Screenshots
+  mask password fields and nested documents, and are withheld when the DOM
+  snapshot finds one inside a closed shadow root, which no mask reaches
+  (`unmaskableCount`, independent of the accessibility tree). The app gets
+  only a few variables of the run's environment (`INHERITED_ENV` in
+  `src/app-process.ts`) and `electron({ env })`. A window that shows a local
+  file outside the app's directory is not observed, traced, or captured
+  (`src/file-bound.ts`): an Electron target has no `app.url` for core's
+  file-app bound to key on.
 - `packages/core/src/engine/protocol/` - the engine protocol: the engine
   contract as LSP-style JSON-RPC (`connectEngine` client, `serveEngine`
   server, spawn/socket/loopback transports), so an engine can run in
@@ -340,6 +364,13 @@ the way a user would.
   pointer and keyboard (`pnpm test:headed`, which moves your pointer), and
   `tests-agent/` one `agent.act`. Hand-run on a Mac with Accessibility
   permission and the native driver built; no CI job runs it yet.
+- `apps/electron-testbed` (`@e2e-dev/electron-testbed`, private) - a small
+  Electron app (`app/`: context isolation, a preload bridge, IPC, a second
+  window, a closed-shadow password field) and the e2e suites on
+  `@e2e-dev/electron` (`tests/` deterministic, `tests-agent/` with a model).
+  Its windows stay hidden unless `E2E_ELECTRON_HEADED=1`. The `electron`
+  job in `spec.yml` runs it under xvfb, after the package's integration tests
+  (`pnpm test:electron-testbed` by hand).
 - `examples/` — standalone user-facing projects, one per technology
   (`with-vite`, `with-next`, `with-astro`, `with-angular`, `with-expo`, `with-swiftui`,
   `with-compose`, `with-kotlin-multiplatform`, `with-flutter`, `with-maui`), each the same
@@ -368,10 +399,10 @@ the way a user would.
   `npm`, `pnpm`, and `bun` blocks, which the site syncs site-wide, enforced
   by `scripts/check-docs-package-managers.ts`).
   `docs/ja/`, `docs/zh/`, `docs/cs/`, `docs/es/`, `docs/pt/`, `docs/hi/`,
-  `docs/fr/`, and `docs/pl/` hold the Japanese, Simplified Chinese, Czech,
-  Spanish, Brazilian Portuguese, Hindi, French, and Polish translations, one
-  page per English page at the same path, with the tab and group labels in
-  `docs/<language>/navigation.json`. Translations are best
+  `docs/fr/`, `docs/pl/`, and `docs/id/` hold the Japanese, Simplified Chinese,
+  Czech, Spanish, Brazilian Portuguese, Hindi, French, Polish, and Indonesian
+  translations, one page per English page at the same path, with the tab and
+  group labels in `docs/<language>/navigation.json`. Translations are best
   effort: keep the English pages current in every change, and leave the
   translations to lag behind, since no contributor is expected to update a
   language they don't speak. `scripts/check-docs-translations.ts` warns on a

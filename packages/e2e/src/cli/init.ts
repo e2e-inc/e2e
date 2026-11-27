@@ -372,8 +372,10 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
     if (duplicates.includes(link)) clack.log.warn(describeDuplicate(link));
     else clack.log.info(`Linked to the installed e2e, not touching: ${link.dir}/${link.name}`);
   }
-  // Where the package manager links the skill, init refreshes the copies there are and adds none: pnpm would link a second skill beside a new copy.
-  const unwritten = packageLinks.length === 0 && rootLinks.length === 0 ? [] : skillDirs.filter((dir) => !holdsSkill(cwd, dir));
+  // Repair an existing copy even if it lost SKILL.md. Beside a package link, only refresh a copy that already loads as a skill.
+  const unwritten = packageLinks.length === 0 && rootLinks.length === 0 ? [] : skillDirs.filter((dir) =>
+    packageLinks.some((link) => link.dir === dir) ? !holdsSkill(cwd, dir) : !installedSkillDirs.includes(dir),
+  );
   for (const dir of unwritten.filter((missing) => !packageLinks.some((link) => link.dir === missing))) {
     clack.log.info(packageLinks.length > 0
       ? `Not copying the skill into ${dir}: the package manager links it from the installed e2e in this project; create the folder and install again to link it there`
