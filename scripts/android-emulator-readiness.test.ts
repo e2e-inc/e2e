@@ -18,7 +18,7 @@ function run(t: TestContext, mode = 'normal', suite = 'deterministic') {
   const state = join(dir, 'state.json');
   const calls = join(dir, 'calls.txt');
   writeFileSync(calls, '');
-  writeFileSync(state, JSON.stringify({ showing: false, swipe: false }));
+  writeFileSync(state, JSON.stringify({ showing: false, swipe: false, reads: 0 }));
   const adb = join(dir, 'adb');
   writeFileSync(adb, `#!${process.execPath}
 const fs = require('node:fs');
@@ -30,16 +30,20 @@ if (command === 'shell locksettings set-disabled false') { state.swipe = true; s
 if (command === 'shell wm dismiss-keyguard' && process.env.MODE !== 'locked') state.showing = false;
 if (command === 'shell dumpsys window policy') {
   if (process.env.MODE === 'adb-failure') process.exit(1);
-  const block = '\\n  KeyguardServiceDelegate\\n    showing=' + state.showing + '\\n    secure=' + (process.env.MODE === 'secure') + '\\n    screenState=SCREEN_STATE_ON\\n';
+  state.reads++;
+  const secure = process.env.MODE === 'secure' || (process.env.MODE === 'settling' && state.reads < 3);
+  const block = '\\n  KeyguardServiceDelegate\\n    showing=' + state.showing + '\\n    secure=' + secure + '\\n    screenState=SCREEN_STATE_ON\\n';
   console.log(process.env.MODE === 'unknown' ? 'no keyguard state' : process.env.MODE === 'ambiguous' ? block + block : block);
 }
 fs.writeFileSync(process.env.STATE, JSON.stringify(state));
 `);
   chmodSync(adb, 0o755);
+  const clock = join(dir, 'clock.cjs');
+  writeFileSync(clock, 'let calls = 0; Date.now = () => calls++ < 2 ? 0 : 5001;');
   const command = prep!.replaceAll('${{ matrix.suite }}', suite).replace('emulator-5554', mode === 'physical' ? 'physical-device' : 'emulator-5554');
   const result = spawnSync('sh', ['-c', `${command} && printf suite-started`], {
     cwd: join(root, 'apps/mobile-benchmark'), encoding: 'utf8', timeout: 15000,
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, STATE: state, CALLS: calls, MODE: mode },
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, STATE: state, CALLS: calls, MODE: mode, ...(mode === 'budget-expired' ? { NODE_OPTIONS: `--require ${clock}` } : {}) },
   });
   return { result, state: JSON.parse(readFileSync(state, 'utf8')), calls: readFileSync(calls, 'utf8') };
 }
@@ -71,9 +75,25 @@ test('agentic preparation does not enable Swipe', (t) => {
   assert.equal(state.swipe, false);
 });
 
+test('preparation observes non-secure state before its single dismissal', (t) => {
+  const { result, calls } = run(t, 'settling');
+  assert.equal(result.status, 0, result.stderr);
+  const beforeDismiss = calls.slice(0, calls.indexOf('wm dismiss-keyguard'));
+  assert.equal(beforeDismiss.split('dumpsys window policy').length - 1, 3);
+  assert.equal(calls.split('wm dismiss-keyguard').length - 1, 1);
+});
+
 test('preparation rejects a physical serial before any adb side effect', (t) => {
   const { result, calls } = run(t, 'physical');
   assert.notEqual(result.status, 0);
   assert.equal(calls, '');
+  assert.doesNotMatch(result.stdout, /suite-started/);
+});
+
+test('preparation does not dismiss when a non-secure read returns after the budget', (t) => {
+  const { result, calls } = run(t, 'budget-expired');
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /readiness exceeded five seconds/);
+  assert.doesNotMatch(calls, /wm dismiss-keyguard/);
   assert.doesNotMatch(result.stdout, /suite-started/);
 });
