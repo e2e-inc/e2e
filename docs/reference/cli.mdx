@@ -1223,7 +1223,8 @@ With `--json`, it prints the `doctor-1` report to stdout: `{ "schemaVersion": "d
 
 Inspects or clears the replay cache. Each subcommand loads the discovered
 config or `--config <path>`, reads the directory a run would, and exits 0 on
-an empty store. `check` exits 0 whatever detours it finds.
+an empty store; `show` given a file path reads that file without the config.
+`check` exits 0 whatever detours it finds.
 
 <CodeGroup>
 ```bash npm
