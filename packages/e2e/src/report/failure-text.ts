@@ -47,7 +47,7 @@ export interface TracePageOptions {
   readonly pageDir?: string | undefined;
   /** Reads one artifact by its report path, for inlining the screen text; absent when the files are not at hand. */
   readonly readArtifact?: ((reportPath: string) => string | undefined) | undefined;
-  /** The file holding the test's replay recordings, as the reader should see it; each recorded step names it with its key. */
+  /** The file holding the test's replay recordings, as the reader should see it; each of the test's own recorded steps names it with its key. */
   readonly cacheFile?: string | undefined;
 }
 
@@ -610,7 +610,8 @@ export function renderTracePage(report: Report1Document, result: ReportResult, f
       if (step.status !== 'passed' && step.explanation !== undefined && step.explanation.trim() !== '') {
         lines.push(`   > ${cell(step.explanation, MAX_DETAIL_CHARS)}`);
       }
-      for (const line of stepDetailLines(step, told.appLog, options)) lines.push(`   - ${line}`);
+      // A session's step records under that session's own cache key, never in the test's file.
+      for (const line of stepDetailLines(step, told.appLog, step.actor === undefined ? options : {})) lines.push(`   - ${line}`);
       for (const artifact of told.artifacts) {
         if (artifact.kind === 'screenshot' && step.artifacts.includes(artifact.id)) lines.push(`   - ${artifactPath(artifact, options)}`);
       }

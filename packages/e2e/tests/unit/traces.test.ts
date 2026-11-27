@@ -83,6 +83,30 @@ describe('writeTracePages', () => {
     expect(text).toContain('**ENGINE_FAILURE** in cleanup: the browser closed early');
   });
 
+  it("does not name the test's recording file on a step another session recorded", async () => {
+    const root = project();
+    const dir = path.join(root, '.e2e', 'results');
+    const guest = reportResult({
+      id: '2'.repeat(12),
+      testId: 'tests/auth.e2e.ts::auth::opens',
+      titlePath: ['auth', 'opens'],
+      status: 'passed',
+      attempts: [
+        reportAttempt({
+          status: 'passed',
+          steps: [
+            reportStep({ index: 0, kind: 'agent', api: 'agent.act', label: 'sign in', actor: 'admin', cache: { mode: 'self-finalized', replayedActions: 1, totalActions: 1, entry: ENTRY } }),
+          ],
+        }),
+      ],
+    });
+    await writeTracePages(reportDocument({ status: 'passed', results: [guest] }), new Set([guest.id]), { projectRoot: root, resultsRoot: dir, cacheDir: path.join(root, '.e2e', 'cache') });
+    const [page] = readdirSync(dir);
+    const text = readFileSync(path.join(dir, page!, 'trace.md'), 'utf8');
+    expect(text).toContain('cache: replayed all 1 recorded action, no model call');
+    expect(text).not.toContain('auth-opens.yml');
+  });
+
   it('names a cache directory outside the project by its absolute path', async () => {
     const root = project();
     const dir = path.join(root, '.e2e', 'results');
