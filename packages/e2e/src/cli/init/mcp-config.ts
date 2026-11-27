@@ -9,12 +9,14 @@
 
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import type { PackageManager } from '../../internal/package-manager.ts';
+import { execArgv, type ProjectManager } from '../../internal/package-manager.ts';
 import { realpathOfExisting } from '@e2e-dev/core/lib/internal/paths';
 import { MCP_LOCATIONS } from './choices.ts';
 import { readCodexConfig, updateCodexConfig } from './codex-config.ts';
 
 const MCP_SERVER_NAME = 'e2e';
+
+type McpProject = Pick<ProjectManager, 'manager' | 'yarnBerry'>;
 
 export interface McpRegistration {
   /** Project-relative file, e.g. `.mcp.json`. */
@@ -103,19 +105,9 @@ export function findRegisteredMcpFiles(cwd: string): string[] {
  * project whose `devEngines` pins another manager, and finds no binary in a
  * Yarn Plug'n'Play install; a Bun project may have no Node.js for it at all.
  */
-function mcpLaunch(manager: PackageManager, yarnBerry: boolean): { readonly command: string; readonly args: readonly string[] } {
-  switch (manager) {
-    case 'npm':
-      return { command: 'npx', args: ['e2e', 'mcp'] };
-    case 'pnpm':
-      return { command: 'pnpm', args: ['exec', 'e2e', 'mcp'] };
-    case 'yarn':
-      // `exec`, since `yarn run e2e` and `yarn e2e` run a package.json script named e2e before the binary. Yarn 1 also
-      // prints a banner to stdout, the protocol's stream, unless silenced, and takes the server's flags as its own without `--`; Yarn 2 and later refuse both.
-      return yarnBerry ? { command: 'yarn', args: ['exec', 'e2e', 'mcp'] } : { command: 'yarn', args: ['--silent', 'exec', '--', 'e2e', 'mcp'] };
-    case 'bun':
-      return { command: 'bunx', args: ['e2e', 'mcp'] };
-  }
+function mcpLaunch(project: McpProject): { readonly command: string; readonly args: readonly string[] } {
+  const { command, args } = execArgv(project);
+  return { command, args: [...args, 'e2e', 'mcp'] };
 }
 
 /**
@@ -124,10 +116,9 @@ function mcpLaunch(manager: PackageManager, yarnBerry: boolean): { readonly comm
  * Extra settings on the e2e entry, other servers, other keys, and the file's
  * indentation are preserved. A file reached through a symlink is never read;
  * it is returned among `links` for the caller to report and skip.
- * `yarnBerry` says a Yarn project is on Yarn 2 or later, whose command differs.
  */
-export function planMcpRegistration(cwd: string, files: readonly string[], manager: PackageManager, yarnBerry = false): McpPlan {
-  const launch = mcpLaunch(manager, yarnBerry);
+export function planMcpRegistration(cwd: string, files: readonly string[], project: McpProject): McpPlan {
+  const launch = mcpLaunch(project);
   const registrations: McpRegistration[] = [];
   const links: McpLink[] = [];
   for (const file of files) {

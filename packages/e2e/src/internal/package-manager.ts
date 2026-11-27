@@ -7,6 +7,15 @@ import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
 
 export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
 
+/** A project's manager with what its commands depend on. */
+export interface ProjectManager {
+  readonly manager: PackageManager;
+  /** Where the install keeps its lockfile. */
+  readonly root: string;
+  /** True for Yarn 2 or later, whose commands differ from Yarn 1's. False for every other manager. */
+  readonly yarnBerry: boolean;
+}
+
 const PACKAGE_MANAGERS: ReadonlySet<string> = new Set<PackageManager>(['npm', 'pnpm', 'yarn', 'bun']);
 const LOCKFILES = [
   ['pnpm-lock.yaml', 'pnpm'],
@@ -66,20 +75,25 @@ export function detectPackageManager(
 export function detectWorkspacePackageManager(
   dir: string,
   env: NodeJS.ProcessEnv = process.env,
-): { readonly manager: PackageManager; readonly root: string } {
+): ProjectManager {
   const project = path.resolve(dir);
   const own = managerAt(project) ?? workspaceGlobs(project)?.manager;
-  if (own !== undefined) return { manager: own, root: project };
+  if (own !== undefined) return projectManager(own, project);
   for (let current = path.dirname(project); ; current = path.dirname(current)) {
     const workspace = workspaceGlobs(current);
     if (workspace !== undefined) {
       const member = includesPackage(workspace.globs, path.relative(current, project).split(path.sep).join('/'));
-      if (member) return { manager: managerAt(current) ?? workspace.manager ?? invokingManager(env), root: current };
+      if (member) return projectManager(managerAt(current) ?? workspace.manager ?? invokingManager(env), current);
       break;
     }
     if (path.dirname(current) === current) break;
   }
-  return { manager: invokingManager(env), root: project };
+  return projectManager(invokingManager(env), project);
+}
+
+/** `manager` as the manager of the install rooted at `root`. */
+export function projectManager(manager: PackageManager, root: string): ProjectManager {
+  return { manager, root, yarnBerry: manager === 'yarn' && usesYarnBerry(root) };
 }
 
 /** The lockfile names every manager writes, for a caller that must put one back. */
@@ -96,10 +110,21 @@ function managerAt(dir: string): PackageManager | undefined {
   return fieldManager(typeof field === 'string' ? field : undefined) ?? lockfileManager(dir);
 }
 
-/** Whether the Yarn project rooted at `root` is on Yarn 2 or later: it has a `.yarnrc.yml`, or its `packageManager` field names such a version. */
-export function usesYarnBerry(root: string): boolean {
+/**
+ * Whether the Yarn project rooted at `root` is on Yarn 2 or later: it has a
+ * `.yarnrc.yml`, else its `packageManager` field names the version, else its
+ * lockfile is in the format Yarn 1 does not write.
+ */
+function usesYarnBerry(root: string): boolean {
+  if (existsSync(path.join(root, '.yarnrc.yml'))) return true;
   const field = readPackageManifest(root)?.['packageManager'];
-  return existsSync(path.join(root, '.yarnrc.yml')) || (typeof field === 'string' && /^yarn@[2-9]/u.test(field));
+  const major = typeof field === 'string' ? /^yarn@(\d+)/u.exec(field)?.[1] : undefined;
+  if (major !== undefined) return Number(major) >= 2;
+  try {
+    return /^__metadata:/mu.test(readFileSync(path.join(root, 'yarn.lock'), 'utf8'));
+  } catch {
+    return false;
+  }
 }
 
 /** The package.json in `dir` as an object, or undefined when it is missing or not one. */
@@ -198,7 +223,12 @@ export function runScriptCommand(manager: PackageManager, name: string): string 
   }
 }
 
-/** The command that runs an installed binary, never a registry download, with the given manager. */
+/**
+ * The command a person types to run an installed binary, never a registry
+ * download, with the given manager. Yarn takes `exec --` in every version:
+ * `yarn e2e` runs a package.json script named e2e before the binary, and
+ * Yarn 1 takes the binary's flags as its own without the separator.
+ */
 export function execCommand(manager: PackageManager, command: string): string {
   switch (manager) {
     case 'npm':
@@ -206,9 +236,29 @@ export function execCommand(manager: PackageManager, command: string): string {
     case 'pnpm':
       return `pnpm exec ${command}`;
     case 'yarn':
-      return `yarn ${command}`;
+      return `yarn exec -- ${command}`;
     case 'bun':
       return `bun run ${command}`;
+  }
+}
+
+/**
+ * The program and leading arguments that run an installed binary when
+ * another program starts it and reads its stdout; the binary's name and
+ * arguments follow. It differs from `execCommand` on purpose: `npx` and
+ * `bunx` are the forms MCP clients document, and Yarn 1 prints a banner to
+ * stdout unless silenced, with a flag Yarn 2 and later refuse.
+ */
+export function execArgv({ manager, yarnBerry }: Pick<ProjectManager, 'manager' | 'yarnBerry'>): { readonly command: string; readonly args: readonly string[] } {
+  switch (manager) {
+    case 'npm':
+      return { command: 'npx', args: [] };
+    case 'pnpm':
+      return { command: 'pnpm', args: ['exec'] };
+    case 'yarn':
+      return { command: 'yarn', args: yarnBerry ? ['exec'] : ['--silent', 'exec', '--'] };
+    case 'bun':
+      return { command: 'bunx', args: [] };
   }
 }
 

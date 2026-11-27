@@ -35,9 +35,11 @@ const canLinkDir = process.platform === 'win32' || symlinks;
 
 const ENTRY = { command: 'npx', args: ['e2e', 'mcp'] };
 
+const NPM = { manager: 'npm', yarnBerry: false } as const;
+
 describe('planMcpRegistration', () => {
   it('creates each missing file with the e2e server entry', () => {
-    const { registrations } = planMcpRegistration(dir, MCP_LOCATIONS.map((location) => location.file), 'npm');
+    const { registrations } = planMcpRegistration(dir, MCP_LOCATIONS.map((location) => location.file), NPM);
     expect(registrations.map((plan) => [plan.relative, plan.existing])).toEqual([
       ['.mcp.json', false],
       ['.cursor/mcp.json', false],
@@ -55,7 +57,7 @@ describe('planMcpRegistration', () => {
     ['yarn', true, 'yarn', ['exec', 'e2e', 'mcp']],
     ['bun', false, 'bunx', ['e2e', 'mcp']],
   ] as const)("starts the server with the project's own manager: %s (Yarn 2 or later: %s)", (manager, yarnBerry, command, args) => {
-    const [json, toml] = planMcpRegistration(dir, ['.mcp.json', '.codex/config.toml'], manager, yarnBerry).registrations;
+    const [json, toml] = planMcpRegistration(dir, ['.mcp.json', '.codex/config.toml'], { manager, yarnBerry }).registrations;
     expect(JSON.parse(json!.content)).toEqual({ mcpServers: { e2e: { command, args } } });
     expect(toml!.content).toBe(`[mcp_servers.e2e]\nargs = ${JSON.stringify(args)}\ncommand = ${JSON.stringify(command)}\n`);
   });
@@ -64,21 +66,21 @@ describe('planMcpRegistration', () => {
     writeFileSync(path.join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { e2e: { command: 'npx', args: ['-y', 'e2e', 'mcp'], env: { APP_ENV: 'staging' } } } }));
     mkdirSync(path.join(dir, '.codex'));
     writeFileSync(path.join(dir, '.codex/config.toml'), '# Keep this comment\n[mcp_servers.e2e]\ncommand = "npx"\nargs = ["e2e", "mcp"]\nstartup_timeout_sec = 30\n');
-    const [json, toml] = planMcpRegistration(dir, ['.mcp.json', '.codex/config.toml'], 'pnpm').registrations;
+    const [json, toml] = planMcpRegistration(dir, ['.mcp.json', '.codex/config.toml'], { manager: 'pnpm', yarnBerry: false }).registrations;
     expect(json!.existing).toBe(true);
     expect(JSON.parse(json!.content)).toEqual({ mcpServers: { e2e: { command: 'pnpm', args: ['exec', 'e2e', 'mcp'], env: { APP_ENV: 'staging' } } } });
     expect(toml!.content).toBe('# Keep this comment\n[mcp_servers.e2e]\ncommand = "pnpm"\nargs = ["exec","e2e","mcp"]\nstartup_timeout_sec = 30\n');
   });
 
   it('registers Codex in its project TOML config and discovers it on the next run', () => {
-    const [plan] = planMcpRegistration(dir, ['.codex/config.toml'], 'npm').registrations;
+    const [plan] = planMcpRegistration(dir, ['.codex/config.toml'], NPM).registrations;
     expect(plan!.content).toContain('[mcp_servers.e2e]');
     expect(plan!.content).toContain('command = "npx"');
     expect(plan!.content).toContain('"e2e"');
     mkdirSync(path.join(dir, '.codex'));
     writeFileSync(path.join(dir, '.codex/config.toml'), plan!.content);
     expect(findRegisteredMcpFiles(dir)).toEqual(['.codex/config.toml']);
-    expect(planMcpRegistration(dir, ['.codex/config.toml'], 'npm').registrations).toEqual([]);
+    expect(planMcpRegistration(dir, ['.codex/config.toml'], NPM).registrations).toEqual([]);
   });
 
   it.each([
@@ -93,7 +95,7 @@ describe('planMcpRegistration', () => {
   ])('preserves Codex settings and comments when repairing or adding a server: %s', (original) => {
     mkdirSync(path.join(dir, '.codex'));
     writeFileSync(path.join(dir, '.codex/config.toml'), original);
-    const [plan] = planMcpRegistration(dir, ['.codex/config.toml'], 'npm').registrations;
+    const [plan] = planMcpRegistration(dir, ['.codex/config.toml'], NPM).registrations;
     const before = getStaticTOMLValue(parseTOML(original));
     const after = getStaticTOMLValue(parseTOML(plan!.content));
     const servers = before.mcp_servers as Record<string, object> | undefined;
@@ -103,14 +105,14 @@ describe('planMcpRegistration', () => {
     }
     expect(plan!.existing).toBe(true);
     writeFileSync(path.join(dir, '.codex/config.toml'), plan!.content);
-    expect(planMcpRegistration(dir, ['.codex/config.toml'], 'npm').registrations).toEqual([]);
+    expect(planMcpRegistration(dir, ['.codex/config.toml'], NPM).registrations).toEqual([]);
   });
 
   it('leaves a current Codex registration byte-for-byte unchanged', () => {
     const original = '# Keep this comment\n[mcp_servers.e2e]\nargs = [\'e2e\', \'mcp\']\ncommand = \'npx\'\nstartup_timeout_sec = 30\n';
     mkdirSync(path.join(dir, '.codex'));
     writeFileSync(path.join(dir, '.codex/config.toml'), original);
-    expect(planMcpRegistration(dir, ['.codex/config.toml'], 'npm').registrations).toEqual([]);
+    expect(planMcpRegistration(dir, ['.codex/config.toml'], NPM).registrations).toEqual([]);
     expect(readFileSync(path.join(dir, '.codex/config.toml'), 'utf8')).toBe(original);
   });
 
@@ -118,7 +120,7 @@ describe('planMcpRegistration', () => {
     const original = '[mcp_servers.e2e\ncommand = "node"\n';
     mkdirSync(path.join(dir, '.codex'));
     writeFileSync(path.join(dir, '.codex/config.toml'), original);
-    expect(() => planMcpRegistration(dir, ['.codex/config.toml'], 'npm')).toThrow(/is not valid TOML/);
+    expect(() => planMcpRegistration(dir, ['.codex/config.toml'], NPM)).toThrow(/is not valid TOML/);
     expect(findRegisteredMcpFiles(dir)).toEqual([]);
     expect(readFileSync(path.join(dir, '.codex/config.toml'), 'utf8')).toBe(original);
   });
@@ -128,7 +130,7 @@ describe('planMcpRegistration', () => {
     (original) => {
       mkdirSync(path.join(dir, '.codex'));
       writeFileSync(path.join(dir, '.codex/config.toml'), original);
-      expect(() => planMcpRegistration(dir, ['.codex/config.toml'], 'npm')).toThrow();
+      expect(() => planMcpRegistration(dir, ['.codex/config.toml'], NPM)).toThrow();
       expect(readFileSync(path.join(dir, '.codex/config.toml'), 'utf8')).toBe(original);
     },
   );
@@ -136,7 +138,7 @@ describe('planMcpRegistration', () => {
   it('merges into an existing file, keeping other servers, keys, and indentation', () => {
     const existing = '{\n    "mcpServers": {\n        "figma": { "command": "figma-mcp" }\n    },\n    "other": true\n}\n';
     writeFileSync(path.join(dir, '.mcp.json'), existing);
-    const [plan] = planMcpRegistration(dir, ['.mcp.json'], 'npm').registrations;
+    const [plan] = planMcpRegistration(dir, ['.mcp.json'], NPM).registrations;
     expect(plan!.existing).toBe(true);
     expect(JSON.parse(plan!.content)).toEqual({ mcpServers: { figma: { command: 'figma-mcp' }, e2e: ENTRY }, other: true });
     expect(plan!.content).toContain('\n    "mcpServers"');
@@ -145,11 +147,11 @@ describe('planMcpRegistration', () => {
   it('plans nothing for a file that already registers the same entry, and finds it', () => {
     mkdirSync(path.join(dir, '.cursor'));
     writeFileSync(path.join(dir, '.cursor', 'mcp.json'), JSON.stringify({ mcpServers: { e2e: ENTRY } }));
-    expect(planMcpRegistration(dir, ['.cursor/mcp.json'], 'npm').registrations).toEqual([]);
+    expect(planMcpRegistration(dir, ['.cursor/mcp.json'], NPM).registrations).toEqual([]);
     expect(findRegisteredMcpFiles(dir)).toEqual(['.cursor/mcp.json']);
     // A stale entry is repaired, not treated as registered.
     writeFileSync(path.join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { e2e: { command: 'e2e', args: ['mcp'] } } }));
-    expect(planMcpRegistration(dir, ['.mcp.json'], 'npm').registrations).toHaveLength(1);
+    expect(planMcpRegistration(dir, ['.mcp.json'], NPM).registrations).toHaveLength(1);
     expect(findRegisteredMcpFiles(dir)).toEqual(['.mcp.json', '.cursor/mcp.json']);
   });
 
@@ -157,7 +159,7 @@ describe('planMcpRegistration', () => {
     const entry = { ...ENTRY, env: { APP_ENV: 'staging' }, timeout: 30_000 };
     const original = JSON.stringify({ mcpServers: { e2e: entry } }, null, 4) + '\n';
     writeFileSync(path.join(dir, '.mcp.json'), original);
-    expect(planMcpRegistration(dir, ['.mcp.json'], 'npm').registrations).toEqual([]);
+    expect(planMcpRegistration(dir, ['.mcp.json'], NPM).registrations).toEqual([]);
     expect(readFileSync(path.join(dir, '.mcp.json'), 'utf8')).toBe(original);
   });
 
@@ -166,13 +168,13 @@ describe('planMcpRegistration', () => {
       mcpServers: { e2e: { command: 'e2e', args: ['mcp'], env: { APP_ENV: 'staging' }, timeout: 30_000 } },
       other: true,
     }));
-    const [plan] = planMcpRegistration(dir, ['.mcp.json'], 'npm').registrations;
+    const [plan] = planMcpRegistration(dir, ['.mcp.json'], NPM).registrations;
     expect(JSON.parse(plan!.content)).toEqual({ mcpServers: { e2e: { ...ENTRY, env: { APP_ENV: 'staging' }, timeout: 30_000 } }, other: true });
   });
 
   it('refuses to overwrite a file that is not JSON', () => {
     writeFileSync(path.join(dir, '.mcp.json'), '{ not json');
-    expect(() => planMcpRegistration(dir, ['.mcp.json'], 'npm')).toThrow(/is not valid JSON/);
+    expect(() => planMcpRegistration(dir, ['.mcp.json'], NPM)).toThrow(/is not valid JSON/);
     expect(findRegisteredMcpFiles(dir)).toEqual([]);
     expect(readFileSync(path.join(dir, '.mcp.json'), 'utf8')).toBe('{ not json');
   });
@@ -185,7 +187,7 @@ describe('planMcpRegistration', () => {
       const file = directory === '.cursor' ? 'mcp.json' : 'config.toml';
       writeFileSync(path.join(elsewhere, file), file.endsWith('.json') ? JSON.stringify({ mcpServers: { e2e: ENTRY } }) : '[mcp_servers.e2e]\ncommand = "node"\n');
       symlinkSync(elsewhere, path.join(dir, directory), 'junction');
-      const { registrations, links } = planMcpRegistration(dir, [`${directory}/${file}`], 'npm');
+      const { registrations, links } = planMcpRegistration(dir, [`${directory}/${file}`], NPM);
       expect(registrations).toEqual([]);
       expect(links).toEqual([{ relative: directory, target: realpathSync(elsewhere) }]);
       // Nothing was written through the link, and it is not counted as registered.
@@ -204,7 +206,7 @@ describe('planMcpRegistration', () => {
       const original = JSON.stringify({ mcpServers: { e2e: ENTRY, other: { command: 'x' } } });
       writeFileSync(target, original);
       symlinkSync(target, path.join(dir, '.mcp.json'), 'file');
-      const { registrations, links } = planMcpRegistration(dir, ['.mcp.json'], 'npm');
+      const { registrations, links } = planMcpRegistration(dir, ['.mcp.json'], NPM);
       expect(registrations).toEqual([]);
       expect(links).toEqual([{ relative: '.mcp.json', target: realpathSync(target) }]);
       // The target is untouched: nothing was read or written through the link, and it is not counted as registered.
