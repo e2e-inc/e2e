@@ -173,12 +173,14 @@ fn plain(text: Option<String>) -> Option<String> {
     label(text.map(|text| if text.chars().any(bidi_mark) { text.chars().filter(|character| !bidi_mark(*character)).collect() } else { text }))
 }
 
-/// Whether an identifier is one AppKit made up rather than one a developer gave: a nib's object id (`_NS:61`) or the
-/// selector of a menu item's action (`_popUpItemAction:`, `chose:`). Neither names the control: the first changes with
-/// the nib, and the second is the same for every item of a menu.
-fn generated_identifier(identifier: &str) -> bool {
+/// Whether an identifier is one AppKit made up rather than one a developer gave: a nib's object id (`_NS:61`) on any
+/// control, or, on a menu item, the selector of its action (`_popUpItemAction:`, `chose:`), the same for every item of
+/// a menu. Neither names the control: the first changes with the nib. Any other control keeps an id ending in `:`, which
+/// a developer may give.
+fn generated_identifier(identifier: &str, role: &str) -> bool {
     identifier.starts_with("_NS:")
-        || (identifier.len() > 1
+        || (role == "menuitem"
+            && identifier.len() > 1
             && identifier.ends_with(':')
             && identifier
                 .split(':')
@@ -724,7 +726,11 @@ impl Walk {
             hint: plain(read.help.clone()),
             level: if role == "heading" { read.heading_level } else { None },
             placeholder: plain(read.placeholder.clone()),
-            native_id: read.identifier.clone().filter(|identifier| !generated_identifier(identifier)).map(|value| NativeId { kind: "ax_identifier", value }),
+            native_id: read
+                .identifier
+                .clone()
+                .filter(|identifier| !generated_identifier(identifier, role))
+                .map(|value| NativeId { kind: "ax_identifier", value }),
             states,
             available_actions: actions,
             scroll_axes,
@@ -897,11 +903,14 @@ mod tests {
 
     #[test]
     fn tells_an_identifier_appkit_made_up_from_a_developers() {
-        for made_up in ["_NS:61", "_popUpItemAction:", "chose:", "menuItemSelected:", "performClick:withEvent:"] {
-            assert!(generated_identifier(made_up), "{made_up}");
+        assert!(generated_identifier("_NS:61", "button"));
+        for made_up in ["_popUpItemAction:", "chose:", "menuItemSelected:", "performClick:withEvent:"] {
+            assert!(generated_identifier(made_up, "menuitem"), "{made_up}");
+            // A developer may give any other control an id that ends in `:`.
+            assert!(!generated_identifier(made_up, "button"), "{made_up}");
         }
         for given in ["username", "sign-in.submit", "StandardInputView;value:15", "com.apple.settings.keyboard", "time: 12:00", ":"] {
-            assert!(!generated_identifier(given), "{given}");
+            assert!(!generated_identifier(given, "menuitem"), "{given}");
         }
     }
     use crate::ax;
