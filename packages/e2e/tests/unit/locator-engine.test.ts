@@ -699,8 +699,8 @@ describe('translateLocatorError mapping table', () => {
       new EngineError('NODE_STALE', 'stale', { retryable: false }),
       EXPRESSION,
     );
-    expect(translated.message).toContain('stale');
-    expect(translated.message).toMatch(/: getByRole\("button"\)$/);
+    // The engine's own reason follows the locator, so text that matched "node became stale: <locator>" still does.
+    expect(translated.message).toBe('node became stale: getByRole("button") (stale)');
   });
 });
 
