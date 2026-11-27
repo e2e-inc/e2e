@@ -83,6 +83,16 @@ describe('planMcpRegistration', () => {
     expect(planMcpRegistration(dir, ['.mcp.json'], { manager: 'pnpm', yarnBerry: false }).registrations).toEqual([]);
   });
 
+  it.each([
+    ['a versioned package', ['-y', 'e2e@0.25.0', 'mcp', '--target', 'web'], ['exec', 'e2e', 'mcp', '--target', 'web']],
+    ['a launcher init does not write', ['node_modules/e2e/dist/cli/bin.js', 'mcp', '--headed'], ['exec', 'e2e', 'mcp']],
+    ['another package that takes an mcp argument', ['-y', 'other-e2e', 'mcp', '--x'], ['exec', 'e2e', 'mcp']],
+  ] as const)('reads the arguments to keep after the e2e package and mcp: %s', (_name, existing, args) => {
+    writeFileSync(path.join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { e2e: { command: 'npx', args: existing } } }));
+    const [json] = planMcpRegistration(dir, ['.mcp.json'], { manager: 'pnpm', yarnBerry: false }).registrations;
+    expect(JSON.parse(json!.content)).toEqual({ mcpServers: { e2e: { command: 'pnpm', args } } });
+  });
+
   it('registers Codex in its project TOML config and discovers it on the next run', () => {
     const [plan] = planMcpRegistration(dir, ['.codex/config.toml'], NPM).registrations;
     expect(plan!.content).toContain('[mcp_servers.e2e]');

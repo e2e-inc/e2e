@@ -111,11 +111,11 @@ function mcpLaunch(project: McpProject, existing: unknown): { readonly command: 
   return { command, args: [...args, 'e2e', 'mcp', ...serverArguments(existing)] };
 }
 
-/** What an existing entry passes to `e2e mcp` itself, after whatever launcher it names. */
+/** What an existing entry passes to `e2e mcp` itself, after a launcher that names the package, as `npx -y e2e@0.25.0 mcp` does. */
 function serverArguments(existing: unknown): readonly string[] {
   const args: unknown = isPlainObject(existing) ? existing['args'] : undefined;
   if (!Array.isArray(args) || !args.every((arg) => typeof arg === 'string')) return [];
-  const server = args.findIndex((arg, index) => arg === 'e2e' && args[index + 1] === 'mcp');
+  const server = args.findIndex((arg, index) => /^e2e(?:@.+)?$/u.test(arg) && args[index + 1] === 'mcp');
   return server === -1 ? [] : args.slice(server + 2);
 }
 

@@ -124,13 +124,33 @@ describe('a devEngines pin', () => {
   it.each([
     ['names the manager of a project with no lockfile yet', { devEngines: { packageManager: { name: 'pnpm', onFail: 'error' } } }, {}, 'pnpm'],
     ['yields to the packageManager field', { packageManager: 'yarn@4.19.0', devEngines: { packageManager: { name: 'pnpm' } } }, {}, 'yarn'],
-    ['wins over a lockfile another manager left', { devEngines: { packageManager: { name: 'pnpm' } } }, { 'package-lock.json': '{}' }, 'pnpm'],
+    ['yields to a lockfile, which says what installed the project', { devEngines: { packageManager: { name: 'pnpm' } } }, { 'package-lock.json': '{}' }, 'npm'],
+    ['is read from a list of one', { devEngines: { packageManager: [{ name: 'pnpm' }] } }, {}, 'pnpm'],
     ['is not read when it lists several managers', { devEngines: { packageManager: [{ name: 'pnpm' }, { name: 'yarn' }] } }, {}, 'npm'],
     ['is not read when it names no manager e2e knows', { devEngines: { packageManager: { name: 'deno' } } }, {}, 'npm'],
   ] as const)('%s', (_name, manifest, files, expected) => {
     writeFileSync(path.join(dir, 'package.json'), JSON.stringify(manifest));
     for (const [name, content] of Object.entries(files)) writeFileSync(path.join(dir, name), content);
     expect(detectWorkspacePackageManager(dir, {}).manager).toBe(expected);
+    expect(detectPackageManager(dir, 'packageManager' in manifest ? manifest.packageManager : undefined, {})).toBe(expected);
+  });
+
+  it("names a manager and never an install root: a member that repeats its workspace's pin installs at the workspace root", () => {
+    writeFileSync(path.join(dir, 'package.json'), '{"private":true,"packageManager":"pnpm@12.0.0"}');
+    writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - apps/*\n');
+    writeFileSync(path.join(dir, 'pnpm-lock.yaml'), '');
+    const member = path.join(dir, 'apps', 'web');
+    mkdirSync(member, { recursive: true });
+    writeFileSync(path.join(member, 'package.json'), '{"name":"web","devEngines":{"packageManager":{"name":"pnpm","onFail":"error"}}}');
+    expect(detectWorkspacePackageManager(member, {})).toEqual({ manager: 'pnpm', root: dir, yarnBerry: false });
+  });
+
+  it('names the manager of a workspace whose root has no field and no lockfile yet', () => {
+    writeFileSync(path.join(dir, 'package.json'), '{"private":true,"workspaces":["apps/*"],"devEngines":{"packageManager":{"name":"yarn","version":"^4.0.0"}}}');
+    const member = path.join(dir, 'apps', 'web');
+    mkdirSync(member, { recursive: true });
+    writeFileSync(path.join(member, 'package.json'), '{"name":"web"}');
+    expect(detectWorkspacePackageManager(member, {})).toEqual({ manager: 'yarn', root: dir, yarnBerry: true });
   });
 });
 
@@ -163,6 +183,11 @@ describe('Yarn flavor', () => {
     ['Yarn 4 over a Yarn 1 lockfile, which decides', 'yarn/4.19.0', { 'yarn.lock': CLASSIC_LOCK }, false],
     ['Yarn 4 over a Yarn 1 packageManager field, which decides', 'yarn/4.19.0', { 'package.json': '{"packageManager":"yarn@1.22.22"}' }, false],
     ['Yarn 1 over a Yarn 2+ lockfile, which decides', 'yarn/1.22.22', { 'yarn.lock': BERRY_LOCK }, true],
+    ['Yarn 4 over an empty lockfile, which decides nothing', 'yarn/4.19.0', { 'yarn.lock': '' }, true],
+    ['Yarn 1 over an empty lockfile, which decides nothing', 'yarn/1.22.22', { 'yarn.lock': '' }, false],
+    ['Yarn 1 under a devEngines pin on Yarn 4', 'yarn/1.22.22', { 'package.json': '{"devEngines":{"packageManager":{"name":"yarn","version":"^4.0.0"}}}' }, true],
+    ['Yarn 4 under a devEngines pin on Yarn 1', 'yarn/4.19.0', { 'package.json': '{"devEngines":{"packageManager":{"name":"yarn","version":"1.22.22"}}}' }, false],
+    ['Yarn 4 under a devEngines pin that leaves the major open', 'yarn/4.19.0', { 'package.json': '{"devEngines":{"packageManager":{"name":"yarn","version":">=1"}}}' }, true],
   ] as const)('reads the Yarn that started the process only when no project file decides: %s', (_name, invoking, files, expected) => {
     expect(flavor(files, invoking)).toBe(expected);
   });
