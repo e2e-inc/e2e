@@ -204,6 +204,12 @@ describe('findDetoursAfterReplay', () => {
       { from: 0, to: 2, at: '/?view=:id', via: '/?view=:id', evidence: 'locations' },
       { from: 3, to: 5, at: '/?view=:id', via: '/help', evidence: 'locations' },
     ]);
+    // A second trip from the same screen after the replayed one reads as one span with it, as on a run from the top.
+    const again = flow(
+      [tap('About', '/', 'link'), back('/about'), tap('About', '/', 'link'), back('/about'), tap('Increment', '/')],
+      { endPath: '/' },
+    );
+    expect(findDetoursAfterReplay(again, [{ from: 0, to: 2 }])).toEqual([{ from: 0, to: 4, at: '/', via: '/about', evidence: 'locations' }]);
     // A trip this run reads across a kept span is the entry's, as it found it.
     expect(findDetoursAfterReplay(trace, [{ from: 2, to: 5 }])).toEqual([{ from: 2, to: 5, at: '/?view=:id', via: '/?view=:id', evidence: 'locations' }]);
   });

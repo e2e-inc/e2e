@@ -136,15 +136,22 @@ export function findDetours(trace: DetourInput): TraceDetour[] {
 /**
  * The detours of a recording made again after a replay handed off: the
  * spans the entry kept for the actions the replay ran, and the ones this
- * run found elsewhere. An action the replay ran without looking carries the
- * location its recording had (`TraceRecorder.keepLocations`), which reads
- * `:id` for a record id and a query value, so comparing again would lose a
- * trip between two records the entry had found.
+ * run found, joined where they overlap. An action the replay ran without
+ * looking carries the location its recording had
+ * (`TraceRecorder.keepLocations`), which reads `:id` for a record id and a
+ * query value, so comparing again would lose a trip between two records
+ * the entry had found; a trip the run took after it from the same screen
+ * reads as one span with it, as two wrong turns from one menu do.
  */
 export function findDetoursAfterReplay(trace: DetourInput, replayed: readonly Pick<TraceDetour, 'from' | 'to'>[]): TraceDetour[] {
-  const found = findDetours(trace).filter((detour) => !replayed.some((span) => detour.from < span.to && span.from < detour.to));
+  const spans: { from: number; to: number }[] = [];
+  for (const { from, to } of [...replayed, ...findDetours(trace)].toSorted((a, b) => a.from - b.from)) {
+    const last = spans.at(-1);
+    if (last !== undefined && from < last.to) last.to = Math.max(last.to, to);
+    else spans.push({ from, to });
+  }
   // This run's places are live addresses: named as an entry spells them, as `byLocations` names its own.
-  return [...recorded({ ...trace, detours: replayed }, routeLocation), ...found].toSorted((a, b) => a.from - b.from);
+  return recorded({ ...trace, detours: spans }, routeLocation);
 }
 
 /**
