@@ -1450,9 +1450,9 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    *   });
    *
    * In a `beforeAll` or `afterAll` hook, a worker fixture, or an
-   * `openHost()` session, `body` just runs, with no step in any report.
-   * Elsewhere outside a test, hook, or fixture the call is
-   * `COLLECTION_ERROR`.
+   * `openHost()` session, `body` just runs, and no report gets a step for
+   * `title`. Elsewhere, outside a running test, hook, fixture, or
+   * `openHost()` session, the call is `COLLECTION_ERROR`.
    */
   step<T>(title: string, body: () => T | Promise<T>): Promise<T>;
   /** Registers one focused local test. CI rejects focused tests. */
