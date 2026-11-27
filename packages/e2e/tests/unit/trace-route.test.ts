@@ -149,6 +149,9 @@ describe('routeLocation', () => {
     expect(spelledAsRoute('/settings?tab=notes')).toBe(false);
     expect(spelledAsRoute(routeLocation('/settings'))).toBe(false);
     expect(spelledAsRoute('com.example / :id')).toBe(false);
+    // A fragment-routed document whose own path held the record id.
+    expect(spelledAsRoute(routeLocation('/records/42#/home'))).toBe(true);
+    expect(spelledAsRoute('/records/42#/home')).toBe(false);
   });
 
   it('keeps a location that is not a web address as it is', () => {

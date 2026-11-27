@@ -210,8 +210,9 @@ function routeKey(location: string): string {
 
 /**
  * Whether a location is spelled as a recording keeps it (`routeLocation`):
- * a segment or a query key or value reads `:id`, so its own record ids and
- * query values are gone and only that spelling can be compared.
+ * a path segment (a fragment-routed document's too) or a query key or value
+ * reads `:id`, so its own record ids and query values are gone and only that
+ * spelling can be compared.
  */
 export function spelledAsRoute(location: string): boolean {
   const route = routeOf(location, false);
@@ -219,7 +220,8 @@ export function spelledAsRoute(location: string): boolean {
     const parts = unparsedParts(location);
     return parts !== undefined && spelledAsRoute(parts.path);
   }
-  return route.segments.includes(PARAM) || route.query.some(([key, value]) => key === PARAM || value === PARAM);
+  const document = route.document?.split('/').map(decodeSegment) ?? [];
+  return document.includes(PARAM) || route.segments.includes(PARAM) || route.query.some(([key, value]) => key === PARAM || value === PARAM);
 }
 
 /**
