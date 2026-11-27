@@ -288,8 +288,12 @@ fn complete(listed: usize, unresolved: usize) -> Outcome<()> {
 }
 
 /// Whether a window of `pid` has left both lists `list` reads: the app's accessibility windows, and the window server's
-/// windows on screen, which keeps a closing window through its animation. An app that quit took the window with it.
+/// windows on screen, which keeps a closing window through its animation. An app that quits with its last window, as
+/// Calculator does, took the window with it: its accessibility then answers nothing, so the process is asked first.
 pub fn closed(pid: i32, id: u32) -> bool {
+    if !crate::process::alive(pid) {
+        return true;
+    }
     let listed = match ax_windows(&Element::application(pid)) {
         Ok(open) => open.iter().any(|(_, window)| *window == Some(id)),
         Err(failure) => failure.code != codes::APP_NOT_FOUND,
