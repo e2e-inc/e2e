@@ -105,7 +105,7 @@ test.describe('sign-in form', () => {
   });
 
   test('refuses a menu item the background disables, a missing one, and a menu', async ({ screen, desktop }) => {
-    const refusal = (path: string[]): Promise<string> =>
+    const refusal = (path: [string, ...string[]]): Promise<string> =>
       desktop.menu(...path).then(
         () => 'chosen',
         (cause: unknown) => String(cause),

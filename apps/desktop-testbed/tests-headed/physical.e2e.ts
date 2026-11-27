@@ -50,7 +50,9 @@ test.describe('physical input', () => {
   test('chooses a menu item the focused field handles', async ({ screen, desktop }) => {
     const note = screen.getByRole('textbox', 'Note');
     await note.fill('first draft');
-    await note.focus();
+    // Typing leaves the caret at the end with nothing selected, so only Select All makes the next key replace the text.
+    await note.pressSequentially('!');
+    await expect(note).toHaveValue('first draft!');
     await desktop.menu('Edit', 'Select All');
     await note.pressSequentially('x');
     await expect(note).toHaveValue('x');

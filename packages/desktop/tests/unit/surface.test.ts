@@ -1221,6 +1221,24 @@ describe('DesktopSurface: the menu bar', () => {
     await expect(surface.chooseMenu(['File', 'Save'], operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
   });
 
+  it('brings the app forward alone when its window is minimized, and refuses a chosen window that closed', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, minimized: true }])] }, { options: { headed: true } });
+    await surface.chooseMenu(['Window', 'Bring All to Front'], operation());
+    expect(last(fake, 'menu')).not.toHaveProperty('windowId');
+    let panelOpen = true;
+    const closed = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, ...(panelOpen ? [{ id: 'w-panel' }] : [])])] }, { options: { headed: true } });
+    await closed.surface.useWindow('w-panel', signal, 5_000);
+    panelOpen = false;
+    await expect(closed.surface.chooseMenu(['File', 'New'], operation())).rejects.toThrow(/useWindow\(\) chose/);
+  });
+
+  it('refuses a path with no title, or an empty one, before anything is read', async () => {
+    const { surface, fake } = await launched({});
+    await expect(surface.chooseMenu([], operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    await expect(surface.chooseMenu(['Edit', ''], operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(fake.of('menu')).toHaveLength(0);
+  });
+
   it('refuses a menu item before the app is open', async () => {
     const { surface } = await initialized({});
     await expect(surface.chooseMenu(['Edit', 'Copy'], operation())).rejects.toMatchObject({ code: 'INVALID_STATE' });

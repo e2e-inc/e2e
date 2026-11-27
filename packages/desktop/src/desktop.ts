@@ -34,7 +34,7 @@ export interface Desktop {
    * background (one the focused control handles, such as Select All) is
    * refused.
    */
-  menu(...path: string[]): Promise<void>;
+  menu(...path: [string, ...string[]]): Promise<void>;
   /** Quits the app. `app.open()` launches it again; every test ends with it quit. */
   closeApp(): Promise<void>;
 }

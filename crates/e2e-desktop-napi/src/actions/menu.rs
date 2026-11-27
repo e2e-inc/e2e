@@ -124,11 +124,17 @@ pub(super) fn refuse_disabled_shortcut(pid: i32, combo: &Combo, deadline: Instan
 const BACKGROUND_DISABLES: &str = "macOS disables a menu command of the focused control or window (Select All, Find) while the app is in the background; choose it with desktop({ headed: true })";
 
 /// The titles a menu shows, for a refusal that names what it has instead of what was asked; separators have none.
-fn titles(items: &[(Element, Item)]) -> String {
+fn titles<'a>(items: impl Iterator<Item = &'a Item>) -> String {
     const SHOWN: usize = 30;
-    let named: Vec<&str> = items.iter().map(|(_, item)| item.title.as_str()).filter(|title| !title.is_empty()).collect();
+    let named: Vec<&str> = items.map(|item| item.title.as_str()).filter(|title| !title.is_empty()).collect();
     let more = if named.len() > SHOWN { format!(", and {} more", named.len() - SHOWN) } else { String::new() };
     format!("{}{more}", named.iter().take(SHOWN).map(|title| format!("\"{title}\"")).collect::<Vec<_>>().join(", "))
+}
+
+/// Which of a menu's items a title names: an enabled one of that title, else the first of it.
+fn pick(items: &[Item], title: &str) -> Option<usize> {
+    let named = || items.iter().enumerate().filter(|(_, item)| item.title == title);
+    named().find(|(_, item)| item.enabled).or_else(|| named().next()).map(|(index, _)| index)
 }
 
 /// Chooses the item of the app's menu bar that `path` names, title by title from the menu bar down, with a press of the
@@ -155,28 +161,36 @@ pub fn choose(pid: i32, path: &[String], window: Option<u32>, physical: bool, in
                 }
             }
         }
-        let bar = app.element("AXMenuBar").ok_or_else(|| Failure::refused(codes::ACTION_FAILED, "the app has no menu bar"))?;
+        let bar = match app.attribute("AXMenuBar") {
+            Ok(Value::Element(bar)) => bar,
+            Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_API_DISABLED)) => return Err(unread(error, "read the menu bar")),
+            _ => return Err(Failure::refused(codes::ACTION_FAILED, "the app has no menu bar")),
+        };
         let mut level: Vec<Element> = below(&bar)?.into_iter().skip(1).collect();
         let mut holder = "the menu bar".to_owned();
         let mut chosen = None;
+        // Whether the item chosen last opens a menu, however many items that menu holds now: a press of it would open the menu on screen.
+        let mut opens_menu = false;
         for title in path {
-            let items = level.iter().map(|element| Ok((element.clone(), read(element)?))).collect::<Outcome<Vec<_>>>()?;
-            let named = || items.iter().filter(|(_, item)| item.title == *title);
-            let Some((element, item)) = named().find(|(_, item)| item.enabled).or_else(|| named().next()) else {
-                return Err(Failure::refused(codes::ACTION_FAILED, format!("{holder} has no item \"{title}\"; it has {}", titles(&items))));
+            let items = level.iter().map(read).collect::<Outcome<Vec<_>>>()?;
+            let Some(index) = pick(&items, title) else {
+                return Err(Failure::refused(codes::ACTION_FAILED, format!("{holder} has no item \"{title}\"; it has {}", titles(items.iter()))));
             };
+            let element = level[index].clone();
+            let menus = below(&element)?;
+            opens_menu = !menus.is_empty();
             level = Vec::new();
-            for menu in below(element)? {
+            for menu in menus {
                 level.extend(below(&menu)?);
             }
             holder = format!("the menu \"{title}\"");
-            chosen = Some((element.clone(), item.enabled));
+            chosen = Some((element, items[index].enabled));
         }
         let Some((element, enabled_now)) = chosen else { return Err(Failure::refused(codes::INVALID_ARGS, "no menu item was named")) };
         let name = path.join(" > ");
-        if !level.is_empty() {
-            let items = level.iter().map(|element| Ok((element.clone(), read(element)?))).collect::<Outcome<Vec<_>>>()?;
-            return Err(Failure::refused(codes::ACTION_FAILED, format!("\"{name}\" opens a menu; name one of its items: {}", titles(&items))));
+        if opens_menu {
+            let items = level.iter().map(read).collect::<Outcome<Vec<_>>>()?;
+            return Err(Failure::refused(codes::ACTION_FAILED, format!("\"{name}\" opens a menu; name one of its items: {}", titles(items.iter()))));
         }
         if physical {
             enabled(&element, deadline, "choose the menu item").map_err(|failure| {
@@ -191,7 +205,27 @@ pub fn choose(pid: i32, path: &[String], window: Option<u32>, physical: bool, in
 
 #[cfg(test)]
 mod tests {
-    use super::{all_disabled, key_character};
+    use super::{Item, all_disabled, key_character, pick, titles};
+
+    fn item(title: &str, enabled: bool) -> Item {
+        Item { title: title.to_owned(), enabled, key: None }
+    }
+
+    #[test]
+    fn picks_an_enabled_item_of_two_with_one_title() {
+        let items = [item("Paste", false), item("", false), item("Paste", true), item("Copy", false)];
+        assert_eq!(pick(&items, "Paste"), Some(2));
+        assert_eq!(pick(&items, "Copy"), Some(3));
+        assert_eq!(pick(&items, "Cut"), None);
+    }
+
+    #[test]
+    fn lists_a_menus_titles_without_its_separators() {
+        let items = [item("Undo", true), item("", false), item("Find…", true)];
+        assert_eq!(titles(items.iter()), "\"Undo\", \"Find…\"");
+        let many: Vec<Item> = (0..32).map(|index| item(&format!("Item {index}"), true)).collect();
+        assert!(titles(many.iter()).ends_with("\"Item 29\", and 2 more"));
+    }
 
     #[test]
     fn refuses_only_when_every_item_the_shortcut_triggers_is_disabled() {

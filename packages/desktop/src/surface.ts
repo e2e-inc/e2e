@@ -1351,8 +1351,12 @@ export class DesktopSurface {
     const operation = withDeadline(context);
     const pid = this.pid;
     if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
+    if (titles.length === 0 || titles.some((title) => title === '')) throw notActionable("desktop.menu() takes the item's titles from the menu bar down, none empty, such as desktop.menu('Edit', 'Select All')");
     const label = `menu ${titles.join(' > ')}`;
-    const window = this.options.headed ? await this.ownWindow(operation) : undefined;
+    // A minimized window cannot come forward: the app does alone, as one with no window does.
+    const inUse = this.options.headed ? await this.ownWindow(operation) : undefined;
+    if (this.options.headed && inUse === undefined && this.chosenWindow !== undefined) throw this.chosenClosed();
+    const window = inUse?.minimized === true ? undefined : inUse;
     const inputId = this.requireDriver().inputId();
     await this.input((driver, timeoutMs) => driver.menu({ pid, path: [...titles], physical: this.options.headed, inputId, timeoutMs, ...(window === undefined ? {} : { windowId: window.id }) }), {
       label,
