@@ -30,7 +30,8 @@ export interface AppFiles {
 export function appDirectory({ reported, declared, firstDocument, projectRoot }: AppFiles): string | undefined {
   // Electron reports a main script's own directory, and a build can put the pages beside it (`out/main/index.js`
   // and `out/renderer/`): the app is the package the script is in, as it is for an app path that names the directory.
-  if (declared !== undefined && statSync(declared, { throwIfNoEntry: false })?.isFile() === true) return canonical(packageOf(declared, projectRoot) ?? path.dirname(declared));
+  // An `.asar` archive is a file too, and the app itself, as Electron reports it: its bound is the archive.
+  if (declared !== undefined && !/\.asar$/i.test(declared) && statSync(declared, { throwIfNoEntry: false })?.isFile() === true) return canonical(packageOf(declared, projectRoot) ?? path.dirname(declared));
   if (reported !== undefined && reported !== '') return canonical(reported);
   if (declared !== undefined) return canonical(statSync(declared, { throwIfNoEntry: false })?.isDirectory() === true ? declared : path.dirname(declared));
   const file = localFile(firstDocument);

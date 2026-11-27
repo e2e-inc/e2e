@@ -43,6 +43,14 @@ describe('appDirectory', () => {
     expect(outsideApp(pathToFileURL(path.join(app, 'main.js')).href, project)).toMatch(/outside it/);
   });
 
+  it('is the archive an app path names, as Electron reports it, not the package it sits in', () => {
+    const archive = path.join(app, 'releases', 'app.asar');
+    mkdirSync(path.dirname(archive), { recursive: true });
+    writeFileSync(archive, '');
+    expect(appDirectory({ reported: archive, declared: archive, firstDocument: page, projectRoot: app })).toBe(archive);
+    expect(outsideApp(page, archive)).toMatch(/outside it/);
+  });
+
   it('is the archive a packaged app shows its first page from, and nothing for an app that shows no local page', () => {
     const archive = path.join(root, 'Resources', 'app.asar');
     expect(appDirectory({ reported: undefined, declared: undefined, firstDocument: pathToFileURL(path.join(archive, 'dist', 'index.html')).href, projectRoot: app })).toBe(archive);
