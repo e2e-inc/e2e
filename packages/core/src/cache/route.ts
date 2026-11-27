@@ -247,7 +247,8 @@ export function addressKey(location: string): string {
 /**
  * A location as a recording keeps it: each path segment the app minted per
  * record, or shaped like a token, as `:id`, and every non-empty query value
- * as `:id`, its key kept.
+ * as `:id`, its key kept unless it reads as minted too (`date-2026`, a
+ * prefixed record id, reads `:id`).
  * A query value is often a token or a code (a magic link, an OAuth
  * callback), and one of letters only reads as a word to the route rule, so
  * no query value is written to an entry or a report. A path segment of
