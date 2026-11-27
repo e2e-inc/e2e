@@ -148,6 +148,20 @@ describe('AppState', () => {
     expect(host.calls).toEqual([]);
   });
 
+  it('never clears the global defaults domain, and takes an underscore in a bundle id', async () => {
+    const host = new FakeHost();
+    // The names `defaults delete` reads as the user's global preferences.
+    for (const bundleId of ['-g', '-globalDomain', 'NSGlobalDomain', '-g.e2e']) {
+      await expect(new AppState(host).requireSole({ path: build(), bundleId }, 'app.clearState()', signal), bundleId).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+      await expect(new AppState(host).reset(bundleId, signal), bundleId).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    }
+    expect(host.calls).toEqual([]);
+    const own = build();
+    host.paths = [own];
+    await expect(new AppState(host).requireSole({ path: own, bundleId: 'com.example.my_app' }, 'app.clearState()', signal)).resolves.toBeUndefined();
+    expect(host.calls).toEqual(['copies com.example.my_app']);
+  });
+
   it("never removes a directory above the app's own when the bundle id names a parent", async () => {
     const host = new FakeHost();
     const planted = host.plant();

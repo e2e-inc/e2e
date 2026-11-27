@@ -36,11 +36,13 @@ const VERSION = 1;
 /** How long one `defaults` or `mdfind` command may take. */
 const COMMAND_MS = 10_000;
 /**
- * A bundle id as macOS allows one: segments of letters, digits, and hyphens, joined by single periods. Checked before
- * it goes into a Spotlight query, and before it names a directory a reset removes, where `.` or `..` would name the
- * directory above.
+ * A bundle id an app can have: two or more segments of letters, digits, hyphens, and underscores (which `codesign`
+ * and LaunchServices take), joined by single periods, not starting with a hyphen. Checked before it goes into a
+ * Spotlight query, and before it names a directory a reset removes, where `.` or `..` would name the directory above.
+ * The period and the first character also keep out the names `defaults` reads as the global domain (`-g`,
+ * `-globalDomain`, `NSGlobalDomain`), whose delete would clear the user's own preferences.
  */
-const BUNDLE_ID = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*$/;
+const BUNDLE_ID = /^(?!-)[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+$/;
 
 /** A defaults export whose root dictionary holds nothing, as `defaults export` writes an empty domain. */
 const EMPTY_DOMAIN = /<plist[^>]*>\s*(?:<dict\s*\/>|<dict>\s*<\/dict>)\s*<\/plist>\s*$/;
