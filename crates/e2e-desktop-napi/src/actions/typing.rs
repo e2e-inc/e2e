@@ -50,20 +50,20 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
     // Set once a key showed no change in its whole wait: a field that drops or caps characters would spend the wait on
     // every key after it, so the rest get the short one.
     let quiet = std::cell::Cell::new(false);
-    let still = || -> Outcome<()> {
-        // A key posted to the app is in its queue, not yet handled: wait until the element it went to shows it, or focus
-        // moved, so a window the key opened (a handler on the text, a Return) holds the keyboard by the time the check
-        // below reads it.
+    // A key posted to the app is in its queue, not yet handled: wait until the element it went to shows it, or focus
+    // moved, so a window the key opened (a handler on the text, a Return) holds the keyboard by the time the next key's
+    // check reads it, and the field holds the whole text once the last key went.
+    let settle = || {
         let last = sent_to.borrow().clone();
         if let Some((target, before)) = &last {
-            let settle = deadline.min(Instant::now() + if quiet.get() { KEY_SETTLE_UNREAD } else { KEY_SETTLE });
+            let end = deadline.min(Instant::now() + if quiet.get() { KEY_SETTLE_UNREAD } else { KEY_SETTLE });
             match (target, *before) {
                 (Some(target), Some(count)) => {
                     // A fine poll of its own: the app takes a key within a millisecond or two, and `until`'s coarse one
                     // would add its whole interval to every key.
                     let taken = || length(target) != Some(count) || focused_element().as_ref() != Some(target);
                     let mut seen = taken();
-                    while !seen && Instant::now() < settle {
+                    while !seen && Instant::now() < end {
                         sleep(KEY_POLL);
                         seen = taken();
                     }
@@ -71,9 +71,13 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
                         quiet.set(true);
                     }
                 }
-                _ => sleep(KEY_SETTLE_UNREAD.min(settle.saturating_duration_since(Instant::now()))),
+                _ => sleep(KEY_SETTLE_UNREAD.min(end.saturating_duration_since(Instant::now()))),
             }
         }
+    };
+    let still = || -> Outcome<()> {
+        let last = sent_to.borrow().clone();
+        settle();
         // The element the key will reach, read before the checks below, so nothing reads the app between them and the
         // key: focus that moves while they run is caught by them, not followed. The first key goes only to the field.
         let target = focused_element();
@@ -103,5 +107,7 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
     CURRENT.with(|current| match current.borrow().as_ref() {
         Some((run, _)) => input::type_text(text, route, run, deadline, &still),
         None => Err(Failure::refused(codes::INTERNAL, "type ran outside an action")),
-    })
+    })?;
+    settle();
+    Ok(())
 }
