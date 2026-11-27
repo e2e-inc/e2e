@@ -67,7 +67,9 @@ describe('executablePath', () => {
   });
 
   it('refuses a directory, such as an .app bundle, and a file it may not execute, in doctor as at launch', async () => {
-    for (const name of ['MyApp.app', 'package.json', 'missing']) {
+    // Windows has no execute permission: any file it can read is one it may start.
+    const refused = process.platform === 'win32' ? ['MyApp.app', 'missing'] : ['MyApp.app', 'package.json', 'missing'];
+    for (const name of refused) {
       expect(() => resolveExecutable(root, name)).toThrow(/not an executable file/);
       expect(describeExecutable(root, name)).toMatchObject({ status: 'fail', message: expect.stringContaining('not an executable file') });
     }
