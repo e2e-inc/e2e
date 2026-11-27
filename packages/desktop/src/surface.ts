@@ -129,7 +129,10 @@ function chooseWindow(choice: WindowChoice, windows: readonly { readonly id: str
   const listed = windows.map((window) => (window.title === '' ? `${window.id} (untitled)` : `${window.id} "${window.title}"`)).join(', ') || 'none';
   const named = typeof choice === 'string' ? `"${choice}"` : [id === undefined ? undefined : `id ${id}`, title === undefined ? undefined : `title ${String(title)}`].filter(Boolean).join(' or ');
   if (title === undefined) throw notActionable(`the app has no window with ${named}; its windows: ${listed}`);
-  const matches = windows.filter((window) => (typeof title === 'string' ? window.title === title : title.test(window.title)));
+  // A RegExp of its own, without `g` or `y`: those carry `lastIndex` from one title to the next, so a second window
+  // with the same title would not match and a shared title would read as one window's.
+  const pattern = typeof title === 'string' ? undefined : new RegExp(title.source, title.flags.replaceAll(/[gy]/g, ''));
+  const matches = windows.filter((window) => (pattern === undefined ? window.title === title : pattern.test(window.title)));
   const [only] = matches;
   if (only !== undefined && matches.length === 1) return only.id;
   if (matches.length > 1) throw notActionable(`${matches.length} windows match ${named}; pass one desktop.windows() lists. Its windows: ${listed}`);

@@ -809,6 +809,8 @@ describe('DesktopSurface: windows', () => {
     await surface.useWindow({ id: 'w-1234', title: 'Sign In' }, signal, 5_000);
     expect(await readsIn()).toBe('w-mine');
     await expect(surface.useWindow({ title: 'Untitled' }, signal, 5_000)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/2 windows match/) });
+    // A global RegExp's lastIndex would skip the second of two windows with one title.
+    await expect(surface.useWindow({ title: /Untitled/g }, signal, 5_000)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/2 windows match/) });
     await expect(surface.useWindow('Settings', signal, 5_000)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringContaining('w-panel "Controls"') });
   });
 
