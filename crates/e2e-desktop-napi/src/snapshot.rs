@@ -18,7 +18,7 @@ const MAX_NODES: usize = 8_000;
 pub(crate) const MAX_CHILDREN: usize = MAX_NODES;
 
 /// Every attribute one request reads of a node.
-const ATTRIBUTES: [&str; 18] = [
+const ATTRIBUTES: [&str; 19] = [
     "AXRole",
     "AXSubrole",
     "AXTitle",
@@ -37,6 +37,7 @@ const ATTRIBUTES: [&str; 18] = [
     "AXVerticalScrollBar",
     "AXHorizontalScrollBar",
     "AXHeadingLevel",
+    "AXDisclosing",
 ];
 
 #[derive(Serialize)]
@@ -208,6 +209,8 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
     let vertical_bar = matches!(take(15), Some(Value::Element(_)));
     let horizontal_bar = matches!(take(16), Some(Value::Element(_)));
     let heading_level = level_of(take(17));
+    // An outline row says it is expanded with AXDisclosing, not AXExpanded.
+    let expanded = expanded.or_else(|| take(18).and_then(|value| value.boolean()));
     let role = roles::role(&ax_role, subrole.as_deref());
     Ok(Read {
         role,
