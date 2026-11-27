@@ -796,11 +796,6 @@ export async function parseRecordingFile(yamlText: string, lockText: string): Pr
 }
 
 /**
- * A lock whose YAML is gone: nothing anyone reviewed is left, so the pair
- * holds no recordings, as a YAML with every step deleted holds none, and a
- * write may replace it. Invalid when the lock itself does not read.
- */
-/**
  * The lock with `keyHash`'s entries dropped and the rest as they were, in
  * the form `renderRecordingFile` writes: how a key is evicted from a pair
  * whose YAML cannot be rewritten. Its YAML block, no longer claimed, never
@@ -812,6 +807,11 @@ export function lockWithout(lockText: string, keyHash: string): string {
   return `${JSON.stringify(lock, null, 2)}\n`;
 }
 
+/**
+ * A lock whose YAML is gone: nothing anyone reviewed is left, so the pair
+ * holds no recordings, as a YAML with every step deleted holds none, and a
+ * write may replace it. Invalid when the lock itself does not read.
+ */
 export function parseLockAlone(lockText: string): ParsedRecordingFile {
   try {
     return { status: 'ok', testId: readLock(lockText).testId, recordings: [], unclaimed: [] };
