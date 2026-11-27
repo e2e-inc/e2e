@@ -119,14 +119,17 @@ export class RevylWebClient {
 
   /**
    * Stops a session, again after a gateway error or a dropped connection
-   * since a stop is idempotent. A session Revyl never made (404) or already
-   * ended (409) counts as stopped.
+   * since a stop is idempotent, and resolves to whether Revyl still had it
+   * open. A session Revyl never made (404) or already ended (409) counts as
+   * stopped.
    */
-  async stopSession(sessionId: string, signal: AbortSignal): Promise<void> {
+  async stopSession(sessionId: string, signal: AbortSignal): Promise<boolean> {
     try {
       await this.#read(signal, () => this.#json('POST', `/api/v1/execution/device/sessions/${encodeURIComponent(sessionId)}/stop`, undefined, signal));
+      return true;
     } catch (error) {
-      if (!(error instanceof RevylHttpError && (error.status === 404 || error.status === 409))) throw error;
+      if (error instanceof RevylHttpError && (error.status === 404 || error.status === 409)) return false;
+      throw error;
     }
   }
 
