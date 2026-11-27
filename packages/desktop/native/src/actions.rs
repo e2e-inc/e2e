@@ -784,7 +784,9 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
         (true, Ok(number)) => element.set_number("AXValue", number),
         _ => element.set_text("AXValue", text),
     };
-    written.map_err(|error| if moved_focus { refused(error, "set value").delivered() } else { refused(error, "set value") })?;
+    // A write the app answered with anything but a refusal may have run its change handler (one that replaced the
+    // field answers a gone element): only a refusal says nothing was sent.
+    written.map_err(|error| if moved_focus || !refuses(error) { refused(error, "set value").delivered() } else { refused(error, "set value") })?;
     if secure {
         return Ok(());
     }
