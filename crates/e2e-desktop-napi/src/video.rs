@@ -15,6 +15,7 @@ use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_foundation::{NSError, NSObject, NSObjectProtocol, NSString, NSURL};
 use objc2_screen_capture_kit::{
     SCContentFilter, SCRecordingOutput, SCRecordingOutputConfiguration, SCRecordingOutputDelegate, SCShareableContent, SCStream, SCStreamConfiguration,
+    SCStreamErrorCode, SCStreamErrorDomain,
 };
 use serde::Serialize;
 use std::collections::HashMap;
@@ -36,7 +37,8 @@ const UNSTARTED_STOP_WAIT: Duration = Duration::from_millis(300);
 
 /// What the recording output reports.
 enum Event {
-    Started,
+    /// The first frame was written, at this time.
+    Started(Instant),
     Failed(String),
     Finished,
 }
@@ -56,7 +58,7 @@ define_class!(
     unsafe impl SCRecordingOutputDelegate for Delegate {
         #[unsafe(method(recordingOutputDidStartRecording:))]
         fn did_start(&self, _output: &SCRecordingOutput) {
-            self.send(Event::Started);
+            self.send(Event::Started(Instant::now()));
         }
 
         #[unsafe(method(recordingOutput:didFailWithError:))]
@@ -93,7 +95,7 @@ struct Recording {
     events: Receiver<Event>,
     /// Whether the first frame was written: a recording with none has no file to finish.
     wrote: bool,
-    /// When the start answered.
+    /// When the first frame was written, or the start answered when none was yet.
     began: Instant,
 }
 
@@ -146,6 +148,13 @@ fn unsupported_before_15() -> Option<Failure> {
         .then(|| Failure::refused(codes::ACTION_NOT_SUPPORTED, "video of a window needs macOS 15 or later, where ScreenCaptureKit records to a file"))
 }
 
+/// Whether an error is ScreenCaptureKit's refusal for want of the Screen Recording permission: told by its domain and
+/// code, since its text is localized.
+fn declined(domain: &str, code: isize) -> bool {
+    // SAFETY: a static string ScreenCaptureKit exports.
+    domain == unsafe { SCStreamErrorDomain }.to_string() && code == SCStreamErrorCode::UserDeclined.0
+}
+
 fn error_text(error: *mut NSError) -> Option<String> {
     // SAFETY: a completion handler's error is nil or an NSError that lives for the call.
     unsafe { error.as_ref() }.map(|error| error.localizedDescription().to_string())
@@ -162,20 +171,20 @@ pub fn start(window: u32, path: &str, deadline: Instant) -> Outcome<Started> {
     if let Some(failure) = unsupported_before_15() {
         return Err(failure);
     }
-    let (sender, receiver) = mpsc::channel::<Result<Handed<Retained<SCShareableContent>>, String>>();
+    let (sender, receiver) = mpsc::channel::<Result<Handed<Retained<SCShareableContent>>, (bool, String)>>();
     let handler = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
         // SAFETY: the content is nil or a live object for the call; retaining it keeps it past the call.
         let content = unsafe { Retained::retain(content) };
-        let _ = sender.send(content.map(Handed).ok_or_else(|| error_text(error).unwrap_or_else(|| "no windows were listed".into())));
+        // SAFETY: the error is nil or an NSError that lives for the call.
+        let refused = unsafe { error.as_ref() }.is_some_and(|error| declined(&error.domain().to_string(), error.code()));
+        let _ = sender.send(content.map(Handed).ok_or_else(|| (refused, error_text(error).unwrap_or_else(|| "no windows were listed".into()))));
     });
     // Windows on screen or not, so one minimized or on another Space is found too.
     unsafe { SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(true, false, &handler) };
     let content = match answer(&receiver, deadline) {
         Some(Ok(Handed(content))) => content,
-        Some(Err(message)) if message.contains("declined") || message.contains("permission") || message.contains("TCC") => {
-            return Err(Failure::refused(codes::PERM_DENIED, format!("list windows for video: {message}")));
-        }
-        Some(Err(message)) => return Err(Failure::refused(codes::ACTION_FAILED, format!("list windows for video: {message}"))),
+        Some(Err((true, message))) => return Err(Failure::refused(codes::PERM_DENIED, format!("list windows for video: {message}"))),
+        Some(Err((false, message))) => return Err(Failure::refused(codes::ACTION_FAILED, format!("list windows for video: {message}"))),
         None => return Err(Failure::timeout("listing windows for video")),
     };
     let windows = unsafe { content.windows() };
@@ -244,7 +253,7 @@ pub fn start(window: u32, path: &str, deadline: Instant) -> Outcome<Started> {
 /// when the recording failed.
 fn first_frame(events: &Receiver<Event>, deadline: Instant) -> Option<bool> {
     match answer(events, deadline) {
-        Some(Event::Started) => Some(true),
+        Some(Event::Started(_)) => Some(true),
         Some(Event::Failed(_) | Event::Finished) => None,
         None => Some(false),
     }
@@ -268,16 +277,37 @@ pub fn stop(id: u32, deadline: Instant) -> Outcome<Stopped> {
         .map_err(|_| Failure::refused(codes::INTERNAL, "the video table is poisoned"))?
         .remove(&id)
         .ok_or_else(|| Failure::refused(codes::INVALID_ARGS, format!("no video {id} is recording")))?;
-    let rest = MIN_LENGTH.saturating_sub(recording.began.elapsed()).min(deadline.saturating_duration_since(Instant::now()));
-    std::thread::sleep(rest);
+    // A first frame that came after the start answered opened the file then: the minimum length counts from it.
+    let mut wrote = recording.wrote;
+    let mut began = recording.began;
+    let mut pending = None;
+    if !wrote {
+        match recording.events.try_recv() {
+            Ok(Event::Started(at)) => {
+                wrote = true;
+                began = at;
+            }
+            Ok(other) => pending = Some(other),
+            Err(_) => {}
+        }
+    }
+    if wrote {
+        std::thread::sleep(MIN_LENGTH.saturating_sub(began.elapsed()).min(deadline.saturating_duration_since(Instant::now())));
+    }
     halt(&recording.stream, deadline);
     // A recording that wrote no frame has no file to finish, and may never say it ended: a frame or an end is waited for
-    // only briefly.
-    let wait = if recording.wrote { deadline } else { deadline.min(Instant::now() + UNSTARTED_STOP_WAIT) };
-    let mut wrote = recording.wrote;
+    // only briefly, and a first frame that comes meanwhile gets the whole deadline to finish its file.
+    let mut wait = if wrote { deadline } else { deadline.min(Instant::now() + UNSTARTED_STOP_WAIT) };
     loop {
-        match recording.events.recv_timeout(wait.saturating_duration_since(Instant::now())) {
-            Ok(Event::Started) => wrote = true,
+        let event = match pending.take() {
+            Some(event) => Ok(event),
+            None => recording.events.recv_timeout(wait.saturating_duration_since(Instant::now())),
+        };
+        match event {
+            Ok(Event::Started(_)) => {
+                wrote = true;
+                wait = deadline;
+            }
             Ok(Event::Finished) => return Ok(Stopped { bytes: unsafe { recording.output.recordedFileSize() } as i64 }),
             Ok(Event::Failed(_)) | Err(_) if !wrote => return Ok(Stopped { bytes: 0 }),
             Ok(Event::Failed(message)) => return Err(Failure::refused(codes::ACTION_FAILED, format!("the video could not be finished: {message}"))),
@@ -289,7 +319,17 @@ pub fn stop(id: u32, deadline: Instant) -> Outcome<Stopped> {
 
 #[cfg(test)]
 mod tests {
-    use super::frame_size;
+    use super::{declined, frame_size};
+    use objc2_screen_capture_kit::{SCStreamErrorCode, SCStreamErrorDomain};
+
+    #[test]
+    fn tells_a_missing_screen_recording_permission_by_domain_and_code() {
+        // SAFETY: a static string ScreenCaptureKit exports.
+        let domain = unsafe { SCStreamErrorDomain }.to_string();
+        assert!(declined(&domain, SCStreamErrorCode::UserDeclined.0));
+        assert!(!declined(&domain, SCStreamErrorCode::FailedToStart.0));
+        assert!(!declined("NSCocoaErrorDomain", SCStreamErrorCode::UserDeclined.0));
+    }
 
     #[test]
     fn sizes_a_frame_in_whole_even_pixels() {
