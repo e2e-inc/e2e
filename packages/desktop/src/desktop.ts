@@ -61,14 +61,18 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
 
 /**
  * How a test line names the window `useWindow` got: by its title, which holds
- * on the next launch, where its id does not. An untitled window, or one
- * named only by its id, keeps its arguments, with a note that they may not
- * hold.
+ * on the next launch, where its id does not. When no window has that title
+ * on replay, the line passes `titled <title>` as the id, which `useWindow`
+ * refuses ("the app has no window titled Inbox"), rather than `undefined`,
+ * which would quietly go back to the focused window. A window with no title,
+ * or one named only by its id, keeps its arguments, with a note that they
+ * may not hold.
  */
 function windowLine(window?: DesktopWindow | string): FixtureTestLine | undefined {
   if (window === undefined) return undefined;
-  if (typeof window === 'object' && window.title !== '') {
-    return { args: `(await desktop.windows()).find((window) => window.title === ${JSON.stringify(window.title)})` };
+  const title: unknown = typeof window === 'object' ? window.title : undefined;
+  if (typeof title === 'string' && title.trim() !== '') {
+    return { args: `(await desktop.windows()).find((window) => window.title === ${JSON.stringify(title)}) ?? ${JSON.stringify(`titled ${title}`)}` };
   }
   return { note: 'a window id holds only while the window stays open; on the next launch, pick the window from desktop.windows()' };
 }

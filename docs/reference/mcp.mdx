@@ -312,8 +312,9 @@ Test lines: 2, 1 read not listed.
 - A call whose argument holds only while the app runs is drafted the way
   its engine says a test finds the same thing again. `desktop.useWindow(window)`
   is drafted as
-  `desktop.useWindow((await desktop.windows()).find((window) => window.title === "Inbox"))`;
-  for an untitled window, or a window id passed as a string, the line keeps
+  `desktop.useWindow((await desktop.windows()).find((window) => window.title === "Inbox") ?? "titled Inbox")`,
+  which fails when no window has that title rather than reading the focused
+  one; for an untitled window, or a window id passed as a string, the line keeps
   the id and says in a comment that it holds only while the window is open.
 - Each action or matcher on `screen` waits `timeout` by default. A `timeout`
   in a line's own options replaces it. Without `timeout`, each waits 5000 ms,
