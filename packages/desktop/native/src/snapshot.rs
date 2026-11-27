@@ -287,17 +287,26 @@ fn intersect(a: Rect, b: Rect) -> Rect {
     Rect { x, y, width: (right - x).max(0.0), height: (bottom - y).max(0.0) }
 }
 
-/// The most ancestors `on_screen` walks up from an element to its window.
+/// The most ancestors `placement` walks up from an element to its window.
 const MAX_ANCESTORS: usize = 256;
 
-/// Whether an element shows in its window now, by the test the snapshot reads `offscreen` with: its frame is not wholly
-/// outside the window and every scroll area it is in, up to a menu or popover, which floats above the window. An element
-/// with no frame has no place to judge, and shows. `Err` when the app did not answer in time.
-pub(crate) fn on_screen(element: &Element) -> Result<bool, ax::AXError> {
-    let Some((x, y, width, height)) = element.frame() else {
-        return Ok(true);
-    };
-    let bounds = Rect { x, y, width, height };
+/// Where an element is, as far as showing it goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Placement {
+    /// In its window and every scroll area it is in.
+    Shown,
+    /// Outside a scroll area it is in, or its window: a scroll into view can bring it back.
+    ScrolledOut,
+    /// In a minimized window: no scroll shows it.
+    Minimized,
+}
+
+/// Where an element is now, by the test the snapshot reads `offscreen` with: its frame against the window and every
+/// scroll area it is in, up to a menu or popover, which floats above the window. A minimized window shows nothing,
+/// whatever its frames say. An element with no frame has no place to judge, and shows. `Err` when the app did not
+/// answer in time.
+pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
+    let frame = element.frame();
     let mut clip: Option<Rect> = None;
     let mut next = element.element("AXParent");
     for _ in 0..MAX_ANCESTORS {
@@ -310,6 +319,13 @@ pub(crate) fn on_screen(element: &Element) -> Result<bool, ax::AXError> {
         if floats(roles::role(&role, None)) {
             break;
         }
+        if role == "AXWindow" {
+            match parent.attribute("AXMinimized") {
+                Ok(Value::Bool(true)) => return Ok(Placement::Minimized),
+                Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+                _ => {}
+            }
+        }
         if matches!(role.as_str(), "AXScrollArea" | "AXWindow")
             && let Some((x, y, width, height)) = parent.frame()
         {
@@ -321,7 +337,11 @@ pub(crate) fn on_screen(element: &Element) -> Result<bool, ax::AXError> {
         }
         next = parent.element("AXParent");
     }
-    Ok(clip.is_none_or(|clip| !outside(bounds, clip)))
+    let outside_clip = match (frame, clip) {
+        (Some((x, y, width, height)), Some(clip)) => outside(Rect { x, y, width, height }, clip),
+        _ => false,
+    };
+    Ok(if outside_clip { Placement::ScrolledOut } else { Placement::Shown })
 }
 
 /// Whether `inner` lies wholly outside `outer`.

@@ -425,18 +425,22 @@ fn enabled(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
 }
 
 /// Brings an element a scroll area holds out of view into view (`AXScrollToVisible`), and waits for it to show. An
-/// element already on screen gets nothing; one that cannot be scrolled is refused, as an action on it would reach a
-/// control the user cannot.
+/// element already on screen gets nothing; one in a minimized window, or one that cannot be scrolled, is refused, as an
+/// action on it would reach a control the user cannot.
 fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
-    let shown = || crate::snapshot::on_screen(element);
-    if shown().map_err(|error| unread(error, what))? {
-        return Ok(());
+    use crate::snapshot::{Placement, placement};
+    match placement(element).map_err(|error| unread(error, what))? {
+        Placement::Shown => return Ok(()),
+        Placement::Minimized => {
+            return Err(Failure::refused(codes::ACTION_FAILED, "the element's window is minimized, so the user cannot reach it; restore the window first"));
+        }
+        Placement::ScrolledOut => {}
     }
     if !action_names(element, what)?.iter().any(|name| name == "AXScrollToVisible") {
         return Err(Failure::refused(codes::ACTION_FAILED, "the element is off screen and cannot be scrolled into view; scroll its list first"));
     }
     perform(element, "AXScrollToVisible", "scroll into view")?;
-    if until(deadline, || shown() == Ok(true)) {
+    if until(deadline, || placement(element) == Ok(Placement::Shown)) {
         return Ok(());
     }
     Err(Failure::unconfirmed(codes::ACTION_FAILED, "the element is still off screen after it was scrolled into view"))
