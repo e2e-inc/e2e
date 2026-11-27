@@ -414,6 +414,8 @@ describe('browser route and waitForResponse decisions', () => {
     ['**/api/quote?id=?', '/api/quote?id=7', false],
     ['**/api/q?ote', '/api/quote', false],
     ['**/api/my file*', '/api/my%20file.txt', true],
+    ["/api/quote?name=O'Neil*", "/api/quote?name=O'Neil*", true],
+    ['/api/a`b*', '/api/a`b*', true],
     ['/api/quote#a*/../flags', '/api/flags', false],
   ];
 
@@ -423,18 +425,21 @@ describe('browser route and waitForResponse decisions', () => {
     return false;
   };
 
-  it.each(SHARED_PATTERNS)('reads %s against %s the same through route, waitForURL, and waitForResponse', async (pattern, pathname, expected) => {
-    await browser.route(pattern, (route) => route.fulfill({ body: 'routed' }));
-    expect((await fetchText(`${origin}${pathname}`)) === 'routed', 'route').toBe(expected);
-    await browser.unrouteAll();
-    await page.goto(`${origin}${pathname}`);
+  it.each(SHARED_PATTERNS)('reads %s against %s the same through route and URL, request, and response waits', async (pattern, pathname, expected) => {
+    await browser.goto(pathname);
     const waited = await browser.waitForURL(pattern, { timeout: 200 }).then(() => true, missed('ASSERTION_FAILED'));
     expect(waited, 'waitForURL').toBe(expected);
-    const [responded] = await Promise.all([
+    await browser.route(pattern, (route) => route.fulfill({ body: 'routed' }));
+    expect((await fetchText(`${origin}${pathname}`)) === 'routed', 'route').toBe(expected);
+    await browser.unroute(pattern);
+    const [requested, responded, body] = await Promise.all([
+      browser.waitForRequest(pattern, { timeout: 300 }).then(() => true, missed('OPERATION_TIMEOUT')),
       browser.waitForResponse(pattern, { timeout: 300 }).then(() => true, missed('OPERATION_TIMEOUT')),
-      page.evaluate((url) => { void fetch(url).then((reply) => reply.text()).catch(() => undefined); }, `${origin}${pathname}`),
+      fetchText(`${origin}${pathname}`),
     ]);
+    expect(requested, 'waitForRequest').toBe(expected);
     expect(responded, 'waitForResponse').toBe(expected);
+    expect(body, 'unroute').toBe(`network:${new URL(pathname, origin).pathname}`);
   });
 
   /** The `browser` fixture on a target with no `app.url`, whose base URL throws as the harness's does. */

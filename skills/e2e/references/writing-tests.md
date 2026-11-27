@@ -525,7 +525,9 @@ background: `waitForPopup(() => trigger)` makes it active and returns it.
   `screen` locator.
 
 Patterns use Playwright's glob grammar (`*` within one path segment, `**`
-across `/`); a relative one resolves against the base URL. Full reference:
+across `/`); a relative one resolves against the base URL. In an HTTP or HTTPS
+URL, a query apostrophe matches `%27`, and a backtick in the path or fragment
+matches `%60`. Full reference:
 docs/reference/web.mdx, docs/browser.mdx.
 
 ## Habits

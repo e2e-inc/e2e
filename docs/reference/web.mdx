@@ -640,9 +640,10 @@ await browser.waitForURL(/\/orders\/\d+$/, { timeout: 15_000 });
   string with no wildcard matches that URL exactly. A glob resolves against the
   base URL unless it starts with `*` or is an absolute URL such as
   `https://x.test/**` or `about:blank`, and a
-  resolved glob's scheme and host match in any letter case. Non-ASCII text and
-  spaces in a glob's path and query match the URL as the browser encodes it. The empty string
-  matches any URL.
+  resolved glob's scheme and host match in any letter case. Globs match
+  non-ASCII text, spaces, apostrophes in special URL queries such as HTTP and
+  HTTPS, and backticks in paths and fragments as the browser encodes them.
+  The empty string matches any URL.
 - `expect(browser).toHaveURL` reads `*` and `{` as themselves, as Playwright's
   does; [`route`](#route), `unroute`, `waitForResponse`, and `waitForRequest`
   read the same globs as this wait.

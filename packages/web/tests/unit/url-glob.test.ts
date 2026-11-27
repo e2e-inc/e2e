@@ -79,6 +79,37 @@ describe('URL globs', () => {
     expect(matches('**/😀*', 'http://localhost:3000/%F0%9F%98%80x')).toBe(true);
   });
 
+  it('encodes an apostrophe in a special URL query and leaves path and fragment apostrophes literal', () => {
+    const path = "/a'b?next=/c'd#e'f";
+    expect(new URL(path, BASE).href).toBe(`${BASE}a'b?next=/c%27d#e'f`);
+    expect(matches("/a'b?next=/c'd*#e'f", new URL(path, BASE).href)).toBe(true);
+    expect(matches("/a'b?next=/c%27d*#e'f", new URL(path, BASE).href)).toBe(true);
+    expect(matches("custom://x.test/a?x='*", "custom://x.test/a?x='1")).toBe(true);
+    expect(matches("custom://x.test/a?x='*", 'custom://x.test/a?x=%271')).toBe(false);
+    expect(matches("**/a?x='*", 'https://x.test/a?x=%271')).toBe(true);
+    expect(matches("**/a?x='*", 'https://x.test/a?x=%25271')).toBe(false);
+    for (const scheme of ['http', 'https', 'ws', 'wss', 'ftp', 'file']) {
+      const url = new URL(`${scheme}://x.test/a?x='1`);
+      expect(url.search).toBe('?x=%271');
+      expect(matches("**/a?x='*", url.href), scheme).toBe(true);
+    }
+    expect(matches("/{a?x='*,b'c}", `${BASE}b'c`)).toBe(true);
+    expect(matches("/{a?x='*,b'c}", `${BASE}b%27c`)).toBe(false);
+  });
+
+  it('encodes a backtick in a path or fragment while keeping query backticks and escapes literal', () => {
+    const path = '/a`*?x=`1#b`2';
+    const url = new URL(path, BASE).href;
+    expect(url).toBe(`${BASE}a%60*?x=\`1#b%602`);
+    expect(matches('/a`\\*\\?x=`*#b`*', url)).toBe(true);
+    expect(matches('/a%60\\*?x=`*#b%60*', url)).toBe(true);
+    expect(matches('/a`\\*?x=`*#b`*', new URL('/a`other?x=`1#b`2', BASE).href)).toBe(false);
+    expect(matches('/a`\\*?x=%60*#b`*', url)).toBe(false);
+    expect(matches('**/a`*', 'https://x.test/a%601')).toBe(true);
+    expect(matches('about:`*', 'about:`a')).toBe(true);
+    expect(matches('about:`*', 'about:%60a')).toBe(false);
+  });
+
   it('restores each glob segment to its own place when the glob or the base holds text like a placeholder', () => {
     expect(matches('/$_2_$/x*', 'http://localhost:3000/$_2_$/xyz')).toBe(true);
     expect(matches('/$_2_$/x*', 'http://localhost:3000/xyz/$_2_$')).toBe(false);

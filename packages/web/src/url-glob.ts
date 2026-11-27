@@ -92,13 +92,20 @@ function escapeRegexpChar(ch: string): string {
   return /[a-zA-Z0-9_-]/.test(ch) ? ch : `\\${ch}`;
 }
 
+// Assert the component on the matched URL: a wildcard or brace alternative
+// can cross a delimiter. Check for the encoded bytes before scanning the prefix.
+const QUERY_APOSTROPHE = /(?:'|(?=%27)(?<=^(?:https?|wss?|ftp|file):[^?#]*\?[^#]*)%27)/.source;
+const PATH_OR_FRAGMENT_BACKTICK =
+  /(?:`|(?=%60)(?<=^(?:[a-z][a-z0-9+.-]*:(?:\/\/[^/?#]*\/|\/(?!\/))[^?#]*|[^#]*#[\s\S]*))%60)/.source;
+
 /**
- * One literal glob character as a regexp source: printable ASCII as itself,
- * and anything else (non-ASCII text, a space) percent-encoded, as the URL
- * parser encodes it in the URL the browser reports. A lone surrogate, which
- * cannot be encoded, stays as written.
+ * One literal glob character as a regexp source. Apostrophes and backticks
+ * follow their URL component's percent-encoding rules. Other printable ASCII
+ * stays literal, and non-ASCII text and spaces match their percent encoding.
  */
 function literalSource(ch: string): string {
+  if (ch === "'") return QUERY_APOSTROPHE;
+  if (ch === '`') return PATH_OR_FRAGMENT_BACKTICK;
   if (/^[\x21-\x7e]$/.test(ch)) return escapeRegexpChar(ch);
   let encoded: string;
   try {
@@ -185,8 +192,8 @@ function resolveUrlGlob(glob: string, base: () => string): string {
  * Playwright's grammar: `*` matches within one path segment, `**` across `/`
  * (a `**` segment may also match none), `{a,b}` matches either, and `\`
  * escapes the next character. `?` and everything else is literal, so a query
- * string reads as written, and non-ASCII text and spaces match the URL
- * percent-encoded. A nested or unbalanced `{` is `INVALID_ARGUMENT`.
+ * string reads as written, with literals encoded by `literalSource`. A nested
+ * or unbalanced `{` is `INVALID_ARGUMENT`.
  */
 function urlGlobSource(glob: string): string {
   const invalid = (problem: string): TestError =>
