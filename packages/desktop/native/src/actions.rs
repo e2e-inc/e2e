@@ -1007,10 +1007,11 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         if found.len() > 1 {
             return Err(Failure::refused(codes::ACTION_FAILED, format!("more than one option of the list is \"{label}\"; select it another way")));
         }
+        // A row whose label could not be read may show the label too: one match is no proof it is the only one.
+        if stalled {
+            return Err(unread(ax::AX_CANNOT_COMPLETE, "read the list's rows"));
+        }
         let Some(row) = found.into_iter().next() else {
-            if stalled {
-                return Err(unread(ax::AX_CANNOT_COMPLETE, "read the list's rows"));
-            }
             return Err(Failure::refused(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\"")));
         };
         let (_, row_role) = role_of(&row, "select")?;
