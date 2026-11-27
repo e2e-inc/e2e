@@ -12,6 +12,8 @@ writeFileSync(path.join(app, 'main.js'), '');
 writeFileSync(path.join(app, 'package.json'), '{}');
 mkdirSync(path.join(app, 'out', 'main'), { recursive: true });
 writeFileSync(path.join(app, 'out', 'main', 'index.js'), '');
+// What a build that emits CommonJS from a module project writes beside its output.
+writeFileSync(path.join(app, 'out', 'main', 'package.json'), '{"type":"commonjs"}');
 writeFileSync(path.join(app, 'renderer', 'index.html'), '');
 writeFileSync(path.join(root, 'secret.txt'), '');
 const page = pathToFileURL(path.join(app, 'renderer', 'index.html')).href;
@@ -26,7 +28,7 @@ describe('appDirectory', () => {
     expect(appDirectory({ reported: undefined, declared: undefined, firstDocument: page })).toBe(path.join(app, 'renderer'));
   });
 
-  it('is the package a declared main script is in, though the main process reports the script\'s own directory', () => {
+  it('is the package a declared main script is in, past a manifest that only sets the module type, though the main process reports the script\'s own directory', () => {
     const script = path.join(app, 'out', 'main', 'index.js');
     expect(appDirectory({ reported: path.join(app, 'out', 'main'), declared: script, firstDocument: page })).toBe(app);
     expect(outsideApp(page, appDirectory({ reported: path.join(app, 'out', 'main'), declared: script, firstDocument: page }))).toBeUndefined();
