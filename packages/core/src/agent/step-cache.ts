@@ -569,7 +569,8 @@ export class StepTraceSession {
 
   private selfFinalize(trace: ActionTrace, outcome: ReplayOutcome): StepVerdict {
     this.replayedWhole = true;
-    const detour = this.describeDetours(findDetours(trace));
+    // A replayed trace has its `unique()` values filled in: named as an entry spells a location.
+    const detour = this.describeDetours(findDetours(trace, routeLocation));
     this.info = {
       mode: 'self-finalized',
       replayedActions: outcome.executed,
@@ -713,7 +714,7 @@ export class StepTraceSession {
     };
     const spans = trace.detours;
     if (spans === undefined) return findDetours(ran);
-    const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to <= executed) });
+    const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to <= executed) }, routeLocation);
     const cut = spans.filter(({ from, to }) => from < executed && executed < to);
     // Every place here is the entry's, spelled as it stores them.
     const stored = new Set(Array.from({ length: executed + 1 }, (_, index) => index));

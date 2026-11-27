@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { boundDetour, describeDetour, findDetours, findDetoursAfterReplay, settledDetour } from '@e2e-dev/core/lib/cache/detours';
+import { routeLocation } from '@e2e-dev/core/lib/cache/route';
 import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { bound } from '@e2e-dev/core/lib/internal/text';
 import type { ActionTrace, RecordedAction } from '@e2e-dev/core/lib/cache/trace';
@@ -251,6 +252,13 @@ describe('findDetoursAfterReplay', () => {
     );
     expect(findDetours({ ...trace, stored: new Set([2]) })[0]).toMatchObject({ from: 0, to: 2 });
     expect(findDetoursAfterReplay(trace, [{ from: 1, to: 3 }], 3, new Set([2]))).toEqual([{ from: 1, to: 3, at: '/orders', via: '/orders/:id', evidence: 'locations' }]);
+  });
+
+  it('names a replayed span in the entry\'s spelling, the unique() value it filled in included', () => {
+    const replayed = flow([tap('Record', '/records', 'link'), back('/records/80362915?code=FreshCallbackWord')], { endPath: '/records' });
+    expect(findDetours({ ...replayed, detours: [{ from: 0, to: 2 }] }, routeLocation)).toEqual([
+      { from: 0, to: 2, at: '/records', via: '/records/:id?code=:id', evidence: 'locations' },
+    ]);
   });
 
   it('adds no span that crosses one the entry found, which would claim a return that never happened', () => {

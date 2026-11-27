@@ -131,10 +131,12 @@ function tappedRoles(action: RecordedAction): readonly (string | undefined)[] {
  * recording run found, when the entry keeps them, since a stored location
  * spells each `unique()` value as a placeholder and no longer compares the
  * way the run's did; else read by locations when any action carries one,
- * else by the actions' shape alone.
+ * else by the actions' shape alone. With `spell`, a kept span names its
+ * places as `spell` writes them: a replay's trace has its `unique()` values
+ * filled in, which an entry's spelling never held.
  */
-export function findDetours(trace: DetourInput): TraceDetour[] {
-  if (trace.detours !== undefined) return recorded(trace);
+export function findDetours(trace: DetourInput, spell?: (place: string) => string): TraceDetour[] {
+  if (trace.detours !== undefined) return recorded(trace, spell);
   return trace.actions.some((action) => action.at !== undefined) ? byLocations(trace) : byActions(trace.actions);
 }
 
