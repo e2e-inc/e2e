@@ -264,7 +264,10 @@ function recordingDigest(step: Record<string, unknown>, targetId: string): strin
  * reads, nothing a reviewer needs. It says when the act or params its step
  * shows do not digest to the ones its key holds (redacted, cut, or never
  * recorded); otherwise a reader holds them to the key, so a lock entry
- * pointed at another step's recording does not replay it.
+ * pointed at another step's recording does not replay it. An entry that says
+ * so is held by its digests alone: a lock edited to say it on purpose can
+ * point a key at another step, which is why a lock change with no YAML
+ * change is one to review (`docs/reference/security.mdx`).
  */
 function lockEntry(recording: StoredRecording, digest: string, group: StepGroup): Record<string, unknown> {
   const { trace } = recording;
@@ -831,8 +834,9 @@ function readRecording(testId: string, entry: LockEntry, index: number, step: Re
   const lock = entry.raw;
   const where = `steps[${String(index)}] on ${entry.target}`;
   if ((step.agent ?? DEFAULT_AGENT) !== lock['agent']) return invalid(`${where} names another agent than its lock entry`);
-  // The digest holds the YAML to the lock entry; these hold the lock entry to its key's step, so a lock edited
-  // (or merged by hand) to point one key at another step's recording does not replay it.
+  // The digest holds the YAML to the lock entry; these hold the lock entry to its key's step, so a lock merged
+  // by hand that points one key at another step's recording does not replay it. An entry that says its act or
+  // params are not verbatim skips that check, so one edited to say so on purpose can (see `lockEntry`).
   if (lock['actVerbatim'] !== false && (step.act === undefined || instructionDigest(step.act) !== lock['instructionDigest'])) {
     return invalid(`${where}: its act is not the instruction its key was recorded for`);
   }
