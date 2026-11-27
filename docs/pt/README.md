@@ -121,6 +121,15 @@ translation moves or goes with it in the same change.
 | trace | trace (keep in English, o trace) |
 | artifact | artefato |
 | matcher | matcher (keep in English, o matcher) |
+| soft assertion, soft failure | asserção suave, falha suave |
+| asymmetric matcher | matcher assimétrico |
+| poll (`expect.poll`) | fazer polling, polling |
+| try (one run of a `toPass` block) | rodada |
+| sample (a polled value) | amostra |
+| held test (paused at a step) | teste pausado |
+| attach, detach (an MCP session) | conectar, se desconectar |
+| plaintext | texto puro |
+| decimal and thousands separators | vírgula decimal, ponto de milhar (59,996; 8.192) |
 | timeout | tempo limite (`timeout` in code) |
 | headless, headed | headless, headed (keep in English; in a screen-reader `aria-label`, write "com interface visível" for headed) |
 | sign in, sign out | entrar (fazer login), sair (fazer logout) |
