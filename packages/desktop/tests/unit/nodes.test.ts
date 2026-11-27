@@ -565,6 +565,30 @@ describe('withContainerText', () => {
     expect(withContainerText(first!).text).toBe('Buy milk\nMedium\nDelete Buy milk');
   });
 
+  it('reads the rows in view of a list with folded rows, and not the line that counts the rest', () => {
+    const screen = projectSnapshot(
+      {
+        snapshot_id: 's',
+        complete: true,
+        tree: {
+          role: 'window',
+          name: 'Inbox',
+          children: [
+            {
+              role: 'outline',
+              ref_id: '@s:e1',
+              native_id: { kind: 'ax_identifier', value: 'tasks' },
+              children: [{ role: 'row', ref_id: '@s:e2', children: [{ role: 'statictext', value: 'Buy milk' }] }, { role: 'folded', folded: 182 }],
+            },
+          ],
+        },
+      },
+      minter(),
+    );
+    const [tasks] = resolveExpression({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'tasks', exact: true } } }, [locatable(screen)]);
+    expect(withContainerText(tasks!).text).toBe('Buy milk');
+  });
+
   it("leaves out a field's value, as an input's text content on the web is empty", () => {
     expect(withContainerText(byTestId(list(), 'tasks')!).text).not.toContain('typed');
   });
