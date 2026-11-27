@@ -48,18 +48,27 @@ pub fn back_match(title: Option<&str>, key: Option<&str>, modifiers: Option<i64>
 struct Candidate<E> {
     element: E,
     found: BackMatch,
+    /// Whether the item, and every menu and submenu item above it, is enabled: an item under a disabled one is not
+    /// one the app takes.
     enabled: bool,
+    /// How deep it sits: 1 in a menu of the menu bar, 2 in a submenu of one.
+    depth: usize,
     title: String,
     menu: String,
 }
 
-/// Which item to press: the best kind of match the menu bar has, the first enabled one of that kind. A disabled item
-/// of the best kind is not passed over for a lesser match, which would press another command (Shift Left in an editor).
+/// Which item is the app's Back: of the best kind of match the menu bar has, the one nearest the menu bar, and of
+/// those the first in menu order (Go comes before Window). It is pressed only when enabled. A disabled one is not
+/// passed over for another, which would press another command: Shift Left for a lesser match in an editor, or a Back
+/// in the Window menu or under Open Recent when the navigation menu's own Back is disabled at the first page.
 fn choose<E>(candidates: &[Candidate<E>]) -> Result<&Candidate<E>, Option<&Candidate<E>>> {
     let Some(best) = candidates.iter().map(|candidate| candidate.found).max() else { return Err(None) };
-    let mut ranked = candidates.iter().filter(|candidate| candidate.found == best);
-    let first = ranked.clone().next();
-    ranked.find(|candidate| candidate.enabled).ok_or(first)
+    let nearest = candidates.iter().filter(|candidate| candidate.found == best).map(|candidate| candidate.depth).min();
+    let chosen = candidates.iter().find(|candidate| candidate.found == best && Some(candidate.depth) == nearest);
+    match chosen {
+        Some(item) if item.enabled => Ok(item),
+        other => Err(other),
+    }
 }
 
 /// What `back` pressed, for the engine's log.
@@ -142,15 +151,26 @@ fn back_candidates<E: Accessible>(bar: &E, deadline: Instant) -> Outcome<Vec<Can
     let mut seen = 0;
     for top in children(bar, "read the app's menu bar")? {
         let menu = top.text("AXTitle").unwrap_or_default();
+        // A menu the app disabled as a whole (no window to act on) disables every item in it.
+        let enabled = top.attribute("AXEnabled").ok().and_then(|value| value.boolean()).unwrap_or(true);
         for list in children(&top, "read a menu")? {
-            collect(&list, &menu, 1, deadline, &mut seen, &mut candidates)?;
+            collect(&list, &menu, 1, enabled, deadline, &mut seen, &mut candidates)?;
         }
     }
     Ok(candidates)
 }
 
 /// The items of one menu (`AXMenu`), and those of their submenus down to `MAX_MENU_DEPTH`, that match Back.
-fn collect<E: Accessible>(list: &E, menu: &str, depth: usize, deadline: Instant, seen: &mut usize, found: &mut Vec<Candidate<E>>) -> Outcome<()> {
+/// `enabled_above` says whether the menu bar item and every item whose submenu holds `list` are enabled.
+fn collect<E: Accessible>(
+    list: &E,
+    menu: &str,
+    depth: usize,
+    enabled_above: bool,
+    deadline: Instant,
+    seen: &mut usize,
+    found: &mut Vec<Candidate<E>>,
+) -> Outcome<()> {
     for item in children(list, "read a menu")? {
         if Instant::now() >= deadline {
             return Err(Failure::timeout("reading the app's menu bar"));
@@ -168,14 +188,14 @@ fn collect<E: Accessible>(list: &E, menu: &str, depth: usize, deadline: Instant,
         let title = values[0].as_ref().and_then(|value| value.text().map(str::to_owned));
         let key = values[1].as_ref().and_then(|value| value.text().map(str::to_owned));
         let modifiers = values[2].as_ref().and_then(|value| if let ax::Value::Number(number) = value { Some(*number as i64) } else { None });
-        let enabled = values[3].as_ref().and_then(ax::Value::boolean).unwrap_or(false);
+        let enabled = enabled_above && values[3].as_ref().and_then(ax::Value::boolean).unwrap_or(false);
         if let Some(kind) = back_match(title.as_deref(), key.as_deref(), modifiers) {
             let title = title.filter(|title| !title.trim().is_empty()).unwrap_or_else(|| "Command-[".into());
-            found.push(Candidate { element: item.clone(), found: kind, enabled, title, menu: menu.to_owned() });
+            found.push(Candidate { element: item.clone(), found: kind, enabled, depth, title, menu: menu.to_owned() });
         }
         if depth < MAX_MENU_DEPTH {
             for submenu in children(&item, "read a submenu")? {
-                collect(&submenu, menu, depth + 1, deadline, seen, found)?;
+                collect(&submenu, menu, depth + 1, enabled, deadline, seen, found)?;
             }
         }
     }
@@ -202,7 +222,7 @@ mod tests {
     use std::time::Instant;
 
     fn item(id: u32, found: BackMatch, enabled: bool) -> Candidate<u32> {
-        Candidate { element: id, found, enabled, title: format!("item {id}"), menu: "Go".into() }
+        Candidate { element: id, found, enabled, depth: 1, title: format!("item {id}"), menu: "Go".into() }
     }
 
     #[test]
@@ -228,10 +248,20 @@ mod tests {
     }
 
     #[test]
-    fn presses_the_first_enabled_item_of_the_best_kind() {
-        let items = [item(1, BackMatch::Shortcut, true), item(2, BackMatch::Title, false), item(3, BackMatch::Title, true)];
-        assert_eq!(choose(&items).ok().map(|chosen| chosen.element), Some(3));
+    fn presses_the_first_item_of_the_best_kind_nearest_the_menu_bar() {
+        let items = [item(1, BackMatch::Shortcut, true), item(2, BackMatch::Title, true), item(3, BackMatch::Title, true)];
+        assert_eq!(choose(&items).ok().map(|chosen| chosen.element), Some(2));
         assert_eq!(choose(&items[..1]).ok().map(|chosen| chosen.element), Some(1));
+        // A submenu's Back (File > Open Recent > Back) is not the app's while a menu's own Back is there.
+        let nested = [Candidate { depth: 2, ..item(4, BackMatch::Title, true) }, item(5, BackMatch::Title, true)];
+        assert_eq!(choose(&nested).ok().map(|chosen| chosen.element), Some(5));
+    }
+
+    #[test]
+    fn refuses_a_disabled_back_rather_than_press_one_in_another_menu() {
+        // Go > Back is disabled at the first page: Window > Back is another command, and is not pressed instead.
+        let items = [item(1, BackMatch::Title, false), Candidate { menu: "Window".into(), ..item(2, BackMatch::Title, true) }];
+        assert_eq!(choose(&items).err().flatten().map(|disabled| disabled.element), Some(1));
     }
 
     /// `revalidated` over scripted reads, with the time it paused in all.
@@ -304,6 +334,16 @@ mod tests {
             found.iter().map(|candidate| (candidate.menu.as_str(), candidate.title.as_str(), candidate.found)).collect();
         assert_eq!(summary, [("Edit", "Shift Left", BackMatch::Shortcut), ("History", "Back", BackMatch::Title)]);
         assert_eq!(choose(&found).ok().map(|chosen| chosen.title.as_str()), Some("Back"), "a title outranks the shortcut");
+    }
+
+    #[test]
+    fn reads_an_item_under_a_disabled_menu_or_submenu_as_disabled() {
+        let open_recent = menu_item("Open Recent", None, false).children(vec![Fake::new("AXMenu").children(vec![menu_item("Back", None, true)])]);
+        let bar = Fake::new("AXMenuBar")
+            .children(vec![top("File", vec![open_recent]), top("Go", vec![menu_item("Back", None, true)]).with("AXEnabled", Value::Bool(false))]);
+        let found = back_candidates(&bar, Instant::now() + Duration::from_secs(60)).expect("a walk");
+        let summary: Vec<(&str, usize, bool)> = found.iter().map(|candidate| (candidate.menu.as_str(), candidate.depth, candidate.enabled)).collect();
+        assert_eq!(summary, [("File", 2, false), ("Go", 1, false)]);
     }
 
     #[test]
