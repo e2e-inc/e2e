@@ -113,6 +113,10 @@ describe('routeLocation', () => {
     expect(routeLocation('https://idp.test/invite/<secret:token>')).toBe('https://idp.test/invite/<secret:token>');
   });
 
+  it('spells a lone surrogate a cache file holds as a URL parser does, without throwing', () => {
+    expect(routeLocation('/settings/\ud800')).toBe('/settings/%EF%BF%BD');
+  });
+
   it('tells a location spelled as an entry keeps it from one the app showed', () => {
     expect(spelledAsRoute(routeLocation('/orders/123/edit'))).toBe(true);
     expect(spelledAsRoute(routeLocation('/callback?code=482913'))).toBe(true);

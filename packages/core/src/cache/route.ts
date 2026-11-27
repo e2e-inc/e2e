@@ -239,12 +239,20 @@ export function routeLocation(location: string): string {
 /** A secret's marker as the ledger writes it (`internal/redact.ts`). */
 const SECRET_MARKER = /(<secret:[A-Za-z0-9_.-]*>)/;
 
-/** One segment or query key as a URL spells it, `:id` and secret markers kept as they read. */
+/** A UTF-16 surrogate with no partner: a unicode pattern reads a pair as one code point. */
+const LONE_SURROGATE = /\p{Cs}/gu;
+
+/**
+ * One segment or query key as a URL spells it, `:id` and secret markers
+ * kept as they read. A lone surrogate, which a location read from a cache
+ * file can hold and `encodeURIComponent` throws on, is spelled as U+FFFD,
+ * as a URL parser spells it.
+ */
 function spellPart(text: string): string {
   if (text === PARAM) return text;
   return text
     .split(SECRET_MARKER)
-    .map((part, index) => (index % 2 === 1 ? part : encodeURIComponent(part)))
+    .map((part, index) => (index % 2 === 1 ? part : encodeURIComponent(part.replace(LONE_SURROGATE, '\uFFFD'))))
     .join('');
 }
 
