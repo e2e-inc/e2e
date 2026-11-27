@@ -1,0 +1,119 @@
+---
+title: Segurança
+description: O que o modelo pode ver e fazer, como os segredos ficam fora dele e o que você ainda precisa vigiar.
+"og:image": "https://e2e.com/docs/images/og/security.png?v=6c43d95c56"
+"twitter:image": "https://e2e.com/docs/images/og/security.png?v=6c43d95c56"
+---
+
+O e2e confia no código que você escreve e trata tudo o que o app mostra como
+não confiável. O conteúdo do app não pode dar ao modelo ferramentas,
+credenciais nem um orçamento maior.
+
+## Como os segredos ficam fora do modelo
+
+Um `Secret` é uma referência sem acessor que devolva o texto puro. O modelo vê
+apenas o nome e a finalidade do segredo. Quando o modelo pede para preencher
+um segredo, o runner verifica o campo e digita o valor por conta própria.
+
+Todo valor de segredo conhecido vira `<secret:name>` na entrada de texto do
+modelo, nos relatórios, na saída do console e nos downloads `.txt`, `.csv`,
+`.json`, `.html` e `.htm`.
+
+## O que ainda pode vazar
+
+A ocultação compara strings, e as capturas de tela mascaram apenas campos
+seguros:
+
+- **Capturas de tela, inclusive as do modelo.** Um segredo genérico preenchido
+  em um campo comum, ou um valor que o app mostra fora de um campo seguro,
+  está na imagem e chega ao seu provedor de modelos. Use credenciais de teste,
+  não segredos de produção.
+- **Vídeo e downloads.** O vídeo não mascara nada, e um download que não seja
+  um arquivo de texto com os segredos ocultados é mantido como foi servido. Se o teste
+  digitou uma senha, confira os vídeos e os downloads antes de compartilhá-los.
+- **`command.log`.** Ele guarda o stdout e o stderr do seu app literalmente.
+  Mantenha os segredos fora da saída do seu app.
+- **Valores transformados.** Os quatro últimos caracteres de uma chave, ou o
+  base64 da chave, passam sem ocultação. Faça asserções sobre o resultado, não
+  sobre o segredo.
+- **Valores não preenchidos como segredo.** Só o valor de um segredo
+  configurado é ocultado. Um valor que um login define em um cookie não é.
+- **Credenciais de requisição.** Os `headers` são enviados em toda requisição
+  que começa na origem do app ou em uma de `credentialOrigins` (até
+  requisições iniciadas por uma página de terceiros), e continuam nos
+  redirecionamentos para qualquer origem. `basicAuth` responde a um `401`
+  dessas origens e, no WebKit, de qualquer origem quando uma delas usa uma
+  porta padrão ou um host IPv6. Veja
+  [credenciais de requisição](/reference/security#request-credentials).
+- **Gravações commitadas.** As entradas do cache guardam os valores digitados
+  literalmente, exceto os preenchimentos de segredos. Elas não são assinadas e
+  são reproduzidas com as suas permissões, então revise essas entradas como
+  você revisaria código de teste.
+
+[Onde a ocultação termina](/reference/security#where-redaction-stops) lista
+todos os casos.
+
+## O que o modelo vê e faz
+
+O modelo vê a sua instrução, a tela como uma árvore de acessibilidade, a URL
+com dados sensíveis ocultados e registros dos passos anteriores do teste. Ele
+recebe uma captura de tela mascarada quando pede uma ou quando um passo define
+`vision`.
+
+O modelo só pode agir por ferramentas declaradas. O e2e valida as chamadas de
+ferramenta contra schemas fechados antes de rodá-las (ferramentas embutidas
+sem campos ignoram as chaves extras e rodam) e nunca avalia texto do modelo
+como código. Ações não permitidas (como navegar para `file:`) são bloqueadas.
+Não há lista de origens permitidas: se o seu app tiver um link para outro
+site, o agente pode seguir o link e usar os segredos do passo lá.
+
+No macOS e no Windows, o Chromium inicia com o sandbox do sistema operacional
+ativado, o que ajuda a conter um exploit do renderizador em uma página que o
+agente acessa. No Linux, é preciso ativar o sandbox: veja
+[`chromiumSandbox`](/reference/web#chromiumsandbox).
+
+## O que roda com as suas permissões
+
+Seus testes, sua configuração, suas engines, ferramentas, reporters,
+armazenamentos, provedores de segredos e comandos do app rodam com as
+permissões do seu sistema operacional, sem sandbox. Rode o código de pull
+requests não confiáveis em um sandbox externo, sem segredos nem tokens de
+escrita.
+
+Um app macOS que o [`@e2e-dev/desktop`](/desktop) inicia recebe só algumas
+variáveis do ambiente da execução, como `HOME` e `PATH`, então os seus
+segredos e as suas chaves de modelo nunca chegam a esse app.
+
+## O que sai do seu computador
+
+Uma execução se conecta ao seu provedor de modelos, ao app em teste e, se você
+não desativar, à [telemetria](/telemetry) em `eu.i.posthog.com`. Não há envio de
+relatórios de travamento (crash reports). Um comando da CLI em um terminal
+verifica `registry.npmjs.org` em busca de uma release mais nova no máximo uma
+vez por dia, `e2e feedback` verifica antes de cada envio, a menos que você passe
+`--allow-outdated`, e `e2e upgrade` lê as versões dos pacotes do e2e que o
+projeto lista. Integrações como Kernel, Expo Simulators, Limrun e smol adicionam
+destinos próprios, listados com os demais em [Conexões de
+saída](/reference/security#outbound-connections).
+
+## Informe uma vulnerabilidade
+
+Informe de forma privada pelos
+[avisos de segurança do GitHub](https://github.com/e2e-inc/e2e/security/advisories/new)
+ou por e-mail para security@e2e.com. A
+[política de segurança](https://github.com/e2e-inc/e2e/blob/main/SECURITY.md)
+informa os prazos de resposta e as versões suportadas.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Regras de segurança" icon="lock" href="/reference/security">
+    Cada regra por trás desta página, como o código a aplica.
+  </Card>
+  <Card title="Autenticação" icon="key" href="/authentication">
+    Passe segredos para testes e passos do agente, e salve sessões.
+  </Card>
+  <Card title="Integração contínua" icon="rotate" href="/ci">
+    Dê chaves de modelo apenas a builds em que você confia.
+  </Card>
+</CardGroup>

@@ -1,0 +1,611 @@
+---
+title: Trabalhando com o navegador
+description: Simule uma API, trate um diálogo, baixe um arquivo, acesse um iframe e escolha um navegador.
+"og:image": "https://e2e.com/docs/images/og/browser.png?v=9e41078fc1"
+"twitter:image": "https://e2e.com/docs/images/og/browser.png?v=9e41078fc1"
+---
+
+A fixture `browser` de `@e2e-dev/web` simula requisições, trata diálogos,
+baixa arquivos e roda código na página. A engine roda o Chromium, o
+Firefox e o WebKit por meio do
+[Playwright](https://github.com/microsoft/playwright). Para navegação,
+interações e verificações, use `screen`, `app` e `expect`.
+
+Importe `test` de `@e2e-dev/web` para ter `browser`:
+
+```ts
+import { test } from '@e2e-dev/web';
+import { expect } from 'e2e';
+
+test('the dashboard loads', async ({ app, screen, browser }) => {
+  await app.open('/dashboard');
+  await expect(browser).toHaveURL('/dashboard');
+  await expect(browser).toHaveTitle(/Dashboard/);
+  await expect(screen.getByRole('heading', 'Overview')).toBeVisible();
+});
+```
+
+Em uma suíte com alvos de dispositivo, adicione `{ platforms: ['web'] }` a
+um teste que usa `browser`, para que o runner o pule nos dispositivos.
+
+## Simule uma API
+
+`browser.route` intercepta requisições pelo resto da tentativa, inclusive
+depois de `app.restart()` e de uma restauração de sessão. Registre a rota
+antes de a página abrir.
+
+```ts
+await browser.route('**/api/quote', async (route) => {
+  await route.fulfill({ json: { cents: 4200 } });
+});
+
+await app.open('/checkout');
+await expect(screen.getByText('$42.00')).toBeVisible();
+```
+
+- Cada handler chama exatamente um entre `fulfill`, `continue`, `fallback`
+  ou `abort`.
+- A rota mais recente roda primeiro. `continue` envia a requisição para a
+  rede. `fallback` a repassa para a rota registrada antes dela.
+- Um `expect` que falha em um handler faz o teste falhar, no próximo passo
+  ou no fim do teste.
+
+Inicie `browser.waitForResponse` antes da ação que aciona a requisição,
+geralmente em `Promise.all`. Ele também funciona antes do primeiro
+`browser.goto` ou `app.open`:
+
+```ts
+const [response] = await Promise.all([
+  browser.waitForResponse('**/api/orders'),
+  screen.getByRole('button', 'Place order').tap(),
+]);
+expect(response.status).toBe(201);
+```
+
+Use `browser.waitForRequest` para resolver assim que a página enviar a
+requisição, antes de qualquer resposta chegar. Os dois métodos aceitam um
+glob de URL, uma `RegExp`, `{ method, url }` ou uma função predicado como
+`(response) => response.request.method === 'POST' && response.status === 201`.
+Veja [`waitForResponse`](/reference/web#waitforresponse) e
+[`waitForRequest`](/reference/web#waitforrequest).
+
+## Trate um diálogo
+
+Um `alert`, `confirm` ou `prompt` não tratado faz o próximo passo falhar.
+Registre um handler antes:
+
+```ts
+const off = await browser.onDialog('accept');
+await screen.getByRole('button', 'Delete').tap();
+await off();
+```
+
+Um handler que é uma função recebe o diálogo e precisa chamar
+`accept(text?)` ou `dismiss()`.
+
+## Baixe um arquivo
+
+```ts
+import { readFile } from 'node:fs/promises';
+
+const file = await browser.waitForDownload(() =>
+  screen.getByRole('link', 'Export CSV').tap(),
+);
+const csv = await readFile(file.absolutePath, 'utf8');
+expect(csv).toContain('Invoice');
+```
+
+O e2e salva o arquivo como um artefato `download`. Leia o arquivo por meio
+de `file.absolutePath`, que também funciona com navegadores hospedados.
+`file.path` é relativo ao diretório de artefatos da tentativa, não ao
+projeto.
+
+## Acesse um iframe
+
+`browser.frameLocator` restringe as consultas a um frame:
+
+```ts
+const payment = browser.frameLocator('#payment-frame');
+await payment.getByLabel('Card number').fill('4242424242424242');
+```
+
+Em um frame, `locator` recebe um seletor CSS ou XPath, e `frameLocator`
+entra em um frame aninhado:
+
+```ts
+const editor = browser.frameLocator('#result');
+await editor.locator('#upload').setInputFiles('fixtures/photo.png');
+await expect(editor.frameLocator('#preview').getByRole('heading', 'Uploaded')).toBeVisible();
+```
+
+`browser.locator('css or xpath')` faz o mesmo na página. Use um seletor
+somente quando consultas por papel, rótulo e test id não encontram o
+elemento. Para uma correspondência que uma duplicata oculta torna ambígua,
+tente `{ visible: true }` primeiro.
+
+A árvore semântica do agente representa um frame de outro site, por exemplo
+um campo de cartão hospedado, por um elemento `iframe` sem nada do conteúdo
+do frame ([verificação de site](/reference/security#site-check)). O agente
+só alcança esse conteúdo por capturas de tela. Use `frameLocator` para os
+passos nesse frame. Para avaliar o conteúdo do frame com `agent.assert`,
+passe [`vision`](/reference/agent#vision). Um `agent.act` cuja única mudança
+fica nesse frame nunca grava um [replay](/cache#when-a-recording-is-written).
+
+## Leia dados da página
+
+`browser.evaluate` roda uma função na página. O e2e serializa a função,
+então ela não pode usar variáveis do teste. Passe dados como segundo
+argumento:
+
+```ts
+const count = await browser.evaluate(() => document.querySelectorAll('li').length);
+const flag = await browser.evaluate((name: string) => window.localStorage.getItem(name), 'featureFlags');
+```
+
+Use `evaluate` apenas para estados que `screen` não consegue ler.
+
+## Rode um script antes da página
+
+Um script de inicialização roda em todo documento antes dos scripts da
+própria página. Use para simular uma API do navegador, fixar a semente de
+`Math.random` ou definir uma flag que o app lê ao iniciar. Para todos os
+testes:
+
+```ts
+web({ initScripts: [{ path: 'tests/init.js' }] })
+```
+
+Para um teste, antes de a página abrir:
+
+```ts
+await browser.addInitScript((value) => { Math.random = () => value; }, 0.5);
+await app.open('/raffle');
+```
+
+Veja [scripts de inicialização](/reference/web#init-scripts).
+
+## Emule modo escuro e movimento reduzido
+
+`colorScheme` e `reducedMotion` definem o que as regras `@media` da página
+e `matchMedia` leem, desde a primeira renderização. Para todos os testes:
+
+```ts
+web({ colorScheme: 'dark', reducedMotion: 'reduce' })
+```
+
+Para um teste, chame `browser.emulateMedia`. Chame antes de a página abrir
+para carregar a página com esses valores:
+
+```ts
+await browser.emulateMedia({ reducedMotion: 'reduce' });
+await app.open('/');
+```
+
+Um valor vale pelo resto do teste, inclusive depois de `app.restart()` e
+`app.clearState()`. Veja [emulação de mídia](/reference/web#media-emulation).
+
+## Fique offline
+
+`browser.setNetwork('offline')` corta a rede de todas as abas e service
+workers, até o teste terminar ou voltar a ficar online:
+
+```ts
+await app.open('/');
+await browser.setNetwork('offline');
+await screen.getByRole('button', 'Refresh').tap();
+await expect(screen.getByText('You are offline')).toBeVisible();
+```
+
+`browser.reload()` carrega uma página que o service worker guardou em cache
+quando está offline; navegar para uma URL fora do cache falha. Veja
+[`setNetwork`](/reference/web#setnetwork).
+
+## Controle o tempo
+
+`browser.clock` define a hora que a página lê e dispara os timers da página
+quando você mandar, como faz o `page.clock` do Playwright. Instale o relógio
+antes de a página abrir e depois pause-o:
+
+```ts
+await browser.clock.install({ time: new Date('2024-02-02T08:00:00Z') });
+await browser.clock.pauseAt(new Date('2024-02-02T09:00:00Z'));
+await app.open('/offer');
+await browser.clock.runFor('00:10'); // fires every timer due in 10 seconds
+await expect(screen.getByText('Offer expired')).toBeVisible();
+```
+
+O relógio cobre todas as abas e vale pelo resto do teste. Os tempos limite
+e as esperas do próprio teste seguem o tempo real. Veja
+[relógio](/reference/web#clock).
+
+## Cookies
+
+```ts
+await browser.setCookies([{ url: 'http://localhost:3000', name: 'tz', value: 'UTC' }]);
+```
+
+As URLs dos cookies precisam ser URLs `http:` ou `https:` válidas (uma
+entrada inválida faz o lote inteiro ser rejeitado, então nenhum cookie do lote é
+definido).
+
+## Escolha um navegador
+
+O navegador é uma opção da engine, `chromium` por padrão. Dois navegadores
+em um mesmo app são dois alvos, como em
+[Um tamanho por alvo](/web#one-size-per-target):
+
+```ts title="Target fragment"
+{ name: 'webkit', engine: web({ browser: 'webkit' }), app },
+```
+
+Na CI, instale o navegador extra com o
+[comando de instalação](/reference/web#installing-browsers):
+
+<CodeGroup>
+```bash npm
+npx @e2e-dev/web install webkit --with-deps
+```
+
+```bash pnpm
+pnpm exec e2e-web install webkit --with-deps
+```
+
+```bash bun
+bunx @e2e-dev/web install webkit --with-deps
+```
+</CodeGroup>
+
+`browser.name` é o navegador em que o teste roda, e `browser.version` é a
+versão que ele informa. Pule um teste em um navegador a partir do corpo do
+teste:
+
+```ts
+test('copies the invite link', async ({ app, screen, browser }) => {
+  test.skip(browser.name === 'webkit', 'not supported on WebKit yet');
+  await app.open('/invite');
+});
+```
+
+Veja [`name`, `version`](/reference/web#name-version).
+
+`connect` se conecta por CDP a um Chromium remoto em vez de iniciar um, ou
+a outro navegador que fala CDP, como um
+[Lightpanda](/integrations/lightpanda) ou um [Moli](/integrations/moli) já
+rodando. Para definir tamanhos, veja [Viewports](/web#viewports).
+
+## Navegadores hospedados
+
+Um provedor de navegadores reserva um navegador em um serviço e entrega à
+engine o endpoint CDP desse navegador. Passe o provedor como `browser`. A
+engine devolve cada navegador quando o escopo dele termina, em qualquer
+caminho de saída, então uma sessão cobrada por minuto é encerrada quando a
+execução deixa de usá-la.
+
+| Serviço | Provedor |
+| --- | --- |
+| [Kernel](/integrations/kernel) | `kernel()` de `@e2e-dev/kernel` |
+| [Notte](/integrations/notte) | `notte()` de `@e2e-dev/notte` |
+| [smol machines](/integrations/smol), microVMs no seu próprio computador | `smol()` de `@e2e-dev/smol` |
+| [Lightpanda](/integrations/lightpanda), o navegador headless de código aberto, na sua própria máquina | `lightpanda()` de `@e2e-dev/lightpanda` |
+| [Moli](/integrations/moli), um navegador local com layout e capturas de tela sob demanda | `moli()` de `@e2e-dev/moli` |
+| [TestMu AI](/integrations/testmu#run-web-targets-in-browsers) | `testmuBrowsers()` de `@e2e-dev/testmu/web` |
+| Sandboxes do [E2B](/integrations/e2b#run-web-targets-in-browsers) | `e2bBrowsers()` de `@e2e-dev/e2b/web` |
+| [Revyl](/integrations/revyl#run-web-targets-in-browsers) | `revylBrowsers()` de `@e2e-dev/revyl/web` |
+| Qualquer outro serviço | Seu próprio provedor, algumas dezenas de linhas no seu projeto |
+
+Quando o serviço mostra a janela em uma visualização ao vivo, adicione
+`viewport: null` para que a página [preencha a janela](/web#fill-the-window).
+
+Um provedor implica um navegador que a engine controla como Chromium por
+CDP (o próprio Chromium, o Lightpanda ou o Moli) e não pode ser combinado
+com `connect`. Um alvo sem nada para rodar não reserva nada.
+
+### Escreva um provedor
+
+Um provedor implementa esta interface:
+
+```ts
+export interface BrowserProvider {
+  /** Label in progress lines and error messages. */
+  readonly name: string;
+  /** `worker` (default): one browser per worker slot for the run. `attempt`: a fresh browser per attempt. */
+  readonly scope?: 'worker' | 'attempt';
+  acquire(request: BrowserRequest): Promise<BrowserLease>;
+  release(lease: BrowserLease, context: BrowserReleaseContext): Promise<void>;
+  /** Optional: resolves CDP handshake headers from the worker's environment. */
+  cdpHeaders?(lease: BrowserLease, context: BrowserRequest): Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>;
+  /** Optional: the service's own recording of the browser, in the worker, for an attempt that records video. */
+  record?(lease: BrowserLease, context: ProviderRecordContext): Promise<ProviderRecording>;
+  /** Optional: serves `browser.waitForDownload` for a browser on another machine. */
+  readonly downloads?: BrowserProviderDownloads;
+  /** Optional: releases the run's leases a dead worker left open, once the run ends; resolves to their ids. */
+  sweep?(context: BrowserReleaseContext): Promise<readonly string[]>;
+}
+
+export interface BrowserProviderDownloads {
+  /** Absolute directory on the browser's machine the browser saves downloads to. */
+  readonly dir: string;
+  /** The bytes of one finished download, `file` a path under `dir`, read off the leased browser. */
+  read(lease: BrowserLease, file: string, context: BrowserDownloadContext): Promise<Uint8Array>;
+}
+
+export interface BrowserLease {
+  /** The provider's handle (a session id), handed back to `release`. */
+  readonly id: string;
+  /** `ws://`, `wss://`, or `http://` DevTools endpoint to attach to over CDP. */
+  readonly cdpEndpoint: string;
+  /** Endpoint to reattach to the same browser after a transport drop; per-attempt leases only. */
+  readonly reconnectEndpoint?: string;
+}
+```
+
+`acquire` recebe o id da execução, o alvo, o slot de worker e o número de
+slots, o id da tentativa para uma reserva por tentativa, o ambiente da
+execução, um sinal de aborto e um `log` que chega ao reporter. Leia os
+tokens de `request.env`, não de `process.env`.
+
+Uma reserva é um dado JSON. `release` recebe de volta o objeto que
+`acquire` retornou, então um provedor pode guardar campos próprios nele. Só
+`id`, `cdpEndpoint` e `reconnectEndpoint` chegam ao worker, então indexe
+tudo o que um worker usa, como uma gravação, por `lease.id`.
+
+Para uma conexão CDP autenticada, implemente `cdpHeaders(lease, request)`
+e leia as credenciais de `request.env` no worker. Os cabeçalhos nunca vão
+no JSON da reserva e não viram cabeçalhos das requisições da página.
+
+Com uma API de sessões típica, um provedor envia três requisições: criar
+uma sessão, fazer polling dela até que ela tenha um endpoint DevTools e
+encerrá-la.
+
+<Accordion title="Exemplo de provedor e configuração">
+
+```ts title="browser-provider.ts"
+import type { BrowserProvider } from '@e2e-dev/web';
+
+/**
+ * Leases browsers from a service that starts a Chromium per session and
+ * exposes its DevTools endpoint. Replace the three requests with your
+ * service's API.
+ */
+export function hostedBrowsers(options: { serviceUrl: string; scope?: 'worker' | 'attempt' }): BrowserProvider {
+  return {
+    name: 'hosted-browsers',
+    scope: options.scope ?? 'worker',
+    async acquire(request) {
+      const token = request.env['BROWSER_SERVICE_TOKEN'];
+      if (token === undefined || token === '') throw new Error('BROWSER_SERVICE_TOKEN is not set');
+      const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+      // 1. Ask for a browser; name the session after the run so it can be found later.
+      const created = await fetch(`${options.serviceUrl}/sessions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          name: `e2e ${request.runId} ${request.targetName} ${request.attemptId ?? `slot ${request.slot + 1} of ${request.slots}`}`,
+        }),
+        signal: request.signal,
+      });
+      if (!created.ok) throw new Error(`browser service: HTTP ${created.status}`);
+      const { id } = (await created.json()) as { id: string };
+      // 2. Wait until the session exposes its DevTools endpoint.
+      for (;;) {
+        const response = await fetch(`${options.serviceUrl}/sessions/${id}`, { headers, signal: request.signal });
+        const session = (await response.json()) as { status: string; cdpUrl?: string; viewerUrl?: string };
+        if (session.status === 'ready' && session.cdpUrl !== undefined) {
+          if (session.viewerUrl !== undefined) request.log(`watch at ${session.viewerUrl}`);
+          return { id, cdpEndpoint: session.cdpUrl };
+        }
+        if (session.status !== 'starting') throw new Error(`browser service: session ${id} is ${session.status}`);
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
+    },
+    async release(lease, context) {
+      // 3. Stop the session; the run waits for this within cleanupTimeout.
+      const token = context.env['BROWSER_SERVICE_TOKEN'] ?? '';
+      await fetch(`${options.serviceUrl}/sessions/${lease.id}/stop`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        signal: context.signal,
+      });
+    },
+  };
+}
+```
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { hostedBrowsers } from './browser-provider.ts';
+
+export default {
+  targets: [
+    {
+      name: 'hosted',
+      engine: web({
+        browser: hostedBrowsers({ serviceUrl: 'https://browsers.example.com' }),
+      }),
+      app: { url: 'https://staging.example.com' },
+    },
+  ],
+  workers: 2,
+} satisfies E2EConfig;
+```
+
+Dois workers reservam duas sessões em paralelo e as mantêm durante a
+execução.
+
+</Accordion>
+
+### Escolha o escopo da reserva
+
+`scope: 'worker'`, o padrão, mantém um navegador por slot de worker durante
+toda a execução. `scope: 'attempt'` dá a cada tentativa, inclusive às novas
+tentativas, um navegador novo que nenhum teste anterior tocou, ao custo de
+iniciar uma sessão por tentativa. Uma sessão hospedada custa dinheiro
+enquanto roda, então mantenha `workers` no número que a suíte consegue
+ocupar.
+
+Um worker que cai ou é encerrado à força não consegue liberar as suas
+reservas. Implemente `sweep` para limpar as reservas órfãs no fim de uma
+execução (uma vez por alvo, usando tags do provedor ou um registro local de
+reservas). Uma limpeza que falha registra uma linha no log sem fazer a
+execução falhar. Sem `sweep`, os navegadores órfãos ficam abertos até o
+serviço encerrá-los.
+
+<Accordion title="Escopo por worker: quando as reservas começam e terminam">
+- Todos os slots de worker reservam seus navegadores em paralelo na
+  inicialização; se algum slot falhar, a execução é abortada antes de os
+  testes começarem e libera o resto.
+- As reservas são liberadas depois que o último worker sai (dentro de
+  `cleanupTimeout`), mesmo em falhas ou com Ctrl-C.
+- Se o navegador de um worker cair no meio da execução, o worker reserva um
+  substituto na próxima tentativa e o libera ao sair. Como `acquire` pode
+  rodar dentro de um processo de worker, não dependa de estado em memória do
+  processo principal.
+- O lado que obteve uma reserva, seja qual for, a libera uma única vez.
+</Accordion>
+
+<Accordion title="Escopo por tentativa: limites">
+Os testes com escopo por tentativa rodam no contexto padrão persistente do
+navegador, na primeira aba, então valem os mesmos limites de
+[`connect.reconnectEndpoint`](/reference/web#recovering-a-cdp-transport):
+
+- `headers`, `basicAuth`, `userAgent`, `locale`, `timezoneId` e
+  `deviceScaleFactor` não são suportados.
+- `app.clearState()` não é suportado.
+- [Sessões](/authentication) salvas não são suportadas.
+
+Se a conexão CDP cair no meio do teste, o e2e se reconecta via
+`reconnectEndpoint` (ou `cdpEndpoint`) e verifica se ainda é o mesmo
+navegador.
+</Accordion>
+
+### Downloads no provedor
+
+Implemente `downloads` para que `browser.waitForDownload` funcione em
+navegadores remotos. Como um navegador remoto escreve os downloads no
+próprio disco, `downloads` diz ao navegador para salvar os arquivos em
+`dir` e passa cada caminho concluído para `read`, que busca os bytes pela
+API do provedor (veja [Kernel](/integrations/kernel#downloads) ou
+[Notte](/integrations/notte#downloads)). Sem `downloads`, chamar
+`waitForDownload` em um navegador remoto falha. Provedores de navegadores
+locais não precisam disso.
+
+### Gravação no provedor
+
+Implemente `record` para usar a gravação do próprio serviço como o vídeo da
+tentativa. Quando uma tentativa grava [vídeo](/reference/config#video), o
+worker chama `record` em vez de iniciar o screencast da engine, assim que a
+página abre. A gravação cobre a janela inteira do navegador, inclusive as
+abas e a barra de endereços.
+
+`record` retorna um `ProviderRecording` de `e2e/engine`. Quando a tentativa
+coleta o vídeo, o `stop` da gravação faz uma de duas coisas:
+
+- Escreve um arquivo no diretório recebido e retorna `{ file }`. O e2e
+  guarda o arquivo como `video/<file>` ao lado dos outros artefatos da
+  tentativa.
+- Retorna `{ url, mediaType }` para uma gravação que o serviço guarda. O
+  relatório tem um link para ela.
+
+<Accordion title="Exemplo de método record">
+
+```ts title="browser-provider.ts"
+import type { ProviderRecording } from 'e2e/engine';
+
+// In hostedBrowsers(), beside acquire and release.
+async record(lease, context): Promise<ProviderRecording> {
+  const headers = { Authorization: `Bearer ${context.env['BROWSER_SERVICE_TOKEN'] ?? ''}` };
+  const startedAt = new Date().toISOString();
+  const started = await fetch(`${options.serviceUrl}/sessions/${lease.id}/recordings`, {
+    method: 'POST',
+    headers,
+    signal: context.signal,
+  });
+  if (!started.ok) throw new Error(`browser service: HTTP ${started.status}`);
+  const { id } = (await started.json()) as { id: string };
+  return {
+    startedAt,
+    async stop({ signal }) {
+      const stopped = await fetch(`${options.serviceUrl}/recordings/${id}/stop`, { method: 'POST', headers, signal });
+      if (!stopped.ok) throw new Error(`browser service: HTTP ${stopped.status}`);
+      // The service keeps the recording; the report links to its player page.
+      return { url: `${options.serviceUrl}/recordings/${id}`, mediaType: 'text/html' };
+    },
+  };
+},
+```
+
+</Accordion>
+
+Um `record` que falha faz a inicialização da tentativa falhar, com o nome
+do provedor e da reserva. Um `stop` que falha roda mais uma vez quando a
+tentativa termina, para que nenhuma gravação continue rodando em um
+navegador compartilhado. Quando o serviço não consegue gravar um navegador
+(um navegador headless, por exemplo), deixe `record` de fora e a engine
+grava o screencast. O [Kernel](/integrations/kernel#recordings) grava
+assim.
+
+## Fontes de ícones e conteúdo gerado
+
+Um texto que uma folha de estilo adiciona com `::before` ou `::after` faz
+parte do nome de um controle, como os leitores de tela o leem: um botão com
+`.next::before { content: "→" }` é `button "→ Next"`. O texto do rótulo,
+como `getByLabel` o lê, nunca inclui conteúdo gerado.
+
+As fontes de ícones são a exceção. O Font Awesome e fontes parecidas
+desenham cada ícone a partir de um caractere de uso privado (`\f090`), e a
+engine remove esses caracteres de todos os nomes:
+
+- `<button><i class="fa fa-sign-in"> Login</i></button>` é
+  `button "Login"`, e `getByRole('button', 'Login')` o encontra.
+- Um glifo entre duas palavras é lido como um espaço.
+- Um controle que só tem um ícone é lido pelo seu `title`, quando tem um. O
+  navegador mesmo assim nomeia o controle pelo glifo, então `getByRole` por
+  esse título não encontra nada. Dê a ele um `aria-label`, ou use
+  `browser.locator('[title="Sign out"]')`.
+- Um nome em `RegExp` corresponde ao nome que o navegador dá, glifo
+  incluído, então não use âncoras nele: `/Login/`.
+
+## Conteúdo inerte
+
+O agente não vê conteúdo inerte, então nunca mira em um controle que não
+recebe entrada:
+
+- Um elemento com o atributo `inert`, e tudo abaixo dele.
+- Tudo fora de um `<dialog>` modal, aberto com `showModal()` ou com um
+  comando `show-modal`. Com vários abertos, só o último exibido fica.
+  Quando o e2e não consegue saber qual é esse diálogo, não deixa nada de
+  fora.
+
+Os localizadores continuam encontrando conteúdo inerte, e `toBeVisible`
+continua passando, como no Playwright.
+
+## Shadow DOM
+
+As consultas de `screen`, os escopos e os filtros `has` alcançam shadow
+roots abertos e fechados, e o agente vê o conteúdo deles. `first`, `last` e
+`nth` contam primeiro as correspondências fora de um shadow root fechado e
+depois as correspondências de cada shadow root, em ordem.
+
+```ts
+// The input and the button live in a closed shadow root a widget attached.
+await screen.getByPlaceholder('Access code').fill('SHADOW-42');
+await screen.getByRole('button', 'Submit').tap();
+await expect(screen.getByText('Access granted')).toBeVisible();
+```
+
+`browser.locator`, `frameLocator` e `filter({ hasText })` não passam de um
+shadow root fechado. Consulte o texto dentro do shadow root, ou filtre com
+`has`. Um shadow root fechado declarado em HTML
+(`<template shadowrootmode="closed">`) fica fora de alcance.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Referência da engine web" icon="masks-theater" href="/reference/web">
+    Cada método de `browser`, o tempo limite dele e o que ele lança.
+  </Card>
+  <Card title="Web" icon="play" href="/web">
+    Inicie o servidor de desenvolvimento, acesse previews protegidos e teste viewports.
+  </Card>
+</CardGroup>

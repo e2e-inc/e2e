@@ -1,0 +1,274 @@
+---
+title: Telemetria
+description: O que a CLI envia, o que ela nunca envia e como desativar a telemetria.
+"og:image": "https://e2e.com/docs/images/og/telemetry.png?v=723dc5172f"
+"twitter:image": "https://e2e.com/docs/images/og/telemetry.png?v=723dc5172f"
+---
+
+A CLI `e2e` envia dados de uso anônimos: quais comandos, engines e recursos
+as pessoas usam, e onde as execuções falham. A telemetria vem ligada por
+padrão. Ela envia contagens e versões, nunca conteúdo de testes, conteúdo do
+app ou credenciais.
+
+## Desativação
+
+Qualquer um destes desliga a telemetria:
+
+<CodeGroup>
+```bash npm
+npx e2e telemetry disable   # saved in ~/.config/e2e/telemetry.json
+export E2E_TELEMETRY_DISABLED=1          # for a shell or a CI job
+export DO_NOT_TRACK=1                    # the cross-tool convention
+```
+
+```bash pnpm
+pnpm exec e2e telemetry disable   # saved in ~/.config/e2e/telemetry.json
+export E2E_TELEMETRY_DISABLED=1          # for a shell or a CI job
+export DO_NOT_TRACK=1                    # the cross-tool convention
+```
+
+```bash bun
+bunx e2e telemetry disable   # saved in ~/.config/e2e/telemetry.json
+export E2E_TELEMETRY_DISABLED=1          # for a shell or a CI job
+export DO_NOT_TRACK=1                    # the cross-tool convention
+```
+</CodeGroup>
+
+As variáveis de ambiente prevalecem sobre a escolha salva.
+`e2e telemetry enable` desfaz um `disable` salvo. `e2e telemetry` imprime o
+status e, quando a telemetria está desligada, o motivo. O arquivo de
+preferências fica em `$XDG_CONFIG_HOME/e2e/` quando essa variável está
+definida, e em `%APPDATA%\e2e\` no Windows.
+
+Um `disable` também vale para os comandos que já estão rodando em outro
+terminal. Nada é enviado quando não é possível escrever no diretório de
+preferências, nem a partir de um checkout do código-fonte do repositório do
+e2e.
+
+## Veja o que seria enviado
+
+<CodeGroup>
+```bash npm
+E2E_TELEMETRY_DEBUG=1 npx e2e run
+```
+
+```bash pnpm
+E2E_TELEMETRY_DEBUG=1 pnpm exec e2e run
+```
+
+```bash bun
+E2E_TELEMETRY_DEBUG=1 bunx e2e run
+```
+</CodeGroup>
+
+A CLI imprime os payloads exatos no stderr como `[telemetry] {...}` e não
+envia nada.
+
+## O que é enviado
+
+Cada comando envia um evento `e2e_cli_session`. `run` e `explore` também
+enviam `e2e_run_completed`, `init` envia `e2e_init_completed` (assim como
+`explore`, quando roda antes o assistente do init), `upgrade` envia
+`e2e_upgrade_completed`, e `mcp` envia um `e2e_mcp_session` por sessão
+MCP. `--help` e `--version` não enviam nada, em nenhum comando. `run()` e
+`explore()` de `e2e/runner` não enviam evento de sessão, só um
+`e2e_run_completed` por chamada que retorna um relatório.
+
+Os eventos vão em uma única requisição quando o comando, `run()` ou
+`explore()` termina, com um prazo de dois segundos. `e2e mcp` envia cada
+evento de sessão em uma requisição própria, e `e2e run --watch` envia o
+evento de cada execução quando ela termina.
+
+Os eventos contêm só as propriedades abaixo. Um código de erro que não é um
+token em maiúsculas é enviado como `OTHER`. Um nome de engine, plataforma,
+modelo, frota ou cliente MCP, ou uma versão de cliente MCP, que não é um
+token simples de letras, dígitos, pontos, hífens e sublinhados é enviado
+como `other`. Uma versão de engine que não segue semver é enviada como
+`unversioned`. Nas contagens de ações e de chamadas de ferramenta, as
+ferramentas do próprio projeto contam juntas como `tool`, e qualquer outro
+nome como `other`.
+
+<AccordionGroup>
+<Accordion title="Todo evento">
+
+| Propriedade | Valor |
+| --- | --- |
+| `distinct_id` | Um id aleatório guardado no arquivo de preferências. A CI usa `ci:<vendor>` no lugar dele, e uma frota usa `fleet:<name>` (veja [Em uma frota](#in-a-fleet)) |
+| `project_id` | Um hash do commit raiz do repositório, o mesmo em todos os clones completos. `null` fora do git e em um clone raso |
+| `session_id` | Um id aleatório para esta invocação |
+| `first_run`, `days_since_first_run` | Se este comando criou o arquivo de preferências, e quantos dias inteiros se passaram desde então. `null` na CI, em uma frota e para um arquivo de preferências de antes de esse horário ser registrado |
+| `os`, `os_release`, `arch`, `cpu_count`, `memory_gb`, `docker`, `wsl`, `tty` | A classe da máquina |
+| `sandbox` | A microVM que o kernel declara ser (`firecracker`); senão, `null` |
+| `ci`, `ci_name` | Se `CI` está definida, e o fornecedor quando ele se identifica (`github-actions`, `gitlab`, `circleci`, ...) |
+| `fleet` | O valor de `E2E_TELEMETRY_FLEET`, `null` quando não está definida |
+| `coding_agent` | O agente de código cujo shell rodou o comando, quando ele se identifica (`claude-code`, `cursor`, `codex`, ...) |
+| `e2e_version`, `package_manager` | A versão do e2e e o gerenciador de pacotes que iniciou a CLI |
+| `runtime`, `runtime_version`, `node_version` | `node`, `bun` ou `deno`, e a versão dele. `node_version` é a versão do próprio Node, ou a versão de compatibilidade com o Node no Bun ou no Deno |
+| `$lib`, `$lib_version`, `$process_person_profile`, `$geoip_disable` | `e2e`, a versão dele, `false` e `true`: o PostHog não mantém perfil de pessoa nem deduz localização |
+
+</Accordion>
+<Accordion title="e2e_cli_session, uma vez por comando">
+
+| Propriedade | Valor |
+| --- | --- |
+| `command` | `init`, `run`, `list`, `cache ls`, `guide`, `telemetry`, ... |
+| `flags` | Os nomes das flags passadas, como `--headed` ou `--tag`. Nunca os valores delas |
+| `exit_code`, `duration_ms` | Como o comando terminou e quanto tempo levou |
+| `error_code` | O código do runner da falha que interrompeu o comando antes que ele pudesse rodar (`CONFIG_NOT_FOUND`, `INVALID_CONFIG`, ...), `CLI_USAGE` para uma flag ou um argumento rejeitado, ou `null` |
+
+</Accordion>
+<Accordion title="e2e_init_completed, uma vez por assistente do init">
+
+| Propriedade | Valor |
+| --- | --- |
+| `result` | `scaffolded`, `already-initialized`, `cancelled`, `install-failed`, `not-interactive`, `invalid-project` ou `example-failed` |
+| `yes`, `existing_config` | Se `--yes` foi passada, e se já existia uma configuração, caso em que nada foi perguntado sobre engine ou gateway |
+| `example` | O nome passado em `--example` (`with-vite`, `with-expo`, ...), `null` sem a flag |
+| `engine`, `gateway` | Os ids das engines e do gateway de modelo escolhidos para uma nova configuração (`web`, `mobile`, `web,mobile`, `none`; `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok`, `none`), `null` quando não houve pergunta. Nunca o endpoint digitado para um gateway compatível com OpenAI |
+| `skill`, `mcp`, `install` | Se a skill do agente, o registro do MCP e a instalação das dependências foram escolhidos |
+| `ci` | O pipeline de CI escolhido (`github-actions`, `gitlab` ou `none`), `null` quando não houve pergunta |
+
+</Accordion>
+<Accordion title="e2e_upgrade_completed, uma vez por e2e upgrade">
+
+| Propriedade | Valor |
+| --- | --- |
+| `result` | `upgraded`, `up-to-date`, `dry-run`, `no-project`, `invalid-project`, `linked`, `unknown-target`, `incompatible`, `registry-failed` ou `install-failed` |
+| `target` | `version` para uma versão nomeada, ou a dist-tag: `latest`, `nightly`, `canary`, `beta` ou `other` |
+| `from_version`, `to_version`, `prerelease` | A versão do `e2e` instalada antes, a versão para a qual o alvo foi resolvido e se ela é uma versão de pré-lançamento. `null` quando desconhecida |
+| `manager` | O gerenciador de pacotes que o comando escolheu para o projeto: `npm`, `pnpm`, `yarn` ou `bun`. O comando só instala quando o resultado é `upgraded`. `null` quando o comando terminou antes de escolher um |
+| `siblings` | Os pacotes `@e2e-dev` no plano de atualização, sem o escopo: `["web", "kernel"]`. Pacotes vinculados e os que o registry não tem ficam de fora |
+| `packages_moved`, `packages_linked` | Quantas entradas de `e2e` e `@e2e-dev` no `package.json` a atualização reescreveu, e quantas deixou como estavam porque não são versões do registry (`workspace:`, `file:`, `catalog:`, um caminho, git, um alias). Não é a contagem de pacotes do lockfile |
+
+</Accordion>
+<Accordion title="e2e_run_completed, uma vez por e2e run, e2e explore ou chamada concluída de run() ou explore()">
+
+| Propriedade | Valor |
+| --- | --- |
+| `command` | `run`, `explore`, `runner.run` para `run()` de `e2e/runner`, ou `runner.explore` para `explore()` |
+| `status`, `exit_code`, `duration_ms` | O resultado da execução |
+| `flags` | Os nomes das flags passadas ao comando da execução, nunca os valores delas |
+| `tests_discovered`, `tests_selected`, `tests_executed`, `tests_passed`, `tests_failed`, `tests_interrupted`, `tests_flaky`, `tests_skipped` | As contagens do resumo |
+| `tests_failed_as_expected` | Testes cuja falha `test.fail` cobriu, contados entre os que passaram |
+| `attempts_total`, `tests_retried` | Quantas tentativas a execução fez entre testes e grupos seriais, e quantos destes precisaram de mais de uma |
+| `filters_run`, `filters_timed_out`, `filters_failed`, `filters_skipped`, `filters_changed_files`, `tests_left_out_by_filters` | Quantos [filtros de testes](/filters) a execução aplicou, quantos excederam o tempo limite e quantos falharam, se uma execução com `--changed-since` não chamou nenhum deles, como quando nenhum arquivo mudou, quantos arquivos a mudança tinha e quantos testes os filtros deixaram de fora. Nunca o nome, o motivo ou a nota de um filtro, um caminho ou um commit |
+| `targets`, `platforms`, `engines` | Quantos alvos, em quais plataformas e com quais engines e versões: `web`, `ios`, `web@0.6.1` ou o nome e a versão da sua própria engine |
+| `steps_total`, `steps_agent`, `steps_locator`, `steps_assertion`, `steps_screen`, `steps_app`, `steps_session`, `steps_resource`, `steps_step` | Contagens de passos por tipo |
+| `steps_agent_act`, `steps_agent_assert`, `steps_agent_extract`, `steps_agent_waitfor` | Os passos do agente por ponto de entrada |
+| `tests_with_agent_steps`, `tests_with_act` | Quantos dos testes que rodaram tiveram algum passo do agente, e quantos rodaram `agent.act` |
+| `agent_steps_replayed`, `agent_steps_partial`, `agent_steps_missed`, `agent_steps_uncached`, `agent_steps_vision` | Como o cache de replay serviu os passos do agente, quantos passos `agent.act` rodaram com o cache desligado e quantos usaram evidência em pixels |
+| `agent_miss_reasons`, `agent_handoff_reasons` | Por que passos deram cache miss e por que replays passaram o passo para o agente, pelos nomes de motivo do próprio runner: `{"no-entry": 3, "retry": 1}` |
+| `tests_code_only`, `tests_replayed`, `tests_assisted`, `tests_live` | Os testes que rodaram, pelo quanto o cache os cobriu: nenhum passo do agente, todo passo do agente reproduzido do cache, o agente rodou mas o cache cobriu parte de um passo, o agente rodou todo passo do agente |
+| `agent_actions` | Quantas vezes o agente fez cada ação, pelos nomes do próprio runner: `{"tap": 12, "typeText": 3, "scroll": 2}` |
+| `model_gateway`, `model_provider`, `model_id`, `model_calls`, `model_tokens`, `model_cached_tokens`, `estimated_cost_usd` | Para o primeiro passo com modelo: o provedor do AI SDK (`gateway`, `openrouter.chat`, `openai.chat`, ...), o fornecedor (o primeiro segmento de `vendor/model`, ou o provedor) e o id público do modelo, mais os totais da execução |
+| `model_calls_act`, `model_calls_assert`, `model_calls_extract`, `model_calls_waitfor` | As chamadas ao modelo por ponto de entrada do agente |
+| `cost_source` | `provider` quando o provedor precificou as chamadas, `none` quando ninguém as precificou, `null` para uma execução sem chamadas ao modelo |
+| `artifact_bytes` | O tamanho dos artefatos que a execução escreveu |
+| `errors`, `error_codes` | Quantos erros no nível da execução houve, e os códigos de erro distintos vistos em qualquer parte da execução (`LOCATOR_NOT_FOUND`, `APP_UNREACHABLE`, ...), no máximo 20 |
+| `primary_error_code` | O primeiro erro que determinou o status da execução (erro no nível da execução, veredito de tentativa com falha ou erro de passo), ou `null` para uma execução limpa |
+| `error_kinds` | Para `ENGINE_FAILURE`, `MODEL_PROVIDER_FAILED` e `ERROR`: o código e um tipo deduzido da mensagem a partir de uma lista fechada (`auth`, `rate-limit`, `overloaded`, `timeout`, `network`, `server`, `bad-request`, `device`, `daemon`, `browser`, `permission`, `not-found`, `memory`, `other`), como `MODEL_PROVIDER_FAILED:rate-limit`. Só o nome do tipo sai da máquina, nunca a mensagem |
+
+Recursos da configuração, ausentes quando a configuração não carregou. Cada
+um é uma contagem, um booleano ou um dos valores de opção do próprio runner,
+nunca um texto que você escreveu:
+
+| Propriedade | Valor |
+| --- | --- |
+| `config_workers`, `config_retries` | O número de workers e as novas tentativas que a execução resolveu |
+| `config_agents`, `config_custom_executor`, `config_separate_judge`, `config_project_tools` | Quantos agentes estão configurados, se algum tem um executor personalizado ou um modelo juiz próprio, e quantas ferramentas do projeto distintas eles declaram |
+| `config_credentials`, `config_secrets` | Quantas credenciais e quantos segredos estão configurados |
+| `config_cache_mode`, `config_cache_store`, `config_cache_strict` | `off`, `read-only` ou `read-write`; `file` ou `custom`; se o replay estrito está ligado |
+| `config_reporters`, `config_custom_reporters`, `config_artifact_store` | Os ids dos reporters embutidos (`list`, `dot`, `line`, `json`, `junit`, `markdown`, `ctrf`), quantos objetos de reporter a configuração adiciona e se um armazenamento de artefatos está definido |
+| `config_filters` | Quantos filtros de testes a configuração declara |
+| `config_trace_modes`, `config_video_modes` | Os modos de gravação distintos entre os alvos (`off`, `on`, `retain-on-failure`, `on-first-retry`, `on-all-retries`) |
+| `config_app_commands`, `config_environments` | Quantos alvos iniciam um comando de app, e os ambientes de app distintos (`test`, `staging`, `production`) |
+
+Só em `e2e explore` e `explore()`, contagens do que a exploração recebeu e encontrou:
+
+| Propriedade | Valor |
+| --- | --- |
+| `explore_ended` | Por que ela terminou: `finished`, `skipped`, `step-limit`, `time`, `stuck` ou `aborted` |
+| `explore_max_steps`, `explore_timeout_ms` | Os orçamentos com que ela rodou |
+| `explore_steps`, `explore_steps_passed`, `explore_steps_failed`, `explore_steps_blocked`, `explore_steps_exhausted` | Os passos da exploração, pela forma como cada um terminou |
+| `explore_assessed` | Se o agente deu uma avaliação final |
+| `explore_issues`, `explore_warnings`, `explore_findings_by_severity` | Os achados por tipo e por gravidade: `{"1": 0, "2": 1, "3": 0, "4": 0, "5": 1}` |
+
+</Accordion>
+<Accordion title="e2e_mcp_session, uma vez por sessão MCP">
+
+Um servidor `e2e mcp` envia um para cada `open_session` que recebe, quando a
+sessão fecha ou a abertura falha. Uma sessão que ainda está aberta quando o
+cliente encerra o servidor à força não é enviada.
+
+| Propriedade | Valor |
+| --- | --- |
+| `client`, `client_version` | O nome e a versão com que o cliente MCP se identifica (`claude-code`, `cursor-vscode`, ...). `null` antes de o cliente se apresentar |
+| `outcome`, `error_code` | `closed` para uma sessão que abriu, `open-failed` com o código do runner da falha (`APP_UNREACHABLE`, `ENGINE_FAILURE`, ...) |
+| `ended_by` | `agent` para `close_session`, `idle`, `step` quando a sessão atinge o limite de tempo dela ou o teste pausado é retomado, `server` quando o servidor foi desligado. `null` para uma abertura com falha |
+| `platform`, `engine`, `headed` | A plataforma e a engine do alvo, com a versão, como em uma execução, e se a UI foi mostrada |
+| `attached` | Se a sessão se conectou a um teste pausado |
+| `duration_ms`, `sessions_open` | Quanto tempo a sessão durou, e quantas outras sessões estavam abertas quando ela abriu |
+| `calls_total`, `calls_failed`, `calls` | As chamadas de ferramenta, as chamadas com falha e as chamadas pelos nomes de ferramenta da própria sessão: `{"observe": 4, "tap": 9, "locate": 2, "screenshot": 1}` |
+| `error_codes` | Quantas vezes cada código do runner fez uma chamada falhar: `{"LOCATOR_NOT_FOUND": 2}`, no máximo 20 códigos |
+
+</Accordion>
+</AccordionGroup>
+
+## O que nunca é enviado
+
+A telemetria nunca envia títulos de testes, caminhos de arquivos, URLs,
+origens, instruções, observações, conteúdo de páginas, capturas de tela,
+mensagens de erro, stack traces, valores de variáveis de ambiente,
+credenciais ou conteúdo de arquivos. Ela nunca envia os nomes de alvos,
+agentes, credenciais, segredos ou ferramentas do projeto, argumentos ou
+resultados de ferramentas MCP, o objetivo ou os charters de uma exploração,
+nem as palavras dos achados dela.
+
+## Na CI
+
+Execuções na CI contam como o fornecedor de CI, não como uma máquina, sem
+arquivo de preferências e sem aviso. Um agente de código que define `CI` no
+próprio shell, sem um fornecedor de CI em volta, conta como a máquina em que
+roda.
+
+Na CI, só as variáveis de ambiente desligam a telemetria. Defina
+`E2E_TELEMETRY_DISABLED: '1'` no `env` do job.
+
+## Em uma frota
+
+Uma plataforma que roda o e2e para os usuários dela em máquinas novas
+contaria cada máquina como um usuário novo. Defina
+`E2E_TELEMETRY_FLEET=<name>` nessas máquinas. Os eventos delas contam como
+`fleet:<name>`, sem arquivo de preferências e sem aviso, como na CI. Ou
+defina `E2E_TELEMETRY_DISABLED=1` para não enviar nada.
+
+## Para onde vai
+
+Os eventos vão para `eu.i.posthog.com`, um projeto do PostHog que os
+mantenedores do e2e operam. O PostHog não mantém perfil de pessoa, não
+armazena o endereço da requisição e desativa o GeoIP. Os dados são lidos de
+forma agregada.
+
+A telemetria está coberta pela
+[política de segurança](https://github.com/e2e-inc/e2e/blob/main/SECURITY.md).
+[Conexões de saída](/reference/security#outbound-connections) lista todas as
+outras conexões que uma execução pode fazer.
+
+## Feedback
+
+[`e2e feedback`](/reference/cli#e2e-feedback) não é telemetria. Ele envia
+as palavras das flags dele como um evento `e2e_feedback` para o mesmo
+projeto do PostHog, com os dados da máquina acima. Quando a telemetria está
+ligada, ele tem o mesmo id anônimo dos seus eventos de telemetria.
+
+Um `e2e telemetry disable` salvo não o impede. `E2E_TELEMETRY_DISABLED=1`
+e `DO_NOT_TRACK=1` impedem. A [referência da CLI](/reference/cli#e2e-feedback)
+cobre a ocultação, `--dry-run` e bugs sem `--repro`.
+
+## O aviso
+
+O primeiro comando, ou a primeira chamada de `run()` ou `explore()` de
+`e2e/runner`, imprime no stderr um aviso que diz como desativar a
+telemetria. Ele mantém intacta a saída de `--reporter json`. `e2e init` e
+`e2e telemetry` não o imprimem, então ele espera pelo próximo comando. O
+aviso aparece de novo depois de uma grande mudança nos dados coletados.

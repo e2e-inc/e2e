@@ -1,0 +1,139 @@
+---
+title: Testes com autocorreção
+description: Como um passo do agente reproduzido se recupera quando a UI mudou e como a gravação se repara sozinha.
+---
+
+Um teste com autocorreção continua passando mesmo quando a UI muda sob um
+passo `agent.act()` gravado. O e2e reproduz a gravação até onde ela ainda
+corresponde à tela e depois passa o passo para o agente ao vivo, que termina
+o objetivo. No modo `read-write`, o fluxo atualizado é salvo automaticamente
+assim que uma asserção posterior passa.
+
+O resumo da execução conta cada passo corrigido dessa forma como `handed off`:
+
+```text
+        Cache  4 replayed · 1 handed off · 1 missed
+```
+
+## O que acontece quando a UI muda
+
+Considere um passo gravado com duas ações e um botão que foi renomeado desde
+então:
+
+```ts title="tests/checkout.e2e.ts"
+import { expect, test } from 'e2e';
+
+test('applies a discount code', async ({ app, agent, screen }) => {
+  await app.open('/checkout');
+  await agent.act('apply the discount code SUMMER');
+  await expect(screen.getByRole('status')).toHaveText('10% off');
+});
+```
+
+1. O replay digita `SUMMER` no campo `Discount code` sem chamada ao modelo.
+2. O replay procura o botão gravado `Apply`. O botão agora é `Redeem`,
+   então nenhum controle corresponde em 15 segundos. O replay é interrompido
+   com `target-not-found`.
+3. O agente recebe o passo com um registro do que o replay fez. Ele lê a
+   tela, vê `Redeem` e toca nele.
+4. O `expect` passa. No fim da tentativa, o runner salva a nova gravação,
+   com `Redeem` no lugar de `Apply`.
+5. A próxima execução reproduz o passo inteiro sem chamada ao modelo.
+
+O replay nunca adivinha. Um controle gravado que não corresponde mais faz o agente
+assumir o passo, nunca leva a um toque no controle mais próximo. Veja
+[Como um replay funciona](/cache#how-a-replay-works) para saber como o
+replay faz a correspondência dos controles.
+
+## O que o agente recebe
+
+O primeiro prompt do agente lista as ações que o replay já realizou e por
+que o replay foi interrompido. Para o passo acima, ele diz:
+
+```text
+Cached replay already performed these recorded actions for this step:
+1. type "SUMMER" into textbox "Discount code"
+Replay stopped (target-not-found) after 1 of 2 recorded actions.
+Continue the step from the CURRENT screen state shown below — do NOT redo the actions above.
+```
+
+O prompt diz ao agente para não repetir essas ações, como um envio que já foi
+feito. Dois motivos de interrupção acrescentam um aviso:
+
+- `end-mismatch`: todas as ações rodaram, mas o replay não consegue mostrar
+  que elas produziram o resultado gravado. O resultado não apareceu, ou já
+  estava na tela antes de o replay agir. O agente é instruído a verificar se
+  o passo teve efeito antes de agir.
+- `action-uncertain`: uma ação falhou, e ela pode ter chegado ao app.
+  O agente é instruído a verificar o estado atual antes de tentar de novo
+  algo parecido.
+
+As ações reproduzidas e a espera contam para os
+[orçamentos](/reference/agent#budgets) e o prazo do passo. A
+[página do cache](/cache#why-a-step-was-not-replayed) lista todos os motivos
+de interrupção. Quando o replay é interrompido antes da primeira ação, o
+passo é um cache miss, e o agente não assume no meio: ele o roda desde o
+início, sem nenhum aviso.
+
+## Como a gravação se repara sozinha
+
+No modo `read-write`, um passo corrigido salva uma gravação nova assim que
+uma verificação posterior (como uma asserção de localizador ou da engine, ou
+`agent.assert()`) passa. Caso contrário, a entrada desatualizada é removida,
+por exemplo se o passo falhou, não foi confirmado por uma verificação
+posterior, não mudou nada na tela ou precisou de um reparo depois de um
+`end-mismatch`.
+
+Se a execução foi cancelada ou o modelo não pôde ser alcançado, a entrada
+existente fica intacta. Veja
+[Quando uma gravação é salva](/cache#when-a-recording-is-written) para as
+regras completas.
+
+## Detecte regressões, não só mudanças na UI
+
+O agente corrige o passo mirando o objetivo da instrução, não os cliques
+gravados. Se o botão de desconto mudou de lugar, o agente o encontra. Se os
+descontos deixam de funcionar, o passo ou a verificação depois dele falha.
+
+Mesmo assim, um objetivo pode passar de um jeito que você não pretendia, por
+exemplo com outro desconto. Termine o teste com uma verificação
+determinística do resultado, como o `toHaveText('10% off')` acima. Essa
+verificação roda em toda execução, reproduzida ou corrigida.
+
+## Veja quais passos se corrigiram
+
+Cada passo corrigido informa `step.cache.mode: 'agent-concluded'` com o
+motivo da interrupção, e `step.cache.detail` diz onde e por que o replay foi
+interrompido. A [página de trace](/debugging#traces) mostra isso abaixo do
+passo:
+
+```text
+cache: replayed 1 of 2 recorded actions, then the agent took over: a recorded target is not on the screen; recorded with `openai/gpt-6-luna-fast`; at action 2 of 2, tap button "Apply"; recording saved (`.e2e/cache/<entry>.json`)
+```
+
+`agent.act()` retorna o mesmo registro, sem `write`, como `result.cache`.
+Um [executor personalizado](/executors#replay-cache) assume o passo com
+`ctx.replayedPrefix` e também precisa continuar a partir da tela atual.
+
+## Evite que a autocorreção custe chamadas ao modelo na CI
+
+Na CI, `cache` usa `read-only` por padrão, então um passo corrigido não é
+salvo de volta no disco e vai passar para o agente (e pagar por chamadas ao
+modelo) em toda execução na CI até você atualizá-lo. Rode de novo localmente
+no modo `read-write` e
+[faça commit do cache atualizado](/cache#commit-the-replay-cache).
+
+Se você prefere que a CI falhe na hora em vez de chamar um modelo, passe
+`--strict-cache`. Veja
+[Falhe quando uma gravação estiver desatualizada](/cache#fail-on-a-stale-recording).
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Cache" icon="box-archive" href="/cache">
+    Modos, motivos de interrupção e o que uma gravação contém.
+  </Card>
+  <Card title="Como funcionam os passos do agente" icon="list-check" href="/agent-steps">
+    O que o agente vê e como um passo termina.
+  </Card>
+</CardGroup>

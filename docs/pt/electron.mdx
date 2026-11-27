@@ -1,0 +1,333 @@
+---
+title: Electron
+description: Teste um app Electron pela árvore de acessibilidade do Chromium, janela por janela.
+---
+
+`@e2e-dev/electron` testa apps Electron. Ele inicia o seu app, lê cada janela
+pela árvore de acessibilidade do Chromium, por meio do protocolo DevTools, e
+controla o app com entrada confiável. Os testes usam as mesmas APIs `agent`,
+`screen` e `expect` dos testes de todas as outras plataformas.
+
+## Configuração
+
+Instale o runner, a engine e o Electron:
+
+<CodeGroup>
+```bash npm
+npm install --save-dev e2e @e2e-dev/electron electron
+```
+
+```bash pnpm
+pnpm add --save-dev e2e @e2e-dev/electron electron
+```
+
+```bash bun
+bun add --dev e2e @e2e-dev/electron electron
+```
+</CodeGroup>
+
+A engine inicia o pacote `electron` instalado no seu projeto. No Electron 45 ou
+mais recente, ela baixa o binário uma vez por execução, antes do primeiro
+teste. Apps empacotados funcionam a partir do Electron 22. Rode
+`npx e2e doctor` para verificar sua configuração.
+
+## Aponte para o seu app
+
+Defina `app.appPath` como o diretório ou o script principal do seu app,
+relativo à raiz do projeto. `app.launchArguments` guarda as flags que toda
+inicialização recebe: as do seu app e as do Electron ou do Chromium, como
+`--lang=en-US`.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { electron } from '@e2e-dev/electron';
+
+export default {
+  targets: [
+    {
+      name: 'electron',
+      engine: electron(),
+      app: { appPath: '.', launchArguments: ['--no-update-check'] },
+    },
+  ],
+  credentials: {
+    ada: { username: 'ada', password: process.env.ADA_PASSWORD ?? '' },
+  },
+} satisfies E2EConfig;
+```
+
+O bloco `credentials` define o usuário de teste que o teste de login abaixo
+usa. Veja [Credenciais](/authentication#credentials).
+
+## Escreva um teste
+
+Importe `test` de `@e2e-dev/electron`. `app.open()` inicia o app e espera uma
+janela carregar. Todo teste começa com um diretório de dados do usuário vazio
+e encerra o app quando termina. Chame `app.restart()` para reiniciar o app com
+os mesmos dados, ou `app.clearState()` para reiniciá-lo sem dados.
+
+```ts title="tests/sign-in.e2e.ts"
+import { test } from '@e2e-dev/electron';
+import { credentials, expect } from 'e2e';
+
+test('signs in and opens settings', async ({ app, screen, electron }) => {
+  const ada = credentials.user('ada');
+  await app.open();
+  await screen.getByRole('textbox', 'Username').fill(ada.username);
+  await screen.getByRole('textbox', 'Password').fill(ada.password);
+  await screen.getByRole('button', 'Sign in').tap();
+  await expect(screen.getByTestId('status')).toContainText('Signed in as ada');
+
+  await electron.waitForWindow(() => screen.getByRole('button', 'Open settings').tap());
+  await expect(screen.getByRole('heading', 'Settings')).toBeVisible();
+
+  const userData = await electron.evaluate(({ app: main }) => main.getPath('userData'));
+  expect(userData).toContain('e2e-electron-');
+});
+```
+
+## A fixture electron
+
+| Método | O que faz |
+| --- | --- |
+| `evaluate(fn, arg?)` | Roda `fn` no processo principal com o módulo `electron` e retorna o resultado da função, serializável em JSON |
+| `windows()` | As janelas abertas, na ordem em que abriram |
+| `waitForWindow(trigger, { timeout }?)` | Roda `trigger`, espera a janela que ele abre e torna essa janela ativa |
+| `window({ title, url }, { timeout }?)` | Espera uma janela pelo título ou pela URL e a retorna, sem torná-la ativa |
+| `waitForDownload(trigger, { timeout }?)` | Roda `trigger` e espera o [download](#downloads) que ele inicia |
+| `onDialog(handler)` | Responde aos [diálogos `alert()` e `confirm()`](#handle-alert-and-confirm-dialogs) do app |
+| `locator(selector)` | Consulta a janela atual por seletor CSS |
+
+## Trabalhe com várias janelas
+
+As janelas funcionam como [abas em um teste de navegador](/reference/web#tabs).
+`screen` lê uma única janela ativa, começando pela primeira que carrega. Uma
+janela que o app abre não se torna ativa sozinha: `electron.waitForWindow()`
+roda o passo que abre a janela e torna essa janela ativa. Quando a janela ativa
+fecha, a janela que a abriu volta a ficar ativa, ou então a que estava ativa
+antes dela.
+
+```ts
+const settings = await electron.waitForWindow(() =>
+  screen.getByRole('button', 'Open settings').tap(),
+);
+await expect(screen.getByRole('heading', 'Settings')).toBeVisible();
+
+const [main] = electron.windows();
+await main.activate();
+await settings.close();
+```
+
+Uma janela tem `title()`, `url()`, `isActive()`, `isClosed()`, `activate()` e
+`close()`. Para uma janela que o app abre sozinho, como a janela principal
+depois de uma tela de abertura, encontre essa janela com `electron.window()`:
+
+```ts
+const main = await electron.window({ title: 'My App' });
+await main.activate();
+```
+
+`title` e `url` aceitam uma string exata ou um `RegExp`. `title` corresponde
+ao título do documento ou ao da janela do sistema operacional, e
+`window.title()` retorna o do documento, ou o da janela do sistema
+operacional quando o documento não tem título. O agente vê as janelas como
+abas e alterna entre elas por conta própria.
+
+## Rode código no processo principal
+
+Use `electron.evaluate()` para APIs do processo principal que uma janela não
+alcança, como acionar um item de menu ou substituir um diálogo nativo por um
+stub:
+
+```ts
+// Trigger a menu item
+await electron.evaluate(({ Menu }) => {
+  Menu.getApplicationMenu()?.getMenuItemById('open-settings')?.click();
+});
+
+// Stub a native file dialog
+await electron.evaluate(({ dialog }, filePath) => {
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
+}, '/tmp/report.csv');
+```
+
+`fn` é enviada como texto, então não pode capturar variáveis do teste: passe
+valores como `arg` (somente JSON simples; segredos são recusados) e retorne
+dados simples. `require` não está no escopo dentro de `fn`; use o argumento
+`electron` ou `process.getBuiltinModule('node:fs')`.
+
+## Trate diálogos de alert e confirm
+
+`electron.onDialog()` responde aos diálogos que o app abre a partir daí, do
+mesmo jeito que [`browser.onDialog()`](/reference/web#ondialog) faz na web.
+Passe `'accept'`, `'dismiss'` ou uma função, e chame a função que o método
+retorna para deixar de responder:
+
+```ts
+const off = await electron.onDialog('accept');
+await screen.getByRole('button', 'Delete').tap();
+await off();
+
+await electron.onDialog(async (dialog) => {
+  expect(dialog.message).toBe('Discard changes?');
+  await dialog.dismiss();
+});
+```
+
+Um handler em forma de função precisa chamar `accept()` ou `dismiss()`. Um
+diálogo que nenhum handler trata é dispensado (`confirm()` retorna `false`) e
+faz o próximo passo do teste falhar.
+
+## Faça upload de arquivos
+
+`setInputFiles` anexa arquivos por caminho, relativo à raiz do projeto, ou
+direto da memória. Chame o método em um `<input>` de arquivo ou em um botão
+que abre um diálogo de escolha de arquivos, e passe `[]` para limpar um campo:
+
+```ts
+await screen.getByTestId('attachment').setInputFiles('fixtures/report.csv');
+await screen.getByRole('button', 'Choose file').setInputFiles('fixtures/report.csv');
+await screen.getByTestId('attachment').setInputFiles({
+  name: 'note.txt',
+  mimeType: 'text/plain',
+  buffer: Buffer.from('written in the test'),
+});
+await screen.getByTestId('attachment').setInputFiles([]);
+```
+
+## Downloads
+
+`electron.waitForDownload()` roda o passo que inicia um download e espera o
+arquivo. O arquivo é copiado para os artefatos do teste:
+
+```ts
+const file = await electron.waitForDownload(() => screen.getByRole('link', 'Export').tap());
+expect(file.suggestedFilename).toBe('report.csv');
+// file.absolutePath is the saved file
+```
+
+Os downloads nunca vão parar na sua própria pasta Downloads: o app os salva
+dentro do diretório de dados do usuário do teste.
+
+## Grave vídeo
+
+Rode com `--video on`, ou defina `video` na configuração, para gravar todos os
+testes. O vídeo acompanha a janela que `screen` lê, inclusive depois de
+`app.restart()`, e é salvo como um único `.webm` junto com os resultados do
+teste. Para gravar só parte de um teste, chame `app.startRecording()` e
+`app.stopRecording()`.
+
+A codificação precisa do ffmpeg. A engine usa o que estiver no seu `PATH`, ou
+baixa um na primeira gravação. Defina `E2E_FFMPEG_PATH` para usar o seu
+próprio.
+
+## Teste um app empacotado
+
+Para testar um build empacotado, aponte `executablePath` para o binário (não
+para o diretório `.app` no macOS) e omita `app.appPath`:
+
+```ts title="e2e.config.ts"
+{
+  name: 'electron-packaged',
+  engine: electron({
+    executablePath: 'dist/mac/MyApp.app/Contents/MacOS/MyApp',
+  }),
+}
+```
+
+- Se o build desativar o fuse `EnableNodeCliInspectArguments`, `screen`,
+  `expect` e o agente continuam funcionando, mas `electron.evaluate()` falha e
+  `electron.window({ title })` só corresponde a títulos de documento.
+- No macOS, um build sem assinatura que lê o keychain (`safeStorage`) pode
+  travar em um prompt do sistema. Adicione `--use-mock-keychain` a
+  `app.launchArguments`.
+
+## Rode na CI no Linux
+
+O Electron precisa de um servidor gráfico para abrir janelas. Na CI no Linux,
+rode o e2e com `xvfb-run`:
+
+<CodeGroup>
+```bash npm
+xvfb-run --auto-servernum npx e2e run
+```
+
+```bash pnpm
+xvfb-run --auto-servernum pnpm exec e2e run
+```
+
+```bash bun
+xvfb-run --auto-servernum bunx e2e run
+```
+</CodeGroup>
+
+A engine adiciona `--no-sandbox` automaticamente no Linux.
+
+## O que muda em relação à web
+
+| Área | No Electron |
+| --- | --- |
+| Argumentos de inicialização | A engine adiciona `--inspect=0`, `--remote-debugging-pipe`, `--force-color-profile=srgb`, `--user-data-dir=...`, flags que mantêm uma janela coberta ou oculta sendo desenhada, e `--no-sandbox` no Linux. Parsers de argumentos estritos precisam aceitar esses argumentos |
+| Workers paralelos | Cada teste recebe o próprio diretório de dados do usuário, então os testes rodam em paralelo. Se o seu app redefine esse diretório com `app.setPath('userData', ...)`, defina `workers: 1` |
+| Área de transferência | O app usa a área de transferência do seu sistema operacional, então o que um teste copia substitui o que você copiou. Defina `workers: 1` para testes de área de transferência |
+| Tema e idioma | `prefers-color-scheme` segue `nativeTheme` e o sistema operacional. Os textos da UI do Chromium seguem o idioma do sistema operacional; adicione `--lang=en-US` a `app.launchArguments` para fixar o inglês |
+| Toque longo | Segura por 800 ms por padrão, em vez dos 500 ms da web |
+| Seletores CSS | `electron.locator()` busca no documento da janela e nos shadow roots abertos, uma raiz por vez, e nunca entra em frames |
+| Renderers que caíram | Uma janela cujo renderer caiu faz as leituras falharem até você recarregar essa janela com `electron.evaluate()` ou reiniciar o app |
+
+## Segurança
+
+- **Ambiente isolado:** o app não herda o ambiente do runner, então chaves de
+  modelo e tokens de CI ficam de fora. O app recebe só variáveis mínimas do
+  sistema operacional (`PATH`, `HOME`, localidade, diretório temporário,
+  display); passe o que o seu app precisar com `electron({ env })`.
+- **Campos de senha:** os valores de senha não podem ser lidos e aparecem
+  pintados de preto nas capturas de tela. Se um campo de senha fica dentro de
+  um shadow root fechado, onde as máscaras não chegam, as capturas de tela
+  dessa janela são retidas.
+- **Fronteira de arquivos locais:** se uma janela navega para um caminho `file:`
+  fora do diretório do seu app, o agente não recebe nenhuma observação e as
+  capturas de tela são recusadas.
+- **Porta do inspector:** a automação das janelas roda por um pipe privado,
+  enquanto o processo principal escuta em uma porta de loopback sem
+  autenticação para `electron.evaluate()` durante cada teste.
+
+## Limites
+
+### Não disponível no Electron
+
+- **`prompt()`:** o Electron não implementa `window.prompt()`, e a chamada
+  lança um erro na página.
+- **Modo headless:** o Electron sempre abre janelas, a menos que o seu app as
+  esconda, e `--headed` não tem efeito. Use `xvfb-run` na CI no Linux.
+- **Aceleradores de menu:** os eventos de teclado vão direto para a página,
+  então os atalhos de menu e `before-input-event` não recebem esses eventos.
+  Acione itens de menu com `electron.evaluate()`.
+
+### Ainda não suportado
+
+- Conteúdo dentro de um `iframe` ou `webview` (a página convidada de um `webview` é listada como uma janela, então `electron.window()` alcança essa página)
+- Rotas e cookies (use `session.defaultSession` em `electron.evaluate()` em vez disso)
+- Salvar e restaurar sessões
+- Uma fixture `keyboard` para manter uma tecla pressionada
+- Ler o console do app a partir de um teste
+
+## Opções
+
+| Opção | Tipo | Padrão | O que define |
+| --- | --- | --- | --- |
+| `executablePath` | `string` | o `electron` do projeto | Binário a iniciar, como um [app empacotado](#test-a-packaged-app) |
+| `env` | `Record<string, string>` | `{}` | Variáveis de ambiente extras para o app (não `ELECTRON_RUN_AS_NODE` nem `NODE_OPTIONS`); veja [Segurança](#security) |
+| `testIdAttribute` | `string` | `'data-testid'` | Atributo que `getByTestId` lê |
+| `settle` | `number \| false` | `100` | Tempo de espera em milissegundos depois de uma ação do agente, antes da próxima leitura (`false` pula a espera) |
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Passos do agente" icon="robot" href="/agent-steps">
+    Deixe o agente preencher um formulário ou verificar a tela.
+  </Card>
+  <Card title="Engines" icon="gears" href="/engines">
+    Como esta engine foi construída, para servir de modelo para a sua.
+  </Card>
+</CardGroup>

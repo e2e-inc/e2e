@@ -1,0 +1,123 @@
+---
+title: Page objects
+description: Reúna os localizadores e as ações de uma tela em uma classe e entregue-a aos testes como uma fixture.
+"og:image": "https://e2e.com/docs/images/og/page-objects.png?v=c53bbc6604"
+"twitter:image": "https://e2e.com/docs/images/og/page-objects.png?v=c53bbc6604"
+---
+
+Um page object guarda os localizadores e as ações de uma tela em um só
+lugar, para que os seus testes chamem os métodos dele em vez de repetir as
+mesmas consultas. É um padrão de projeto e funciona do mesmo jeito em
+qualquer framework de testes. Se você já escreveu page objects no Playwright
+ou no Selenium, isto vai parecer familiar.
+
+No e2e, um page object é uma classe TypeScript simples que recebe `screen`.
+Você o entrega aos testes por meio de uma fixture.
+
+## Escreva um page object
+
+O construtor recebe `screen` e monta os localizadores. Os localizadores são
+avaliados sob demanda, então nada é buscado até um método usar um deles:
+
+```ts title="tests/pages/sign-in-page.ts"
+import type { Locator, Screen, Secret } from 'e2e';
+
+export class SignInPage {
+  readonly email: Locator;
+  readonly password: Locator;
+  readonly submit: Locator;
+  readonly error: Locator;
+
+  constructor(readonly screen: Screen) {
+    this.email = screen.getByLabel('Email');
+    this.password = screen.getByLabel('Password');
+    this.submit = screen.getByRole('button', 'Sign in');
+    this.error = screen.getByRole('alert');
+  }
+
+  async signIn(email: string, password: string | Secret) {
+    await this.email.fill(email);
+    await this.password.fill(password);
+    await this.submit.tap();
+  }
+}
+```
+
+Não termine o nome do arquivo em `.e2e.ts`, senão o runner o coleta como um
+teste.
+
+## Entregue-o como uma fixture
+
+Crie o page object em uma fixture com `test.extend`. Todo teste que importa
+esse `test` recebe o page object, sem `beforeEach`:
+
+```ts title="tests/fixtures.ts"
+import { test as base } from 'e2e';
+import { SignInPage } from './pages/sign-in-page.ts';
+
+export const test = base.extend<{ signInPage: SignInPage }>({
+  signInPage: async ({ screen }, use) => {
+    await use(new SignInPage(screen));
+  },
+});
+```
+
+```ts title="tests/sign-in.e2e.ts"
+import { expect } from 'e2e';
+import { test } from './fixtures.ts';
+
+test('rejects a wrong password', async ({ app, signInPage }) => {
+  await app.open();
+  await signInPage.signIn('ada@example.test', 'not-the-password');
+  await expect(signInPage.error).toHaveText('Wrong email or password');
+});
+```
+
+## Mantenha-o portável
+
+Use `screen` para page objects que você compartilha entre alvos web e
+mobile. Para APIs do navegador, como entrada de teclado, seletores CSS ou
+`evaluate`, use `browser`. Use `device` para APIs do dispositivo.
+
+Uma fixture de page object construída sobre `browser` ou `device` é
+preparada mesmo assim em todos os alvos. Em um alvo sem essa fixture de
+base, `browser` ou `device` é `undefined`, então você recebe um `TypeError`
+ao chamar um dos métodos dela.
+
+Para rodar os testes que usam um page object de `browser` só na web, defina
+`platforms: ['web']` neles. Os testes sem essa opção rodam em todos os
+alvos.
+
+## Onde entram os objetivos do agente
+
+Um método pode receber `agent` como argumento e encapsular um objetivo que
+muda com frequência no app:
+
+```ts
+async addCard(agent: Agent, name: string) {
+  await agent.act('add a new card named {name}', { params: { name } });
+}
+```
+
+Não leia `agent` na fixture. Se fizer isso, todo teste desse `test` vai
+precisar de um modelo configurado, inclusive os determinísticos.
+
+Muitos métodos de page object existem só para clicar ao longo de um fluxo.
+Um único [objetivo de `agent.act`](/core-concepts#goals) pode substituir
+esses métodos. Mantenha métodos para os passos que todo teste repete e que
+precisam ser exatos.
+
+Para começar os testes com o login feito, não chame `signIn` em cada um. Em
+vez disso, salve uma sessão uma única vez. Veja
+[Autenticação](/authentication).
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Autenticação" icon="key" href="/authentication">
+    Faça login uma vez e reutilize a sessão.
+  </Card>
+  <Card title="API de teste" icon="code" href="/reference/test#your-own-fixtures">
+    Preparação, desmontagem e ordem das fixtures.
+  </Card>
+</CardGroup>

@@ -1,0 +1,70 @@
+---
+title: Projetos de exemplo
+description: Rode exemplos independentes do e2e com Vite, Next.js, Astro, Angular, Expo, SwiftUI, Jetpack Compose, Kotlin Multiplatform, Flutter e .NET MAUI.
+"og:image": "https://e2e.com/docs/images/og/example-projects.png?v=dc027fe862"
+"twitter:image": "https://e2e.com/docs/images/og/example-projects.png?v=dc027fe862"
+---
+
+Cada exemplo é um app de saudação independente, com três testes de localizador
+e dois testes de agente. Um teste de agente obtém uma saudação para um nome; o
+outro verifica o erro de nome vazio. Cada exemplo instala os pacotes
+publicados do e2e a partir do npm.
+
+## Escolha um exemplo
+
+<CardGroup cols={2}>
+  <Card title="Vite" icon="/images/examples/vite.svg" href="https://github.com/e2e-inc/e2e/tree/main/examples/with-vite" cta="Ver exemplo" arrow>
+    React com Vite, testado no Chromium.
+  </Card>
+  <Card title="Next.js" icon="/images/examples/nextjs.svg" href="https://github.com/e2e-inc/e2e/tree/main/examples/with-next" cta="Ver exemplo" arrow>
+    Next.js App Router, iniciado pelo runner e testado no Chromium.
+  </Card>
+  <Card title="Astro" icon="/images/examples/astro.svg" href="https://github.com/e2e-inc/e2e/tree/main/examples/with-astro" cta="Ver exemplo" arrow>
+    Uma página Astro sem framework de UI, iniciada pelo runner e testada no Chromium.
+  </Card>
+  <Card title="Angular" icon="/images/examples/angular.svg" href="https://github.com/e2e-inc/e2e/tree/main/examples/with-angular" cta="Ver exemplo" arrow>
+    Um componente standalone do Angular, iniciado pelo runner e testado no Chromium.
+  </Card>
+  <Card title="Expo" icon="/images/integrations/expo.svg" href="https://github.com/e2e-inc/e2e/tree/main/examples/with-expo" cta="Ver exemplo" arrow>
+    React Native com Expo, testado na web, no iOS e no Android.
+  </Card>
+  <Card title="SwiftUI" icon="/images/examples/swiftui.png" href="https://github.com/e2e-inc/e2e/tree/main/examples/with-swiftui" cta="Ver exemplo" arrow>
+    Um app iOS nativo, testado em um simulador de iPhone.
+  </Card>
+  <Card title="Jetpack Compose" icon="/images/examples/jetpack-compose.svg" href="https://github.com/e2e-inc/e2e/tree/main/examples/with-compose" cta="Ver exemplo" arrow>
+    Um app Android nativo, testado em um emulador.
+  </Card>
+  <Card title="Kotlin Multiplatform" icon="/images/examples/kotlin.svg" href="https://github.com/e2e-inc/e2e/tree/main/examples/with-kotlin-multiplatform" cta="Ver exemplo" arrow>
+    Uma tela de Compose Multiplatform, testada no Android e no iOS.
+  </Card>
+  <Card title="Flutter" icon="/images/examples/flutter.svg" href="https://github.com/e2e-inc/e2e/tree/main/examples/with-flutter" cta="Ver exemplo" arrow>
+    Um app Flutter, testado no Android e no iOS.
+  </Card>
+  <Card title=".NET MAUI" icon="/images/examples/dotnet.svg" href="https://github.com/e2e-inc/e2e/tree/main/examples/with-maui" cta="Ver exemplo" arrow>
+    Um app .NET MAUI, testado no Android e no iOS.
+  </Card>
+</CardGroup>
+
+## Rode um exemplo
+
+Siga o README do projeto para instalar, fazer o build e rodar o exemplo. A
+configuração e os testes ficam ao lado do app, em uma pasta `e2e/` nos
+projetos nativos, Flutter e .NET MAUI.
+
+Os testes de localizador não precisam de modelo. Os testes de agente usam o
+Vercel AI Gateway e são pulados a menos que `AI_GATEWAY_API_KEY` esteja
+definida.
+
+Para começar um novo app Next.js a partir do exemplo com `create-next-app`,
+veja [Next.js](/frameworks/nextjs#start-a-new-app).
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Início rápido" icon="rocket" href="/quickstart">
+    Adicione o e2e ao seu próprio app.
+  </Card>
+  <Card title="Modelos" icon="brain" href="/models">
+    Use outro provedor, uma assinatura ou um modelo local.
+  </Card>
+</CardGroup>

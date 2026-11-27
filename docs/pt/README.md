@@ -129,6 +129,15 @@ translation moves or goes with it in the same change.
 | stop (a recording) | encerrar, encerramento |
 | shorthand (`request.get`) | atalho |
 | trace | trace (keep in English, o trace) |
+| engine protocol, engine server | protocolo de engine, servidor de engine |
+| contributed fixture | fixture contribuída (a engine fornece a fixture) |
+| crash report | relatório de travamento (crash report) |
+| stop reason (a replay) | motivo de interrupção |
+| fleet (telemetry) | frota |
+| main process (Electron) | processo principal |
+| packaged app, unsigned build | app empacotado, build sem assinatura |
+| file chooser | diálogo de escolha de arquivos |
+| splash screen | tela de abertura |
 | artifact | artefato |
 | matcher | matcher (keep in English, o matcher) |
 | soft assertion, soft failure | asserção suave, falha suave |
