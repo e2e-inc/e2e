@@ -148,12 +148,13 @@ test.describe('controls page', () => {
     await expect.poll(() => existsSync(path.join(downloads, 'note.txt'))).toBe(true);
   });
 
-  test('finds text that inline markup splits, and text under aria-hidden, as web() does', async ({ screen }) => {
+  test('finds text that inline markup splits, and text under aria-hidden or inert, as web() does', async ({ screen }) => {
     await expect(screen.getByText('Order ABC123', { exact: true })).toHaveCount(1);
     await expect(screen.getByText('Order ABC123')).toHaveCount(1);
     await expect(screen.getByText('ABC123', { exact: true })).toHaveCount(1);
     await expect(screen.getByText('Ref R77', { exact: true })).toHaveCount(1);
     await expect(screen.getByText('Unlisted directions', { exact: true })).toHaveCount(1);
+    await expect(screen.getByText('Background task', { exact: true })).toHaveCount(1);
   });
 
   test('checks a box its app replaces, unchecks a custom radio, and refuses to fill a field no user reaches', async ({ screen }) => {
