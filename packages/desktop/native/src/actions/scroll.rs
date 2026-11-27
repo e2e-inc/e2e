@@ -20,8 +20,11 @@ pub fn scroll_bar(element: &Element, vertical: bool) -> Option<Element> {
 /// Scrolls a scroll area by moving its scroll bar, `pages` of its visible size.
 pub(super) fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
     let vertical = matches!(direction, "up" | "down");
-    // A list or table scrolls through the scroll area that holds it: a swipe on the list moves that one.
-    let target = if scroll_bar(element, vertical).is_some() { None } else { enclosing_scroll_area(element, vertical) };
+    // A node that scrolls itself (a scroll bar of its own, or the page action for the direction) is the one moved; one
+    // with neither, a list or table, scrolls through the scroll area that holds it. The enclosing pane comes last, so a
+    // swipe on a nested list never moves the pane around it.
+    let own = scroll_bar(element, vertical).is_some() || action_names(element, "scroll")?.iter().any(|name| name == page_action(direction));
+    let target = if own { None } else { enclosing_scroll_area(element, vertical) };
     scroll_by(target.as_ref().unwrap_or(element), direction, pages).map_err(|failure| {
         // An element that takes none of the ways to scroll: say so, not which attribute it lacks.
         if failure.code == codes::ACTION_NOT_SUPPORTED && failure.delivery == Delivery::NotDelivered {
@@ -42,6 +45,16 @@ pub(super) fn enclosing_scroll_area(element: &Element, vertical: bool) -> Option
         current = current.element("AXParent")?;
     }
     None
+}
+
+/// The accessibility action that scrolls an element a page in `direction`.
+fn page_action(direction: &str) -> &'static str {
+    match direction {
+        "down" => "AXScrollDownByPage",
+        "up" => "AXScrollUpByPage",
+        "right" => "AXScrollRightByPage",
+        _ => "AXScrollLeftByPage",
+    }
 }
 
 /// About how many of a scroll bar's increments make a page.
@@ -86,12 +99,7 @@ pub(super) fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outco
         return repeat(&bar, if forward { "AXIncrement" } else { "AXDecrement" }, ((pages * LINES_PER_PAGE).round() as usize).max(1));
     }
     let names = action_names(element, "scroll")?;
-    let action = match direction {
-        "down" => "AXScrollDownByPage",
-        "up" => "AXScrollUpByPage",
-        "right" => "AXScrollRightByPage",
-        _ => "AXScrollLeftByPage",
-    };
+    let action = page_action(direction);
     if names.iter().any(|name| name == action) {
         return repeat(element, action, (pages.round() as usize).max(1));
     }
