@@ -20,11 +20,13 @@ export interface Desktop {
    * the window the test is about. Name it as `desktop.windows()` lists it, by
    * `{ title }` (a string matches the whole title, a RegExp any part), or by
    * a string, an id or else a title. A window id changes at every launch, so
-   * a listed window whose id is gone is found again by its title. Called
-   * with no argument, goes back to the focused window; `undefined` passed
-   * explicitly (a `find()` that matched nothing) fails.
+   * a listed window whose id is gone is found again by its title.
+   * `undefined` names no window and fails (a `find()` that matched
+   * nothing); the type refuses it too.
    */
-  useWindow(window?: DesktopWindow | WindowChoice): Promise<void>;
+  useWindow(window: DesktopWindow | WindowChoice): Promise<void>;
+  /** Goes back to reading and acting in the app's focused window. */
+  useWindow(): Promise<void>;
   /**
    * Presses one key, or a combo such as `ControlOrMeta+2`, into the app's
    * window, for an app with no control that takes keyboard focus. Without

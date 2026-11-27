@@ -13,8 +13,7 @@ test.describe('controls window', () => {
     await app.open();
     await screen.getByRole('button', 'Controls…').tap();
     await expect.poll(async () => (await desktop.windows()).map((window) => window.title).toSorted()).toEqual(['Controls', 'Sign In']);
-    const controls = (await desktop.windows()).find((window) => window.title === 'Controls');
-    await desktop.useWindow(controls);
+    await desktop.useWindow({ title: 'Controls' });
   });
 
   test('scrolls a list until an item shows, and selects it', async ({ screen }) => {
@@ -80,8 +79,7 @@ test.describe('controls window', () => {
     );
     expect(String(failure)).toMatch(/typing stopped/);
     await expect(opener).toHaveValue('x');
-    const popup = (await desktop.windows()).find((window) => window.title === 'Popup');
-    await desktop.useWindow(popup);
+    await desktop.useWindow({ title: 'Popup' });
     await expect(screen.getByRole('textbox', 'Popup field')).toHaveValue('');
   });
 
@@ -96,8 +94,7 @@ test.describe('controls window', () => {
       );
     expect(String(failure)).toMatch(/typing stopped/);
     await expect(screen.getByRole('textbox', 'Opener')).toHaveValue('x');
-    const popup = (await desktop.windows()).find((window) => window.title === 'Popup');
-    await desktop.useWindow(popup);
+    await desktop.useWindow({ title: 'Popup' });
     await expect(screen.getByRole('textbox', 'Popup field')).toHaveValue('');
   });
 

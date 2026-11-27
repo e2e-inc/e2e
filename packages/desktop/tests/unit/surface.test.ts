@@ -1835,6 +1835,21 @@ describe('DesktopSurface: quitting', () => {
     expect(last(fake, 'press')).toMatchObject({ windowId: 'w-mine', combo: 'cmd+2', physical: false });
   });
 
+  it('refuses desktop.useWindow(undefined), which names no window, and goes back to the focused window with no argument', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', title: 'Sign In', is_focused: true }, { id: 'w-panel', title: 'Controls' }])] });
+    const context = { operation: () => operation(), fixture: <T,>(_name: string, value: T) => value } as unknown as Parameters<typeof createDesktopFixture>[1];
+    const desktop = createDesktopFixture(surface, context);
+    await desktop.useWindow({ title: 'Controls' });
+    const missing = (await desktop.windows()).find((window) => window.title === 'Settings');
+    // @ts-expect-error a find() that may match nothing is no window
+    await expect(desktop.useWindow(missing)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await surface.observe(operation(), undefined);
+    expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-panel' });
+    await desktop.useWindow();
+    await surface.observe(operation(), undefined);
+    expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
+  });
+
   it('kills nothing when the app already quit on its own', async () => {
     const { surface, fake } = await launched({}, { observe: false });
     process.kill(fake.pid, 'SIGKILL');
