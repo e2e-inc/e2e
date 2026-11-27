@@ -222,13 +222,14 @@ export function fakeDriver(scenario: Scenario = {}): FakeDriver {
 /**
  * A launch that starts a real process standing in for the app, carrying the
  * launch's token unless `token` is false, and reports it as the driver does.
+ * `runningBefore` are the copies the driver says ran before the launch.
  * `answer` replaces the success envelope: a failure the driver reports after
  * the process started.
  */
-export function spawnApp({ token = true, exits = false, sleepMs, answer }: { token?: boolean; exits?: boolean; sleepMs?: number; answer?: Answer } = {}): Scripted {
+export function spawnApp({ token = true, exits = false, sleepMs, answer, runningBefore }: { token?: boolean; exits?: boolean; sleepMs?: number; answer?: Answer; runningBefore?: readonly number[] } = {}): Scripted {
   return (fake, args) => {
     const pid = fake.spawn({ token: token ? (args[0] as { token: string }).token : undefined, exits });
-    const reported = answer ?? { ok: true, data: { app: 'SpikeForm', pid, bundle_id: 'dev.e2e.spike.form', started: fake.processStarted(pid) ?? undefined } };
+    const reported = answer ?? { ok: true, data: { app: 'SpikeForm', pid, bundle_id: 'dev.e2e.spike.form', started: fake.processStarted(pid) ?? undefined, ...(runningBefore === undefined ? {} : { running_before: runningBefore }) } };
     return sleepMs === undefined ? reported : { ...reported, sleepMs };
   };
 }

@@ -392,15 +392,57 @@ describe('DesktopSurface: launching', () => {
     await expect(launched({ launch: [spawnApp({ exits: true })], listWindows: [ok([])] }, { observe: false })).rejects.toThrow(/quit right after it launched/);
     expect(Date.now() - started).toBeLessThan(3_000);
   });
+
+  it('says a copy that was already running took the launch, when the launched process quit beside one', async () => {
+    const running = standIn();
+    const open = launched({ launch: [spawnApp({ exits: true, runningBefore: [running] })], listWindows: [ok([])] }, { observe: false });
+    await expect(open).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: `SpikeForm quit right after it launched, before it showed a window: a copy of it was already running (process ${running}), and an app that runs one copy at a time hands the launch to that copy and exits. The engine drives only a copy it launched, so quit the running one first`,
+    });
+    // The copy the engine did not launch is left running.
+    expect(alive(running)).toBe(true);
+  });
+
+  it('blames no copy that ran before the launch once that copy is gone', async () => {
+    const quit = standIn({ exits: true });
+    expect(await gone(quit)).toBe(true);
+    await expect(launched({ launch: [spawnApp({ exits: true, runningBefore: [quit] })], listWindows: [ok([])] }, { observe: false })).rejects.toThrow(/before it showed a window$/);
+  });
+
+  it('names the copy that was already running when no new process could be claimed', async () => {
+    const running = standIn();
+    const { surface } = await initialized({ launch: [failure('TIMEOUT', 'delivered_unverified', 'Form.app was opened, but no new process carries this launch\'s token', { kind: 'unclaimed', running_before: [running] })] });
+    await expect(surface.restart(operation())).rejects.toMatchObject({
+      code: 'ACTION_MAY_HAVE_COMMITTED',
+      message: expect.stringMatching(new RegExp(`looks for it again; a copy of it was already running \\(process ${running}\\).*quit the running one first$`)),
+    });
+  });
 });
 
 describe('DesktopSurface: the launch wait', () => {
-  it('fails the open when the window never becomes readable', async () => {
-    await expect(launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, accessible: false }])] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/cannot be read through accessibility/);
+  it('fails the open when the window never becomes readable, saying what the reads listed', async () => {
+    await expect(launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, accessible: false }])] }, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility: the last read listed 1 window, 1 unreadable. The window may be off screen',
+    );
+  }, 30_000);
+
+  it('names the failure the last read of an unreadable window answered with', async () => {
+    const scenario = { listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel', accessible: false }])], snapshot: [failure('WINDOW_NOT_FOUND', 'not_delivered', 'window w-mine has no accessibility element.')] };
+    await expect(launched(scenario, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility: the last read listed 2 windows, 2 unreadable; the last read failed with WINDOW_NOT_FOUND (window w-mine has no accessibility element). The window may be off screen',
+    );
   }, 30_000);
 
   it('reports a launch whose window reads ran out of time as unreadable, not as an app that opened no window', async () => {
-    await expect(launched({ listWindows: [failure('TIMEOUT', 'not_delivered')] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/cannot be read through accessibility \(a read ran out of time\)/);
+    await expect(launched({ listWindows: [failure('TIMEOUT', 'not_delivered')] }, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'cannot be read through accessibility (a read ran out of time): no read listed its windows; the last read failed with TIMEOUT (TIMEOUT from the fake). The window may be off screen',
+    );
+  });
+
+  it('keeps what a launch wait saw out of the reads after it', async () => {
+    const { surface } = await launched({});
+    expect((surface as unknown as { launchReads: unknown }).launchReads).toBeUndefined();
   });
 
   it('says a background app that opens no window needs headed, however the wait ends against a slow window list', async () => {

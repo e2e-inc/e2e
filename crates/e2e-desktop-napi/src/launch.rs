@@ -54,6 +54,10 @@ pub struct Launched {
     /// later one the OS gives the same id.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started: Option<f64>,
+    /// The copies of the app that ran before the launch. An app that runs one copy at a time hands the launch to one
+    /// of them and exits, which the caller can then say.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub running_before: Vec<i32>,
 }
 
 /// The folders an app named by its name is looked for in, in order.
@@ -205,26 +209,33 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
                 None => crate::process::argument_pair(*pid, TOKEN_ARGUMENT, &token),
             };
             if ours {
-                return Ok(launched(*pid, &bundle, &bundle_id));
+                return Ok(launched(*pid, &bundle, &bundle_id, before));
             }
         }
         if Instant::now() >= claim_until {
             return Err(Failure::unconfirmed(codes::TIMEOUT, format!("{bundle} was opened, but no new process carries this launch's token"))
-                .with_details(serde_json::json!({ "kind": "unclaimed" })));
+                .with_details(serde_json::json!({ "kind": "unclaimed", "running_before": before })));
         }
         sleep(Duration::from_millis(50));
     }
 }
 
-fn launched(pid: i32, bundle: &str, bundle_id: &str) -> Launched {
+fn launched(pid: i32, bundle: &str, bundle_id: &str, running_before: Vec<i32>) -> Launched {
     let name = NSRunningApplication::runningApplicationWithProcessIdentifier(pid).and_then(|app| app.localizedName()).map(|name| name.to_string());
     let app = name.unwrap_or_else(|| Path::new(bundle).file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default());
-    Launched { pid, app, bundle_id: Some(bundle_id.to_owned()), started: crate::process::started(pid).map(|started| started as f64) }
+    Launched { pid, app, bundle_id: Some(bundle_id.to_owned()), started: crate::process::started(pid).map(|started| started as f64), running_before }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::hidden_by;
+    use super::{Launched, hidden_by};
+
+    #[test]
+    fn names_the_copies_that_ran_before_the_launch_only_when_some_did() {
+        let launched = |running_before| Launched { pid: 7, app: "Form".to_owned(), bundle_id: None, started: None, running_before };
+        assert_eq!(serde_json::to_value(launched(vec![3, 5])).unwrap(), serde_json::json!({ "pid": 7, "app": "Form", "running_before": [3, 5] }));
+        assert_eq!(serde_json::to_value(launched(vec![])).unwrap(), serde_json::json!({ "pid": 7, "app": "Form" }));
+    }
 
     #[test]
     fn tells_which_signatures_hide_the_environment() {

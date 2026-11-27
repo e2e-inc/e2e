@@ -88,6 +88,8 @@ export interface Launched {
   readonly bundle_id?: string;
   /** When the process started, in microseconds since the epoch, read as the driver claimed it. */
   readonly started?: number;
+  /** The copies of the app that ran before the launch, which the launch never claims; absent when none did. */
+  readonly running_before?: readonly number[];
 }
 
 /** What the driver can do: one function per native call. */

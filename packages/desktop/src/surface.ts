@@ -41,6 +41,7 @@ import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, t
 import { toCombo } from './keys.ts';
 import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_POLL_MS, LAUNCH_TOKEN, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
 import { launchArgumentList } from './launch-arguments.ts';
+import { handOff, LaunchReads, stillRunning } from './launch-report.ts';
 import { ROOT_ID, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
@@ -237,6 +238,8 @@ export class DesktopSurface {
   /** The id handed out for each node identity since the app launched; see `projectSnapshot`. */
   private readonly ids = new Map<string, string>();
   private sequence = 0;
+  /** Set while `app.open()` waits for the launched app's window, so a wait that fails can say what its reads saw. */
+  private launchReads: LaunchReads | undefined;
   private driverVersion = 'unknown';
   /** The run's environment cut to `INHERITED_ENV`: all the app is given of it. */
   private appEnv: Readonly<Record<string, string>> = {};
@@ -428,7 +431,7 @@ export class DesktopSurface {
     // The process and when it started, so a later run can quit it, and never a later process given the same id.
     await this.writeRecord({ token, pid: launched.pid, ...(this.started === undefined ? {} : { started: this.started }) });
     this.forget();
-    await this.windowReadable(operation);
+    await this.windowReadable(operation, launched.running_before);
   }
 
   /** The engine error for a failed launch, naming what to fix where the driver says what went wrong. */
@@ -438,7 +441,8 @@ export class DesktopSurface {
       if (cause.details.kind === 'not_started') return new EngineError('ENGINE_FAILURE', `launch ${target.label}: ${cause.message}`, { retryable: false, cause });
     }
     if (cause instanceof DriverFailure && cause.details.kind === 'unclaimed') {
-      return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${cause.message}, so none can be shown to be its own; the end of the attempt looks for it again`, { retryable: false, cause });
+      const copies = handOff(stillRunning(cause.details.running_before, alive));
+      return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${cause.message}, so none can be shown to be its own; the end of the attempt looks for it again${copies === '' ? '' : `; ${copies}`}`, { retryable: false, cause });
     }
     return translate(cause, `launch ${target.label}`, true);
   }
@@ -461,7 +465,17 @@ export class DesktopSurface {
    * forward: one that opens no window there (a document-based app opens its
    * first one only when it comes forward) fails the open, and needs `headed`.
    */
-  private async windowReadable(operation: OperationContext): Promise<void> {
+  private async windowReadable(operation: OperationContext, runningBefore: readonly number[] | undefined): Promise<void> {
+    const reads = new LaunchReads();
+    this.launchReads = reads;
+    try {
+      await this.readableWithin(operation, reads, runningBefore);
+    } finally {
+      this.launchReads = undefined;
+    }
+  }
+
+  private async readableWithin(operation: OperationContext, reads: LaunchReads, runningBefore: readonly number[] | undefined): Promise<void> {
     const budgetBound = operation.timeoutMs < LAUNCH_READY_MS;
     const deadline = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
     let sawWindow = false;
@@ -495,7 +509,8 @@ export class DesktopSurface {
       if (this.pid !== undefined && !(await this.running(this.pid))) {
         this.forget();
         this.dropProcess();
-        throw new EngineError('ENGINE_FAILURE', `${this.appName ?? 'the app'} quit right after it launched, before it showed a window`, { retryable: false });
+        const copies = handOff(stillRunning(runningBefore, alive));
+        throw new EngineError('ENGINE_FAILURE', `${this.appName ?? 'the app'} quit right after it launched, before it showed a window${copies === '' ? '' : `: ${copies}`}`, { retryable: false });
       }
       await sleep(Math.min(LAUNCH_POLL_MS, Math.max(deadline - Date.now(), 0)), operation.signal);
     }
@@ -518,7 +533,7 @@ export class DesktopSurface {
     }
     throw new EngineError(
       'ENGINE_FAILURE',
-      `${this.appName ?? 'the app'} launched, but its window cannot be read through accessibility${timedOut ? ' (a read ran out of time)' : ''}. The window may be off screen`,
+      `${this.appName ?? 'the app'} launched, but its window cannot be read through accessibility${timedOut ? ' (a read ran out of time)' : ''}: ${reads.summary()}. The window may be off screen`,
       { retryable: false },
     );
   }
@@ -783,6 +798,7 @@ export class DesktopSurface {
       } catch (cause) {
         // A panel accessibility cannot read, or a window that just closed: try the next one.
         if (cause instanceof DriverFailure && NO_WINDOW_CODES.has(cause.code)) {
+          this.launchReads?.unread(cause);
           if (chosen) {
             this.unlessLocked();
             throw this.chosenClosed();
@@ -831,8 +847,11 @@ export class DesktopSurface {
     }
     try {
       const windows = await this.read((driver) => driver.listWindows(pid), { label: 'list windows', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
-      return windows.filter((window) => window.pid === undefined || window.pid === pid);
+      const own = windows.filter((window) => window.pid === undefined || window.pid === pid);
+      this.launchReads?.windows(own);
+      return own;
     } catch (cause) {
+      if (cause instanceof DriverFailure) this.launchReads?.unlisted(cause);
       if (cause instanceof DriverFailure && NO_WINDOW_CODES.has(cause.code)) {
         if (strict) {
           await this.requireRunning();

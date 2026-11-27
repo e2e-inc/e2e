@@ -105,8 +105,10 @@ come forward before they show a window. `e2e run --headed` also launches
 the app in the foreground, but only `desktop({ headed: true })` turns on the
 physical input described below. When the engine launched it
 before, it quits that copy first. A copy you opened yourself is left alone,
-and the engine never reads or drives it. Every test ends with the app quit,
-and no window the app saved at its last quit comes back.
+and the engine never reads or drives it. An app that runs one copy at a time
+hands the launch to a copy that is already running, so `app.open()` fails and
+names that copy: quit it first. Every test ends with the app quit, and no
+window the app saved at its last quit comes back.
 
 ```ts title="tests/sign-in.e2e.ts"
 import { test } from '@e2e-dev/desktop';
