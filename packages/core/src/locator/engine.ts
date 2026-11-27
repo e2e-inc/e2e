@@ -440,15 +440,16 @@ export class LocatorEngine {
    * Reads one node for polling surfaces; returns null while zero matches.
    * A poll that waits for absence passes `missingFrame: 'empty'`: nothing
    * under a frame that is not in the document is attached, so the sample is
-   * zero matches rather than a wait for the frame.
+   * zero matches rather than a wait for the frame. A ref that went stale
+   * before it was read is `stale`, one match with no node: a poll for
+   * absence samples again instead of reading the node as gone.
    */
   async tryRead(
     expression: LocatorExpression,
     reads: ReadWindow,
     missingFrame: MissingFrame = 'wait',
-  ): Promise<{ node: SemanticNode | null; count: number }> {
-    const { node, count } = await this.readOne(expression, reads, missingFrame);
-    return { node, count };
+  ): Promise<{ node: SemanticNode | null; count: number; stale: boolean }> {
+    return this.readOne(expression, reads, missingFrame);
   }
 
   /**
@@ -471,7 +472,6 @@ export class LocatorEngine {
       );
     }
     const { node, count, stale } = await this.readOne(expression, reads, 'empty');
-    if (stale) return { node: null, count: 1, stale };
     if (node === null) return { node, count, stale };
     try {
       const intersection = await reads.read((timeoutMs) =>
@@ -496,8 +496,8 @@ export class LocatorEngine {
 
   /**
    * Resolves and reads the one current match. A ref superseded between the
-   * resolve and the read is no node with `stale` set: most callers read it as
-   * gone, and `readViewport` samples again.
+   * resolve and the read is one match with no node and `stale` set: a poll
+   * samples again, and `readNow` reads it as gone.
    */
   private async readOne(
     expression: LocatorExpression,
@@ -511,7 +511,7 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
       return { node, count: 1, stale: false };
     } catch (cause) {
       if (asEngineError(cause)?.code === 'NODE_STALE') {
-        return { node: null, count: 0, stale: true };
+        return { node: null, count: 1, stale: true };
       }
       throw translateLocatorError(cause, expression);
     }

@@ -7,8 +7,11 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { FixtureTestLine } from '@e2e-dev/core/engine';
 import { classifyError, type E2EError } from '@e2e-dev/core/lib/internal/errors';
 import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
+import { collapseText } from '@e2e-dev/core/lib/internal/text';
+import { fixtureTestLine } from '@e2e-dev/core/lib/run/fixture-recording';
 
 /** What became of one line: the value it resolved with, or the error it failed with. */
 export type Outcome = { readonly source: string; readonly read: boolean; readonly value: unknown } | { readonly source: string; readonly error: E2EError };
@@ -193,6 +196,10 @@ export class Recorder {
     const spelled = (line: boolean): string => `${text}(${args.map((arg) => this.spell(arg, 0, line)).join(', ')})`;
     const called = spelled(false);
     const recording = this.turn === 'running' && insideFunction.getStore() === undefined;
+    // An engine's fixture may say how a test finds again what an argument names only for this launch, such as a window by its id.
+    const declared = recording ? this.declaredLine(method, args) : undefined;
+    const lineText = declared !== undefined && 'args' in declared ? `${text}(${this.redact(declared.args)})` : undefined;
+    const declaredNote = declared !== undefined && 'note' in declared ? ` // ${this.redact(collapseText(declared.note))}` : '';
     // Asked before the call runs: a line the call itself makes, as a poll's read is, does not run alongside it.
     const alongside = this.pending.size > 0;
     let returned: unknown;
@@ -204,7 +211,9 @@ export class Recorder {
     }
     if (!isThenable(returned)) return this.given(returned, called);
     // A line's own strings are written by name where a test has one; a step of a chain, such as the query that finds a field, keeps what it was given.
-    return recording ? this.line(spelled(true), returned, text, args, alongside ? ALONGSIDE : '') : Promise.resolve(returned).then((value) => this.given(value, called));
+    return recording
+      ? this.line(lineText ?? spelled(true), returned, text, args, `${declaredNote}${alongside ? ALONGSIDE : ''}`)
+      : Promise.resolve(returned).then((value) => this.given(value, called));
   }
 
   private line(called: string, returned: PromiseLike<unknown>, text: string, args: readonly unknown[], note: string): Promise<unknown> {
@@ -254,6 +263,29 @@ export class Recorder {
     if (this.reading.has(rootOf(text))) this.reading.add(name);
     this.slots[slot] = { source: `const ${name} = ${source}${note}`, read: false, value: undefined };
     return this.given(value, name);
+  }
+
+  /**
+   * What a recorded fixture method declares for its test line
+   * (`FixtureOperation.testLine`), given the arguments as the real object
+   * takes them with every string through the ledger. A declaration that
+   * throws counts as none: the line is written as given.
+   */
+  private declaredLine(method: object, args: readonly unknown[]): FixtureTestLine | undefined {
+    try {
+      return fixtureTestLine(method, args.map((arg) => this.redactedData(this.real(arg, 0), 0)));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Plain data with every string through the ledger; anything else as itself. */
+  private redactedData(value: unknown, depth: number): unknown {
+    if (typeof value === 'string') return this.redact(value);
+    if (depth > MAX_DEPTH) return value;
+    if (Array.isArray(value)) return value.map((item) => this.redactedData(item, depth + 1));
+    if (!isPlainObject(value)) return value;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, this.redactedData(item, depth + 1)]));
   }
 
   /** An argument as the real object takes it: what the code holds wrapped goes in as itself. */

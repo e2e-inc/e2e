@@ -48,6 +48,7 @@ import {
   type ViewportPoint,
   type ViewportSize,
   ConfigurationError,
+  readPngSize,
   TestError,
 } from '@e2e-dev/core/engine';
 import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
@@ -81,7 +82,6 @@ import {
   invalidState,
   notActionable,
   logicalScreenSize,
-  readPngSize,
   sanitizeFilename,
   screenLocation,
   type RawScreenshotResult,
