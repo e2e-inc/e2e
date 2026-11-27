@@ -918,7 +918,16 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         };
         let (_, row_role) = role_of(&row, "select")?;
         if matches!(row_role, "radiobutton" | "tab") {
-            return perform(&row, "AXPress", "choose the option");
+            // An app can refuse the choice (an NSTabViewDelegate's shouldSelect) while the press itself succeeds: the
+            // option must show it is the selected one.
+            let selected = || row.boolean("AXSelected") == Some(true) || toggle_state(&row) == Some(1);
+            if !selected() {
+                perform(&row, "AXPress", "choose the option")?;
+                if !until(deadline, selected) {
+                    return Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("\"{label}\" did not become selected")));
+                }
+            }
+            return Ok(());
         }
         let by_rows = settable(element, "AXSelectedRows", "select")?;
         // The read above can take long on a slow app; the caller may have given up since.
