@@ -1114,4 +1114,18 @@ mod tests {
         let unreadable = press_to_state(1, None, || Ok(()), || None);
         assert!(!unreadable.unwrap());
     }
+
+    #[test]
+    fn lets_a_scroll_area_scroll_itself_only_with_a_scroll_bar_for_the_axis() {
+        let pages = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+        let swiftui = pages(&["AXScrollDownByPage", "AXScrollUpByPage", "AXScrollLeftByPage", "AXScrollRightByPage"]);
+        // A SwiftUI scroll area offers every page action: only its scroll bar for the axis says it scrolls along it.
+        assert!(!super::scroll::scrolls_itself("scrollarea", false, &swiftui, "down"));
+        assert!(super::scroll::scrolls_itself("scrollarea", true, &swiftui, "down"));
+        assert!(super::scroll::scrolls_itself("scrollarea", true, &[], "left"));
+        // Any other role scrolls itself by the page action for the direction.
+        assert!(super::scroll::scrolls_itself("list", false, &pages(&["AXScrollDownByPage"]), "down"));
+        assert!(!super::scroll::scrolls_itself("list", false, &pages(&["AXScrollDownByPage"]), "right"));
+        assert!(!super::scroll::scrolls_itself("list", false, &[], "up"));
+    }
 }
