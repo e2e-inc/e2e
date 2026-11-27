@@ -1280,12 +1280,11 @@ describe('DesktopSurface: keys', () => {
     await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/lost keyboard focus/) });
   });
 
-  const field = (name: string, ref: string, y: number, focused: boolean, extra: Record<string, unknown> = {}) => ({ role: 'textfield', name, ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}), ...extra });
-  const list = (id: string, children: readonly unknown[], extra: Record<string, unknown> = {}) => screen('w-mine', { name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children }, { snapshot_id: id, ...extra });
-
   it('presses a key into one of two look-alike fields by its own element, whatever box it has once focused', async () => {
     // A look-alike has no identity a later read could find it by, and a field can grow as it takes focus: the driver holds its element.
-    const { surface, fake } = await launched({ snapshot: [list('s1', [field('Item', '@s1:e1', 10, false), field('Item', '@s1:e2', 40, false)])] }, { observe: false });
+    const field = (ref: string, y: number) => ({ role: 'textfield', name: 'Item', ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 } });
+    const list = screen('w-mine', { name: 'List', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [field('@s1:e1', 10), field('@s1:e2', 40)] }, { snapshot_id: 's1' });
+    const { surface, fake } = await launched({ snapshot: [list] }, { observe: false });
     const observed = await surface.observe(operation(), undefined);
     await surface.perform(observed.root.children![1]!.ref, { kind: 'press', key: 'a' }, operation());
     expect(last(fake, 'press')).toMatchObject({ combo: 'a', windowId: 'w-mine', focusedRef: '@s1:e2' });
@@ -1293,13 +1292,13 @@ describe('DesktopSurface: keys', () => {
 
   it('presses a key into a located field among look-alike cards with interactive snapshots, and keeps the observation ids', async () => {
     const window = { name: 'Notes', bounds: { x: 0, y: 0, width: 300, height: 300 } };
-    const note = (focused: boolean) => ({ role: 'textfield', name: 'Note', ref_id: '@s:e1', native_id: { kind: 'ax_identifier', value: 'note' }, bounds: { x: 10, y: 10, width: 100, height: 20 }, ...(focused ? { states: ['focused'] } : {}) });
+    const note = { role: 'textfield', name: 'Note', ref_id: '@s:e1', native_id: { kind: 'ax_identifier', value: 'note' }, bounds: { x: 10, y: 10, width: 100, height: 20 } };
     const card = (inside: readonly unknown[]) => ({ role: 'group', name: 'Card', children: inside });
-    const read = (focused: boolean) => ({
-      ...screen('w-mine', { ...window, children: [card([note(focused)]), card([{ role: 'statictext', value: 'Draft', bounds: { x: 10, y: 60, width: 80, height: 20 } }])] }),
-      interactive: screen('w-mine', { ...window, children: [card([note(focused)])] }),
-    });
-    const { surface, fake } = await launched({ snapshot: [read(false), read(false), read(false), read(false)] }, { observe: false, options: { snapshot: 'interactive', headed: true } });
+    const read = {
+      ...screen('w-mine', { ...window, children: [card([note]), card([{ role: 'statictext', value: 'Draft', bounds: { x: 10, y: 60, width: 80, height: 20 } }])] }),
+      interactive: screen('w-mine', { ...window, children: [card([note])] }),
+    };
+    const { surface, fake } = await launched({ snapshot: [read, read, read, read] }, { observe: false, options: { snapshot: 'interactive', headed: true } });
     const before = await surface.observe(operation(), undefined);
     const [located] = await surface.locate(testId('note'), operation());
     const after = await surface.observe(operation(), undefined);

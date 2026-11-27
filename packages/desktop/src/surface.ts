@@ -1558,9 +1558,9 @@ async function afterChange(label: string, run: () => Promise<unknown>): Promise<
   try {
     await run();
   } catch (cause) {
-    const message = (cause as Error).message;
-    // A translated failure already opens with the label.
-    throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${message.startsWith(`${label}: `) ? message : `${label}: ${message}`} (an earlier command of this step changed the app)`, { retryable: false, cause });
+    // Only the driver's own failure is unnamed: an engine error already says which command it is.
+    const message = cause instanceof DriverFailure ? `${label}: ${cause.message}` : (cause as Error).message;
+    throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${message} (an earlier command of this step changed the app)`, { retryable: false, cause });
   }
 }
 
