@@ -75,7 +75,8 @@ describe('launchArgumentList', () => {
     expect(launchArgumentList('android', { tags: ['a', 'b c', 'd'] })).toEqual(['--esa', 'tags', 'a,b c,d']);
   });
 
-  it('keeps a name with spaces as one argument', () => {
+  // Characterization: the list never split names; the config check is what now lets a spaced name through.
+  it('passes a name with spaces through as one argument', () => {
     expect(launchArgumentList('ios', { 'NSSplitView Subview Frames Main': ['0, 0, 200, 600'] })).toEqual(['-NSSplitView Subview Frames Main', '("0, 0, 200, 600")']);
     expect(launchArgumentList('android', { 'mock server': 'http://localhost:9001' })).toEqual(['--es', 'mock server', 'http://localhost:9001']);
   });

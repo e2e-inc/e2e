@@ -5,6 +5,9 @@ import type { LaunchArgumentValue, LaunchArgumentValues, ResolvedLaunchArguments
 /** What an old-style plist string may hold unquoted. `NSUserDefaults` reads a bare value that starts with `-` as the next argument's name. */
 const PLIST_UNQUOTED = /^[A-Za-z0-9_$/:.][A-Za-z0-9_$/:.-]*$/;
 
+/** What an argument name may not hold: a control character, or whitespace other than a plain space. */
+const CONTROL_OR_NON_SPACE_WHITESPACE = /[^\S ]|\p{Cc}/u;
+
 const LAUNCH_ARGUMENTS_SHAPE = 'an array of strings or an object of argument name to string, number, boolean, or array of strings';
 
 /**
@@ -39,7 +42,7 @@ export function checkLaunchArguments(label: string, declared: unknown, code: 'IN
   for (const [name, value] of Object.entries(declared)) {
     if (value === undefined) continue;
     if (name === '') fail(code, `${label} has an empty argument name`);
-    if (/[^\S ]|\p{Cc}/u.test(name)) {
+    if (CONTROL_OR_NON_SPACE_WHITESPACE.test(name)) {
       fail(code, `${label} argument name ${JSON.stringify(name)} must have no control characters and no whitespace other than a space`);
     }
     if (name !== name.trim()) {
