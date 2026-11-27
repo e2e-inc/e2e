@@ -388,6 +388,28 @@ describe('projectSnapshot', () => {
     expect(byTestId(root, 'username')?.text).toBeUndefined();
   });
 
+  it("finds a value by its text and by its label, and the label's text only once", () => {
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'W',
+          children: [
+            { role: 'statictext', value: 'Words' },
+            { role: 'statictext', name: 'Words', value: '5' },
+          ],
+        },
+      },
+      minter(),
+    );
+    const find = (kind: 'text' | 'label', value: string) => resolveExpression({ kind: 'query', query: { kind, value: { kind: 'string', value, exact: true } } }, [root]).map((node) => node.text);
+    expect(root.children?.[1]).toMatchObject({ role: 'text', name: 'Words', text: '5' });
+    expect(find('text', 'Words')).toEqual(['Words']);
+    expect(find('text', '5')).toEqual(['5']);
+    expect(find('label', 'Words')).toEqual(['Words', '5']);
+  });
+
   it('withholds masking when a secure field has no bounds, and measures rects from the window', () => {
     expect(project('macos/appkit-form').secureRects).toBeUndefined();
     const raw = load('macos/appkit-form');

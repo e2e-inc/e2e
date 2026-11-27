@@ -152,11 +152,11 @@ function matchesQuery(entry: ProjectedNode, query: SemanticQuery, withoutPackage
       const placeholder = node.attributes?.['placeholder'];
       return placeholder !== undefined && matchesText(placeholder, query.value);
     }
-    case 'text':
-      return (
-        (node.name !== undefined && matchesText(node.name, query.value)) ||
-        (node.text !== undefined && matchesText(node.text, query.value))
-      );
+    case 'text': {
+      // As `resolveExpression` reads it: what the node shows, or its name when it shows nothing.
+      const shown = node.text ?? node.name;
+      return shown !== undefined && matchesText(shown, query.value);
+    }
     case 'displayValue':
       return node.value !== undefined && matchesText(node.value, query.value);
     case 'testId':

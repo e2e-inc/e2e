@@ -87,6 +87,18 @@ describe('resolveExpression', () => {
     );
   });
 
+  it('matches a text query against what a node shows, and against its name only when it shows nothing', () => {
+    const pair = [
+      node('label', { role: 'text', name: 'Words', text: 'Words' }),
+      node('count', { role: 'text', name: 'Words', text: '5' }),
+      node('close', { role: 'button', name: 'Close' }),
+    ];
+    expect(ids(query('text', 'Words'), pair)).toEqual(['label']);
+    expect(ids(query('text', '5'), pair)).toEqual(['count']);
+    expect(ids(query('label', 'Words'), pair)).toEqual(['label', 'count']);
+    expect(ids(query('text', 'Close'), pair)).toEqual(['close']);
+  });
+
   it('drops hidden nodes from any query kind when it says visible', () => {
     expect(ids(query('text', 'Hidden'))).toEqual(['hidden']);
     expect(ids(query('text', 'Hidden', { visible: true }))).toEqual([]);

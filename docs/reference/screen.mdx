@@ -201,6 +201,11 @@ getByText(text: TextMatch, options?: TextMatchOptions): Locator;
 screen.getByText('Welcome back', { exact: false });
 ```
 
+On a device or a desktop app, `getByText` matches the text a node shows. A
+node that shows none, such as an icon button, matches by its accessible
+name. So a value named by the label beside it (`5` named `Words`) answers
+`getByText('5')` and `getByLabel('Words')`, never `getByText('Words')`.
+
 ##### Echoed text
 
 `getByText` answers with the innermost matching node, so a container that

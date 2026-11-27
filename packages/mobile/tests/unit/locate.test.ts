@@ -48,6 +48,22 @@ describe('locator expressions over a device snapshot', () => {
     expect(names(query('placeholder', 'anything'))).toEqual([]);
   });
 
+  it('finds a described Android text by what it shows, by its description only as a label, and an icon by its description', () => {
+    const nodes: RawNode[] = [
+      { ref: 'e1', index: 0, depth: 0, type: 'android.widget.FrameLayout' },
+      { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'android.widget.TextView', label: 'Words' },
+      { ref: 'e3', index: 2, parentIndex: 0, depth: 1, type: 'android.widget.TextView', label: '5', contentDescription: 'Words' },
+      { ref: 'e4', index: 3, parentIndex: 0, depth: 1, type: 'android.widget.ImageButton', contentDescription: 'Close' },
+    ];
+    let counter = 0;
+    const { index } = projectSnapshot(nodes, { mintId: () => `n${++counter}` });
+    const shown = (expression: LocatorExpression) => resolveExpression(expression, index, 'android').map((entry) => entry.node.text ?? entry.node.name);
+    expect(shown(query('text', 'Words'))).toEqual(['Words']);
+    expect(shown(query('text', '5'))).toEqual(['5']);
+    expect(shown(query('label', 'Words'))).toEqual(['Words', '5']);
+    expect(shown(query('text', 'Close'))).toEqual(['Close']);
+  });
+
   it('answers text and label queries with the innermost match when an ancestor echoes the text', () => {
     let counter = 0;
     const { index } = projectSnapshot(SETTINGS_NODES, { mintId: () => `n${++counter}` });

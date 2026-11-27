@@ -33,9 +33,9 @@ export interface ResolveExpressionOptions {
  *
  * Query kinds: `role` compares the role exactly, then the name, the requested
  * states, and the heading level, and never matches a hidden node; `label`
- * and `text` match the name (`text` the visible text too) and answer with
- * the innermost match, since a container echoing a descendant's text is not
- * a second match; `placeholder`, `displayValue`, and `testId` compare their
+ * matches the name and `text` the visible text (the name of a node that has
+ * none), and both answer with the innermost match, since a container echoing
+ * a descendant's text is not a second match; `placeholder`, `displayValue`, and `testId` compare their
  * one field. `visible` drops hidden nodes from any kind. `scope` searches
  * strict descendants of the scope's matches; `filter` keeps a match whose
  * own or descendants' name, text, or value matches `hasText`, and whose
@@ -290,7 +290,11 @@ function compileKindMatcher(query: SemanticQuery): (node: SemanticNode) => boole
     }
     case 'text': {
       const matches = compileTextMatcher(query.value);
-      return (node) => (node.name !== undefined && matches(node.name)) || (node.text !== undefined && matches(node.text));
+      // A node is found by what it shows; its name stands in only when it shows nothing, so a value named by its label ("Words": 5) is not a second match for the label.
+      return (node) => {
+        const shown = node.text ?? node.name;
+        return shown !== undefined && matches(shown);
+      };
     }
     case 'displayValue': {
       const matches = compileTextMatcher(query.value);

@@ -1891,6 +1891,8 @@ async locate(expression) {
 },
 ```
 
+- `text` matches a node's `text`, or its `name` when it has no `text`;
+  `label` matches the `name`.
 - `text` and `label` answer with the innermost match when a container echoes
   a descendant's text.
 - An engine whose tree is the whole truth (a device) calls it; a browser
