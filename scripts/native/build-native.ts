@@ -4,7 +4,7 @@
  * checkout: `packages/<package>/<file>.<platform>.node`.
  *
  * Usage: `node scripts/native/build-native.ts <addon> [--target x86_64-apple-darwin] [--out <dir>]`,
- * or `pnpm --filter @e2e-dev/desktop build:native` for the desktop driver.
+ * or `pnpm --filter <package> build:native` (`@e2e-dev/desktop`, `@e2e-dev/util`).
  * `--out` copies the addon into another directory too, the platform package
  * (`packages/desktop/npm/darwin-*`) before it is published, with a stamp naming
  * that package's version, which its `prepublishOnly` checks. Needs a Rust
@@ -23,7 +23,7 @@ const DEPLOYMENT_TARGET = '13.0';
 
 const { values, positionals } = parseArgs({ args: scriptArgs(), allowPositionals: true, options: { target: { type: 'string' }, out: { type: 'string' } } });
 const addon = findAddon(positionals[0]);
-const host = `${process.platform}-${process.arch}`;
+const host = hostPlatform();
 const target = values.target ?? Object.keys(addon.targets).find((triple) => addon.targets[triple] === host);
 if (target === undefined) throw new Error(`no ${addon.name} addon build for ${host}; name a target, one of ${Object.keys(addon.targets).join(', ')}`);
 const platform = Object.hasOwn(addon.targets, target) ? addon.targets[target] : undefined;
@@ -52,6 +52,17 @@ if (values.out !== undefined) {
   }
 }
 process.stdout.write(`built ${path.join(addon.packageDir, name)}\n`);
+
+/** NAPI-RS's name for this machine's platform, the one an addon's loader asks for: `darwin-arm64`, `linux-x64-gnu`. */
+function hostPlatform(): string {
+  const { platform: os, arch } = process;
+  if (os === 'linux') {
+    const glibc = (process.report.getReport() as { header?: { glibcVersionRuntime?: string } }).header?.glibcVersionRuntime;
+    return `linux-${arch}-${glibc === undefined ? 'musl' : 'gnu'}`;
+  }
+  if (os === 'win32') return `win32-${arch}-msvc`;
+  return `${os}-${arch}`;
+}
 
 /** The file name cargo gives a crate's `cdylib` on a target. */
 function library(crateName: string, triple: string): string {
