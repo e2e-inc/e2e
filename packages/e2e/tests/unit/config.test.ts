@@ -650,13 +650,23 @@ describe('resolveConfig', () => {
     expect(() => resolveApp({ launchArguments: null } as never)).toThrow(`${shape}, got null`);
     expect(() => resolveApp({ launchArguments: new Map([['AppleLocale', 'fr_FR']]) } as never)).toThrow(`${shape}, got a Map`);
     expect(() => resolveApp({ launchArguments: { '': 'x' } })).toThrow('target "web" app.launchArguments has an empty argument name');
-    expect(() => resolveApp({ launchArguments: { 'Apple Locale': 'fr_FR' } })).toThrow(
-      'target "web" app.launchArguments argument name "Apple Locale" must have no whitespace or control characters',
-    );
+    expect(resolveApp({ bundleId: 'dev.shop.app', launchArguments: { 'NSSplitView Subview Frames Main': ['0, 0, 200, 600'] } }).launchArguments).toEqual({
+      'NSSplitView Subview Frames Main': ['0, 0, 200, 600'],
+    });
+    for (const name of [' AppleLocale', 'AppleLocale ']) {
+      expect(() => resolveApp({ launchArguments: { [name]: 'fr_FR' } })).toThrow(
+        `target "web" app.launchArguments argument name ${JSON.stringify(name)} must not start or end with a space`,
+      );
+    }
+    for (const name of ['Apple\tLocale', 'Apple\u00a0Locale', 'Apple\u2028Locale']) {
+      expect(() => resolveApp({ launchArguments: { [name]: 'fr_FR' } })).toThrow(
+        `target "web" app.launchArguments argument name ${JSON.stringify(name)} must have no control characters and no whitespace other than a space`,
+      );
+    }
     expect(() => resolveApp({ launchArguments: { '-AppleLocale': 'fr_FR' } })).toThrow(
       'target "web" app.launchArguments argument name "-AppleLocale" starts with a dash; remove the dash, the engine adds it',
     );
-    expect(() => resolveApp({ launchArguments: { 'a\u0000b': 'x' } })).toThrow('argument name "a\\u0000b" must have no whitespace or control characters');
+    expect(() => resolveApp({ launchArguments: { 'a\u0000b': 'x' } })).toThrow('argument name "a\\u0000b" must have no control characters and no whitespace other than a space');
     expect(() => resolveApp({ launchArguments: { env: 'a\u0000' } })).toThrow('target "web" app.launchArguments.env holds a NUL character');
     expect(() => resolveApp({ launchArguments: { tags: ['a', 'b\u0000'] } })).toThrow('target "web" app.launchArguments.tags holds a NUL character');
     expect(() => resolveApp({ launchArguments: ['-a', 'b\u0000'] })).toThrow('target "web" app.launchArguments item 1 holds a NUL character');
