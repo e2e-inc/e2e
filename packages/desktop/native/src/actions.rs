@@ -1634,6 +1634,16 @@ mod tests {
     }
 
     #[test]
+    fn counts_a_failure_after_a_scroll_into_view_as_delivered() {
+        use super::after_scroll;
+        use crate::failure::{Delivery, Failure, codes};
+        let refused = || Err::<(), _>(Failure::refused(codes::ACTION_NOT_SUPPORTED, "no press"));
+        assert_eq!(after_scroll(false, refused()).expect_err("refused").delivery, Delivery::NotDelivered);
+        assert_eq!(after_scroll(true, refused()).expect_err("refused").delivery, Delivery::Unknown, "the list moved");
+        assert!(after_scroll(true, Ok(())).is_ok());
+    }
+
+    #[test]
     fn stops_stepping_at_the_deadline_and_says_the_steps_landed() {
         let value = Cell::new(0.0);
         let steps = Cell::new(0);
