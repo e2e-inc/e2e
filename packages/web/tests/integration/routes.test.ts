@@ -399,8 +399,9 @@ describe('browser route and waitForResponse decisions', () => {
 
   /**
    * One grammar: each row answers the same through `route` (a fetch from the
-   * page reaches the handler) and `waitForURL` (the page at that URL
-   * satisfies the wait), relative patterns resolved against the app's URL.
+   * page reaches the handler), `unroute` (the next fetch reaches the
+   * network), and `waitForURL`, `waitForRequest`, and `waitForResponse`,
+   * relative patterns resolved against the app's URL.
    */
   const SHARED_PATTERNS: readonly (readonly [pattern: string, pathname: string, matches: boolean])[] = [
     ['**/api/quote', '/api/quote', true],
