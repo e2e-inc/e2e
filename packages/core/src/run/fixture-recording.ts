@@ -1,21 +1,8 @@
 /** Explicit fixture operations: open the step before running any engine code. */
-import type { FixtureOperation, FixtureOperations, FixtureTestLine } from '../engine/index.ts';
+import type { FixtureOperation, FixtureOperations } from '../engine/index.ts';
 import { asEngineError, ConfigurationError, TestError, translateEngineError } from '../internal/errors.ts';
 import { stepTimeout, withAbort, withTimeout } from '../internal/time.ts';
 import type { AttemptEnvironment } from './fixtures.ts';
-
-/** The `testLine` each recorded method's operation declares, by the method a fixture holds. */
-const testLines = new WeakMap<object, (...args: unknown[]) => FixtureTestLine | undefined>();
-
-/**
- * How a test line spells a call of `method`, a declared operation of a
- * recorded fixture, with `args`: what its `testLine` answers, or undefined
- * for a method that declares none.
- */
-export function fixtureTestLine(method: unknown, args: readonly unknown[]): FixtureTestLine | undefined {
-  if (typeof method !== 'function') return undefined;
-  return testLines.get(method)?.(...args);
-}
 
 export class FixtureRecorder {
   /** Every declared surface, keyed to the fixture (or namespace) name it was declared under. */
@@ -61,9 +48,11 @@ export class FixtureRecorder {
       if (operation.kind === 'resource' || operation.kind === 'assertion') {
         const method = Reflect.get(surface, key) as (...args: unknown[]) => Promise<unknown>;
         if (typeof method !== 'function') throw new TestError('INVALID_ARGUMENT', `${api} must be a method`);
-        const recorded = (...args: unknown[]): Promise<unknown> => this.run(api, operation, args, () => method.apply(surface, args));
-        if (operation.testLine !== undefined) testLines.set(recorded, operation.testLine);
-        Object.defineProperty(surface, key, { configurable: true, enumerable: true, value: recorded });
+        Object.defineProperty(surface, key, {
+          configurable: true,
+          enumerable: true,
+          value: (...args: unknown[]) => this.run(api, operation, args, () => method.apply(surface, args)),
+        });
       } else {
         const descriptor = propertyDescriptor(surface, key);
         let value = descriptor?.value;
