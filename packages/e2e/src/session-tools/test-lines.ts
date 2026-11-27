@@ -23,6 +23,7 @@
 
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
+import { describeTarget } from '@e2e-dev/core/lib/agent/actions';
 import type { ExecutorNode, ExecutorObservation, ExecutorObserveOptions, PointHit, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
 import { isFailedResult } from '@e2e-dev/core/lib/agent/loop-guards';
 import { typedThroughKeyboard } from '@e2e-dev/core/lib/agent/primitives';
@@ -32,6 +33,8 @@ import type { LocatorExpression, NodeRef, SemanticNode, ViewportPoint } from '@e
 import { codedMessage, InfrastructureError } from '@e2e-dev/core/lib/internal/errors';
 import { collapseText } from '@e2e-dev/core/lib/internal/text';
 import { filterExpression, indexExpression } from '@e2e-dev/core/lib/locator/expression';
+import type { RedactedNode } from '@e2e-dev/core/lib/agent/observation';
+import { relocateDescriptor } from '@e2e-dev/core/lib/cache/relocate';
 import type { Role } from '@e2e-dev/core/lib/types';
 
 /** Matches read per locator while looking for the target among them. */
@@ -142,6 +145,8 @@ interface ScreenEntry {
 interface Screen {
   readonly root: ExecutorNode;
   readonly nodes: ReadonlyMap<string, ScreenEntry>;
+  /** The same nodes in the shape the relocation rule reads (`refound`). */
+  readonly redacted: ReadonlyMap<string, RedactedNode>;
 }
 
 /** What one locator matched: how many nodes, and which of them is the target. */
@@ -323,13 +328,21 @@ export class SessionTestLines {
     return { node: entry.node, ancestors, root: screen.root };
   }
 
-  /** The newest screen's entry for the one node that reads like what `id` named on the latest earlier screen that listed it. */
+  /**
+   * The newest screen's entry for what `id` named on the latest earlier
+   * screen that listed it, re-found by the rule the step's action uses
+   * (`describeTarget` and `relocateDescriptor`, as `refound` in the
+   * observation feed): role, name, test id, placeholder, and input purpose,
+   * the text only for a node with neither a name nor a test id.
+   */
   private refound(id: string, screen: Screen): ScreenEntry | undefined {
     for (let index = this.earlier.length - 1; index >= 0; index -= 1) {
       const was = this.earlier[index]!.nodes.get(id)?.node;
       if (was === undefined) continue;
-      const alike = twinsOf(screen.root, was);
-      return alike.length === 1 ? screen.nodes.get(alike[0]!.id) : undefined;
+      const descriptor = describeTarget(asRedacted(was));
+      if (descriptor === undefined) return undefined;
+      const relocated = relocateDescriptor(descriptor, screen.redacted);
+      return relocated.kind === 'found' ? screen.nodes.get(relocated.id) : undefined;
     }
     return undefined;
   }
@@ -810,12 +823,24 @@ function pointCode(point: ViewportPoint): string {
 /** Indexes an observation's tree by id, each node with its parent's id. */
 function indexScreen(root: ExecutorNode): Screen {
   const nodes = new Map<string, ScreenEntry>();
+  const redacted = new Map<string, RedactedNode>();
   const walk = (node: ExecutorNode, parent: string | undefined): void => {
     nodes.set(node.id, { node, parent });
+    redacted.set(node.id, asRedacted(node));
     for (const child of node.children ?? []) walk(child, node.id);
   };
   walk(root, undefined);
-  return { root, nodes };
+  return { root, nodes, redacted };
+}
+
+/**
+ * A listed node in the shape the relocation rule reads. The listing is
+ * already redacted, and the rule reads the fields both shapes share; a
+ * node's children are not read, since a re-found target names no container.
+ */
+function asRedacted(node: ExecutorNode): RedactedNode {
+  // oxlint-disable-next-line e2e/no-chained-type-assertions -- mints the phantom REDACTED brand for a node the listing already redacted, as `redactNode` does
+  return { ...node, ref: { id: node.id, revision: '' } } as unknown as RedactedNode;
 }
 
 /** Text in the one-line form a locator matches against, or undefined for none. */

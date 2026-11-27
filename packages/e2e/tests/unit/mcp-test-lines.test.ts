@@ -41,6 +41,7 @@ const listed = (node: Fake): ExecutorNode => ({
   ...(node.name === undefined ? {} : { name: node.name }),
   ...(node.text === undefined ? {} : { text: node.text }),
   ...(node.placeholder === undefined ? {} : { attributes: { placeholder: node.placeholder } }),
+  ...(node.testId === undefined ? {} : { testId: node.testId }),
   rect: { x: 0, y: node.y, width: 100, height: 20 },
   ...(node.children === undefined ? {} : { children: node.children.map(listed) }),
 });
@@ -468,6 +469,29 @@ describe('SessionTestLines', () => {
     session.show([renumbered, { id: 'n10', role: 'button', name: 'Save', y: 80 }]);
     await session.context.observe();
     expect(noteOf(await session.run('tap', { target: 'n2' }))).toBe('No test line: #n2 is not on the newest screen.');
+  });
+
+  it('re-finds an earlier id by the test id the action goes by, so the line names the node the action touched', async () => {
+    // Two Delete buttons told apart by test id, renumbered and swapped on the next screen.
+    const first: Fake = { id: 'n3', role: 'button', name: 'Delete', testId: 'delete-1', y: 40 };
+    const second: Fake = { id: 'n4', role: 'button', name: 'Delete', testId: 'delete-2', y: 80 };
+    const moved1: Fake = { id: 'n14', role: 'button', name: 'Delete', testId: 'delete-1', y: 80 };
+    const moved2: Fake = { id: 'n13', role: 'button', name: 'Delete', testId: 'delete-2', y: 40 };
+    const session = await harness({ screen: [first, second], matches: { 'getByRole("button", name: "Delete")': [moved2, moved1], 'getByTestId("delete-1")': [moved1] } });
+    session.show([moved2, moved1]);
+    await session.context.observe();
+    expect(noteOf(await session.run('tap', { target: 'n3' }))).toBe('Test line: await screen.getByTestId("delete-1").tap();');
+
+    // Two nameless rows told apart by test id, whose text swapped: the text does not decide.
+    const rowA: Fake = { id: 'n5', role: 'row', text: 'Paid', testId: 'row-a', y: 120 };
+    const rowB: Fake = { id: 'n6', role: 'row', text: 'Due', testId: 'row-b', y: 160 };
+    const nowA: Fake = { ...rowA, id: 'n15', text: 'Due' };
+    const nowB: Fake = { ...rowB, id: 'n16', text: 'Paid' };
+    const rows = await harness({ screen: [rowA, rowB], matches: { 'getByRole("row")': [nowA, nowB], 'getByText("Due")': [nowA], 'getByTestId("row-a")': [nowA] } });
+    rows.show([nowA, nowB]);
+    await rows.context.observe();
+    // The row the action touched shows "Due" now; the one showing "Paid" is the other row.
+    expect(noteOf(await rows.run('tap', { target: 'n5' }))).toBe('Test line: await screen.getByText("Due").tap();');
   });
 
   describe('point tools', () => {
