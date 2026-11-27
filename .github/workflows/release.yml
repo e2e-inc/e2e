@@ -64,12 +64,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Rust toolchain
-        run: |
-          if ! command -v rustup >/dev/null; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          fi
+      - uses: ./.github/actions/rust-toolchain
       # build-native.ts is TypeScript run directly, which needs a Node newer than a runner image may ship.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:

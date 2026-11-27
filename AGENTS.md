@@ -926,7 +926,9 @@ trees, on both platforms, without a device.
   (the desktop driver's `cargo fmt --check`, clippy, and `cargo test`, a
   build for both Mac architectures with each one's architecture checked by
   `lipo`, and a load of the arm64 build, also
-  through the engine's loader test), which
+  through the engine's loader test; rustup, when the image has none, comes
+  from the rustup-init release and SHA-256 that
+  `.github/actions/rust-toolchain` pins), which
   `spec gate` needs; `benchmark.yml` runs the
   web benchmark's two suites; `mobile.yml` runs the mobile benchmark's on an
   iOS simulator and an Android emulator (KVM on x64 Linux); `docs.yml`
