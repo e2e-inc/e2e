@@ -616,6 +616,13 @@ describe('FileCacheStore', () => {
       expect(read.status).toBe('invalid');
     });
 
+    it.each(['constructor', 'toString', '__proto__'])('an action named %s, an object built-in, as an unknown action', async (verb) => {
+      const { directory, store, yaml } = await written();
+      await writeFile(yamlPath(directory), yaml.replace('          - back', `          - ${verb}: x`), 'utf8');
+      const read = await store.read(KEY, step());
+      expect(read.status === 'invalid' ? read.reason : read.status).toContain(`has an unknown action "${verb}"`);
+    });
+
     it('a missing lock file', async () => {
       const { directory, store } = await written();
       await rm(lockPath(directory));

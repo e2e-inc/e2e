@@ -552,7 +552,8 @@ function readAction(value: unknown, where: string): Record<string, unknown> {
     only(raw, [verb, ...(isTapActionName(verb) ? ['hold'] : [])], where);
     return { name: verb, summary, target: readTarget(subject, `${where}.${verb}`), ...(raw['hold'] === undefined ? {} : { modifiers: raw['hold'] }) };
   }
-  const keys = VERB_KEYS[verb];
+  // Own keys only: `constructor` or `toString` written as a verb is an unknown action, not an inherited one.
+  const keys = Object.hasOwn(VERB_KEYS, verb) ? VERB_KEYS[verb] : undefined;
   if (keys === undefined) fail(`${where} has an unknown action "${verb}"`);
   only(raw, [verb, ...keys], where);
   const target = (key: string) => readTarget(raw[key], `${where}.${key}`);
