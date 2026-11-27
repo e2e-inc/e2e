@@ -1,8 +1,9 @@
 ---
-'@e2e-dev/core': patch
-'@e2e-dev/mobile': patch
-'@e2e-dev/desktop': patch
-'e2e': patch
+'@e2e-dev/core': minor
+'e2e': minor
+'@e2e-dev/mobile': minor
+'@e2e-dev/desktop': minor
+'@e2e-dev/web': patch
 ---
 
-`getByText` on a device or a desktop app matches the text a node shows, and its accessible name only when it has no text of its own. A value named by a label beside it (a `5` named `Words`) no longer makes `getByText('Words')` ambiguous. A node that shows text under another accessible name, such as an Android text with a content description, no longer answers `getByText` by that name: find it by its text, or with `getByLabel`. On the desktop engine a web view's heading reads its text, not its level.
+**Breaking:** `getByText` on a device or a desktop app no longer matches a node by its accessible name when the node shows text of its own. It matches the text the node shows, and the name only of a node that shows none, such as an icon button. Replace `getByText(name)` with `getByLabel(name)`, or query the text the node shows. This affects a text an app names otherwise, an Android text or filled field with a content description (`<Text accessibilityLabel="Total price">$5</Text>` answers `getByText('$5')` and `getByLabel('Total price')`), and an empty Android field with a description, which `getByText` finds by its hint. A value named by the label beside it (a `5` named `Words`) no longer makes `getByText('Words')` ambiguous. `filter({ hasText })` still reads names, text, and values. `resolveExpression` from `@e2e-dev/core/engine` follows the same rule, and `shownText(node)` is exported beside it for an engine that matches text itself. On the desktop engine a row or a cell reads the text inside it as its text, and a web view's heading reads its title as its text and its level from the number it reports as its value. `@e2e-dev/desktop` now needs the `@e2e-dev/core` and `e2e` of this release or newer.

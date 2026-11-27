@@ -1837,6 +1837,7 @@ reproduces these semantics; import them instead of carrying a copy.
 | --- | --- |
 | [`matchesText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `TextPattern`, `string` |
 | [`resolveExpression`](#resolveexpression) | `SemanticNode[]` |
+| [`shownText`](#showntext) | `string \| undefined` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`, `sameSite`](#site-helpers) | `string`, `boolean` |
 | [`isRefusedLinkScheme`](#isrefusedlinkscheme) | `boolean` |
@@ -1891,15 +1892,35 @@ async locate(expression) {
 },
 ```
 
-- `text` matches a node's `text`, or its `name` when it has no `text`;
-  `label` matches the `name`.
+- `text` matches a node's `text`, or its `name` when `text` is omitted or
+  blank ([`shownText`](#showntext)); `label` matches the `name`.
+- A `filter`'s `hasText` reads `name`, `text`, and `value`, so it keeps a
+  node a `text` query skips.
 - `text` and `label` answer with the innermost match when a container echoes
   a descendant's text.
-- An engine whose tree is the whole truth (a device) calls it; a browser
-  engine reproduces it.
+- An engine whose tree is the whole truth (a device, a desktop app) calls
+  it. A browser engine answers with its own query engine, where `text` reads
+  text content and never an accessible name.
 - A `selector` expression needs the `selector` option.
 - A `frame` expression is `FRAME_NOT_FOUND`.
 - A `union` expression matches either branch in document order, without duplicate nodes.
+
+#### `shownText`
+
+The string a `text` query reads a node by: its `text`, or its `name` when
+`text` is omitted or blank.
+
+```ts
+export function shownText(node: Pick<SemanticNode, 'name' | 'text'>): string | undefined;
+```
+
+```ts
+shownText({ name: 'Words', text: '5' }); // '5'
+shownText({ name: 'Close' }); // 'Close'
+```
+
+An engine that matches text itself calls it, so its `getByText` agrees with
+`resolveExpression`.
 
 #### `urlMatches`
 
