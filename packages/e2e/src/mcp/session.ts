@@ -791,7 +791,7 @@ export class SessionHost {
           })
           .strict()
           .optional()
-          .describe('With engine: the app under test. @e2e-dev/web needs url; @e2e-dev/mobile needs bundleId or appPath'),
+          .describe('With engine: the app under test. @e2e-dev/web needs url; @e2e-dev/mobile and @e2e-dev/desktop need bundleId or appPath'),
       }).strict(),
       readOnly: false,
       call: async (args, extra) => textResult(await this.open(args, extra.signal)),

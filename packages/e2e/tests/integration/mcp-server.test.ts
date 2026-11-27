@@ -67,6 +67,19 @@ export const kiosk = createFakeEngine({
 });
 `;
 
+// A device engine package, as a session opened with `engine` loads one: it
+// writes the app its `init` received beside its entry.
+const KIOSK_ENGINE = `import { writeFileSync } from 'node:fs';
+import { createFakeEngine } from ${JSON.stringify(new URL('../helpers/fake-engine.ts', import.meta.url).href)};
+
+export default () =>
+  createFakeEngine({
+    device: true,
+    platform: 'kiosk',
+    onInit: (info) => writeFileSync(new URL('./init.json', import.meta.url), JSON.stringify(info.app)),
+  }).engine;
+`;
+
 // A third config: two targets, one a custom engine with fewer verbs, and
 // project tools scoped by platform.
 const CUSTOM_CONFIG = `import type { E2EConfig } from 'e2e';
@@ -590,6 +603,8 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
       'node_modules/dual-engine/package.json': JSON.stringify({ name: 'dual-engine', version: '0.0.0', type: 'module', exports: { import: './index.js', require: './index.cjs' } }),
       'node_modules/dual-engine/index.js': "export { web as default } from '@e2e-dev/web';\n",
       'node_modules/dual-engine/index.cjs': "throw new Error('the require entry was loaded');\n",
+      'node_modules/kiosk-engine/package.json': JSON.stringify({ name: 'kiosk-engine', version: '0.0.0', type: 'module', exports: './index.js' }),
+      'node_modules/kiosk-engine/index.js': KIOSK_ENGINE,
     });
     const other = new Client({ name: 'e2e-mcp-bare-test', version: '0.0.0' });
     await other.connect(new StdioClientTransport({ command: process.execPath, args: [CLI, 'mcp'], cwd: bare.dir, env: { ...(process.env as Record<string, string>), CI: '' }, stderr: 'ignore' }));
@@ -627,6 +642,18 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
       const nested = await open({ engine: '@e2e-dev/web', app: { url: app.url, launchArguments: { e2e: { on: true } } } });
       expect(nested.isError).toBe(true);
       expect(nested.text).toContain('Invalid arguments for tool open_session');
+
+      const device = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'] } });
+      expect(device.isError, device.text).toBe(false);
+      expect(JSON.parse(readFileSync(path.join(bare.dir, 'node_modules/kiosk-engine/init.json'), 'utf8'))).toMatchObject({
+        bundleId: 'com.example.greeter',
+        launchArguments: ['--profile', 'a b'],
+      });
+      const closedDevice = (await other.callTool({ name: 'close_session', arguments: {} })) as { isError?: boolean };
+      expect(closedDevice.isError).not.toBe(true);
+      const dashed = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', launchArguments: { '-profile': 'a' } } });
+      expect(dashed.isError).toBe(true);
+      expect(dashed.text).toContain('app.launchArguments argument name "-profile" starts with a dash');
 
       const dual = await open({ engine: 'dual-engine', app: { url: app.url } });
       expect(dual.isError, dual.text).toBe(false);
