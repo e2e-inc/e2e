@@ -1188,6 +1188,80 @@ mod tests {
     }
 
     #[test]
+    fn names_no_value_in_any_stepper_failure() {
+        let digitless = |failure: crate::failure::Failure| {
+            assert!(!failure.message.chars().any(|c| c.is_ascii_digit()), "names a value: {}", failure.message);
+        };
+        // Wraps: one step up from 42 goes to 0.
+        let value = Cell::new(42.0);
+        digitless(
+            step_to(
+                43.0,
+                Some(42.0),
+                later(),
+                |_| {
+                    value.set(0.0);
+                    Ok(())
+                },
+                || Some(value.get()),
+            )
+            .expect_err("wraps"),
+        );
+        // Steps past and back: 40, 42, 44 past 43, then back to 40.
+        let value = Cell::new(40.0);
+        digitless(
+            step_to(
+                43.0,
+                Some(40.0),
+                later(),
+                |up| {
+                    value.set(value.get() + if up { 2.0 } else { -2.0 });
+                    Ok(())
+                },
+                || Some(value.get()),
+            )
+            .expect_err("past"),
+        );
+        // Steps past and cannot go back.
+        let value = Cell::new(40.0);
+        digitless(
+            step_to(
+                43.0,
+                Some(40.0),
+                later(),
+                |up| {
+                    if up {
+                        value.set(value.get() + 2.0)
+                    }
+                    Ok(())
+                },
+                || Some(value.get()),
+            )
+            .expect_err("stuck past"),
+        );
+        // Already showed the target up to rounding, and the step to tell it left it changed.
+        let summed = 0.1 + 0.1 + 0.1;
+        let value = Cell::new(summed);
+        digitless(
+            step_to(
+                0.3,
+                Some(summed),
+                later(),
+                |up| {
+                    if !up {
+                        value.set(value.get() - 0.1)
+                    }
+                    Ok(())
+                },
+                || Some(value.get()),
+            )
+            .expect_err("left changed"),
+        );
+        // Out of time before the first step.
+        digitless(step_to(43.0, Some(40.0), Instant::now(), |_| Ok(()), || Some(40.0)).expect_err("no time"));
+    }
+
+    #[test]
     fn takes_only_a_finite_number() {
         assert_eq!(super::finite(" 3 "), Ok(3.0));
         for text in ["NaN", "inf", "-infinity", "three"] {

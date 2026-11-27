@@ -223,6 +223,7 @@ pub(super) fn shown_number(read: Result<Value, AXError>, what: &str) -> Outcome<
         _ => Ok(None),
     }
 }
+
 /// Whether a stepper's target lies outside the range it reports: below `min` or above `max`. A bound it does not report
 /// limits nothing.
 pub(super) fn outside(target: f64, min: Option<f64>, max: Option<f64>) -> bool {
