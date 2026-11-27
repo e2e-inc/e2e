@@ -204,6 +204,58 @@ fn shifted(character: char) -> Option<char> {
 pub struct Combo {
     key: Key,
     flags: CGEventFlags,
+    /// The character of a character key, lowercase, as the combo names it; none for a named key.
+    base: Option<char>,
+}
+
+/// A key equivalent as accessibility reports a menu item's (`AXMenuItemCmdChar`, `AXMenuItemCmdVirtualKey`,
+/// `AXMenuItemCmdModifiers`): its character in lowercase or, for a named key, its key code, and the modifier bits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KeyEquivalent {
+    pub character: Option<char>,
+    pub code: Option<u16>,
+    pub modifiers: u32,
+}
+
+impl KeyEquivalent {
+    pub const SHIFT: u32 = 1;
+    pub const OPTION: u32 = 2;
+    pub const CONTROL: u32 = 4;
+    /// Set when the key equivalent takes no Command.
+    pub const NO_COMMAND: u32 = 8;
+}
+
+impl Combo {
+    /// Whether the combo holds Command: AppKit hands such a key to key equivalents only, never to a control as a key.
+    pub fn command(&self) -> bool {
+        self.flags.contains(CGEventFlags::CGEventFlagCommand)
+    }
+
+    /// Whether a menu item's key equivalent is this combo. A character is matched as the item names it: `?` with
+    /// Command is Command-Shift-/ on the US layout the combo's keys follow.
+    pub fn triggers(&self, item: &KeyEquivalent) -> bool {
+        let mut modifiers = 0;
+        for (flag, bit) in [
+            (CGEventFlags::CGEventFlagShift, KeyEquivalent::SHIFT),
+            (CGEventFlags::CGEventFlagAlternate, KeyEquivalent::OPTION),
+            (CGEventFlags::CGEventFlagControl, KeyEquivalent::CONTROL),
+        ] {
+            if self.flags.contains(flag) {
+                modifiers |= bit;
+            }
+        }
+        if !self.command() {
+            modifiers |= KeyEquivalent::NO_COMMAND;
+        }
+        match self.base {
+            Some(base) => {
+                let Some(character) = item.character else { return false };
+                (character == base && item.modifiers == modifiers)
+                    || (modifiers & KeyEquivalent::SHIFT != 0 && shifted(base) == Some(character) && item.modifiers == modifiers & !KeyEquivalent::SHIFT)
+            }
+            None => item.code == Some(self.key.code) && item.modifiers == modifiers,
+        }
+    }
 }
 
 /// Parses `cmd+shift+a`: modifiers, then one key. A lone capital letter adds Shift.
@@ -223,6 +275,7 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
         };
     }
     let mut characters = last.chars();
+    let mut base = None;
     let key = match (characters.next(), characters.next()) {
         (Some(character), None) => {
             if character.is_ascii_uppercase() {
@@ -253,6 +306,7 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
             };
             // With Shift the key types its shifted character; one with none on the US layout is left to the app to work out.
             let typed = if flags.contains(CGEventFlags::CGEventFlagShift) { shifted(lower) } else { Some(lower) };
+            base = Some(lower);
             Key { code, character: typed }
         }
         _ => {
@@ -261,7 +315,7 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
             Key { code, character: if name == "space" { Some(' ') } else { None } }
         }
     };
-    Ok(Combo { key, flags })
+    Ok(Combo { key, flags, base })
 }
 
 fn source() -> Outcome<CGEventSource> {
@@ -352,7 +406,8 @@ pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time:
         let units = match piece {
             Piece::Return | Piece::Tab => {
                 let code = if piece == Piece::Tab { 48 } else { 36 };
-                press(&Combo { key: Key { code, character: None }, flags: CGEventFlags::CGEventFlagNull }, route).map_err(|failure| stopped(failure, sent))?;
+                press(&Combo { key: Key { code, character: None }, flags: CGEventFlags::CGEventFlagNull, base: None }, route)
+                    .map_err(|failure| stopped(failure, sent))?;
                 sent = true;
                 continue;
             }
@@ -494,6 +549,26 @@ mod tests {
             assert_eq!(parsed.key.character, typed, "{combo}");
         }
         assert!(parse_combo("shift+a").unwrap().flags.contains(CGEventFlags::CGEventFlagShift));
+    }
+
+    #[test]
+    fn matches_a_menu_items_key_equivalent() {
+        use super::KeyEquivalent;
+        let item = |character: Option<char>, code: Option<u16>, modifiers: u32| KeyEquivalent { character, code, modifiers };
+        // Named keys and Shift combos read no keyboard layout, so they parse on any Mac.
+        let up = parse_combo("ctrl+up").unwrap();
+        assert!(up.triggers(&item(Some('\u{f700}'), Some(126), KeyEquivalent::CONTROL | KeyEquivalent::NO_COMMAND)));
+        assert!(!up.triggers(&item(Some('\u{f700}'), Some(126), KeyEquivalent::NO_COMMAND)));
+        assert!(!up.triggers(&item(Some('\u{f701}'), Some(125), KeyEquivalent::CONTROL | KeyEquivalent::NO_COMMAND)));
+        let f5 = parse_combo("f5").unwrap();
+        assert!(f5.triggers(&item(Some('\u{f708}'), Some(96), KeyEquivalent::NO_COMMAND)));
+        assert!(!f5.triggers(&item(None, None, 0)));
+        let shift_d = parse_combo("shift+d").unwrap();
+        assert!(shift_d.triggers(&item(Some('d'), None, KeyEquivalent::SHIFT | KeyEquivalent::NO_COMMAND)));
+        assert!(!shift_d.triggers(&item(Some('d'), None, KeyEquivalent::NO_COMMAND)));
+        // An item named by the character Shift types: `?` is Shift-/.
+        assert!(parse_combo("shift+/").unwrap().triggers(&item(Some('?'), None, KeyEquivalent::NO_COMMAND)));
+        assert!(!parse_combo("a").unwrap().command());
     }
 
     #[test]

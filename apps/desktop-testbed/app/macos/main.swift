@@ -4,7 +4,10 @@
 // window with one control per engine capability the form does not reach
 // (a scrolling list, a key handler, a context menu, a slider, a disabled
 // button, a SwiftUI alert, and double-click and hover targets for physical
-// input), each writing what happened into that window's status line.
+// input), each writing what happened into that window's status line. The
+// menu bar has one command the app handles itself (Form > Reset) and one the
+// focused control handles (Edit > Select All), which AppKit disables while
+// the app is in the background.
 
 import AppKit
 import SwiftUI
@@ -54,8 +57,31 @@ final class Controller: NSObject, NSApplicationDelegate {
     password.widthAnchor.constraint(equalToConstant: 260).isActive = true
     status.widthAnchor.constraint(equalToConstant: 360).isActive = true
     window.contentView = stack
+    NSApp.mainMenu = menuBar()
     // No activation: the engine launches the app in the background unless the run is headed, and the suites drive it there.
     window.makeKeyAndOrderFront(nil)
+  }
+
+  func menuBar() -> NSMenu {
+    let bar = NSMenu()
+    let menu = { (title: String) -> NSMenu in
+      let item = NSMenuItem()
+      item.submenu = NSMenu(title: title)
+      bar.addItem(item)
+      return item.submenu!
+    }
+    menu("SignInForm").addItem(withTitle: "Quit SignInForm", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    menu("Edit").addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+    let reset = menu("Form").addItem(withTitle: "Reset", action: #selector(reset(_:)), keyEquivalent: "r")
+    reset.keyEquivalentModifierMask = [.command, .shift]
+    reset.target = self
+    return bar
+  }
+
+  @objc func reset(_ sender: Any?) {
+    username.stringValue = ""
+    password.stringValue = ""
+    status.stringValue = "Reset from the menu"
   }
 
   @objc func signIn(_ sender: NSButton) {

@@ -38,6 +38,15 @@ test.describe('physical input', () => {
     await expect(screen.getByTestId('username')).toHaveValue('x');
   });
 
+  test('presses a shortcut the focused field handles', async ({ screen }) => {
+    // In front the app has a key window, so Select All is enabled: the next key replaces the text.
+    const note = screen.getByRole('textbox', 'Note');
+    await note.fill('first draft');
+    await note.press('ControlOrMeta+a');
+    await note.pressSequentially('x');
+    await expect(note).toHaveValue('x');
+  });
+
   test('taps a point in the window and types through the real keyboard', async ({ screen }) => {
     const note = screen.getByRole('textbox', 'Note');
     const box = await note.boundingBox();

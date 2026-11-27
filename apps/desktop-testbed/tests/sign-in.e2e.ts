@@ -79,6 +79,25 @@ test.describe('sign-in form', () => {
     await expect(screen.getByTestId('status')).toHaveText('Signed in as  on Pro (password: 1 characters)');
   });
 
+  test('presses the shortcut of a menu item the app handles itself', async ({ screen, desktop }) => {
+    await screen.getByTestId('username').fill('grace');
+    await desktop.press('ControlOrMeta+Shift+r');
+    await expect(screen.getByTestId('status')).toHaveText('Reset from the menu');
+    await expect(screen.getByTestId('username')).toHaveValue('');
+  });
+
+  test('refuses a shortcut whose menu item the background disables', async ({ screen }) => {
+    // Select All is the focused field's command: with the app in the background AppKit disables it, and the key would do nothing.
+    const username = screen.getByTestId('username');
+    await username.fill('grace');
+    const refused = await username.press('ControlOrMeta+a').then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    expect(String(refused)).toMatch(/the menu item "Edit > Select All" this shortcut triggers is disabled/);
+    await expect(username).toHaveValue('grace');
+  });
+
   test('reads controls by test id and refuses an empty password', async ({ screen }) => {
     await screen.getByTestId('username').fill('grace');
     await expect(screen.getByTestId('username')).toHaveValue('grace');

@@ -12,6 +12,7 @@ use crate::windows;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+mod menu;
 mod pointer;
 mod scroll;
 mod select;
@@ -516,6 +517,9 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option
             && Element::application(pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element)
         {
             return Err(Failure::refused(codes::ACTION_FAILED, "the control lost keyboard focus before the key was sent, so nothing was sent"));
+        }
+        if !physical {
+            menu::refuse_disabled_shortcut(pid, &combo, deadline)?;
         }
         // The frontmost check is the last read before a physical key, so a switch to another app is still caught.
         if physical && !frontmost(pid)? {
