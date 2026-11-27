@@ -7,12 +7,19 @@ use super::*;
 pub(super) fn enabled_of(options: &[Element], deadline: Instant, label: &str) -> Outcome<Element> {
     let refuse_at = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
     loop {
+        // An option the menu dropped since the scan is skipped: a live one of the title may still be enabled. With every
+        // one gone, the menu changed under the select.
+        let mut live = 0;
         for option in options {
             match option.attribute("AXEnabled") {
-                Ok(value) if value.boolean() == Some(false) => {}
+                Ok(value) if value.boolean() == Some(false) => live += 1,
+                Err(ax::AX_INVALID_ELEMENT) => {}
                 Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_API_DISABLED)) => return Err(unread(error, "select")),
                 _ => return Ok(option.clone()),
             }
+        }
+        if live == 0 {
+            return Err(unread(ax::AX_INVALID_ELEMENT, "select"));
         }
         if Instant::now() + POLL >= refuse_at {
             return Err(Failure::refused(codes::ACTION_FAILED, format!("the option \"{label}\" is disabled")));
