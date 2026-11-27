@@ -1146,7 +1146,10 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    *     await screen.getByTestId('login_button').tap();
    *   });
    *
-   * Outside a test the call is `COLLECTION_ERROR`.
+   * In a `beforeAll` or `afterAll` hook, a worker fixture, or an
+   * `openHost()` session, `body` just runs, with no step in any report.
+   * Elsewhere outside a test, hook, or fixture the call is
+   * `COLLECTION_ERROR`.
    */
   step<T>(title: string, body: () => T | Promise<T>): Promise<T>;
   /** Registers one focused local test. CI rejects focused tests. */
