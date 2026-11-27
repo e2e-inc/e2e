@@ -358,7 +358,20 @@ fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<bool> {
         return Err(Failure::refused(codes::ACTION_FAILED, "the element is off screen and cannot be scrolled into view; scroll its list first"));
     }
     perform(element, "AXScrollToVisible", "scroll into view")?;
-    if until(deadline, || placement(element) == Ok(Placement::Shown)) {
+    // A list can replace a row's element as it scrolls the row in: the element is gone then, and no wait shows it.
+    let mut gone = false;
+    let shown = until(deadline, || match placement(element) {
+        Ok(Placement::Shown) => true,
+        Err(ax::AX_INVALID_ELEMENT) => {
+            gone = true;
+            true
+        }
+        _ => false,
+    });
+    if gone {
+        return Err(Failure::unconfirmed(codes::STALE_REF, "the list replaced the element as it scrolled it into view"));
+    }
+    if shown {
         return Ok(true);
     }
     Err(Failure::unconfirmed(codes::ACTION_FAILED, "the element is still off screen after it was scrolled into view"))
