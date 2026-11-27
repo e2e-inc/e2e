@@ -79,12 +79,6 @@
             ]
           },
           {
-            "group": "Frameworks",
-            "pages": [
-              "frameworks/nextjs"
-            ]
-          },
-          {
             "group": "Features",
             "pages": [
               "cache",
@@ -115,6 +109,12 @@
               "ci/codemagic",
               "ci/norrix",
               "github"
+            ]
+          },
+          {
+            "group": "Frameworks",
+            "pages": [
+              "frameworks/nextjs"
             ]
           },
           {
