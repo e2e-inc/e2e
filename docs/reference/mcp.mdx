@@ -223,7 +223,7 @@ changed on screen.
 
 | Input | Does |
 | --- | --- |
-| A node id | From the newest observation. An id only an earlier observation listed is found again on the newest one by what its node read as (role, name, test id, placeholder, and the text of a node with neither a name nor a test id), when exactly one node there reads the same; otherwise the action fails with `LOCATOR_NOT_FOUND`. |
+| A node id | From the newest observation, or an earlier one's, found again on the newest by what its node read as (role, name, test id, placeholder); see [Sessions](#sessions). |
 | The value, key, `checked` state, direction, drop target, project-relative or `sample:` `files`, URL, `width` and `height`, or secret name | What the verb needs. |
 | `modifiers` (optional) | On `tap`, `double_tap`, and `right_click`, when the engine declares `tapModifiers`: a list of `Shift`, `Control`, `Alt`, `Meta`, `ControlOrMeta`, held for the click. |
 
