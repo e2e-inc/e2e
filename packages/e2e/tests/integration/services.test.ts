@@ -1907,6 +1907,21 @@ test('reads a service', async ({ services }) => {
         return reply;
       };
 
+      const sendRequest = (method: string, params: object) => {
+        nextId += 1;
+
+        const id = nextId;
+        const reply = new Promise<McpMessage>((resolve) => replies.set(id, resolve));
+
+        server.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+
+        return { id, reply };
+      };
+
+      const notify = (method: string, params: object) => {
+        server.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
+      };
+
       const callTool = async (name: string, args: object): Promise<string> => {
         const reply = await request('tools/call', { name, arguments: args });
         const text = reply.result?.content.map((part) => part.text).join('\n') ?? '';
@@ -1920,7 +1935,7 @@ test('reads a service', async ({ services }) => {
 
       server.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
 
-      return { server, output, exited, request, callTool };
+      return { server, output, exited, request, sendRequest, notify, callTool };
     }
 
     /** Holds the app's shutdown until the test releases it. */
@@ -1990,6 +2005,43 @@ test('reads a service', async ({ services }) => {
       }
 
       expect(eventLines(project)).toEqual(['start alpha', 'start beta', 'env', `app start ${port} http://alpha.test`, 'app stopping', 'app stop', 'stop beta', 'stop alpha']);
+    });
+
+    it.skipIf(process.platform === 'win32')('frees the slot when a queued reopen of a stopping target is cancelled', async () => {
+      const port = await freePort();
+      const project = heldAppProject(port, true);
+      const { server, exited, sendRequest, notify, callTool } = await mcpServer(project.dir);
+
+      try {
+        const slow = sessionId(await callTool('open_session', { target: 'fake' }));
+        const closing = callTool('close_session', { session: slow });
+        try {
+          await expect.poll(() => eventLines(project), { timeout: 5_000 }).toContain('app stopping');
+          const queued = sendRequest('tools/call', { name: 'open_session', arguments: { target: 'fake' } });
+          await expect.poll(() => eventLines(project).filter((line) => line === 'env').length, { timeout: 5_000 }).toBe(2);
+          await sleep(100);
+          notify('notifications/cancelled', { requestId: queued.id, reason: 'give up waiting on slow stop' });
+          let other = '';
+          await expect.poll(async () => {
+            const reply = await sendRequest('tools/call', { name: 'open_session', arguments: { target: 'independent' } }).reply;
+            if (reply.result?.isError === true) return false;
+            const text = reply.result?.content.map((part) => part.text).join('\n') ?? '';
+            other = sessionId(text);
+            return other.length > 0;
+          }, { timeout: 2_000 }).toBe(true);
+          expect(eventLines(project)).not.toContain('app stop');
+          expect(eventLines(project)).not.toContain('stop alpha');
+          await callTool('close_session', { session: other });
+        } finally {
+          writeFileSync(path.join(project.dir, 'release-stop'), '');
+          await closing;
+        }
+      } finally {
+        server.stdin.end();
+        expect(await exited).toBe(0);
+      }
+
+      expect(eventLines(project)).toEqual(['start alpha', 'start beta', 'env', `app start ${port} http://alpha.test`, 'app stopping', 'env', 'app stop', 'stop beta', 'stop alpha']);
     });
 
     it('stops the app and then the services when the client closes stdin with sessions open, and leaves no process behind', async () => {

@@ -26,6 +26,8 @@ export const UNSHARED: ProcessPool = { acquire: (_key, start, signal) => start(s
 
 interface SharedEntry<Held extends AppProcesses> {
   users: number;
+  /** Set once `start` has actually been called after any earlier stop finished draining. */
+  startedWork: boolean;
   /** Set once the start settled: from then on an attempt giving up abandons nothing. */
   settled: boolean;
   /** Attempts still waiting on the start whose own signal has not aborted. */
@@ -61,16 +63,30 @@ export class SharedProcesses<Held extends AppProcesses = AppProcesses> implement
       // A stop that failed has still ended its process: the fresh start goes ahead.
       const drained = (this.draining.get(key) ?? Promise.resolve()).catch(() => undefined);
       const abandon = new AbortController();
-      const created: SharedEntry<Held> = { users: 0, settled: false, waiting: 0, abandon, started: drained.then(() => start(abandon.signal)) };
-      created.started.then(
-        () => {
-          created.settled = true;
-        },
-        () => {
-          created.settled = true;
-          this.forget(key, created);
-        },
-      );
+      const created: SharedEntry<Held> = {
+        users: 0,
+        startedWork: false,
+        settled: false,
+        waiting: 0,
+        abandon,
+        started: drained.then(async () => {
+          if (abandon.signal.aborted) {
+            throw new InfrastructureError('CANCELLED', 'gave up waiting on a shared process start');
+          }
+          created.startedWork = true;
+          try {
+            const held = await start(abandon.signal);
+            created.settled = true;
+            return held;
+          } catch (cause) {
+            created.settled = true;
+            this.forget(key, created);
+            throw cause;
+          }
+        }),
+      };
+      // An abandoned start settles without callers; keep the rejection handled.
+      created.started.catch(() => undefined);
       this.entries.set(key, created);
       entry = created;
     }
@@ -83,12 +99,20 @@ export class SharedProcesses<Held extends AppProcesses = AppProcesses> implement
       if (shared.waiting > 0 || shared.settled) return;
       shared.abandon.abort();
       this.forget(key, shared);
+      // Nothing was started yet while waiting on an earlier drain: keep the prior drain entry intact.
+      if (!shared.startedWork) return;
       // A start that completes despite the abort has nobody left to stop it: it stops here.
-      abandoned = shared.started.then(
+      const cleanup = shared.started.then(
         (started) => started.stop(() => undefined),
         () => undefined,
       );
-      this.draining.set(key, abandoned);
+      const tracked = cleanup.finally(() => {
+        if (this.draining.get(key) === tracked) {
+          this.draining.delete(key);
+        }
+      });
+      abandoned = tracked;
+      this.draining.set(key, tracked);
     };
     if (signal.aborted) giveUp();
     else signal.addEventListener('abort', giveUp, { once: true });
@@ -97,6 +121,9 @@ export class SharedProcesses<Held extends AppProcesses = AppProcesses> implement
 
     try {
       processes = await Promise.race([shared.started, cancelled(signal, shared.started)]);
+      if (abandoned !== undefined || shared.abandon.signal.aborted) {
+        throw new InfrastructureError('CANCELLED', 'gave up waiting on a shared process start');
+      }
     } catch (cause) {
       shared.users -= 1;
       if (this.options.waitForAbandonedStart && abandoned !== undefined) {
