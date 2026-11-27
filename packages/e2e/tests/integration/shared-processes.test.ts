@@ -324,13 +324,13 @@ require('./server.cjs');
     const cancel = new AbortController();
     let stopCalls = 0;
     let resolveStart!: (held: AppProcesses) => void;
-    const starting = new Promise<AppProcesses>((resolve) => {
+    const startGate = new Promise<AppProcesses>((resolve) => {
       resolveStart = resolve;
     });
-    const pending = pool.acquire('app:late-race', () => starting, cancel.signal);
+    const pending = pool.acquire('app:late-race', () => startGate, cancel.signal);
     await new Promise((resolve) => setTimeout(resolve, 10));
     // Registered after the pool's own wait on the start, so the abort lands right after the start settled.
-    void starting.then(() => cancel.abort());
+    void startGate.then(() => cancel.abort());
     resolveStart({
       async stop() {
         stopCalls += 1;
