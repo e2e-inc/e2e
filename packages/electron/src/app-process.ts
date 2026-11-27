@@ -591,6 +591,8 @@ async function placeDownloads(main: MainProcess, directory: string, withinMs: nu
       place(session.defaultSession);
       for (const contents of webContents.getAllWebContents()) place(contents.session);
       electronApp.on('session-created', place);
+      // A session the app made before this ran, with no window on it yet, is placed when a window first uses it.
+      electronApp.on('web-contents-created', (_event, contents) => place(contents.session));
     }, { downloads: directory, saved }),
     withinMs,
   );

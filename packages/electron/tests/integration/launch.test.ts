@@ -312,6 +312,29 @@ describe('electron.evaluate', () => {
   });
 });
 
+describe('downloads', () => {
+  it.skipIf(process.platform === 'win32')('saves inside the attempt a download from a session the app made before any window used it', async () => {
+    const launched = appWith(`app.setPath('downloads', require('node:path').join(__dirname, 'outside'));
+      app.whenReady().then(() => {
+        require('electron').session.fromPartition('persist:later');
+        const server = require('node:http').createServer((request, response) => {
+          if (request.url !== '/file') return response.end('<title>Loaded</title>');
+          response.setHeader('Content-Disposition', 'attachment; filename="later.txt"');
+          response.end('later');
+        });
+        server.listen(0, '127.0.0.1', () => new BrowserWindow({ show: false }).loadURL('http://127.0.0.1:' + server.address().port + '/'));
+      });`);
+    await launched.launch();
+    const origin = new URL(launched.windows.require().page.url()).origin;
+    await launched.app.evaluate(({ BrowserWindow, session }, url) => {
+      new BrowserWindow({ show: false, webPreferences: { session: session.fromPartition('persist:later') } }).webContents.downloadURL(url);
+    }, `${origin}/file`);
+    const downloads = path.join(launched.directory, 'data', 'Downloads');
+    await expect.poll(() => (existsSync(downloads) ? readdirSync(downloads) : [])).toContain('later.txt');
+    expect(existsSync(path.join(launched.directory, 'outside', 'later.txt'))).toBe(false);
+  });
+});
+
 describe('an app with no inspector', () => {
   it.skipIf(process.platform === 'win32')('opens and saves a download inside the attempt', async () => {
     const launched = appWith(`app.whenReady().then(() => {
