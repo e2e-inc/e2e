@@ -410,6 +410,27 @@ purpose. Use the workaround, or keep the test in Playwright.
 | Workers | half the CPU cores | 1 in CI, half the CPU cores locally |
 | Trace | `off` (`on-first-retry` in the scaffolded config) | `retain-on-failure` |
 
+## Electron apps
+
+A suite that drives an Electron app with Playwright's `_electron` moves to the
+[Electron engine](/electron), not the web one: a target with
+`engine: electron()` and `app: { appPath: '.' }`, and `test` from
+`@e2e-dev/electron`. `e2e init` has no Electron preset yet, so write the
+config by hand.
+
+| Playwright | e2e |
+| --- | --- |
+| `_electron.launch({ args })` in a fixture, `electronApp.firstWindow()` | `await app.open()` in `beforeEach`. Arguments the app reads, and Chromium switches, go in the target's `app.launchArguments`, the same for every test |
+| `electronApp.evaluate(fn, arg)` | `electron.evaluate(fn, arg)` |
+| `page.evaluate(fn)` in the renderer | `electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.executeJavaScript('…'))`. Pick the window by title: `getAllWindows()` is not in the order `electron.windows()` lists |
+| `electronApp.waitForEvent('window')` | `await electron.waitForWindow(() => screen.getByRole('button', 'Open').tap())`, which makes the new window active. For a window the app opens on its own, `await electron.window({ title: 'Settings' })` |
+| `page.on('dialog')` | `await electron.onDialog('accept')`, `'dismiss'`, or a handler |
+| `page.waitForEvent('close')` | `await expect.poll(() => window.isClosed()).toBe(true)` |
+| `expect(page).toHaveTitle(title)` | `await expect.poll(() => window.title()).toBe(title)` |
+| `page.getByRole`, `getByLabel`, `getByTestId`, `locator(css)` | `screen.getByRole`, `getByLabel`, `getByTestId`, and `electron.locator(css)`, which takes CSS only |
+| `page.on('console')`, `electronApp.on('console')` | Recorded in the test's trace under App log, main-process lines prefixed `[main]`. A test cannot read them |
+| `electronApp.close()` | Nothing: every test ends with the app quit |
+
 ## Next
 
 <CardGroup cols={2}>

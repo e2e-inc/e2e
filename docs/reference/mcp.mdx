@@ -171,8 +171,10 @@ call {tool: "tap", args: {target: "n42"}, session: "<id>"}
 #### `close_session`
 
 Saves a recording still running, ends the attempt, and disposes the engine.
-It stops the app processes the session started once no other session uses
-them. Use it on an attachment to detach and leave the test held.
+It stops app processes and services when the session is their last user,
+with app processes stopping before services. The session frees its slot
+when its own cleanup finishes, even while another app is still stopping.
+Use it on an attachment to detach and leave the test held.
 
 ```txt
 close_session {session: "<id>"}
@@ -270,7 +272,7 @@ call {tool: "run_code", args: {code: "const rows = screen.getByRole('listitem');
 
 | Input | Does |
 | --- | --- |
-| `code` | The body of an async function. `screen`, `app`, `expect`, `credentials`, `secrets`, `services`, `console`, and the engine's fixture (`browser` or `device`) are in scope. A session attached to a held test doesn't have an engine fixture. |
+| `code` | The body of an async function. `screen`, `app`, `expect`, `credentials`, `secrets`, `services`, `console`, and the engine's fixture (`browser`, `device`, `desktop`, or `electron`) are in scope. A session attached to a held test doesn't have an engine fixture. |
 | `timeout` | Optional. How long each action or matcher on `screen` waits by default, in ms, 1 through 120000. Without it: `5000`, or the config's timeout when shorter. |
 
 ```txt
@@ -484,7 +486,8 @@ passes `foldTools(...)` gets `fold` for a foldable device.
 The server ships with `e2e`. `e2e init` offers to register it in
 `.mcp.json` (Claude Code), `.cursor/mcp.json` (Cursor), and
 `.codex/config.toml` (Codex). Install dependencies and start the MCP client
-in the project directory so `npx` (`bunx` in a Bun project) uses the installed e2e version. By hand:
+in the project directory so the command uses the installed e2e version. Init
+writes your package manager's command; see [MCP server](/mcp-server#set-it-up). By hand:
 
 <CodeGroup>
 ```bash npm
@@ -551,8 +554,8 @@ options, or to name an export, write `engine` as an object:
 | `options` | object | The options the factory takes, as in an `e2e.config.ts`. |
 
 - **A package name alone** calls the package's default export with no
-  options. `@e2e-dev/web`, `@e2e-dev/mobile`, and `@e2e-dev/desktop` export
-  their factory this way. [Your own engine](/writing-an-engine#open-it-by-name) can do the same.
+  options. `@e2e-dev/web`, `@e2e-dev/mobile`, `@e2e-dev/desktop`, and
+  `@e2e-dev/electron` export their factory this way. [Your own engine](/writing-an-engine#open-it-by-name) can do the same.
 - **An option can be another factory call.** The server reads an option
   value as a call when it has `package` and no key other than `export` and
   `options`. It makes that call first and passes the result as the option.
@@ -579,7 +582,8 @@ options, or to name an export, write `engine` as an object:
 - **`app`** takes `url`, `bundleId`, and `appPath`, as a target's
   [`app`](/reference/config#the-app-under-test) does. `@e2e-dev/web` needs
   `url`. `@e2e-dev/mobile` and `@e2e-dev/desktop` need `bundleId` or
-  `appPath`.
+  `appPath`. `@e2e-dev/electron` needs `appPath`, or none for a packaged app
+  named by `options: {executablePath}`.
 - **Files.** The project root is the server's working directory, and the
   session writes `.e2e/` there.
 - **Tests.** `e2e run` and `open_session {test}` need a config. To keep
