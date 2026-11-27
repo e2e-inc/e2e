@@ -97,6 +97,10 @@ pub struct RawSnapshot {
     /// False when the read missed part of the window: the deadline stopped it, or the app did not answer for an
     /// element that still exists. What it did not reach may be there.
     complete: bool,
+    /// True when the deadline stopped the read: it is incomplete because the caller's time ran out, not because the
+    /// app stalled or a limit cut it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    timed_out: bool,
     /// True when the node budget stopped the read.
     truncated: bool,
     ref_count: usize,
@@ -124,6 +128,8 @@ struct Walk {
     focused: Option<Element>,
     nodes: usize,
     complete: bool,
+    /// Whether the deadline stopped the read.
+    timed_out: bool,
     /// How many reads of an element that still exists failed; a parent whose subtree lost one is truncated.
     lost: usize,
     truncated: bool,
@@ -682,6 +688,7 @@ impl Walk {
             }
         } else if self.expired() {
             self.complete = false;
+            self.timed_out = true;
             node.subtree_truncated = element.count("AXChildren").unwrap_or(0) > 0;
         } else {
             let lost = self.lost;
@@ -692,6 +699,7 @@ impl Walk {
             for child in &children {
                 if self.expired() {
                     self.complete = false;
+                    self.timed_out = true;
                     node.subtree_truncated = true;
                     break;
                 }
@@ -754,6 +762,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         focused,
         nodes: 0,
         complete: true,
+        timed_out: false,
         lost: 0,
         truncated: false,
         refs: Vec::new(),
@@ -776,6 +785,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
     Ok(RawSnapshot {
         snapshot_id: walk.snapshot,
         complete: walk.complete,
+        timed_out: walk.timed_out,
         truncated: walk.truncated,
         ref_count,
         tree,
