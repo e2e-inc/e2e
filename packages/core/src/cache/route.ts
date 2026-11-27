@@ -252,14 +252,15 @@ export function routeLocation(location: string): string {
 }
 
 /**
- * A web address the URL parser refuses, as a recording keeps it: a secret's
- * marker the ledger put in its host (`https://<secret:tenant>.example.org`)
- * is no host a parser takes. Its scheme and authority stay as they read and
- * the rest is spelled as a path on them, so a query value it carries is not
- * kept either. Any other location is kept as it is.
+ * A web address the route rule does not read, as a recording keeps it: a
+ * `file:` URL (a file app), or an address with a secret's marker the
+ * ledger put in its host (`https://<secret:tenant>.example.org`), which is
+ * no host a parser takes. Its scheme and authority stay as they read and
+ * the rest is spelled as a path on them, so a query value it carries is
+ * not kept either. Any other location is kept as it is.
  */
 function unparsedLocation(location: string): string {
-  if (!/^\s*https?:/i.test(location)) return location;
+  if (!/^\s*(?:https?|file):/i.test(location)) return location;
   const authority = URL_ORIGIN_PREFIX.exec(location)?.[0] ?? '';
   const rest = location.slice(authority.length);
   return `${authority}${routeLocation(rest.startsWith('/') ? rest : `/${rest}`)}`;

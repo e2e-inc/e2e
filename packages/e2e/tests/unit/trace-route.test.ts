@@ -120,6 +120,11 @@ describe('routeLocation', () => {
     expect(routeLocation('https://<secret:tenant>.example.org?code=Sample')).toBe('https://<secret:tenant>.example.org/?code=:id');
   });
 
+  it('keeps the query values out of a file app\'s location, and spells its path as a route', () => {
+    expect(routeLocation('file:///srv/app/about.html?tab=summary')).toBe('file:///srv/app/about.html?tab=:id');
+    expect(routeLocation('file:///srv/app/index.html#/orders/123')).toBe('file:///srv/app/index.html#/orders/:id');
+  });
+
   it('spells a fragment route with its document path, so the location names a page the app serves', () => {
     expect(routeLocation('/#/list')).toBe('/#/list');
     expect(routeLocation('/app/#/orders/123?x=abc')).toBe('/app/#/orders/:id?x=:id');
@@ -154,6 +159,7 @@ describe('routeLocation', () => {
       '/invite/<secret:token>',
       '/app/#/orders/123?x=abc',
       'https://<secret:tenant>.example.org/callback?code=abc',
+      'file:///srv/app/about.html?tab=summary',
     ]) {
       expect(routeLocation(routeLocation(location))).toBe(routeLocation(location));
     }
