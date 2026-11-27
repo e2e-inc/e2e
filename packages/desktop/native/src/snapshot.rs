@@ -485,6 +485,11 @@ impl Walk {
                 }
             }
         };
+        // The window's own title-bar buttons are window chrome, never the app's controls, whatever buttons beside them
+        // the window hides: their subrole says so.
+        if !root && roles::window_control_name(read.subrole.as_deref()).is_some() {
+            return None;
+        }
         let role = if root && read.role == "unknown" { "window" } else { read.role };
         let secure = read.subrole.as_deref() == Some("AXSecureTextField") || read.ax_role == "AXSecureTextField";
         let (actions, scroll_axes) = self.actions(element, &read);
