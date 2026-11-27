@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 /// The variable that carries a launch's token into the process it starts.
 pub const TOKEN_VARIABLE: &str = "E2E_DESKTOP_LAUNCH";
 
-/// The argument that carries a launch's token into an app whose environment macOS hides, followed by the token.
+/// The argument that carries a launch's token into an app whose environment macOS hides: `-E2EDesktopLaunch=<token>`,
+/// one entry, so no app reads the token as a file or a URL to open.
 pub const TOKEN_ARGUMENT: &str = "-E2EDesktopLaunch";
 
 /// What `launch` was asked to start.
@@ -120,8 +121,8 @@ fn hides_environment(bundle: &str) -> bool {
 /// Apple's App Store apps (Numbers, Pages, Xcode: signed by Apple Mac OS
 /// Application Signing, with no platform identifier), and builds signed with
 /// the `restrict` flag. Every Mac App Store app carries that signature, so
-/// each gets the token as arguments too, which the claim reads only when the
-/// environment is hidden.
+/// each gets the token as an argument too, which the claim reads only when
+/// the environment is hidden.
 fn hidden_by(signature: &str) -> bool {
     signature.lines().any(|line| {
         line.starts_with("Platform identifier=")
@@ -134,8 +135,8 @@ fn hidden_by(signature: &str) -> bool {
 /// environment given (LaunchServices hands the app the environment of the
 /// process that asks), and finds the process it started: the new copy whose
 /// environment carries the launch token. An app whose environment macOS
-/// hides also gets the token as its last arguments (`-E2EDesktopLaunch
-/// <token>`, a user default AppKit ignores), which stay readable. A copy
+/// hides also gets the token as its last argument
+/// (`-E2EDesktopLaunch=<token>`, which AppKit ignores), which stays readable. A copy
 /// with neither is never taken: it may be one the user opened meanwhile.
 pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     let started = request.asked;
@@ -166,7 +167,7 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     command.arg("--env").arg(format!("{TOKEN_VARIABLE}={token}"));
     command.arg(&bundle).arg("--args").args(&request.arguments);
     if hides_environment(&bundle) {
-        command.arg(TOKEN_ARGUMENT).arg(&token);
+        command.arg(format!("{TOKEN_ARGUMENT}={token}"));
     }
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     // The lookup and `codesign` above can take a while: an app the caller gave up on is never started.
@@ -202,7 +203,7 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
         for pid in &fresh {
             let ours = match crate::process::carries(*pid, &marker) {
                 Some(carried) => carried,
-                None => crate::process::argument_pair(*pid, TOKEN_ARGUMENT, &token),
+                None => crate::process::token_argument(*pid, &token),
             };
             if ours {
                 return Ok(launched(*pid, &bundle, &bundle_id));

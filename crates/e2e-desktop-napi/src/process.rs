@@ -83,9 +83,17 @@ fn environment(pid: i32) -> Option<Vec<String>> {
     procargs(pid)?.1
 }
 
-/// Whether a process's arguments hold `name` followed by `value`.
-pub fn argument_pair(pid: i32, name: &str, value: &str) -> bool {
-    procargs(pid).is_some_and(|(arguments, _)| arguments.windows(2).any(|pair| pair[0] == name && pair[1] == value))
+/// Whether a process's arguments hold a launch's token.
+pub fn token_argument(pid: i32, token: &str) -> bool {
+    procargs(pid).is_some_and(|(arguments, _)| holds_token(&arguments, token))
+}
+
+/// Whether arguments hold a launch's token: `-E2EDesktopLaunch=<token>`, or the two entries (`-E2EDesktopLaunch`, then
+/// the token) a version before this one passed, whose app a killed worker may have left running for this one to sweep.
+fn holds_token(arguments: &[String], token: &str) -> bool {
+    let name = crate::launch::TOKEN_ARGUMENT;
+    let whole = format!("{name}={token}");
+    arguments.contains(&whole) || arguments.windows(2).any(|pair| pair[0] == name && pair[1] == token)
 }
 
 /// Whether a process's environment holds `marker` (`NAME=value`); `None` when it cannot be read.
@@ -110,14 +118,14 @@ pub fn carrying(marker: &str) -> Option<Vec<i32>> {
     let token = marker.strip_prefix(crate::launch::TOKEN_VARIABLE).and_then(|rest| rest.strip_prefix('='));
     let holds = |pid: i32| match carries(pid, marker) {
         Some(carried) => carried,
-        None => token.is_some_and(|token| argument_pair(pid, crate::launch::TOKEN_ARGUMENT, token)),
+        None => token.is_some_and(|token| token_argument(pid, token)),
     };
     Some(pids.into_iter().filter(|pid| *pid > 0 && *pid != own && holds(*pid)).collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_procargs;
+    use super::{holds_token, parse_procargs};
 
     /// A `KERN_PROCARGS2` buffer as the kernel lays it out.
     fn buffer(path: &str, argv: &[&str], environment: &[&str]) -> Vec<u8> {
@@ -142,9 +150,21 @@ mod tests {
 
     #[test]
     fn reads_a_hidden_environment_as_none_and_keeps_the_arguments() {
-        let (arguments, environment) = parse_procargs(&buffer("/System/App", &["/System/App", "-E2EDesktopLaunch", "tok"], &[])).unwrap();
-        assert_eq!(arguments, ["-E2EDesktopLaunch", "tok"]);
+        let (arguments, environment) = parse_procargs(&buffer("/System/App", &["/System/App", "-E2EDesktopLaunch=tok"], &[])).unwrap();
+        assert_eq!(arguments, ["-E2EDesktopLaunch=tok"]);
         assert!(environment.is_none());
+    }
+
+    #[test]
+    fn finds_a_launch_token_in_one_argument_or_in_the_two_an_older_version_passed() {
+        let arguments = |entries: &[&str]| entries.iter().map(|entry| (*entry).to_owned()).collect::<Vec<_>>();
+        assert!(holds_token(&arguments(&["-ApplePersistenceIgnoreState", "YES", "-E2EDesktopLaunch=tok"]), "tok"));
+        assert!(holds_token(&arguments(&["-ApplePersistenceIgnoreState", "YES", "-E2EDesktopLaunch", "tok"]), "tok"));
+        // Another launch's token, a token under another name, and a token that only starts the same.
+        assert!(!holds_token(&arguments(&["-E2EDesktopLaunch=other"]), "tok"));
+        assert!(!holds_token(&arguments(&["-E2EDesktopLaunch", "other", "tok"]), "tok"));
+        assert!(!holds_token(&arguments(&["-Other=tok", "-Other", "tok"]), "tok"));
+        assert!(!holds_token(&arguments(&["-E2EDesktopLaunch=token"]), "tok"));
     }
 
     #[test]
