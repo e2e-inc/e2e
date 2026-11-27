@@ -27,6 +27,7 @@ import {
   type EngineObserveOptions,
   type EnginePrepareResult,
   type EngineSnapshot,
+  type EngineState,
   type LocatorAction,
   type LocatorExpression,
   type NodeRef,
@@ -46,6 +47,7 @@ import { LAUNCH_READY_MS, QUIT, windowReadable } from './launch-wait.ts';
 import { ROOT_ID, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
+import { AppState, installedApp, nativeStateHost, type OwnedBuild, type StateHost } from './state.ts';
 
 /** How long a quit waits for a launch whose outcome was unknown to report the process it started. */
 const PENDING_SETTLE_MS = 3_000;
@@ -240,11 +242,12 @@ export class DesktopSurface {
   /** The run's environment cut to `INHERITED_ENV`: all the app is given of it. */
   private appEnv: Readonly<Record<string, string>> = {};
 
-  /** `loadDriver` is how the native driver is loaded; tests pass a scripted one. */
+  /** `loadDriver` is how the native driver is loaded, and `stateHost` what the state commands ask of the machine; tests pass scripted ones. */
   constructor(
     readonly options: ResolvedDesktopOptions,
     readonly platform: DesktopPlatform,
     private readonly loadDriver: () => DesktopDriver = loadNativeDriver,
+    private readonly stateHost: (driver: () => DesktopDriver) => StateHost = nativeStateHost,
   ) {}
 
   // --- lifecycle ---
@@ -1300,6 +1303,53 @@ export class DesktopSurface {
     await this.sendKey(combo, window.id, `press ${key}`, operation);
     // As after every other agent action: the app reacts to the key before the agent reads the screen again.
     await this.settle(operation);
+  }
+
+  // --- saved state ---
+
+  private appState: AppState | undefined;
+
+  /**
+   * The build whose saved state the engine may replace, once macOS is shown
+   * to know no other copy of its bundle id; an installed app (a `bundleId`
+   * target) is refused. See `state.ts` for what is covered.
+   */
+  private async ownedBuild(what: string, signal: AbortSignal): Promise<{ build: OwnedBuild; state: AppState }> {
+    const target = this.launchTarget;
+    // An `appPath` target's label is the bundle id its Info.plist declares (`resolveLaunchTarget`).
+    if (target === undefined || !('path' in target)) throw installedApp(what, this.app.bundleId);
+    const state = (this.appState ??= new AppState(this.stateHost(() => this.requireDriver())));
+    const build = { path: target.path, bundleId: target.label };
+    await state.requireSole(build, what, signal, this.pid);
+    return { build, state };
+  }
+
+  /** `app.clearState()`: quits the app, clears what macOS keeps of it by its bundle id, and launches it again. */
+  async reset(context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    const { build, state } = await this.ownedBuild('app.clearState()', operation.signal);
+    await this.serially(async () => {
+      // Quit first: a running app would write its defaults back from memory.
+      await this.quitNow(operation.signal, operation.timeoutMs, false);
+      await state.reset(build.bundleId, operation.signal);
+      await this.launchFresh(operation);
+    });
+  }
+
+  /** Saves a `test.setup` session: the build's defaults domain. */
+  async captureState(context: OperationContext): Promise<EngineState> {
+    const { build, state } = await this.ownedBuild('saving a session', context.signal);
+    return await state.capture(build.bundleId, context.signal);
+  }
+
+  /** Restores a session before the test opens the app: the app is quit and reset, and the session's defaults written. */
+  async restoreState(saved: EngineState, context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    const { build, state } = await this.ownedBuild('restoring a session', operation.signal);
+    await this.serially(async () => {
+      await this.quitNow(operation.signal, operation.timeoutMs, false);
+      await state.restore(build.bundleId, saved, operation.signal);
+    });
   }
 
   /**

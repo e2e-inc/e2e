@@ -138,6 +138,14 @@ export class FakeDriver implements DesktopDriver {
     return Promise.resolve([...this.carriers].filter(([pid, carried]) => carried === token && alive(pid)).map(([pid]) => pid));
   }
 
+  /** What `bundleCopies` answers: no other copy unless a test says so. */
+  copies: { registered: string[]; running: { pid: number; path?: string }[] } = { registered: [], running: [] };
+
+  bundleCopies(bundleId: string): Promise<Envelope<{ readonly registered: readonly string[]; readonly running: readonly { readonly pid: number; readonly path?: string }[] }>> {
+    this.calls.push({ method: 'bundleCopies', args: [bundleId] });
+    return Promise.resolve({ ok: true, data: this.copies });
+  }
+
   forgetProcess(pid: number): void {
     this.calls.push({ method: 'forgetProcess', args: [pid] });
   }

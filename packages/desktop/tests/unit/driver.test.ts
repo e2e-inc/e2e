@@ -98,6 +98,7 @@ const NATIVE_FUNCTIONS = [
   'processStarted',
   'processesCarrying',
   'forgetProcess',
+  'bundleCopies',
   'launch',
   'listWindows',
   'snapshot',

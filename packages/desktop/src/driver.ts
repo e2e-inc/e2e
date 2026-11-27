@@ -103,6 +103,8 @@ export interface DesktopDriver {
   processStarted(pid: number): number | null;
   /** Every process that carries the launch `token`, in its environment or its arguments; null when the processes cannot be listed. */
   processesCarrying(token: string): Promise<readonly number[] | null>;
+  /** The bundles LaunchServices registered with this bundle id, as paths, and the processes running one. */
+  bundleCopies(bundleId: string): Promise<Envelope<{ readonly registered: readonly string[]; readonly running: readonly { readonly pid: number; readonly path?: string }[] }>>;
   /** Drops the refs of a process that quit. */
   forgetProcess(pid: number): void;
   launch(options: {

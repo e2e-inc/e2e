@@ -8,6 +8,7 @@
 
 mod actions;
 mod ax;
+mod bundles;
 mod failure;
 #[cfg(test)]
 mod fake;
@@ -274,6 +275,12 @@ pub async fn press(options: PressOptions) -> Value {
         Ok(serde_json::json!({}))
     })
     .await
+}
+
+/// The copies of an app LaunchServices knows by bundle id: the bundles it registered, and the processes running one.
+#[napi(ts_return_type = "Promise<NativeEnvelope<{ registered: string[]; running: { pid: number; path?: string }[] }>>")]
+pub async fn bundle_copies(bundle_id: String) -> Value {
+    blocking(move || data(bundles::copies(&bundle_id))).await
 }
 
 #[napi(object)]
