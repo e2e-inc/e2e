@@ -26,9 +26,10 @@ pub(super) fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<
     let own = scrolls_itself(role, scroll_bar(element, vertical).is_some(), &action_names(element, "scroll")?, direction);
     let target = if own { None } else { enclosing_scroll_area(element, vertical) };
     scroll_by(target.as_ref().unwrap_or(element), direction, pages).map_err(|failure| {
-        // An element that takes none of the ways to scroll: say so, not which attribute it lacks.
+        // An element that takes none of the ways to scroll: say so, not which attribute it lacks. Like a window with
+        // nothing to scroll, it is not actionable, not a capability the engine lacks.
         if failure.code == codes::ACTION_NOT_SUPPORTED && failure.delivery == Delivery::NotDelivered {
-            Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("nothing here scrolls {direction}"))
+            Failure::refused(codes::ACTION_FAILED, format!("nothing here scrolls {direction}"))
         } else {
             failure
         }
@@ -111,5 +112,5 @@ pub(super) fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outco
     if scrolls_itself(role, false, &names, direction) {
         return repeat(element, page_action(direction), (pages.round() as usize).max(1));
     }
-    Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("nothing here scrolls {direction}")))
+    Err(Failure::refused(codes::ACTION_FAILED, format!("nothing here scrolls {direction}")))
 }
