@@ -187,7 +187,8 @@ fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
         Ok(()) => Ok(()),
         Err(error) => {
             let then = match error {
-                _ if refuses(error) || error == ax::AX_INVALID_ELEMENT => None,
+                // "No such attribute" is watched too: a SwiftUI alert's button answers it once its press closed the alert.
+                _ if error != ax::AX_ATTRIBUTE_UNSUPPORTED && (refuses(error) || error == ax::AX_INVALID_ELEMENT) => None,
                 // The app answers again or not: one read tells, and another would wait out the same stall.
                 ax::AX_CANNOT_COMPLETE => element.attribute("AXRole").err(),
                 // A press that closes what holds its element (a dismissed alert) can leave it readable a moment more.
@@ -218,6 +219,8 @@ fn refuses(error: AXError) -> bool {
 /// What an action's error answer means, from the error and a read of the element after it (`then`, its error, `None`
 /// when the element still answers):
 /// - refused outright: nothing reached the app;
+/// - "no such attribute" with the element gone after: a SwiftUI alert's button answers so once its press closed the
+///   alert, so it landed;
 /// - the element gone as the action was sent: the action may have closed what held it, so it may have landed;
 /// - gone after: the action closed what held it (an alert's button, a panel's), so it landed;
 /// - a timeout while the app still answers: the action opened a menu or a modal and runs inside the app's handler;
@@ -225,6 +228,7 @@ fn refuses(error: AXError) -> bool {
 /// - any other error: it may have landed, delivered but unverified. The caller reads the effect where it can.
 fn answered(error: AXError, then: Option<AXError>, what: &str) -> Outcome<()> {
     match (error, then) {
+        (ax::AX_ATTRIBUTE_UNSUPPORTED, Some(ax::AX_INVALID_ELEMENT)) => Ok(()),
         _ if refuses(error) => Err(refused(error, what)),
         (ax::AX_INVALID_ELEMENT, _) => Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("{what}: the element went away as the action was sent"))),
         (_, Some(ax::AX_INVALID_ELEMENT)) => Ok(()),
@@ -1047,6 +1051,9 @@ mod tests {
             assert_eq!(answer(refused, None).expect_err("refused").delivery, Delivery::NotDelivered);
         }
         assert!(answer(AX_FAILURE, Some(AX_INVALID_ELEMENT)).is_ok(), "gone after the press: it closed its alert");
+        assert!(answer(AX_ATTRIBUTE_UNSUPPORTED, Some(AX_INVALID_ELEMENT)).is_ok(), "a SwiftUI alert's button, gone after the press");
+        assert_eq!(answer(AX_ATTRIBUTE_UNSUPPORTED, Some(AX_FAILURE)).expect_err("still there").delivery, Delivery::NotDelivered);
+        assert_eq!(answer(AX_ACTION_UNSUPPORTED, Some(AX_INVALID_ELEMENT)).expect_err("no such action").delivery, Delivery::NotDelivered);
         assert!(answer(AX_CANNOT_COMPLETE, None).is_ok(), "a modal runs in the press's handler");
         let stalled = answer(AX_CANNOT_COMPLETE, Some(AX_CANNOT_COMPLETE)).expect_err("no answer after");
         assert_eq!((stalled.code, stalled.delivery), (codes::APP_UNRESPONSIVE, Delivery::Unknown));
