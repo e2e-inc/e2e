@@ -115,6 +115,8 @@ export interface ProjectedScreen {
   readonly timedOut: boolean;
   /** The app did not answer for the window itself (`root_unread`). */
   readonly rootUnread: boolean;
+  /** The ids of the lines that stand for folded rows: a reader sees them, a locator never matches one (`locatable`). */
+  readonly folds?: ReadonlySet<string>;
   readonly windowId?: string;
   /** Set by the surface: the sheet on the window that held its focus when the window was read (see `sheetKey`). */
   readonly sheet?: string;
@@ -270,6 +272,7 @@ export function projectSnapshot(
 ): ProjectedScreen {
   const window = raw.tree.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
   const bindings = new Map<string, NodeBinding>();
+  const folds = new Set<string>();
   const secureRects: Rect[] = [];
   let unmaskable = false;
   const scrollTargets: { vertical?: string; horizontal?: string } = {};
@@ -407,6 +410,7 @@ export function projectSnapshot(
    */
   const fold = (count: number, id: string, likeness: string): SemanticNode => {
     const states = { hidden: true };
+    folds.add(id);
     bindings.set(id, { id, states, actions: [], ...(raw.window === undefined ? {} : { windowId: raw.window.id }), stable: false, likeness, interactive });
     return { ref: { id, revision: '' }, text: `${count} ${count === 1 ? 'row' : 'rows'} out of view`, states };
   };
@@ -423,11 +427,26 @@ export function projectSnapshot(
     cutShort: raw.complete === false || raw.truncated === true,
     timedOut: raw.timed_out === true,
     rootUnread: raw.root_unread === true,
+    ...(folds.size === 0 ? {} : { folds }),
     ...(raw.window === undefined ? {} : { windowId: raw.window.id }),
     // The window's accessibility root carries its title; the window server's is the app's name without Screen Recording permission.
     ...(title === undefined ? {} : { title }),
     ...(scrollTargets.vertical === undefined && scrollTargets.horizontal === undefined ? {} : { scrollTargets }),
   };
+}
+
+/**
+ * The tree a locator matches on: the screen's, without the lines that stand
+ * for folded rows. Their text is the engine's own (`182 rows out of view`),
+ * so `getByText('rows')` or a non-exact `getByText('View')` would otherwise
+ * find one, and a strict action fail as ambiguous.
+ */
+export function locatable(screen: ProjectedScreen): SemanticNode {
+  const folds = screen.folds;
+  if (folds === undefined) return screen.root;
+  const prune = (node: SemanticNode): SemanticNode =>
+    node.children === undefined ? node : { ...node, children: node.children.filter((child) => !folds.has(child.ref.id)).map(prune) };
+  return prune(screen.root);
 }
 
 /** A heading's level: the one the app reports, else one its description names (`heading level 2`). */

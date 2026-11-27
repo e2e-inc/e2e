@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { type LocatorExpression, resolveExpression, type SemanticNode } from '@e2e-dev/core/engine';
 import { describe, expect, it } from 'vitest';
-import { projectSnapshot, type RawSnapshot } from '../../src/nodes.ts';
+import { locatable, projectSnapshot, type RawSnapshot } from '../../src/nodes.ts';
 
 function load(name: string): RawSnapshot {
   return JSON.parse(readFileSync(new URL(`../fixtures/snapshots/${name}.json`, import.meta.url), 'utf8')) as RawSnapshot;
@@ -323,16 +323,16 @@ describe('projectSnapshot', () => {
       bounds: { x: 0, y, width: 300, height: 24 },
       children: [{ role: 'checkbox', name: title, ref_id: `@s:${title}-box`, bounds: { x: 4, y, width: 200, height: 24 } }],
     });
-    const list = (rows: readonly unknown[]): RawSnapshot =>
+    const list = (rows: readonly unknown[], beside: readonly unknown[] = []): RawSnapshot =>
       ({
         snapshot_id: 's',
         complete: true,
         window: { id: '7' },
-        tree: { role: 'window', name: 'W', bounds: { x: 0, y: 0, width: 400, height: 300 }, children: [{ role: 'scrollarea', ref_id: '@s:area', bounds: { x: 0, y: 0, width: 400, height: 300 }, children: [{ role: 'outline', name: 'Tasks', ref_id: '@s:list', children: rows }] }] },
+        tree: { role: 'window', name: 'W', bounds: { x: 0, y: 0, width: 400, height: 300 }, children: [...beside, { role: 'scrollarea', ref_id: '@s:area', bounds: { x: 0, y: 0, width: 400, height: 300 }, children: [{ role: 'outline', name: 'Tasks', ref_id: '@s:list', children: rows }] }] },
       }) as RawSnapshot;
-    const query = (kind: 'role' | 'text', value: string, name?: string): LocatorExpression => ({
+    const query = (kind: 'role' | 'text', value: string, name?: string, exact = true): LocatorExpression => ({
       kind: 'query',
-      query: { kind, value: { kind: 'string', value, exact: true }, ...(name === undefined ? {} : { name: { kind: 'string', value: name, exact: true } }) },
+      query: { kind, value: { kind: 'string', value, exact }, ...(name === undefined ? {} : { name: { kind: 'string', value: name, exact: true } }) },
     });
 
     it('reads a run of folded rows as one hidden line that counts them, which nothing acts on', () => {
@@ -350,10 +350,22 @@ describe('projectSnapshot', () => {
     });
 
     it('finds the rows in view and none folded out of it, by any query', () => {
-      const { root } = projectSnapshot(list([row('Task 1', 0), row('Task 2', 24), { role: 'folded', folded: 198 }]), minter());
+      const screen = projectSnapshot(list([row('Task 1', 0), row('Task 2', 24), { role: 'folded', folded: 198 }]), minter());
+      const root = locatable(screen);
       expect(resolveExpression(query('role', 'checkbox', 'Task 2'), [root])).toHaveLength(1);
       expect(resolveExpression(query('role', 'checkbox', 'Task 200'), [root])).toHaveLength(0);
       expect(resolveExpression(query('text', 'Task 200'), [root])).toHaveLength(0);
+    });
+
+    it('never matches the fold line itself, so a loose text query stays unique', () => {
+      const view = { role: 'button', name: 'View', ref_id: '@s:view', bounds: { x: 0, y: 0, width: 60, height: 20 } };
+      const screen = projectSnapshot(list([row('Task 1', 0), { role: 'folded', folded: 182 }], [view]), minter());
+      const loose = (text: string) => resolveExpression(query('text', text, undefined, false), [locatable(screen)]);
+      expect(loose('View')).toHaveLength(1);
+      expect(loose('rows')).toHaveLength(0);
+      expect(loose('182')).toHaveLength(0);
+      // A reader still sees it.
+      expect(all(screen.root).some((node) => node.text === '182 rows out of view')).toBe(true);
     });
 
     it('gives no row beside a fold an id the next read keeps, since a folded row may be its twin', () => {
