@@ -130,7 +130,7 @@ describe('URL globs', () => {
     expect(matches(glob, BASE + "authors/O'Neil")).toBe(true);
     expect(matches(glob, BASE + 'authors/O%27Neil')).toBe(false);
     expect(matches(glob, BASE + 'search?next=/O%27Neil')).toBe(true);
-    expect(matches(glob.replace("'", '%27'), BASE + 'authors/O%27Neil')).toBe(true);
+    expect(matches('/{search?next=,authors}/O%27Neil', BASE + 'authors/O%27Neil')).toBe(true);
   });
 
   it('restores each glob segment to its own place when the glob or the base holds text like a placeholder', () => {

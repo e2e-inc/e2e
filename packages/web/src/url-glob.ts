@@ -100,7 +100,7 @@ const URL_FRAGMENT = /[^#]*#[\s\S]*/.source;
 const SPECIAL_QUERY = /(?:https?|wss?|ftp|file):[^?#]*\?[^#]*/.source;
 
 function encodedLiteral(character: string, component: string): string {
-  const encoded = encodeURIComponent(character).replace("'", '%27');
+  const encoded = character === "'" ? '%27' : encodeURIComponent(character);
   return `(?:${escapeRegexpChar(character)}|(?=${encoded})(?<=^(?:${component}))${encoded})`;
 }
 
