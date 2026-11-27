@@ -109,8 +109,10 @@ describe('e2e mcp test lines', { timeout: 120_000 }, () => {
       ['type', { target: nodeId(screen, /textbox "Username"/), value: USERNAME }, 'await screen.getByRole("textbox", "Username").fill(credentials.user("admin").username);'],
       ['type_secret', { target: nodeId(screen, /textbox "Password"/), name: 'admin.password' }, 'await screen.getByRole("textbox", "Password").fill(credentials.user("admin").password);'],
       ['select', { target: nodeId(screen, /combobox "Plan"/), value: 'Pro' }, 'await screen.getByRole("combobox", "Plan").selectOption("Pro");'],
-      // Checked with a bare tap at its point, which prints screen.tapAt (below).
       ['check', { target: nodeId(screen, /checkbox "Accept terms"/) }, 'await screen.getByRole("checkbox", "Accept terms").check();'],
+      // Tapped twice more at its point with tap_at, a bare point on the web, which prints screen.tapAt: off, then on.
+      ['tap_at', { name: 'Accept terms' }, ''],
+      ['tap_at', { name: 'Accept terms' }, ''],
       [
         'tap',
         { target: nodeId(screen.slice(screen.indexOf('Offer B')), /button "Reserve"/) },
@@ -131,8 +133,8 @@ describe('e2e mcp test lines', { timeout: 120_000 }, () => {
     ];
     const lines = ['await app.open();', 'await app.open("/test-lines");'];
     for (const [tool, args, line] of steps) {
-      if (tool === 'check') {
-        lines.push(...(await tapAtPoint('Accept terms')));
+      if (tool === 'tap_at') {
+        lines.push(...(await tapAtPoint(String(args['name']))));
         continue;
       }
       const result = await call(tool, args);
