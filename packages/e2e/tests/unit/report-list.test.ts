@@ -1280,6 +1280,28 @@ describe('ListReporter', () => {
       }
     });
 
+    it('names on the step line a cache miss the author can end, and no miss the cache meant', () => {
+      const { lines, output } = capture();
+      const reporter = plainReporter(output);
+      reporter.handle(plan([{ file: 'tests/flow.e2e.ts', tests: 1 }]));
+      reporter.handle(testStarted('t1', 'checkout', 'chromium', 'tests/flow.e2e.ts'));
+      const end = (cache: { mode: 'missed' | 'agent-concluded'; reason: 'truncated' | 'wrong-context' | 'invalid-entry' | 'no-entry' | 'retry' | 'gap' }) =>
+        reporter.handle({
+          type: 'step', testId: 't1', agent: 'default', repeat: 0, target: 'chromium',
+          progress: { phase: 'end', kind: 'agent', api: 'agent.act', label: 'pay', status: 'passed', durationMs: 4_200, modelCalls: 3, cache },
+        });
+      for (const reason of ['truncated', 'wrong-context', 'invalid-entry', 'no-entry', 'retry'] as const) end({ mode: 'missed', reason });
+      end({ mode: 'agent-concluded', reason: 'gap' });
+      expect(lines).toEqual([
+        '   ✓ checkout > agent.act "pay" 4.20s · 3 model calls · not replayed: truncated',
+        '   ✓ checkout > agent.act "pay" 4.20s · 3 model calls · not replayed: wrong-context',
+        '   ✓ checkout > agent.act "pay" 4.20s · 3 model calls · not replayed: invalid-entry',
+        '   ✓ checkout > agent.act "pay" 4.20s · 3 model calls',
+        '   ✓ checkout > agent.act "pay" 4.20s · 3 model calls',
+        '   ✓ checkout > agent.act "pay" 4.20s · 3 model calls',
+      ]);
+    });
+
     it('keeps deterministic steps out of the permanent log', () => {
       const { lines, output } = capture();
       const reporter = plainReporter(output);

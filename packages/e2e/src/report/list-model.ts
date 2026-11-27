@@ -74,7 +74,7 @@ export function currentStep(test: RunningTest): CurrentStep | undefined {
 }
 
 /** How a step ended, as its `end` progress reported it. */
-export type StepOutcome = Pick<Extract<StepProgress, { phase: 'end' }>, 'status' | 'durationMs' | 'modelCalls'>;
+export type StepOutcome = Pick<Extract<StepProgress, { phase: 'end' }>, 'status' | 'durationMs' | 'modelCalls' | 'cache'>;
 
 /**
  * A step listed under its test. Only a `test.step` is listed before it ends,

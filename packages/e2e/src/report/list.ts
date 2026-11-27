@@ -853,14 +853,14 @@ export class ListReporter {
       }
       case 'end': {
         running.open.delete(stepId);
-        const { api, label, kind, status, durationMs, modelCalls } = progress;
+        const { api, label, kind, status, durationMs, modelCalls, cache } = progress;
         // A step whose start was not shown (a timed-out attempt began it after the retry did) is listed by its own indexes, outside any `test.step`.
         const identity = progress.identity;
         const call: StepCall = current ?? {
           api, label, kind, actor: identity?.actor, groups: [],
           path: identity === undefined ? undefined : [identity.attemptIndex, identity.stepIndex],
         };
-        const step: ListedStep = { ...call, outcome: { status, durationMs, modelCalls } };
+        const step: ListedStep = { ...call, outcome: { status, durationMs, modelCalls, ...(cache === undefined ? {} : { cache }) } };
         this.list(running, step);
         if (this.live || !printsAtEnd(kind)) {
           this.window.redraw();

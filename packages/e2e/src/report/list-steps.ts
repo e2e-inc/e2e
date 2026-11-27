@@ -22,7 +22,7 @@ import {
   withActor,
   type Colors,
 } from './format.ts';
-import type { ConfiguredModel, ListedStep, ReplayNotice, ShownEvent } from './list-model.ts';
+import type { ConfiguredModel, ListedStep, ReplayNotice, ShownEvent, StepOutcome } from './list-model.ts';
 
 /** Step labels stay one glanceable line; the report holds the full text. */
 const MAX_STEP_LABEL_COLUMNS = 72;
@@ -68,9 +68,23 @@ const F_RUNNING = '◌';
 const DEPTH_INDENT = '  ';
 
 /**
+ * The cache misses a step line names: the ones the test's author can end.
+ * `no-entry` and `retry` are the cache working as meant, and a hand-off
+ * repairs its recording on the next passing run.
+ */
+const NAMED_MISSES: ReadonlySet<string> = new Set(['truncated', 'wrong-context', 'invalid-entry']);
+
+/** ` · not replayed: truncated` for a step whose recording can never replay as things stand, else nothing. */
+function missNotice(pc: Colors, outcome: StepOutcome): string {
+  const { cache } = outcome;
+  if (cache?.mode !== 'missed' || cache.reason === undefined || !NAMED_MISSES.has(cache.reason)) return '';
+  return `${pc.dim(' · ')}${pc.yellow(`not replayed: ${cache.reason}`)}`;
+}
+
+/**
  * One listed step: outcome glyph, api, quoted label, then duration, model
- * calls, and a non-passed status. A `test.step` is its title alone, with
- * nothing after it while it runs.
+ * calls, a cache miss the author can end, and a non-passed status. A
+ * `test.step` is its title alone, with nothing after it while it runs.
  */
 export function stepLine(pc: Colors, step: Pick<ListedStep, 'api' | 'label' | 'kind' | 'actor' | 'outcome'>, options: StepLineOptions = {}): string {
   const { outcome } = step;
@@ -81,7 +95,7 @@ export function stepLine(pc: Colors, step: Pick<ListedStep, 'api' | 'label' | 'k
   let tail = '';
   if (outcome !== undefined) {
     const calls = outcome.modelCalls > 0 ? ` · ${outcome.modelCalls} model call${outcome.modelCalls === 1 ? '' : 's'}` : '';
-    tail = pc.dim(`${formatTime(outcome.durationMs)}${calls}${outcome.status === 'passed' ? '' : ` ${outcome.status}`}`);
+    tail = `${pc.dim(`${formatTime(outcome.durationMs)}${calls}`)}${missNotice(pc, outcome)}${outcome.status === 'passed' ? '' : pc.dim(` ${outcome.status}`)}`;
   }
   // A title takes no quotes.
   const chrome = titled ? LABEL_CHROME - 2 : LABEL_CHROME;
