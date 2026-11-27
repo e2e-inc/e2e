@@ -197,6 +197,16 @@ translation moves or goes with it in the same change.
 | registry, dist-tag | registry, dist-tag (keep in English, o registry, a dist-tag) |
 | opt in, opt out | ativação, desativação |
 | wins (over another value) | prevalece |
+| built-in fixture | fixture embutida |
+| skip (noun), skip reason | pulo, motivo do pulo (pular, pulado) |
+| expected failure, unexpected pass | falha esperada, sucesso inesperado |
+| row (`test.each`) | linha |
+| lazy (acquired on demand) | sob demanda |
+| truthy, falsy | truthy, falsy (keep in English) |
+| observation (a screen read) | observação |
+| evidence (sent to the judge) | evidências |
+| repair round | rodada de reparo |
+| windowed list | lista virtualizada |
 | stored screenshot | captura de tela armazenada |
 | the agent takes over | o agente assume |
 | cache miss | cache miss (keep in English, o cache miss) |
