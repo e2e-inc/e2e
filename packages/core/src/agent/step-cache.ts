@@ -491,9 +491,9 @@ export class StepTraceSession {
     // The replayed actions are this step's recording now; the ones it ran without looking keep where they were recorded.
     const kept = this.recorder?.keepLocations(trace.actions.slice(0, outcome.executed)) ?? new Set<number>();
     // So are the detours they made: the report names them, and this step's recording keeps them (`findDetoursAfterReplay`).
-    // A replay that found no target looked at the screen it stopped on.
+    // A replay that found no target looked at the screen it stopped on; one whose end never reached the recorded route saw where it stayed.
     const looked = stopReason === 'target-not-found' || stopReason === 'target-ambiguous' || stopReason === 'viewport-changed';
-    const ran = this.prefixDetours(trace, outcome.executed, looked ? screens.at(-1)?.path : undefined);
+    const ran = this.prefixDetours(trace, outcome.executed, looked ? screens.at(-1)?.path : end?.seen);
     if (trace.detours !== undefined) this.replayed = { executed: outcome.executed, spans: ran.map(({ from, to }) => ({ from, to })), kept };
     this.handOff(outcome, stopReason, detail, this.describeDetours(ran));
     return undefined;
@@ -514,8 +514,8 @@ export class StepTraceSession {
    */
   private async endStateMatches(trace: ActionTrace, start: SemanticScreen, screens: readonly ObservedScreen[]): Promise<EndStateCheck> {
     if (!this.host.traceEligible) return { matches: false };
-    const arrived = await this.endScreen(trace);
-    if (arrived === undefined) return { matches: false };
+    const { arrived, seen } = await this.endScreen(trace);
+    if (arrived === undefined) return { matches: false, ...(seen === undefined ? {} : { seen }) };
     // Both captures may predate a secret the replay resolved; read with the
     // ledger as it is now, an unchanged node is no change.
     const baseline = baselineScreen(screens, arrived.path);
@@ -547,15 +547,15 @@ export class StepTraceSession {
    * polling while a navigation the last action started commits. A route
    * that never matches is another screen, whatever it shows: a link that
    * now lands on a page sharing the recorded one's layout is exactly the
-   * flow that went wrong.
+   * flow that went wrong. When it never matches, where the screen stayed.
    */
-  private async endScreen(trace: ActionTrace): Promise<SemanticScreen | undefined> {
+  private async endScreen(trace: ActionTrace): Promise<{ readonly arrived?: SemanticScreen; readonly seen?: string }> {
     const startedMs = Date.now();
     const recorded = trace.endPath;
     for (let attempt = 0; ; attempt += 1) {
       const observation = await probeScreen(this.host, 'raw');
-      if (observation?.kind !== 'semantic' || !this.host.traceEligible) return undefined;
-      if (recorded === undefined || observation.path === undefined || sameRoute(recorded, observation.path)) return observation;
+      if (observation?.kind !== 'semantic' || !this.host.traceEligible) return {};
+      if (recorded === undefined || observation.path === undefined || sameRoute(recorded, observation.path)) return { arrived: observation };
       // The last delay repeats until the timeout, as in `pollSettled`.
       const delay = END_PATH_DELAYS_MS[attempt] ?? END_PATH_DELAYS_MS[END_PATH_DELAYS_MS.length - 1]!;
       if (
@@ -563,7 +563,7 @@ export class StepTraceSession {
         this.host.remainingMs() <= delay ||
         this.host.signal.aborted
       ) {
-        return undefined;
+        return { seen: observation.path };
       }
       await sleep(delay, this.host.signal);
     }
@@ -701,10 +701,11 @@ export class StepTraceSession {
    * The detours of the first `executed` actions of a recording, which a
    * replay ran before it handed off, read as a flow of their own that ends
    * where the next recorded action stood, so a trip the replay completed is
-   * not merged with one it never reached. When the replay stopped because
-   * the screen it looked at had no recorded target (`live`), a return there
-   * counts only if that screen is where the action was recorded: a link
-   * that now leads elsewhere took the flow off the recorded route. A span
+   * not merged with one it never reached. When the replay saw where it
+   * stopped (`live`: a screen with no recorded target, or an end that never
+   * reached the recorded route), a return there counts only if that screen
+   * is where the recording stood: a link that now leads elsewhere took the
+   * flow off the recorded route. A span
    * the recording run found that ends inside them is kept as found: a
    * stored location reads `:id` for a record id and a query value, so
    * comparing again would lose a trip to another record. Only a span the
@@ -712,7 +713,8 @@ export class StepTraceSession {
    * found there counts only inside it.
    */
   private prefixDetours(trace: ActionTrace, executed: number, live?: string): TraceDetour[] {
-    const next = trace.actions[executed]?.at;
+    // Where the action the replay stopped at was recorded, or the recorded end when it ran them all.
+    const next = executed < trace.actions.length ? trace.actions[executed]?.at : trace.endPath;
     const returned = live === undefined || next === undefined || routeLocation(live) === routeLocation(next);
     const ran = {
       actions: trace.actions.slice(0, executed),
@@ -784,6 +786,8 @@ export class StepTraceSession {
 interface EndStateCheck {
   readonly matches: boolean;
   readonly failure?: 'already-showing' | DeltaMismatch;
+  /** Where the screen stayed when it never reached the recorded end route. */
+  readonly seen?: string;
 }
 
 /**

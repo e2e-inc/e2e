@@ -1691,3 +1691,67 @@ describe('trace cache: a hand-off inside a trip, after a trip it completed', () 
     expect(step.cache?.detour).toBeUndefined();
   }, 240_000);
 });
+
+const MARKER_SUITE = `import { test, expect } from 'e2e';
+
+test('saves the marker after a look at About', async ({ app, agent, screen }) => {
+  await app.open('/storage');
+  await agent.act('save the marker');
+  await expect(screen.getByRole('status', { name: 'Marker' })).toHaveText('saved');
+});
+`;
+
+/** Saves the marker, opens About, and comes back to Storage by its address; after a hand-off, goes back to Storage. */
+function markerTripExecutor(appUrl: string): StepExecutor {
+  return {
+    name: 'marker-trip-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      const observation = await context.observe();
+      if (context.replayedPrefix === undefined) {
+        await context.actions.tap({ id: nodeIdFor(observation.text, /button "Save marker"/) });
+        await context.observe();
+        await context.actions.navigate(`${appUrl}/about`);
+        await context.observe();
+      }
+      await context.actions.navigate(`${appUrl}/storage`);
+      return { status: 'passed' as const, summary: 'the marker is saved' };
+    },
+  };
+}
+
+describe('trace cache: a replay whose last action now ends on another page', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/marker.e2e.ts': MARKER_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('claims no return at the end the replay never reached', async () => {
+    const options = (cache: 'read-write' | 'read-only') => ({
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: markerTripExecutor(app.url) } }, cache },
+    });
+    const step = (outcome: RunOutcome) => resultByTitle(outcome, 'saves the marker after a look at About').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    const recorded = await runExisting(project, options('read-write'));
+    expect(recorded.exitCode).toBe(0);
+    expect(step(recorded).cache).toMatchObject({ detour: 'actions 2-3 left /storage for /about and came back with nothing typed, chosen, or set' });
+    expect(readOnlyEntry(project).entry.payload.detours).toEqual([{ from: 1, to: 3 }]);
+    // The way back now leads to the echo page: every action replays, and the end is not the recorded one.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      actions: payload.actions.map((action, index) => (index === 2 && action.name === 'navigate' ? { ...action, url: '/echo' } : action)),
+    }));
+    const outcome = await runExisting(project, options('read-only'));
+    expect(outcome.exitCode).toBe(0);
+    expect(step(outcome).cache).toMatchObject({ mode: 'agent-concluded', reason: 'end-mismatch', replayedActions: 3 });
+    expect(step(outcome).cache?.detour).toBeUndefined();
+  }, 240_000);
+});
