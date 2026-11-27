@@ -152,10 +152,12 @@ export class ElectronSurface {
   // --- the app ---
 
   /** `app.open()` and `app.restart()`: quits the app if it runs and launches it again on the attempt's app data. */
-  restart(operation: OperationContext): Promise<void> {
+  async restart(operation: OperationContext): Promise<void> {
+    // A dialog the app left unanswered is this step's failure, not one of the next app's.
+    this.failOnDialog();
     // Started now: the quit, and a launch or quit ahead in the queue, spend the operation's time too.
     const budget = new Budget(operation, 'app.open');
-    return this.app.serialized(async () => {
+    return await this.app.serialized(async () => {
       // A call cancelled, or out of time, while it waited for its turn does nothing to the app.
       budget.check();
       await this.app.quit(operation, RESTART_CLOSE_MS);
@@ -164,9 +166,10 @@ export class ElectronSurface {
   }
 
   /** `app.clearState()`: quits the app, empties its data, and launches it again. */
-  reset(operation: OperationContext): Promise<void> {
+  async reset(operation: OperationContext): Promise<void> {
+    this.failOnDialog();
     const budget = new Budget(operation, 'app.open');
-    return this.app.serialized(async () => {
+    return await this.app.serialized(async () => {
       budget.check();
       await this.app.quit(operation, DISCARD_CLOSE_MS);
       // A quit that took the rest of the time leaves the app's data as it was.
