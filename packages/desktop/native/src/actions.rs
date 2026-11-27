@@ -810,12 +810,14 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     if secure {
         // A secure field shows no value, but counts its characters: the count says the text landed whole (one a
         // formatter cut short does not), with no secret read. A field that counts none is taken at the write's word.
+        // `Err` for a read the app did not answer in time, which is no proof the field counts none: it is read again.
         let count = || match element.attribute("AXNumberOfCharacters") {
-            Ok(Value::Number(count)) => Some(count as usize),
-            _ => None,
+            Ok(Value::Number(count)) => Ok(Some(count as usize)),
+            Err(ax::AX_CANNOT_COMPLETE) => Err(()),
+            _ => Ok(None),
         };
         let wanted = text.encode_utf16().count();
-        if count().is_none() || until(deadline, || count() == Some(wanted)) {
+        if count() == Ok(None) || until(deadline, || count() == Ok(Some(wanted))) {
             return Ok(());
         }
         return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the secure field did not take the whole text set"));
