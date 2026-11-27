@@ -254,6 +254,18 @@ describe('findDetoursAfterReplay', () => {
     expect(findDetoursAfterReplay(trace, [{ from: 1, to: 3 }], 3, new Set([2]))).toEqual([{ from: 1, to: 3, at: '/orders', via: '/orders/:id', evidence: 'locations' }]);
   });
 
+  it('finds the agent\'s own trip after a hand-off without crossing a span the entry found', () => {
+    // The replay ran /p, the list, an order (`back` without looking), the list; the agent went /z, /p, /w and ended on the list.
+    const trace = flow(
+      [tap('List', '/p', 'link'), tap('Order', '/list', 'link'), back('/orders/:id'), tap('Z', '/list', 'link'), tap('P', '/z', 'link'), tap('W', '/p', 'link')],
+      { endPath: '/list' },
+    );
+    expect(findDetoursAfterReplay(trace, [{ from: 1, to: 3 }], 3, new Set([2]))).toEqual([
+      { from: 1, to: 3, at: '/list', via: '/orders/:id', evidence: 'locations' },
+      { from: 3, to: 6, at: '/list', via: '/z', evidence: 'locations' },
+    ]);
+  });
+
   it('names a replayed span in the entry\'s spelling, the unique() value it filled in included', () => {
     const replayed = flow([tap('Record', '/records', 'link'), back('/records/80362915?code=FreshCallbackWord')], { endPath: '/records' });
     expect(findDetours({ ...replayed, detours: [{ from: 0, to: 2 }] }, routeLocation)).toEqual([

@@ -39,7 +39,11 @@ import type { ActionTrace, RecordedAction } from './trace.ts';
  * replay copied from its entry onto an action it ran without looking, or
  * every place of an entry read for the actions a hand-off ran.
  */
-type DetourInput = Pick<ActionTrace, 'actions' | 'startPath' | 'endPath' | 'truncated' | 'detours'> & { readonly stored?: ReadonlySet<number> };
+type DetourInput = Pick<ActionTrace, 'actions' | 'startPath' | 'endPath' | 'truncated' | 'detours'> & {
+  readonly stored?: ReadonlySet<number>;
+  /** Spans already settled: the scan starts in none and crosses none. */
+  readonly bounds?: readonly Pick<TraceDetour, 'from' | 'to'>[];
+};
 
 /** One stretch of a recording that left a screen and came back to it with nothing typed, chosen, or set on the way. */
 export interface TraceDetour {
@@ -143,14 +147,14 @@ export function findDetours(trace: DetourInput, spell?: (place: string) => strin
 /**
  * The detours of a recording made again after a replay ran its first
  * `executed` actions and handed off: the spans the entry kept for those
- * actions, and the ones this run found that end after them and cross none
- * of those. The entry already judged the replayed actions. The ones the
- * replay ran without looking carry the location their recording had
- * (`kept`, from `TraceRecorder.keepLocations`), which reads `:id` for a
- * record id and a query value, so comparing again would lose a trip
- * between two records the entry found, or find one to a record the flow
- * never went back to; a span of this run that crosses one of the entry's
- * rests on such a comparison.
+ * actions, and the ones this run found that end after them, a scan that
+ * starts in none of the entry's and crosses none. The entry already judged
+ * the replayed actions. The ones the replay ran without looking carry the
+ * location their recording had (`kept`, from `TraceRecorder.keepLocations`),
+ * which reads `:id` for a record id and a query value, so comparing again
+ * would lose a trip between two records the entry found, or find one to a
+ * record the flow never went back to; a span that crossed one of the
+ * entry's would rest on such a comparison, and would hide a trip inside it.
  */
 export function findDetoursAfterReplay(
   trace: DetourInput,
@@ -158,9 +162,7 @@ export function findDetoursAfterReplay(
   executed: number,
   kept: ReadonlySet<number>,
 ): TraceDetour[] {
-  const found = findDetours({ ...trace, stored: kept }).filter(
-    ({ from, to }) => to > executed && !replayed.some((span) => from < span.to && span.from < to),
-  );
+  const found = findDetours({ ...trace, stored: kept, bounds: replayed }).filter(({ to }) => to > executed);
   const spans = [...replayed, ...found].map(({ from, to }) => ({ from, to })).toSorted((x, y) => x.from - y.from);
   // This run's places are live addresses: named as an entry spells them, as `byLocations` names its own.
   return recorded({ ...trace, detours: spans }, routeLocation);
@@ -234,9 +236,17 @@ function byLocations(trace: DetourInput): TraceDetour[] {
     return a.address === b.address || ((stored.has(first) || stored.has(second)) && a.spelling === b.spelling);
   };
   const { actions } = trace;
+  const bounds = trace.bounds ?? [];
   const detours: TraceDetour[] = [];
   let from = 0;
   while (from < actions.length) {
+    const settled = bounds.find((span) => span.from <= from && from < span.to);
+    if (settled !== undefined) {
+      from = settled.to;
+      continue;
+    }
+    // A return at the start of the next settled span is the last one this trip may make.
+    const limit = Math.min(actions.length, ...bounds.filter((span) => span.from > from).map((span) => span.from));
     const home = where[from];
     if (home === undefined) {
       from += 1;
@@ -246,7 +256,7 @@ function byLocations(trace: DetourInput): TraceDetour[] {
     let back: number | undefined;
     // The action that left: the last one known to stand home before the first departure.
     let left = from;
-    for (let to = from + 1; to <= actions.length; to += 1) {
+    for (let to = from + 1; to <= limit; to += 1) {
       if (changesState(actions[to - 1]!)) break;
       const place = where[to];
       if (place === undefined) continue;
