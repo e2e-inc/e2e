@@ -8,6 +8,7 @@ use crate::refs::{self, Entry};
 use crate::roles;
 use crate::windows::{self, Rect};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::time::Instant;
 
 /// The most nodes one snapshot reads; a window with more is read in part (`truncated`).
@@ -165,6 +166,10 @@ struct Walk<E> {
     /// The text of every text node read so far, in reading order, pruned ones too: a row or cell with no name of its
     /// own takes it from the text inside it.
     content: Vec<String>,
+    /// Every element read so far. An element listed under two parents is read once, where it is first found: a SwiftUI
+    /// toolbar `Menu` lists its open menu both as the button's child and as the button's sibling, and the two are one
+    /// element, so its items would match a locator twice.
+    seen: HashSet<E>,
 }
 
 /// Whether a failed read leaves a hole: the app did not answer in time (it stalled), so an element that is there was
@@ -564,6 +569,9 @@ impl<E: Accessible> Walk<E> {
             self.truncated = true;
             return None;
         }
+        if !self.seen.insert(element.clone()) {
+            return None;
+        }
         self.nodes += 1;
         let read = match read(element) {
             Ok(read) => read,
@@ -824,6 +832,7 @@ fn read_tree<E: Accessible>(window: &E, app: &E, settings: Settings) -> Outcome<
         truncated: false,
         refs: Vec::new(),
         content: Vec::new(),
+        seen: HashSet::new(),
     };
     // The window must answer: one that does not is gone, or its app is.
     match window.attribute("AXRole") {
@@ -1177,6 +1186,23 @@ mod tests {
             // Out of time before the walk began, even a window with nothing in it was not read whole.
             let tree = read(&window(vec![]), &Fake::default(), 30, false, Instant::now()).expect("a tree");
             assert!(tree.timed_out && !tree.complete);
+        }
+
+        #[test]
+        fn reads_an_element_listed_under_two_parents_once_where_it_is_first_found() {
+            // A SwiftUI toolbar `Menu`: its open menu is the button's child and the button's sibling.
+            let menu = Fake::new("AXMenu").frame(10.0, 40.0, 95.0, 58.0).children(vec![
+                Fake::new("AXMenuItem").title("By Title").frame(10.0, 45.0, 95.0, 24.0).actions(&["AXPress"]),
+                Fake::new("AXMenuItem").title("By Priority").frame(10.0, 69.0, 95.0, 24.0).actions(&["AXPress"]),
+            ]);
+            let sort = Fake::new("AXMenuButton").title("Sort").frame(10.0, 10.0, 50.0, 30.0).actions(&["AXPress"]).children(vec![menu.clone()]);
+            let toolbar = Fake::new("AXToolbar").frame(0.0, 0.0, 800.0, 52.0).children(vec![sort, menu]);
+            let tree = whole(&window(vec![toolbar]));
+            assert_eq!(nodes(&tree.tree).iter().filter(|node| node.name.as_deref() == Some("By Priority")).count(), 1);
+            assert_eq!(nodes(&tree.tree).iter().filter(|node| node.role == "menu").count(), 1);
+            let sort = named(&tree, "Sort");
+            assert_eq!(sort.children.first().map(|menu| menu.role), Some("menu"), "the menu stays under its button");
+            assert!(tree.complete);
         }
 
         #[test]
