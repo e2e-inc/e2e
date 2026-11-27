@@ -52,16 +52,40 @@ fn key_character(text: &str) -> Option<char> {
     }
 }
 
+/// How long AppKit keeps what it validated for accessibility: a read of a menu item validates the items of its menu,
+/// as opening the menu would, only when the menu was last validated a second or more ago
+/// (`-[NSMenu _openForInspection:]`). So a read can report what an item was up to a second earlier.
+const VALIDATED_FOR: Duration = Duration::from_secs(1);
+
+/// Whether every one of `items`, read as disabled by `read_at`, is still disabled in a read AppKit validates them
+/// for: one that comes `VALIDATED_FOR` after the first. False when that read would come after `stop`, when the action
+/// was given up meanwhile, and when an item is enabled by then or no longer answers.
+fn still_disabled(items: &[Element], read_at: Instant, stop: Instant) -> bool {
+    let fresh_at = read_at + VALIDATED_FOR;
+    if fresh_at >= stop {
+        return false;
+    }
+    while Instant::now() < fresh_at {
+        if go("press").is_err() {
+            return false;
+        }
+        sleep(POLL);
+    }
+    items.iter().all(|item| item.attribute("AXEnabled").is_ok_and(|value| value.boolean() == Some(false)))
+}
+
 /// The first disabled item of the app's own menus whose key equivalent is `combo`, as its path of titles: the one a
 /// refusal names. `None` when no item has the key, when an item that has it is enabled, and when the menu bar could
 /// not be read whole (a menu that did not answer, no time left, more items than a walk reads): what was not read may
-/// hold an enabled item with the same key. The Apple menu, the menu bar's first, is the system's (Force Quit, Log Out)
-/// and is left out.
+/// hold an enabled item with the same key. An item read as disabled may have been enabled since AppKit last validated
+/// it, so every one is read once more, after `VALIDATED_FOR`. The Apple menu, the menu bar's first, is the system's
+/// (Force Quit, Log Out) and is left out.
 fn disabled_item(pid: i32, combo: &Combo, deadline: Instant) -> Option<Vec<String>> {
     let bar = Element::application(pid).element("AXMenuBar")?;
     // The answer must reach the caller before its deadline, with time left to send the key.
     let stop = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
-    let mut disabled = None;
+    let mut disabled = Vec::new();
+    let mut name = None;
     let mut read_items = 0;
     // Each entry: the item's element, and the titles above it.
     let mut pending: Vec<(Element, Vec<String>)> = below(&bar).ok()?.into_iter().skip(1).rev().map(|menu| (menu, Vec::new())).collect();
@@ -79,7 +103,8 @@ fn disabled_item(pid: i32, combo: &Combo, deadline: Instant) -> Option<Vec<Strin
             if item.enabled {
                 return None;
             }
-            disabled.get_or_insert_with(|| path.clone());
+            name.get_or_insert_with(|| path.clone());
+            disabled.push(element.clone());
         }
         // Most items open no menu: one count says so, where reading the children takes two requests.
         if path.len() >= MAX_DEPTH || element.count("AXChildren") == Ok(0) {
@@ -92,16 +117,17 @@ fn disabled_item(pid: i32, combo: &Combo, deadline: Instant) -> Option<Vec<Strin
             }
         }
     }
-    disabled
+    name.filter(|_| still_disabled(&disabled, Instant::now(), stop))
 }
 
 /// Refuses a Command shortcut sent into the event queue of an app in the background when the menu item it triggers is
 /// disabled: the app has no key window there, so AppKit hands a Command key to the menu bar only, the key would do
 /// nothing, and the press would pass. Every item whose command the focused control or window handles (Copy, Select
 /// All, Find) is disabled in the background. The item is not waited for, as a disabled control is: such an item stays
-/// disabled for as long as the app is in the background. A shortcut goes on when no item has it, when one that has it
-/// is enabled, when the menu bar could not be read whole, and when the app is in front, where its key window can take
-/// the key before the menu does.
+/// disabled for as long as the app is in the background. It is read a second time, a second later, since AppKit
+/// validates a menu for accessibility that often: an item the app enabled since the last validation is not refused. A
+/// shortcut goes on when no item has it, when one that has it is enabled, when the menu bar could not be read whole,
+/// and when the app is in front, where its key window can take the key before the menu does.
 pub(super) fn refuse_disabled_shortcut(pid: i32, combo: &Combo, deadline: Instant) -> Outcome<()> {
     if !combo.command() || Element::application(pid).boolean("AXFrontmost") == Some(true) {
         return Ok(());
