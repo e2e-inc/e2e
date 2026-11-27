@@ -1679,6 +1679,11 @@ describe('DesktopSurface: points', () => {
     const keyless = await launched({ listWindows: [unnamed] }, { observe: false, options: { physicalInput: true } });
     await expect(keyless.surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
     expect(keyless.fake.of('pointer')).toHaveLength(0);
+    // A hover presses nothing: a sheet that opened as the window came forward is left to the driver, which refuses the
+    // move only when a window is on top at the point.
+    const hovered = await launched({ listWindows: [at(false), at(false), at(true)] }, { observe: false, options: { physicalInput: true } });
+    await hovered.surface.performAt({ x: 10, y: 290 }, { kind: 'hover' }, operation());
+    expect(hovered.fake.of('pointer').at(-1)?.args).toEqual([110, 390, 'hover']);
   });
 
   it('refuses a tap at an observed point when the sheet on its window opened, closed, or changed after the observation', async () => {
