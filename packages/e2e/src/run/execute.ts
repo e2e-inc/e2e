@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { TargetSession } from '@e2e-dev/core/lib/engine/surface';
 import { isCiMode, type ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
 import { classifyError, ConfigurationError, E2EError, serializeError, sanitizeRecordedText, truncateUtf8, TestError, TestTimeoutError, withHint, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
-import { isRuntimeSkip, runtimeSkipCause, type CaughtRuntimeSkip } from '../internal/skip.ts';
+import { attemptStep, isRuntimeSkip, runtimeSkipCause, type CaughtRuntimeSkip } from '../internal/skip.ts';
 import { lateExpectedFailureError } from '@e2e-dev/core/lib/internal/expected-failure';
 import { settleExpectedFailure } from './expected-failure.ts';
 import type { ExecutorAttempt } from '@e2e-dev/core/lib/agent/executor';
@@ -14,6 +14,7 @@ import { resultId, timestamp, uuidv7 } from '@e2e-dev/core/lib/internal/ids';
 import { abortError, cancelledError, Deadline, withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
 import { createAgentCacheContext, settleStagedTraces } from '@e2e-dev/core/lib/cache/context';
 import { storedRecordingsFor, type StoredRecordings } from '@e2e-dev/core/lib/cache/rekeyed';
+import { inLoadOf } from '../collect/collect-file.ts';
 import type { ModuleRegistration, RegisteredTest } from '../collect/registry.ts';
 import { pairRecordings, type TestTargetPair } from '../collect/select.ts';
 import type { ArtifactStore } from '@e2e-dev/core/lib/types';
@@ -186,7 +187,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     this.models = new WorkerModels((error) => {
       options.events?.onRunAbort?.({ error: serializeError(error) });
     });
-    this.workerFixtures = new WorkerFixturePool(options.target);
+    this.workerFixtures = new WorkerFixturePool(options.target, this.services);
     this.suiteAttempts = { host: this, config: options.config, models: this.models, runErrors: this.runErrors };
     this.realms = new RealmManager({
       targetName: options.target.name,
@@ -270,12 +271,17 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
   async runFileUnit(
     file: FileRef,
     filePairs: readonly TestTargetPair[],
-    freshRegistration?: ModuleRegistration,
+    freshRegistration: ModuleRegistration | undefined,
+    keepRealm: boolean,
   ): Promise<void> {
     const executedSerialUnits = new Set<string>();
     const ordered = filePairs.toSorted((a, b) => a.test.declarationIndex - b.test.declarationIndex);
     let realm: Realm | null =
       freshRegistration === undefined ? null : this.realms.adopt(freshRegistration, file);
+    // What the file's next unit on this worker may run in: the last realm ordinary tests shared, while nothing failed.
+    let reusable = realm;
+    let failed = false;
+    const runErrorsBefore = this.runErrors.length;
     for (const [index, pair] of ordered.entries()) {
       // One serial unit per agent the group runs as: its members are the
       // group's pairs under that agent, in declaration order. The unit
@@ -299,11 +305,15 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         // sharing ends here, afterAll included.
         if (realm !== null) await this.realms.leave(realm);
         realm = null;
-        await runSerialUnit(this, members, file);
+        const group = await runSerialUnit(this, members, file);
+        if (group.status !== 'passed') failed = true;
         continue;
       }
       this.pairStarted(pair);
       realm = await this.runOrdinaryPair(pair, file, realm);
+      // A pair leaves no realm when an attempt of it failed.
+      if (realm === null) failed = true;
+      else reusable = realm;
       // A scope's afterAll runs as soon as its last test in this realm is
       // done, so a describe's teardown never lands after a sibling's tests.
       if (realm !== null) {
@@ -319,6 +329,8 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       }
     }
     if (realm !== null) await this.realms.leave(realm);
+    // A suite hook that failed is a run error.
+    if (keepRealm && !failed && reusable !== null && this.runErrors.length === runErrorsBefore) this.realms.keep(reusable);
   }
 
   /** Records a deterministic-registration violation as a run-level error. */
@@ -462,7 +474,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       },
       async () => {
         try {
-          return await this.executeAttempt(pair, registered, realm, attemptIndex, context);
+          return await inLoadOf(realm.registration, () => this.executeAttempt(pair, registered, realm, attemptIndex, context));
         } finally {
           this.options.events?.onAttemptEnd?.();
         }
@@ -641,6 +653,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         ledger: sessionLedger(openSession, this.config.allSecrets),
         config: this.config,
         appOrigin: this.target.app.base?.origin,
+        appBase: this.target.app.base,
         artifacts: artifacts.sink,
         operation: (signal, timeoutMs) => this.op(attemptId, timeoutMs, signal),
         interrupt: this.interruptSignal,
@@ -667,6 +680,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
     // the phase it landed in, beside a failure already there.
     let cutBody: ((cause: unknown) => void) | undefined;
     let leaveWorkerFixtures: (() => void) | undefined;
+    let endBudget: (() => void) | undefined;
     this.strayFailure = (cause) => {
       if (cutBody !== undefined) {
         attemptAbort.abort();
@@ -705,6 +719,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
             ledger: sessionLedger(session, this.config.allSecrets),
             maxBytes: this.config.limits.maxObservationBytes,
             appOrigin: this.target.app.base?.origin,
+            appBase: this.target.app.base,
           }),
         );
       });
@@ -713,6 +728,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       const announce = (remainingMs?: number): void =>
         this.options.events?.onAttemptDeadline?.(pair, { index: attemptIndex, id: attemptId, startedAt, timeoutMs: timeout.timeoutMs, ...(remainingMs === undefined ? {} : { remainingMs }) });
       const budget = new AttemptBudget(attemptAbort.signal, new Deadline(pair.options.timeout));
+      endBudget = () => budget.end();
       const timeout = new AttemptTimeout(budget, pair.options.timeout, announce);
       announce();
       const saveSession =
@@ -752,21 +768,24 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         debug: this.debug,
         models: this.models,
         test: { file: pair.test.file, titlePath: pair.test.titlePath, writtenScreenshots: this.writtenScreenshots },
+        services: this.services,
       });
       if (hold !== undefined) {
-        const tools = new HeldTestTools(
-          agentRuntime,
-          this.options.runId,
-          this.target,
-          this.options.headed,
-          video !== undefined,
-          this.options.events?.onNotice,
-        );
+        const tools = new HeldTestTools({
+          runtime: agentRuntime,
+          runId: this.options.runId,
+          target: this.target,
+          headed: this.options.headed,
+          runRecordsVideo: video !== undefined,
+          notice: this.options.events?.onNotice,
+          services: this.services,
+        });
         heldTools = tools;
         const screens = {
           ledger: sessionLedger(session, this.config.allSecrets),
           maxBytes: this.config.limits.maxObservationBytes,
           appOrigin: this.target.app.base?.origin,
+          appBase: this.target.app.base,
         };
 
         holds = holdAttemptSteps({
@@ -799,6 +818,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
           attemptId,
           guests: guests.offer,
           owner: 'suite',
+          step: attemptStep(steps, budget),
           testKind: pair.test.kind,
           assertionTimeout: this.config.assertionTimeout,
           toPass: this.config.toPass,
@@ -987,6 +1007,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       this.strayFailure = undefined;
       this.lastAttemptTestId = pair.test.id;
       attemptEnd.abort();
+      endBudget?.();
       this.interruptSignal.removeEventListener('abort', onInterrupt);
       // The verdict is reached before the session closes: nothing after this
       // point changes it, and the close reads it to decide what the attempt's

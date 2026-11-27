@@ -131,7 +131,9 @@ suites that consume the built packages the way a user would.
   device-cloud providers (`testmu`, `browserstack`, `revyl`) share: one
   daemon per slot, heartbeat, a release that fails unless the session end is
   confirmed, and `agentDevicePlugin()`, which checks a provider plugin's
-  version and registers it in the daemon's home.
+  version and registers it in the daemon's home. Its `installLeasedApp()`
+  installs a target's `app.appPath` through any lease's daemon; `eas` uses
+  it too.
 - `packages/desktop` - the published `@e2e-dev/desktop` package: the
   desktop engine on agent-desktop (native apps through the OS accessibility
   tree), built with the same public `defineEngine`,
@@ -168,9 +170,28 @@ suites that consume the built packages the way a user would.
 - `packages/notte` - the published `@e2e-dev/notte` package: Notte cloud
   browsers for the web engine, `attempt` scope only, with a marker-file
   ledger for `sweep` since sessions carry no tags. Maintained by Notte.
+- `packages/browser-run` - the published `@e2e-dev/browser-run` package:
+  Cloudflare Browser Run hosted Chromium for the web engine
+  (`BrowserProvider`). It reads `CLOUDFLARE_ACCOUNT_ID` and
+  `CLOUDFLARE_API_TOKEN` from the run's environment when it acquires a
+  browser, so importing a config needs no login. One session per worker slot
+  by default, or a fresh browser per attempt with `scope: 'attempt'`; the CDP
+  endpoint is built from the account and session id rather than taken from the
+  response, so a response cannot send the token to another origin. Each
+  session is journaled by id under the OS temp directory, and `sweep` deletes
+  what a killed worker left open.
 - `packages/lightpanda` - the published `@e2e-dev/lightpanda` package: a
   `BrowserProvider` that starts a local `lightpanda serve` per worker slot
   and stops it with the run; no vendor SDK, the binary is the dependency.
+- `packages/moli` - the published `@e2e-dev/moli` package: a `BrowserProvider`
+  that runs a local Moli browser for the web engine, one `moli serve` process
+  on an available loopback port per worker slot, stopped when the lease is
+  released. The binary is `binary` when given, else `MOLI_PATH`, then `PATH`,
+  then `~/.local/bin/moli`, resolved when a browser is acquired, so importing
+  a config starts nothing; no vendor SDK, the binary is the dependency.
+  On-demand layout and screenshots (`--layout`) and optional resource fetching
+  (`--resource`) are on by default, and `args` passes further `moli serve`
+  flags. Worker scope only.
 - `packages/eas` - the published `@e2e-dev/eas` package: Expo Simulators
   hosted iOS simulators and Android emulators for the mobile engine
   (`DeviceProvider`). Expo publishes no SDK for the sessions API, so it calls
@@ -668,6 +689,49 @@ calls the model. A load average above half the cores is warned about; shared
 CI runners are too noisy for wall-time verdicts, so trust the behavior and
 counter sections there. The harness's statistics have unit tests under
 `scripts/bench-ab/` (`pnpm test:scripts`).
+## Microbenchmarks
+
+`pnpm microbench` measures small pure-JS functions (secret redaction,
+locator resolution, mobile tree projection; the cases are in
+`scripts/microbench/cases.mjs`) as instruction counts under Valgrind's
+Cachegrind, so the result does not move with the machine's load. Valgrind
+runs on Linux only; on macOS, `--tool time` runs the same cases on wall time
+as a smoke check.
+
+```bash
+pnpm microbench --trials 10 --base-root .                      # repeatability: one build against itself
+pnpm microbench --base-root /path/to/base/checkout             # base against this checkout
+pnpm microbench --tool time --case redact                      # local smoke run, noisy
+```
+
+- Each trial runs a case in two fresh processes, N and 3N iterations, and
+  keeps the difference: startup, loading, warmup, and compilation cancel.
+  Cases and inputs come from this checkout, the code under test from each
+  `--root`/`--base-root`, which must be built. Give both roots paths of the
+  same length: a different length moved one case by a fixed 0.075% between
+  builds of the same code, and the harness warns about it.
+- The default mode, `jitless`, counts the interpreter only, regexps
+  included; in CI, the trials of one commit spread at most 0.17% per case.
+  `--mode jit` keeps V8's compilers under `--predictable`,
+  `--single-threaded`, `--predictable-gc-schedule`, and fixed seeds, but V8
+  still optimizes differently in some processes and its trials cluster up
+  to 2% apart: use it to look at JIT behavior, not to compare. Every
+  process runs with `--v8-pool-size=0`, and with ASLR off (`setarch -R`) on
+  Linux. Counts are not wall time.
+- A direction is reported only when the base and head trial ranges do not
+  overlap and the change reaches the noise floor (`--threshold`, 0.5% for
+  instruction counts). `--expect-same` (implied by one directory twice)
+  makes the run a repeatability check, which exits 1 when any case's ranges
+  separate, under the floor too.
+- `.github/workflows/microbench.yml` runs both checks on a Blacksmith runner
+  with one pinned Node version; dispatch it with a `base` ref to compare. On
+  a pull request from this repository it posts the comparison and the
+  repeatability result as one comment and edits it on every run; a fork's or
+  Dependabot's pull request has the tables in the job summaries only. A
+  measured regression never fails the job: read the comment.
+- A case's `child.mjs` and `cases.mjs` are plain JavaScript: `--jitless`
+  turns off WebAssembly, which Node's TypeScript stripping needs.
+
 ## Golden device trees
 
 `packages/mobile/tests/fixtures/snapshots/{ios,android}/` holds raw
@@ -789,7 +853,32 @@ trees, on both platforms, without a device.
     `resolveNavigationUrl`: only `http:`, `https:`, and the exact
     `about:blank` pass; every other scheme (`view-source:file:` included) and
     a malformed URL is `POLICY_DENIED` (a relative URL on a target with no
-    `app.url` is `APP_URL_REQUIRED`). `device.openLink` takes custom app
+    `app.url` is `APP_URL_REQUIRED`). One exception: on a target whose
+    `app.url` is itself a `file:` URL (one file, no host, never a directory),
+    a `file:` URL passes for a file in that file's directory or below it,
+    compared as decoded paths with symbolic links resolved, so neither an
+    encoded separator nor a link climbs out, and never for a directory,
+    whose listing links to its parent; a path that cannot be resolved is
+    outside. The agent names navigation URLs and a page can tell it to, so
+    anything wider would let a local page read any file the user can and
+    carry it to an http(s) address. A link or a script in the local page
+    can still take the browser anywhere a file page may go, which an
+    http(s) page cannot, so `leftFileApp` holds the same bound over every
+    sink that keeps or sends a screen on its own: an observation taken for
+    a model (`checkObservedLocation` in `agent/observation-feed.ts` and
+    `agent/invocation.ts`), the trace's step screens (`traceScreen`), and
+    failure evidence (`run/failure-evidence.ts`). Out of the directory, the
+    screen is withheld and only the location kept. A model is sent no
+    pixels of a file app at all (`isFileApp` where `pixelsAllowed` is
+    set and where `Invocation.observe` asks for pixels), since pixels can
+    show a frame of another local file that no tree lists. For the same
+    reason no automatic screenshot of a file app is kept: the two
+    `captureEvidence` of `agent.assert` and the failure screenshot are
+    second captures nothing places. A video the user turns on is not gated. A test's own reads are trusted and not gated. An engine opens a
+    file app only when it declares `fileApps`, and the harness tells its
+    `validateApp` with `fileApp: true`; the scheme is read once, in core
+    (`namesFile`). The web engine refuses a provider and `connect` there,
+    since the bound is checked against the runner's disk. `device.openLink` takes custom app
     schemes, so it refuses a list instead (`packages/mobile/src/links.ts`):
     `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, `filesystem:`.
     There is no origin or host allowlist; PR #290 removed them on purpose, since a
@@ -807,7 +896,8 @@ trees, on both platforms, without a device.
 
 - CI: `.github/workflows/spec.yml` runs lint, typecheck, and the testbed on
   Node 26, `pnpm test` on the newest Node 22, 24, and 26 and on the
-  `engines.node` floors (22.22.3, 24.8.0), the CLI on Bun 1.4.3 and the
+  `engines.node` floors (22.22.3, 24.8.0), as two jobs per version
+  (`test:runner` for core and e2e, `test:packages` for the rest), the CLI on Bun 1.4.3 and the
   latest Bun, and `scripts/install-smoke.ts`, a fresh install of the packed
   packages with pnpm 11 and 12; `benchmark.yml` runs the
   web benchmark's two suites; `mobile.yml` runs the mobile benchmark's on an

@@ -11,6 +11,7 @@
 
 import { isModelUnreachable } from '@e2e-dev/core/lib/agent/error';
 import { settleStagedTraces, type AgentCacheContext } from '@e2e-dev/core/lib/cache/context';
+import { inLoadOf } from '../collect/collect-file.ts';
 import { collect, type CollectedFile } from '../collect/collect.ts';
 import type { TestIdentity } from '@e2e-dev/core/lib/run/records';
 import { select, type TestTargetPair } from '../collect/select.ts';
@@ -23,7 +24,7 @@ import {
   classifyError, ConfigurationError, E2EError, InfrastructureError, serializeError, TestError, TestTimeoutError, type ErrorPhase, type SerializedError,
 } from '@e2e-dev/core/lib/internal/errors';
 import type { ExpectedFailureInfo } from '@e2e-dev/core/lib/internal/expected-failure';
-import { isRuntimeSkip, type CaughtRuntimeSkip } from '../internal/skip.ts';
+import { attemptStep, isRuntimeSkip, type CaughtRuntimeSkip } from '../internal/skip.ts';
 import { settleExpectedFailure } from './expected-failure.ts';
 import { withAbort, withTimeout } from '@e2e-dev/core/lib/internal/time';
 import { AttemptTimeout, type AttemptBudget } from '@e2e-dev/core/lib/run/budget';
@@ -298,6 +299,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           assertionTimeout: config.assertionTimeout,
           toPass: config.toPass,
           recordSecondaryError: (error) => { secondaryErrors.push(serialize(error, phase)); },
+          step: attemptStep(steps, budget),
           budget,
           soft,
           polls,
@@ -410,6 +412,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
         ledger: sessionLedger(env.session, config.allSecrets),
         config,
         appOrigin: env.target.app.base?.origin,
+        appBase: env.target.app.base,
         artifacts: env.artifacts,
         operation,
         interrupt: env.signal,
@@ -427,7 +430,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       );
     }
     // Parked until teardown: a body that outlived its turn finds every harness call refused.
-    budget.enter(env.signal, 1).abort();
+    budget.end();
     const verdict: { status: StandaloneTestOutcome['status']; error?: SerializedError; skip?: string; secondaryErrors: SerializedError[]; expectedFailure?: ExpectedFailureInfo } = {
       status,
       ...(failure === undefined ? {} : { error: serialize(failure, failurePhase) }),
@@ -456,7 +459,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       begun = true;
       lastTest = test.pair.test.titlePath.join(' › ');
       try {
-        const result = await execute();
+        const result = await inLoadOf(test.file.registration, execute);
         if (result.started !== undefined) liveRuns.push(self);
         return result;
       } finally {
@@ -485,6 +488,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           publishAttempt({
             attemptId, owner: 'host', testKind: 'test', assertionTimeout: config.assertionTimeout, toPass: config.toPass,
             budget, soft, polls: new PollScope('the test teardown'), setTimeout: () => 'teardown',
+            step: attemptStep(steps, budget),
             recordSecondaryError: (error) => { retryErrors.push(serialize(error, 'afterEach')); },
           }, publication.signal);
           steps.phase = 'afterEach';
@@ -502,6 +506,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
           await executor.realms.leave(started.realm, env.session).catch((cause: unknown) => errors.push(serialize(cause, 'afterAll')));
         } finally {
           leaveWorkerFixtures?.();
+          budget.end();
           steps.phase = undefined;
           publication.abort();
           strayInTurn = undefined;

@@ -27,6 +27,7 @@ import {
   isForcedToolChoiceDowngraded,
   isForcedToolChoiceRejected,
 } from './model/tool-choice.ts';
+import { missingCredentialError, withMissingCredentialNamed } from './model/missing-credential.ts';
 import { withStallGuard } from './model/stall.ts';
 import { providerHints, type ProviderHints, type ProviderModelRef } from './model/provider-hints.ts';
 import { isScreenOutput, reportsNoEffect, toolResultTexts } from './screen-update.ts';
@@ -263,6 +264,8 @@ class LoopRun {
   /** Whether each look (by call id) showed a change, read when the result was new and kept past compaction. */
   private readonly looks = new Map<string, boolean>();
   private noticedLowClock = false;
+  /** A turn asked again (a refused forced choice, an overflow) resends the request that already carries the notice. */
+  private noticedWindDown = false;
   /** Every turn that ran, oldest first: the debug transcript is rendered from it, the report keeps the tail. */
   private readonly turns: LoopTurn[] = [];
   /** Loop notes from before the first turn. */
@@ -312,7 +315,7 @@ class LoopRun {
     this.conclusion = createVerdictTool(context.step.kind);
     this.toolChoice = FREE_TOOL_CHOICE_MODELS.has(model) ? 'auto' : 'required';
     this.requestModel = ai.wrapLanguageModel({
-      model: withStallGuard(ai, model, (stallMs) => {
+      model: withStallGuard(ai, withMissingCredentialNamed(ai, model), (stallMs) => {
         this.note(`turn ${String(this.turnsUsed + 1)} got no response in ${String(stallMs / 1000)}s: sending it again`);
       }),
       middleware: {
@@ -429,8 +432,8 @@ class LoopRun {
             { cause },
           );
         }
-        const unserved = unservedModelError(cause);
-        if (unserved !== undefined) throw unserved;
+        const named = unservedModelError(cause) ?? missingCredentialError(cause);
+        if (named !== undefined) throw named;
         throw new AgentError(
           'MODEL_PROVIDER_FAILED',
           withHint(`the model provider failed: ${message}`, failureHint(cause)),
@@ -843,7 +846,8 @@ class LoopRun {
           'blocked (with errorCode) if something outside the application stopped you.',
       );
     }
-    if (turnsLeft === WIND_DOWN_TURNS && this.guardStop === undefined) {
+    if (turnsLeft === WIND_DOWN_TURNS && this.guardStop === undefined && !this.noticedWindDown) {
+      this.noticedWindDown = true;
       this.note(`before turn ${String(stepNumber + 1)}: only ${String(turnsLeft)} turns remain, asking to wrap up`);
       prepared = appendNotice(
         prepared,

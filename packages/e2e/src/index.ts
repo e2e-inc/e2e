@@ -1,13 +1,16 @@
 /** Public sdk-0.1 entrypoint. */
 
 export { afterAll, afterEach, beforeAll, beforeEach, describe, test } from './collect/registry.ts';
+export { defineConfig, defineService } from './config/define.ts';
 export { expect } from './expect/index.ts';
 export { credentials, secrets } from '@e2e-dev/core/lib/secrets';
 export { unique } from '@e2e-dev/core/lib/params';
 export { AgentError, isAgentError } from '@e2e-dev/core/lib/agent/error';
 // The markdown page the `markdown` reporter writes, for a reporter that posts
-// it elsewhere: @e2e-dev/github renders the pull request comment from it.
+// it elsewhere: @e2e-dev/github renders the pull request comment from it,
+// folding a --last-failed rerun into the runs before it first.
 export { renderMarkdownReport } from './report/markdown.ts';
+export { foldLastRun } from './report/fold.ts';
 export type { MarkdownReportOptions } from './report/markdown.ts';
 
 export type * from '@e2e-dev/core/lib/types';

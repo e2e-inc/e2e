@@ -24,6 +24,7 @@ interface FakeLocator {
   tap(options?: object): Promise<void>;
   fill(value: unknown): Promise<void>;
   textContent(): Promise<string>;
+  screenshot(label?: string): Promise<string>;
   missing(): Promise<never>;
 }
 
@@ -41,6 +42,7 @@ function fakeScreen(seen: unknown[] = []) {
       return Promise.resolve();
     },
     textContent: () => Promise.resolve(`text of ${path}`),
+    screenshot: () => Promise.resolve(`/artifacts/${path}.png`),
     missing: () => Promise.reject(Object.assign(new Error('locator matched no nodes'), { code: 'LOCATOR_NOT_FOUND' })),
   });
   return { getByRole: (role: string, name?: string) => locator(name === undefined ? role : `${role}:${name}`) };
@@ -60,6 +62,13 @@ describe('run_code recorder', () => {
       "await screen.getByRole('textbox', 'it\\'s \\\\ a\\nname').fill(/^a.b$/i);",
     ]);
     expect(await recorder.end(new AbortController().signal)).toEqual({ unawaited: 0, lost: undefined });
+  });
+
+  it('keeps a locator screenshot as an action, though it answers with a path', async () => {
+    const recorder = recording();
+    const screen = recorder.wrap(fakeScreen(), 'screen', true);
+    expect(await screen.getByRole('row').screenshot('row')).toBe('/artifacts/row.png');
+    expect(sources(recorder.outcomes)).toEqual(["await screen.getByRole('row').screenshot('row');"]);
   });
 
   it('hands the real object what the code holds wrapped, and leaves the rest as it is', async () => {
@@ -182,6 +191,15 @@ describe('run_code recorder', () => {
     await page.poll(() => page.text());
     // What the function called is its own doing, written once, in its line.
     expect(sources(polled.outcomes)).toEqual(['await screen.poll(() => page.text()); // the function brings none of the variables run_code declared: declare the ones it uses']);
+  });
+
+  it('spells a member whose name a dot cannot reach in brackets, in a call and in data passed along', async () => {
+    const recorder = recording();
+    const services = recorder.wrap({ 'my-mail': { createInbox: () => Promise.resolve('ada@example.com'), regions: { 'eu-west': { name: 'Ireland' } } } }, 'services');
+    const page = recorder.wrap({ use: (_value: object) => Promise.resolve() }, 'page');
+    await services['my-mail'].createInbox();
+    await page.use(services['my-mail'].regions['eu-west']);
+    expect(sources(recorder.outcomes)).toEqual(['await services["my-mail"].createInbox();', 'await page.use(services["my-mail"].regions["eu-west"]);']);
   });
 
   it("writes a credential's username by its name", async () => {

@@ -8,6 +8,7 @@ import {
   type OperationContext,
   type PointerAction,
   type SemanticNode,
+  type ViewportIntersection,
   type ViewportPoint,
   type ViewportSize,
 } from '../engine/surface.ts';
@@ -444,7 +445,41 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
     reads: ReadWindow,
     missingFrame: MissingFrame = 'wait',
   ): Promise<{ node: SemanticNode | null; count: number }> {
-    return this.readOne(expression, reads, missingFrame);
+    const { node, count } = await this.readOne(expression, reads, missingFrame);
+    return { node, count };
+  }
+
+  /**
+   * Reads the one current match and measures how much of it is inside the
+   * viewport, for `toBeInViewport`: one resolve, one read from it, and one
+   * measure of the same ref, all inside `reads`, never a second observation.
+   * Zero matches or a missing frame read as no node. A ref that went stale
+   * before it was read or measured is `stale`, so the poll samples again
+   * instead of reading the node as gone. An engine that cannot measure is
+   * refused before the resolve, so a missing match never hides it.
+   */
+  async readViewport(
+    expression: LocatorExpression,
+    reads: ReadWindow,
+  ): Promise<{ node: SemanticNode | null; count: number; stale: boolean; intersection?: ViewportIntersection }> {
+    if (!this.session.measuresViewport) {
+      throw new ConfigurationError(
+        'UNSUPPORTED_CAPABILITY',
+        'toBeInViewport is not available on this target: its engine does not implement viewportIntersection',
+      );
+    }
+    const { node, count, stale } = await this.readOne(expression, reads, 'empty');
+    if (stale) return { node: null, count: 1, stale };
+    if (node === null) return { node, count, stale };
+    try {
+      const intersection = await reads.read((timeoutMs) =>
+        this.session.viewportIntersection(node.ref, this.readOperation(timeoutMs)),
+      );
+      return { node, count, stale, intersection };
+    } catch (cause) {
+      if (asEngineError(cause)?.code === 'NODE_STALE') return { node, count, stale: true };
+      throw translateLocatorError(cause, expression);
+    }
   }
 
   /**
@@ -457,19 +492,24 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
     return node;
   }
 
+  /**
+   * Resolves and reads the one current match. A ref superseded between the
+   * resolve and the read is no node with `stale` set: most callers read it as
+   * gone, and `readViewport` samples again.
+   */
   private async readOne(
     expression: LocatorExpression,
     reads: ReadWindow,
     missingFrame: MissingFrame,
-  ): Promise<{ node: SemanticNode | null; count: number }> {
+  ): Promise<{ node: SemanticNode | null; count: number; stale: boolean }> {
 const ref = await this.singleOf(await this.resolveOnce(expression, reads, missingFrame), expression);
-    if (ref === null) return { node: null, count: 0 };
+    if (ref === null) return { node: null, count: 0, stale: false };
     try {
       const node = await reads.read((timeoutMs) => this.session.read(ref, this.readOperation(timeoutMs)));
-      return { node, count: 1 };
+      return { node, count: 1, stale: false };
     } catch (cause) {
       if (asEngineError(cause)?.code === 'NODE_STALE') {
-        return { node: null, count: 0 };
+        return { node: null, count: 0, stale: true };
       }
       throw translateLocatorError(cause, expression);
     }
@@ -591,6 +631,12 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     await this.dispatchAt({ x: at.x + offset.x, y: at.y + offset.y }, action, deadline);
   }
 
+  /** The failure of an action that was not sent: its phase was cancelled, or its deadline passed first. */
+  private lateAction(kind: string, target: string): Error & { readonly code: string } {
+    if (!this.signal.aborted) return lateAction(kind, target);
+    return isE2EError(this.signal.reason) ? this.signal.reason : cancelledError();
+  }
+
   /** One pointer dispatch within a deadline, its engine error translated to the public taxonomy. */
   private async dispatchAt(point: ViewportPoint, action: PointerAction, deadline: Deadline): Promise<void> {
     const startedAt = timestamp();
@@ -606,8 +652,8 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
         detail: `${action.kind} at (${Math.round(point.x)}, ${Math.round(point.y)})`,
       });
     if (deadline.expired()) {
-      const failure = lateAction(action.kind, `(${Math.round(point.x)}, ${Math.round(point.y)})`);
-      record('failed', failure.code);
+      const failure = this.lateAction(action.kind, `(${Math.round(point.x)}, ${Math.round(point.y)})`);
+      record(this.signal.aborted ? 'cancelled' : 'failed', failure.code);
       throw failure;
     }
     try {
@@ -690,8 +736,8 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
       const record = (status: StepEvent['status'], code?: string): void =>
         this.recordAction({ node, kind: resolved.kind, startedAt, startedMs, waitedMs, stale, status, code });
       if (deadline.expired()) {
-        const failure = lateAction(resolved.kind, describeExpression(expression));
-        record('failed', failure.code);
+        const failure = this.lateAction(resolved.kind, describeExpression(expression));
+        record(this.signal.aborted ? 'cancelled' : 'failed', failure.code);
         throw failure;
       }
       try {

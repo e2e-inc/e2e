@@ -107,9 +107,9 @@ Gateways usually use `provider/model` IDs. Direct providers use their own.
 
 ### Vercel OIDC instead of a key
 
-Without `AI_GATEWAY_API_KEY`, `gateway()` signs in with a short-lived Vercel
-OIDC token, which it refreshes. Sign in to the Vercel CLI and link the
-project one time:
+If `AI_GATEWAY_API_KEY` isn't set, `gateway()` authenticates with a
+short-lived Vercel OIDC token and refreshes it automatically. Sign in to the
+Vercel CLI and link your project once:
 
 <CodeGroup>
 ```bash npm
@@ -131,11 +131,10 @@ bunx e2e run
 ```
 </CodeGroup>
 
-The gateway uses a valid `VERCEL_OIDC_TOKEN`. Else it gets a token for the
-project in `.vercel/project.json`, found from the working directory upward.
-e2e loads no `.env` file, so a token from `npx vercel env pull` works only
-when your shell exports it, or when the config loads the file with
-[`process.loadEnvFile()`](/reference/config#loading).
+The gateway uses `VERCEL_OIDC_TOKEN` if it's valid; otherwise it requests a
+token for the project in `.vercel/project.json`. e2e doesn't load `.env`
+files on its own, so export the token in your shell or call
+[`process.loadEnvFile()`](/reference/config#loading) in `e2e.config.ts`.
 
 ## AI SDK providers
 
@@ -239,14 +238,11 @@ model. For Clef or Jev, use the [decision executor](/decision-models). See
 
 ## Data retention and compliance
 
-Model input is the redacted screen, the step instruction, and the
-screenshots the agent asks for. e2e reads nothing back from the provider
-after a response, so a run needs no state stored by the provider.
-
-Every model request names e2e: a `User-Agent` that starts with
-`e2e/<version> (<platform>; <arch>)`, plus `HTTP-Referer:
-https://tester.army/e2e` and `X-Title: e2e` for Vercel AI Gateway and
-OpenRouter. They replace the same headers set on the provider instance.
+e2e sends the redacted screen, the step instruction, and any requested
+screenshots to your model provider, and never depends on server-side
+conversation storage. Every request sends an `e2e/<version>` `User-Agent`
+(plus `HTTP-Referer` and `X-Title` headers for Vercel AI Gateway and
+OpenRouter).
 
 <AccordionGroup>
 <Accordion title="OpenAI and Azure OpenAI: zero data retention">
@@ -286,6 +282,7 @@ them.
 | The built-in agent has no model | `MODEL_UNAVAILABLE` | Set `agents.<name>.model`. |
 | GitHub Copilot doesn't serve the model to your account | `MODEL_UNAVAILABLE` | Pick an id your plan serves. See [Pick a model](/subscriptions#pick-a-model). |
 | A provider that reads its key at config load has none | `CONFIG_LOAD_FAILED` | Set the key. |
+| The model's key variable is not set | `MODEL_PROVIDER_FAILED` | Set the variable the message names, such as `AI_GATEWAY_API_KEY`. Only steps that call the model fail. Recorded `agent.act` steps and tests with no agent call still run. |
 | Authentication fails on the first model call | `MODEL_PROVIDER_FAILED` | Check the provider's API key, or run `npx e2e login` for a subscription. For Vercel OIDC the message names only `AI_GATEWAY_API_KEY`. Check `vercel login` and `.vercel/project.json`. |
 | The `ai` package is missing | `MODEL_UNAVAILABLE` | Install `ai`. See [Pick a gateway or a provider](#pick-a-gateway-or-a-provider). |
 | A step's second turn fails with `Item with id 'rs_…' not found` | `MODEL_PROVIDER_FAILED` | Leave `store` off in `providerOptions`, the default, or call OpenAI directly instead of through a gateway. |

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -132,6 +132,17 @@ describe('engine protocol', () => {
     await remote.dispose!(cleanup);
     const legacy = overLoopback(toy({ actions: LOCATOR_ACTION_KINDS, perform }));
     expect(legacy.remote.actions).not.toContain('setInputFilePayloads');
+  });
+
+  it('advertises multiTap and carries its count and modifiers over JSON-RPC unchanged', async () => {
+    const perform = vi.fn<NonNullable<Engine['perform']>>(async () => undefined);
+    const { remote } = overLoopback(toy({ actions: ['tap', 'multiTap'], perform }));
+    expect(remote.actions).toContain('multiTap');
+    await remote.init!(initInfo());
+    const action = { kind: 'multiTap', count: 3, modifiers: ['Shift'] } as const;
+    await remote.perform!({ id: 'root', revision: '1' }, action, operation());
+    expect(perform).toHaveBeenCalledWith(expect.anything(), action, expect.anything());
+    await remote.dispose!(cleanup);
   });
 
   it('carries a snapshot with its pixels byte for byte', async () => {
@@ -564,20 +575,26 @@ describe('engine protocol', () => {
         pointerActions: ['tap'],
         performAt: async () => {},
         keyboard: { type: async () => {}, press: async () => {} },
+        grantsAllPermissions: true,
         init: async () => {},
       }),
     );
     expect(validate(describeEngine(local))).toBe(true);
+    expect(describeEngine(local).grantsAllPermissions).toBe(true);
+    expect(connectEngine({ manifest: describeEngine(local), transport: loopbackTransport(local) }).grantsAllPermissions).toBe(true);
     const base = { name: 'x', version: '1', spiVersion: 1 };
     for (const refused of [
       { ...base, methods: ['engine/observe', 'engine/teleport'] },
       { ...base, methods: ['engine/readStyle'] },
       { ...base, methods: ['engine/observe'], actions: ['tap'] },
+      { ...base, methods: ['engine/observe'], actions: ['blur'] },
+      { ...base, methods: ['engine/viewportIntersection'] },
       { ...base, methods: ['engine/observe'], tapModifiers: true },
       { ...base, methods: ['engine/observe'], selectsDevice: true },
       // The client serves prepare for finish alone, which would drop the device it never forwards.
       { ...base, methods: ['lifecycle/finish'], selectsDevice: true },
       { ...base, methods: ['engine/observe'], pointerActions: ['tap'] },
+      { ...base, methods: ['engine/observe'], grantsAllPermissions: 'yes' },
       { ...base, methods: ['engine/locate'] },
       { ...base, methods: ['engine/observe', 'keyboard/type'] },
       { ...base, methods: ['state/capture'] },
@@ -586,6 +603,8 @@ describe('engine protocol', () => {
       expect(validate(refused), JSON.stringify(refused)).toBe(false);
       expect(() => connectEngine({ manifest: refused as never, transport: loopbackTransport(local) }), JSON.stringify(refused)).toThrow(ConfigurationError);
     }
+    // Only a worker-isolated engine names its isolation; `attempt` is the default, left out.
+    expect(validate({ ...base, methods: ['engine/observe'], isolation: 'attempt' })).toBe(false);
   });
 
   describe('launch arguments', () => {
@@ -626,6 +645,25 @@ describe('engine protocol', () => {
       expect(spread).toHaveLength(2);
     });
 
+    it('carries fileApps in the manifest, so a served engine opens a file app and one that does not declare it is refused', () => {
+      const { local, remote } = overLoopback(toy({ fileApps: true }));
+      expect(describeEngine(local).fileApps).toBe(true);
+      expect(remote.fileApps).toBe(true);
+      const plain = overLoopback(toy({}));
+      expect(describeEngine(plain.local).fileApps).toBeUndefined();
+      expect(plain.remote.fileApps).not.toBe(true);
+    });
+
+    it('refuses a server that does not declare the fileApps its manifest promised', async () => {
+      const local = defineEngine(toy({}));
+      const remote = connectEngine({ manifest: { ...describeEngine(local), fileApps: true }, transport: loopbackTransport(local) });
+      await expect(remote.init!(initInfo())).rejects.toThrow(/fileApps is false, declared true/);
+    });
+
+    it('refuses a fileApps flag that is not a boolean', () => {
+      expect(() => defineEngine(toy({ fileApps: 'yes' as never }))).toThrow(/fileApps must be a boolean/);
+    });
+
     it('carries the object form to an engine that declares launchArgumentValues', async () => {
       const seen: unknown[] = [];
       const { local, remote } = overLoopback(
@@ -664,6 +702,40 @@ describe('engine protocol', () => {
     });
   });
 
+  describe("permissions 'all'", () => {
+    it('carries allPermissions into prepare on an engine that declares grantsAllPermissions', async () => {
+      const seen: unknown[] = [];
+      const { remote } = overLoopback(
+        toy({
+          grantsAllPermissions: true,
+          async prepare(info) {
+            seen.push(info.app);
+          },
+        }),
+        {
+          validateApp(app) {
+            seen.push(app);
+          },
+        },
+      );
+      const target = resolveConfig(
+        { targets: [{ name: 'phone', platform: 'toy', engine: remote, app: { bundleId: 'dev.shop.app', permissions: 'all' } }] },
+        { projectRoot: process.cwd(), env: {} as NodeJS.ProcessEnv },
+      ).targets[0]!;
+      await target.engine!.prepare!({ runId: 'run', targetName: target.name, projectRoot: process.cwd(), app: engineAppInfo(target.app), slots: 1, env: {}, headed: false, signal: new AbortController().signal, log: () => {} });
+      expect(seen).toEqual([
+        { bundleId: 'dev.shop.app', allPermissions: true },
+        { bundleId: 'dev.shop.app', allPermissions: true },
+      ]);
+    });
+
+    it('refuses a server that does not declare the grantsAllPermissions its manifest promised', async () => {
+      const local = defineEngine(toy({}));
+      const remote = connectEngine({ manifest: { ...describeEngine(local), grantsAllPermissions: true }, transport: loopbackTransport(local) });
+      await expect(remote.init!(initInfo())).rejects.toThrow(/grantsAllPermissions is false, declared true/);
+    });
+  });
+
   it('serves every in-process target through one protocol client and leaves a connected engine as declared', () => {
     const engine = defineEngine(toy());
     const { remote } = overLoopback(toy());
@@ -686,6 +758,10 @@ describe('engine protocol', () => {
     expect(() => connectEngine({ manifest: { name: 'x', version: '1', spiVersion: 1, methods: ['engine/perform'] }, transport })).toThrow(/perform without observe/);
     expect(() => connectEngine({ manifest: { name: 'x', version: '1', spiVersion: 1, methods: ['engine/observe', 'engine/perform'] }, transport })).toThrow(/perform without actions/);
     expect(() => connectEngine({ manifest: { name: 'x', version: '1', spiVersion: 1, methods: ['engine/observe', 'engine/observe'] }, transport })).toThrow(/twice/);
+    // The schema cannot require engine/locate beside it: resolveLocators builds locate on the client.
+    const measuring = { name: 'x', version: '1', spiVersion: 1 as const, methods: ['engine/observe', 'engine/viewportIntersection'] as const };
+    expect(() => connectEngine({ manifest: measuring, transport })).toThrow(/viewportIntersection without locate/);
+    expect(connectEngine({ manifest: measuring, transport, resolveLocators: true }).capabilities.has('viewport-intersection')).toBe(true);
   });
 });
 
@@ -938,6 +1014,69 @@ describe('engine protocol against a server written from the messages alone', () 
     await remote.init!(initInfo());
     await remote.startAttempt!({ attemptId: 'attempt-1', artifactsDir, signal: new AbortController().signal, resolveSecret: async () => '', appLog: () => {}, navigation: () => {}, environment: () => {} });
     expect(await remote.artifacts!.screenshot(undefined, operation())).toBe(path.join('screenshots', '001-screenshot.png'));
+    await remote.dispose!(cleanup);
+    rmSync(artifactsDir, { recursive: true, force: true });
+  });
+
+  it('keeps a screenshot answered after its attempt ended out of the next attempt\'s directory', async () => {
+    const methods = ['engine/observe', 'artifacts/screenshot', 'lifecycle/startAttempt', 'lifecycle/endAttempt'] as const;
+    let answer: (() => void) | undefined;
+    const { transport } = handWritten(methods, {
+      'lifecycle/endAttempt': async () => null,
+      'artifacts/screenshot': async () => {
+        await new Promise<void>((resolve) => (answer = resolve));
+        return { data: Buffer.from('late png bytes').toString('base64'), mediaType: 'image/png' };
+      },
+    });
+    const remote = connectEngine({ manifest: { name: 'hand', version: '1', spiVersion: 1, methods: [...methods] }, transport });
+    const first = mkdtempSync(path.join(tmpdir(), 'e2e-protocol-'));
+    const second = mkdtempSync(path.join(tmpdir(), 'e2e-protocol-'));
+    const attempt = (attemptId: string, artifactsDir: string): EngineAttemptContext => ({
+      attemptId, artifactsDir, signal: new AbortController().signal, resolveSecret: async () => '', appLog: () => {}, navigation: () => {}, environment: () => {},
+    });
+    await remote.init!(initInfo());
+    await remote.startAttempt!(attempt('attempt-1', first));
+    const late = remote.artifacts!.screenshot('late', operation()).then(() => undefined, (cause: unknown) => cause);
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    await remote.endAttempt!(cleanup);
+    await remote.startAttempt!(attempt('attempt-2', second));
+    answer?.();
+    const refused = await late;
+    expect(readdirSync(second)).toEqual([]);
+    expect(refused).toMatchObject({ code: 'INVALID_STATE' });
+    await remote.dispose!(cleanup);
+    rmSync(first, { recursive: true, force: true });
+    rmSync(second, { recursive: true, force: true });
+  });
+
+  it('keeps a screenshot answered while its attempt is ending out of that attempt\'s directory', async () => {
+    const methods = ['engine/observe', 'artifacts/screenshot', 'lifecycle/startAttempt', 'lifecycle/endAttempt'] as const;
+    let answer: (() => void) | undefined;
+    let ended: (() => void) | undefined;
+    const { transport } = handWritten(methods, {
+      'lifecycle/endAttempt': async () => {
+        await new Promise<void>((resolve) => (ended = resolve));
+        return null;
+      },
+      'artifacts/screenshot': async () => {
+        await new Promise<void>((resolve) => (answer = resolve));
+        return { data: Buffer.from('late png bytes').toString('base64'), mediaType: 'image/png' };
+      },
+    });
+    const remote = connectEngine({ manifest: { name: 'hand', version: '1', spiVersion: 1, methods: [...methods] }, transport });
+    const artifactsDir = mkdtempSync(path.join(tmpdir(), 'e2e-protocol-'));
+    await remote.init!(initInfo());
+    await remote.startAttempt!({ attemptId: 'attempt-1', artifactsDir, signal: new AbortController().signal, resolveSecret: async () => '', appLog: () => {}, navigation: () => {}, environment: () => {} });
+    const late = remote.artifacts!.screenshot('late', operation()).then(() => undefined, (cause: unknown) => cause);
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    const ending = remote.endAttempt!(cleanup);
+    await vi.waitFor(() => expect(ended).toBeDefined());
+    answer?.();
+    const refused = await late;
+    expect(readdirSync(artifactsDir)).toEqual([]);
+    expect(refused).toMatchObject({ code: 'INVALID_STATE' });
+    ended?.();
+    await ending;
     await remote.dispose!(cleanup);
     rmSync(artifactsDir, { recursive: true, force: true });
   });
