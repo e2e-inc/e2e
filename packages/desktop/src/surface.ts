@@ -489,6 +489,8 @@ export class DesktopSurface {
     this.chosenWindow = id;
     // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
     this.pointWindow = undefined;
+    // The video records what `screen` reads, from now on, not from the next read.
+    await this.video.follow(id, { ...operation, runId: '', attemptId: '', origin: 'test' });
   }
 
   /**

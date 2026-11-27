@@ -26,6 +26,14 @@ const snapshotOfAsked = (_fake: FakeDriver, args: readonly unknown[]): Answer =>
   return { ok: true, data: { snapshot_id: 's', window: { id: windowId }, tree: { role: 'window', children: [{ role: 'button', name: 'Go', ref: `@${windowId}` }] } } };
 };
 
+/** A start that writes its file, as the fake's own does, for a scenario that scripts the starts after it. */
+const recording = (fake: FakeDriver, args: readonly unknown[]): Answer => {
+  const file = (args[0] as { path: string }).path;
+  writeFileSync(file, 'mp4');
+  fake.videos.set(1, file);
+  return { ok: true, data: { id: 1, width: 840, height: 584 } };
+};
+
 /** The window each recording the fake started was asked for, in order. */
 const recorded = (fake: FakeDriver) => fake.of('startVideo').map((call) => (call.args[0] as { windowId: string }).windowId);
 
@@ -66,7 +74,9 @@ describe('desktop video', () => {
     await surface.startVideo(operation());
     await surface.observe(operation(), undefined);
     expect(recorded(fake)).toEqual(['w-mine']);
+    // Activating a window moves the video at once, with no read of the screen after it.
     await surface.activateWindow('w-other', operation());
+    expect(recorded(fake)).toEqual(['w-mine', 'w-other']);
     await surface.observe(operation(), undefined);
     expect(recorded(fake)).toEqual(['w-mine', 'w-other']);
     expect(await surface.stopVideo(operation())).toHaveLength(2);
@@ -113,6 +123,19 @@ describe('desktop video', () => {
     await attempt(surface);
     await surface.startVideo(operation());
     await expect(surface.stopVideo(operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('got no frame') });
+  });
+
+  it("keeps the files of the windows it recorded when another window's start failed", async () => {
+    const refused = failure('WINDOW_NOT_FOUND', 'not_delivered', 'window w-other is not one ScreenCaptureKit can record');
+    const { surface, fake } = await launched({ listWindows: [twoWindows], snapshot: [snapshotOfAsked], startVideo: [recording, refused] });
+    await attempt(surface);
+    await surface.startVideo(operation());
+    await surface.activateWindow('w-other', operation());
+    // The window that cannot be recorded is not tried again on every read while the screen stays on it.
+    await surface.observe(operation(), undefined);
+    await surface.observe(operation(), undefined);
+    expect(recorded(fake)).toEqual(['w-mine', 'w-other']);
+    expect(await surface.stopVideo(operation())).toEqual([{ path: path.join('video', 'window-001.mp4'), startedAt: expect.any(String) }]);
   });
 
   it('stops a recording the attempt left running when it ends', async () => {

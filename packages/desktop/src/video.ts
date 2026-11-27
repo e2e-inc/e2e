@@ -42,6 +42,8 @@ export class WindowVideo {
   private files = 0;
   /** The first file the video lost (a start `follow` could not make, or a stop that left no playable file): why a video that recorded nothing has no file. */
   private missed: unknown;
+  /** The windows whose recording failed to start, which `follow` does not try again: a read polls every 100 ms. */
+  private refused = new Set<string>();
   /** The start or stop running now, which the next one waits for. */
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -76,6 +78,7 @@ export class WindowVideo {
     this.artifactsDir = artifactsDir;
     this.segments = [];
     this.missed = undefined;
+    this.refused = new Set();
     try {
       await this.serially(() => this.switchTo(windowId, operation));
     } catch (cause) {
@@ -89,12 +92,14 @@ export class WindowVideo {
    * new one starts. Undefined ends the current file with nothing after it,
    * as before the app quits. Nothing happens while no video was asked for,
    * and a window that cannot be recorded leaves a gap, never a failure of
-   * the read or launch that called it. The first such failure is kept for
-   * `end`.
+   * the read or launch that called it: it is not tried again while the
+   * screen stays on it. The first such failure is kept for `end`.
    */
   async follow(windowId: string | undefined, operation: OperationContext): Promise<void> {
-    if (!this.wanted || windowId === this.current?.windowId) return;
-    await this.serially(() => this.switchTo(windowId, operation)).catch((cause: unknown) => {
+    const target = windowId !== undefined && this.refused.has(windowId) ? undefined : windowId;
+    if (!this.wanted || target === this.current?.windowId) return;
+    await this.serially(() => this.switchTo(target, operation)).catch((cause: unknown) => {
+      if (target !== undefined) this.refused.add(target);
       this.missed ??= cause;
     });
   }
