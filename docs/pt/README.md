@@ -204,6 +204,16 @@ translation moves or goes with it in the same change.
 | store (`cache.store`) | armazenamento |
 | stale | desatualizado |
 | gap (an action the cache can't replay) | lacuna (`gap` in code) |
+| engine spec (`defineEngine`) | especificação (da engine) |
+| handle (`EngineHandle`), factory | handle, factory (keep in English, o handle, a factory) |
+| capability (an engine's) | capability (keep in English, a capability) |
+| retryable (an error code) | que permite nova tentativa |
+| drive (an app or device) | controlar |
+| steering (hooks, methods) | de controle (hooks de controle) |
+| surface (under test) | superfície |
+| withheld (pixels) | retido |
+| semantic capture | captura semântica |
+| dispose, disposal | descartar, descarte |
 | label (text on a control) | rótulo |
 | edge case | caso de borda |
 | checkout (a git working copy) | checkout (keep in English, o checkout) |
