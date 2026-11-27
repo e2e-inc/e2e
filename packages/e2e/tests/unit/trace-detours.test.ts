@@ -163,6 +163,16 @@ describe('findDetours by recorded locations', () => {
     ]);
   });
 
+  it('names a trip to another record of one route alike when it records and when it replays', () => {
+    const live = flow([tap('Order 456', '/orders/123', 'link'), tap('Help', '/orders/456', 'link'), tap('Order 123', '/help', 'link')], { endPath: '/orders/123' });
+    const found = findDetours(live);
+    expect(found).toEqual([{ from: 0, to: 3, at: '/orders/:id', via: '/orders/:id', evidence: 'locations' }]);
+    expect(describeDetour(found[0]!)).toBe('actions 1-3 left /orders/:id for another /orders/:id and came back with nothing typed, chosen, or set');
+    // Read back from the entry, the first stop is still the other order, not the help page after it.
+    const stored = flow([tap('Order 456', '/orders/:id', 'link'), tap('Help', '/orders/:id', 'link'), tap('Order 123', '/help', 'link')], { endPath: '/orders/123' });
+    expect(findDetours({ ...stored, detours: [{ from: 0, to: 3 }] })).toEqual(found);
+  });
+
   it('does not read a cut recording\'s end location as where its last kept action led', () => {
     // Actions past the cap (typing, then the way back) ran but were not kept.
     expect(findDetours(flow([tap('Edit', '/'), scroll('/edit')], { endPath: '/', truncated: true }))).toEqual([]);

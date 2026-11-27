@@ -135,13 +135,15 @@ export function findDetours(trace: DetourInput): TraceDetour[] {
 
 /**
  * The spans the recording run kept, named by the locations as stored: the
- * screen the span started on, and the first other location it reached.
+ * screen the span started on, and the first other location it reached,
+ * which is the first known place after the action that left, since
+ * `byLocations` starts a span at the last action that stood home.
  */
 function recorded(trace: DetourInput): TraceDetour[] {
   const where = places(trace);
   return (trace.detours ?? []).map(({ from, to }) => {
     const at = where[from];
-    const via = where.slice(from + 1, to).find((place) => place !== undefined && place !== at);
+    const via = where.slice(from + 1, to).find((place) => place !== undefined);
     return { from, to, ...(at === undefined ? {} : { at }), ...(via === undefined ? {} : { via }), evidence: 'locations' as const };
   });
 }
@@ -273,7 +275,9 @@ export function settledDetour(detour: string, ledger: { readonly redact: (text: 
 /**
  * One detour as a line names it, actions numbered from 1 as the report
  * numbers them: `actions 2-4 left /settings for /settings/privacy and came
- * back with nothing typed, chosen, or set`. That is all the rule can show:
+ * back with nothing typed, chosen, or set`, or `for another /orders/:id`
+ * when the place it went to is spelled like the one it left (another record
+ * of the route, other query values). That is all the rule can show:
  * a plain button tap on the way may still have saved something. A detour
  * read from an entry's actions alone says it is a hint wherever it is
  * printed, the step's report included, as `e2e cache check` reads it.
@@ -282,5 +286,7 @@ export function describeDetour(detour: TraceDetour): string {
   // Every detour spans two actions at least: one that left, one that came back.
   const span = `actions ${String(detour.from + 1)}-${String(detour.to)}`;
   if (detour.evidence === 'actions') return `${span} left a screen, only looked around, and went back (recorded without locations: a hint only)`;
-  return `${span} left ${detour.at ?? 'a screen'} for ${detour.via ?? 'another'} and came back with nothing typed, chosen, or set`;
+  // Another record of one route, or other query values, spell alike.
+  const via = detour.via === undefined ? 'another' : detour.via === detour.at ? `another ${detour.via}` : detour.via;
+  return `${span} left ${detour.at ?? 'a screen'} for ${via} and came back with nothing typed, chosen, or set`;
 }
