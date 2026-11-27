@@ -667,6 +667,39 @@ describe('FileCacheStore', () => {
       expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toHaveLength(1);
     });
 
+    it('finishes the pair when publishing the lock failed and so did putting the old YAML back', async () => {
+      const { directory, store } = await makeStore();
+      await store.write(KEY, payload());
+      // The lock's rename fails, and from then on so does every write: the rollback cannot restore the old YAML.
+      const script = `
+        import fsp from 'node:fs/promises';
+        import { syncBuiltinESMExports } from 'node:module';
+        const { rename, writeFile } = fsp;
+        let full = false;
+        const enospc = () => Object.assign(new Error('no space left'), { code: 'ENOSPC' });
+        fsp.rename = (from, to) => {
+          if (String(to).endsWith('.lock.json')) {
+            full = true;
+            return Promise.reject(Object.assign(new Error('i/o error'), { code: 'EIO' }));
+          }
+          return rename(from, to);
+        };
+        fsp.writeFile = (...args) => (full ? Promise.reject(enospc()) : writeFile(...args));
+        syncBuiltinESMExports();
+        const { FileCacheStore } = await import('@e2e-dev/core/lib/cache/store');
+        const store = new FileCacheStore({ directory: ${JSON.stringify(directory)}, maxBytes: ${String(MAX_CACHE_WIRE_BYTES)}, writable: true });
+        await store.write(${JSON.stringify(OTHER_KEY)}, ${JSON.stringify(payload('ios'))}).then(() => process.exit(0), () => process.exit(3));
+      `;
+      const code = await new Promise<number | null>((resolve) => {
+        spawn(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), stdio: 'ignore' }).on('exit', resolve);
+      });
+      expect(code).toBe(3);
+      expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toHaveLength(1);
+      expect((await store.read(OTHER_KEY, step('ios'))).status).toBe('hit');
+      expect((await store.read(KEY, step())).status).toBe('hit');
+      expect((await readdir(directory)).filter((name) => name.endsWith('.pending'))).toEqual([]);
+    });
+
     it('leaves a file at the record path that is not a record a writer left', async () => {
       const { directory, store } = await makeStore();
       await store.write(KEY, payload());

@@ -489,30 +489,28 @@ export class FileCacheStore implements CacheStore {
     await mkdir(this.directory, { recursive: true });
     const pending = this.pendingPath(name);
     let recorded = false;
-    try {
-      const replaced = await writeFilesAtomic(
-        [
-          { path: this.path(name, RECORDING_EXTENSION), content: yaml },
-          { path: this.path(name, LOCK_EXTENSION), content: lock },
-        ],
-        {
-          mode: 0o600,
-          // Rendered from what was read under the lock: published only while the lock is still this writer's,
-          // checked as late as can be, once the files are written and only the renames are left. The lock
-          // is recorded then too, for `recover`, which finishes a pair a crash cut between its renames.
-          beforeReplace: async () => {
-            if (!(await holdsFileLock(this.lockPath(name)))) return false;
-            await writeFileAtomic(pending, JSON.stringify({ name, yamlDigest: digest(yaml), lock }), { mode: 0o600 });
-            recorded = true;
-            return true;
-          },
+    // A write that throws keeps the record: a rollback that failed too left the new YAML beside the old lock,
+    // which `recover` finishes, and one that worked left the old pair, whose YAML makes `recover` drop it.
+    const replaced = await writeFilesAtomic(
+      [
+        { path: this.path(name, RECORDING_EXTENSION), content: yaml },
+        { path: this.path(name, LOCK_EXTENSION), content: lock },
+      ],
+      {
+        mode: 0o600,
+        // Rendered from what was read under the lock: published only while the lock is still this writer's,
+        // checked as late as can be, once the files are written and only the renames are left. The lock
+        // is recorded then too, for `recover`, which finishes a pair a crash cut between its renames.
+        beforeReplace: async () => {
+          if (!(await holdsFileLock(this.lockPath(name)))) return false;
+          await writeFileAtomic(pending, JSON.stringify({ name, yamlDigest: digest(yaml), lock }), { mode: 0o600 });
+          recorded = true;
+          return true;
         },
-      );
-      if (!replaced) return undefined;
-      return { bytes: yamlBytes + lockBytes };
-    } finally {
-      if (recorded) await unlink(pending).catch(() => undefined);
-    }
+      },
+    );
+    if (recorded) await unlink(pending).catch(() => undefined);
+    return replaced ? { bytes: yamlBytes + lockBytes } : undefined;
   }
 
   private async remove(name: string): Promise<void> {
