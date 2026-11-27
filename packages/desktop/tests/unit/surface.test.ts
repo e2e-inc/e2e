@@ -1112,6 +1112,22 @@ describe('DesktopSurface: acting', () => {
     expect(last(fake, 'act')).toMatchObject({ direction: 'left', pages: 0.75 });
   });
 
+  it('scrolls the node that scrolls sideways on a root swipe left or right, and the one that scrolls up and down otherwise', async () => {
+    const store = screen('w-mine', {
+      name: 'Store',
+      bounds: { x: 0, y: 0, width: 100, height: 100 },
+      children: [
+        { role: 'scrollarea', name: 'Carousel', ref_id: '@s:e1', available_actions: ['Scroll'], scroll_axes: ['horizontal'] },
+        { role: 'scrollarea', name: 'List', ref_id: '@s:e2', available_actions: ['Scroll'], scroll_axes: ['vertical'] },
+      ],
+    });
+    const { surface, fake } = await launched({ snapshot: [store] }, { observe: false });
+    for (const [direction, ref] of [['left', '@s:e1'], ['right', '@s:e1'], ['up', '@s:e2'], ['down', '@s:e2']] as const) {
+      await surface.perform({ id: 'root', revision: '' }, { kind: 'swipe', direction }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref, action: 'scroll', direction });
+    }
+  });
+
   it('scrolls the window as it is now on a root swipe, not the container of an older observation', async () => {
     const read = (id: string) => screen('w-mine', { name: 'List', bounds: { x: 0, y: 0, width: 100, height: 100 }, children: [{ role: 'scrollarea', name: id, ref_id: `@${id}:e1`, available_actions: ['Scroll'] }] });
     const { surface, fake } = await launched({ snapshot: [read('s1'), read('s1'), read('s2')] });
