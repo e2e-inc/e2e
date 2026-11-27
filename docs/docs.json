@@ -75,8 +75,7 @@
               "web",
               "mobile",
               "desktop",
-              "api-testing",
-              "core"
+              "api-testing"
             ]
           },
           {
@@ -93,7 +92,8 @@
               "visual-testing",
               "authentication",
               "bug-bash",
-              "agents"
+              "agents",
+              "core"
             ]
           },
           {
@@ -193,8 +193,7 @@
               "reference/screen",
               "reference/app",
               "reference/request",
-              "reference/agent",
-              "reference/core"
+              "reference/agent"
             ]
           },
           {
@@ -204,6 +203,7 @@
               "reference/cli",
               "reference/runner",
               "reference/mcp",
+              "reference/core",
               "reference/reporters",
               "reference/environment",
               "reference/errors",
