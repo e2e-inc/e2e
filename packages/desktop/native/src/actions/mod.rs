@@ -482,21 +482,27 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option
             key_window(pid, &element)?;
             Route::Process(pid)
         };
-        if let Some(reference) = focused {
-            let entry = refs::get(reference).ok_or_else(|| Failure::refused(codes::STALE_REF, format!("{reference} names no element of a recent snapshot")))?;
-            if Element::application(pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element) {
-                return Err(Failure::refused(codes::ACTION_FAILED, "the control lost keyboard focus before the key was sent, so nothing was sent"));
+        let control = match focused {
+            Some(reference) => {
+                Some(refs::get(reference).ok_or_else(|| Failure::refused(codes::STALE_REF, format!("{reference} names no element of a recent snapshot")))?)
             }
-        }
+            None => None,
+        };
         // A key sent as physical input goes to whatever app is frontmost: the user may have switched apps since the raise,
-        // while the app still names its own focused control.
+        // while the app still names its own focused control. The window check waits on the app, so it comes first.
         if physical {
-            // The window check waits on the app: the frontmost check comes after it, the last read before the key, so a
-            // switch to another app while it ran is still caught.
             key_window(pid, &element)?;
-            if !frontmost(pid)? {
-                return Err(Failure::refused(codes::ACTION_FAILED, "another app came forward before the key was sent, so nothing was sent"));
-            }
+        }
+        // The control a locator's key is for must hold the app's focus, read after the window check: a sheet that opened
+        // during it took the focus, and its default button would take the key.
+        if let Some(entry) = &control
+            && Element::application(pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element)
+        {
+            return Err(Failure::refused(codes::ACTION_FAILED, "the control lost keyboard focus before the key was sent, so nothing was sent"));
+        }
+        // The frontmost check is the last read before a physical key, so a switch to another app is still caught.
+        if physical && !frontmost(pid)? {
+            return Err(Failure::refused(codes::ACTION_FAILED, "another app came forward before the key was sent, so nothing was sent"));
         }
         go("press")?;
         input::press(&combo, route).map_err(Failure::delivered)
