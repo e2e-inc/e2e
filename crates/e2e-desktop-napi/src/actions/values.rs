@@ -230,7 +230,16 @@ pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Out
         // A stepper whose value cannot be written still steps toward a number.
         let names = action_names(element, "set value")?;
         let steps = names.iter().any(|name| name == "AXIncrement" || name == "AXDecrement");
-        if let (true, Ok(Value::Number(_)), Ok(target)) = (steps, element.attribute("AXValue"), finite(text)) {
+        // A value the app did not answer in time is no proof the stepper shows no number: a stall, which a retry may get past.
+        let current = if steps {
+            match element.attribute("AXValue") {
+                Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => return Err(unread(error, "set value")),
+                current => Some(current),
+            }
+        } else {
+            None
+        };
+        if let (Some(Ok(Value::Number(_))), Ok(target)) = (current, finite(text)) {
             // A value outside the range the stepper reports is one no step reaches: refused before any press.
             let bound = |name: &str| match element.attribute(name) {
                 Ok(Value::Number(number)) => Some(number),
