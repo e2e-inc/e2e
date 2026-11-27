@@ -810,6 +810,19 @@ describe('FileCacheStore', () => {
     expect((await store.read(KEY, step())).status).toBe('hit');
   });
 
+  it('fails an eviction it cannot write back, and the key still replays', async () => {
+    const { directory, store } = await makeStore();
+    const keys = Array.from({ length: 8 }, (_, index) => String(index).repeat(64));
+    for (const [index, key] of keys.entries()) await store.write(key, payload('web', { recordedFor: step('web', { callIndex: index }) }));
+    // The lock as compact JSON reads the same, but a rewrite renders it indented, over this store's cap.
+    const lock = JSON.stringify(JSON.parse(await readFile(lockPath(directory), 'utf8')));
+    await writeFile(lockPath(directory), lock, 'utf8');
+    const capped = new FileCacheStore({ directory, maxBytes: Math.max(Buffer.byteLength(lock), Buffer.byteLength(await readFile(yamlPath(directory), 'utf8'))), writable: true });
+    expect((await capped.read(keys[0]!, step())).status).toBe('hit');
+    await expect(capped.delete(keys[0]!, step())).rejects.toThrow(/could not write/u);
+    expect((await capped.read(keys[0]!, step())).status).toBe('hit');
+  });
+
   it('keeps a recording it cannot read when another is written or evicted beside it', async () => {
     const { directory, store } = await makeStore();
     const second = step('web', { callIndex: 1 });

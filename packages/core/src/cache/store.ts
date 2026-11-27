@@ -202,7 +202,8 @@ export class FileCacheStore implements CacheStore {
       if (problem !== undefined) throw new Error(`cannot evict ${keyHash.slice(0, 12)} without dropping a recording that does not read: ${problem}`);
       const next = hits(file.parsed).filter((recording) => recording.keyHash !== keyHash);
       if (next.length === 0) await this.remove(file.name);
-      else await this.save(file.name, file.parsed.testId, next);
+      // A pair it could not write back (one rendered over the size cap, or the lock lost) still replays the key.
+      else if ((await this.save(file.name, file.parsed.testId, next)) === undefined) throw new Error(`could not write ${file.name} without ${keyHash.slice(0, 12)}`);
     });
   }
 
