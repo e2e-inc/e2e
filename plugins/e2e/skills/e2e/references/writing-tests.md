@@ -525,9 +525,10 @@ background: `waitForPopup(() => trigger)` makes it active and returns it.
   `screen` locator.
 
 Patterns use Playwright's glob grammar (`*` within one path segment, `**`
-across `/`); a relative one resolves against the base URL. In an HTTP or HTTPS
-URL, a query apostrophe matches `%27`. Other punctuation follows the browser's
-encoding for its part of the URL. Full reference:
+across `/`); a relative one resolves against the base URL. e2e matches raw
+`"`, `<`, `>`, `` ` ``, `^`, and `'` according to the browser's encoding for
+the URL component. For example, a query apostrophe in an HTTP URL matches
+`%27`. Full reference:
 docs/reference/web.mdx, docs/browser.mdx.
 
 ## Habits

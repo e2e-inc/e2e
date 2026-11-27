@@ -21,9 +21,9 @@ export interface UrlPattern {
 }
 
 /**
- * Compiles a `waitForURL`, `route`, `unroute`, `waitForResponse`, or `waitForRequest` pattern as
- * Playwright's `urlMatches` does: a string is a URL glob, the empty string
- * matches any URL, and a RegExp tests the full URL. A string with no `*`, `{`,
+ * Compiles a `waitForURL`, `route`, `unroute`, `waitForResponse`, or `waitForRequest`
+ * string pattern in Playwright's URL glob grammar. The empty string matches
+ * any URL, and a RegExp tests the full URL. A string with no `*`, `{`,
  * `}`, or `\` matches the one URL it resolves to. `base` is read only for a
  * string that needs it, so a target with no app URL takes every other pattern.
  * A glob that nests a `{` or leaves one unmatched is `INVALID_ARGUMENT` here,
@@ -120,8 +120,8 @@ const ENCODED_LITERALS = new Map([
  * ASCII stays literal, and non-ASCII text and spaces match their encoding.
  */
 function literalSource(ch: string): string {
-  const encodedLiteral = ENCODED_LITERALS.get(ch);
-  if (encodedLiteral !== undefined) return encodedLiteral;
+  const spelling = ENCODED_LITERALS.get(ch);
+  if (spelling !== undefined) return spelling;
   if (/^[\x21-\x7e]$/.test(ch)) return escapeRegexpChar(ch);
   let encoded: string;
   try {
@@ -154,6 +154,20 @@ function baseFor(glob: string, base: () => string): string | undefined {
   return scheme || URL.canParse(glob) ? undefined : base();
 }
 
+const COMPONENT_PUNCTUATION = /['`"<>^]/g;
+
+/** Find a punctuation-bearing authority using the URL parser's slash and base rules. */
+function authoritySegment(segments: readonly string[], baseHref: string | undefined, tag: string): number {
+  // oxlint-disable-next-line no-control-regex -- the URL parser strips these characters at the start of its input
+  const first = segments[0]!.replace(/^[\x00-\x20]+|[\t\n\r]/g, '');
+  const scheme = /^[a-z][a-z0-9+.-]*:/i.exec(first)?.[0] ?? '';
+  const index = segments.findIndex((segment, segmentIndex) => segmentIndex === 0 ? first !== scheme : segment.replace(/[\t\n\r]/g, '') !== '');
+  if (index < 0 || segments[index]!.search(COMPONENT_PUNCTUATION) < 0) return -1;
+  const prefix = index === 0 ? scheme : `${segments.slice(0, index).join('/')}/`;
+  const host = `${tag}authority`;
+  return URL.parse(prefix + host, baseHref)?.hostname === host ? index : -1;
+}
+
 /**
  * Resolves a relative URL glob against the base URL, as Playwright's
  * `resolveGlobBase` does: each path segment that holds a glob character is
@@ -169,42 +183,48 @@ function resolveUrlGlob(glob: string, base: () => string): string {
   if (glob.startsWith('*')) return glob;
   const baseHref = baseFor(glob, base);
   if (UNRESOLVED_GLOB_SCHEMES.some((scheme) => glob.startsWith(scheme))) return glob;
-  // A placeholder prefix neither the glob nor the base holds, so restoring a segment never lands on the user's own text.
+  const segments = glob.split('/');
+  const first = segments[0]!;
+  const schemeGlob = inSchemePlace(first) && isSchemePattern(first) ? first.toLowerCase() : undefined;
+  if (schemeGlob !== undefined) segments[0] = 'http:';
+  // The URL parser can create marker text, for example by decoding a hostname.
+  const normalizedGlob = URL.parse(segments.join('/'), baseHref)?.href;
+  const normalizedBase = baseHref === undefined ? undefined : URL.parse(baseHref)?.href;
   let tag = '$_';
-  while (glob.includes(tag) || baseHref?.includes(tag) === true) tag += '_';
+  while ([glob, baseHref, normalizedGlob, normalizedBase].some((input) => input?.includes(tag))) tag += '_';
+  const authority = authoritySegment(segments, baseHref, tag);
   const originals = new Map<string, string>();
-  const hold = (original: string, placeholder: string): string => {
+  const hold = (original: string): string => {
     if (original === '') return '';
+    // A marker ends without the leading '$', so adjacent input cannot start a marker inside it.
+    const placeholder = `${tag}${originals.size}z`;
     originals.set(placeholder, original);
     return placeholder;
   };
-  const relative = glob.split('/').map((segment, index) => {
+  const relative = segments.map((segment, index) => {
     if (segment === '.' || segment === '..' || segment === '') return segment;
-    if (index === 0 && inSchemePlace(segment)) return isSchemePattern(segment) ? hold(segment, 'http:') : segment;
+    if (index === 0 && inSchemePlace(segment)) return segment;
     if (!/[*?{}\\]/.test(segment)) {
+      if (index === authority) return segment;
       // A delimiter in an earlier alternative does not determine the actual
       // component of a literal in this segment. Preserve its spelling.
-      return segment.replace(/['`"<>^]/g, (literal, offset: number) => hold(literal, `${tag}${index}_${offset}_$`));
+      return segment.replace(COMPONENT_PUNCTUATION, hold);
     }
     // The query or fragment is held behind its own `?` or `#`, so the URL parser still sees where the path ends
     // and a later `..` stays in the query or fragment instead of eating a path segment.
     const end = segment.search(/[?#]/);
-    if (end === -1) return hold(segment, `${tag}${String(index)}_$`);
+    if (end === -1) return hold(segment);
     const delimiter = segment[end]!;
-    return hold(segment.slice(0, end), `${tag}${String(index)}_$`) + hold(segment.slice(end), `${delimiter}${tag}${String(index)}_$`);
+    return hold(segment.slice(0, end)) + delimiter + hold(segment.slice(end + 1));
   }).join('/');
-  let url: URL;
-  try {
-    url = new URL(relative, baseHref);
-  } catch {
-    return glob;
-  }
-  let resolved = url.href;
-  for (const [placeholder, original] of originals) {
-    const segment = url.origin.includes(placeholder) ? original.toLowerCase() : original;
-    resolved = resolved.replace(placeholder, () => segment);
-  }
-  return resolved;
+  const url = URL.parse(relative, baseHref);
+  if (url === null) return glob;
+  const resolved = url.href.replace(new RegExp(`\\${tag}[0-9]+z`, 'g'), (placeholder) => {
+    const original = originals.get(placeholder);
+    if (original === undefined) return placeholder;
+    return url.origin.includes(placeholder) ? original.toLowerCase() : original;
+  });
+  return schemeGlob === undefined ? resolved : schemeGlob + resolved.slice(url.protocol.length);
 }
 
 /**

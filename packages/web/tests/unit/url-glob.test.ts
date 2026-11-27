@@ -115,11 +115,14 @@ describe('URL globs', () => {
     ['/a"*', '/a"1', 'a%221'],
     ['/a<*', '/a<1', 'a%3C1'],
     ['/p#a>*', '/p#a>1', 'p#a%3E1'],
-    ['/a^*', '/a^1', 'a%5E1'],
   ])('matches %s against the browser serialization of %s', (glob, path, encoded) => {
     const url = new URL(path, BASE).href;
     expect(url).toBe(BASE + encoded);
     expect(matches(glob, url)).toBe(true);
+  });
+
+  it('matches a raw path caret against the percent-encoded URL Chromium reports', () => {
+    expect(matches('/a^*', `${BASE}a%5E1`)).toBe(true);
   });
 
   it('matches only the browser spelling in each brace alternative', () => {
@@ -134,6 +137,26 @@ describe('URL globs', () => {
     expect(matches('/$_2_$/x*', 'http://localhost:3000/$_2_$/xyz')).toBe(true);
     expect(matches('/$_2_$/x*', 'http://localhost:3000/xyz/$_2_$')).toBe(false);
     expect(matches('x*', 'http://localhost:3000/$_0_$/xyz', 'http://localhost:3000/$_0_$/')).toBe(true);
+  });
+
+  it.each([
+    ['http://demo^qa@x.test/path*', 'http://demo%5Eqa@x.test/path1'],
+    [' \thttp:\n//\r/demo^qa@x.test/path*', 'http://demo%5Eqa@x.test/path1'],
+    ["http://bü'cher.test/path*", "http://xn--b'cher-3ya.test/path1"],
+  ])('normalizes the literal authority in %s', (glob, url) => {
+    expect(matches(glob, url)).toBe(true);
+  });
+
+  it('keeps host text that normalizes to a marker lookalike', () => {
+    expect(matches('http://%24_3_1_%24.test/a^b/x*', 'http://$_3_1_$.test/a%5Eb/x1')).toBe(true);
+    expect(matches('http://%24_1z.test/a^b/x*', 'http://$_1z.test/a%5Eb/x1')).toBe(true);
+  });
+
+  it.each([
+    ["/x*/../'_1_$", "'_1_$"],
+    ["/a'b/../'_1_1_$/*", "'_1_1_$/z"],
+  ])('restores only the surviving segments in %s', (glob, path) => {
+    expect(matches(glob, BASE + path)).toBe(true);
   });
 
   it('matches a string with no wildcard exactly, resolved against the base', () => {
