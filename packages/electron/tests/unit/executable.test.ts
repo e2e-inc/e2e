@@ -95,12 +95,20 @@ describe('executablePath', () => {
 
   it('refuses the launcher a Squirrel installer leaves beside the app, and names the app it starts', () => {
     const install = path.join(root, 'squirrel');
-    for (const version of ['app-3.7.1', 'app-3.10.0', 'packages']) mkdirSync(path.join(install, version), { recursive: true });
-    for (const file of ['MyApp.exe', 'Update.exe', path.join('app-3.7.1', 'MyApp.exe'), path.join('app-3.10.0', 'MyApp.exe')]) writeFileSync(path.join(install, file), 'MZ\u0090');
-    const newest = path.join(install, 'app-3.10.0', 'MyApp.exe');
-    expect(describeExecutable(install, 'MyApp.exe', 'win32')).toEqual({ status: 'fail', message: expect.stringContaining(`name the app itself, ${newest}`) });
-    expect(resolveExecutable(install, path.join('app-3.10.0', 'MyApp.exe'), 'win32')).toBe(newest);
+    for (const folder of ['app-3.7.1', 'packages']) mkdirSync(path.join(install, folder), { recursive: true });
+    for (const file of ['MyApp.exe', 'Update.exe', path.join('app-3.7.1', 'MyApp.exe')]) writeFileSync(path.join(install, file), 'MZ\u0090');
+    const app = path.join(install, 'app-3.7.1', 'MyApp.exe');
+    const problem = (name: string): string => describeExecutable(install, name, 'win32').message;
+    expect(describeExecutable(install, 'MyApp.exe', 'win32')).toEqual({ status: 'fail', message: expect.stringContaining(`name the app itself, ${app}`) });
+    expect(resolveExecutable(install, path.join('app-3.7.1', 'MyApp.exe'), 'win32')).toBe(app);
+    // The hints for a folder and a missing extension skip the launcher too.
+    expect(problem('.')).toContain(`name the app's .exe, ${app}`);
+    expect(problem('MyApp')).toContain(`name the file with its extension, ${app}`);
     // The updater is a program of its own, with no app of its name in the version folders.
     expect(resolveExecutable(install, 'Update.exe', 'win32')).toBe(path.join(install, 'Update.exe'));
+    // With an update staged beside the running version, which one the launcher starts is its own rule: both are named.
+    mkdirSync(path.join(install, 'app-3.10.0-beta'));
+    writeFileSync(path.join(install, 'app-3.10.0-beta', 'MyApp.exe'), 'MZ\u0090');
+    expect(problem('MyApp.exe')).toContain('name the app itself, MyApp.exe in one of the version folders beside it (app-3.10.0-beta, app-3.7.1)');
   });
 });

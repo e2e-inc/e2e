@@ -92,39 +92,41 @@ function entries(directory: string): string[] {
 /** How many `.exe` files of a folder a hint names. */
 const NAMED_EXECUTABLES = 5;
 
-/** What to name instead of an `executablePath` that is no executable file, for the mistakes each platform invites. */
-function executableHint(resolved: string, platform: NodeJS.Platform): string {
-  if (/\.app[\\/]?$/.test(resolved)) return `; a macOS app runs as the binary inside its bundle, ${path.join(resolved, 'Contents', 'MacOS', path.basename(resolved, '.app'))}`;
-  if (platform !== 'win32') return '';
-  if (/\.lnk$/i.test(resolved)) return '; it is a shortcut: name the .exe it points to (its Target, under Properties)';
-  if (isExecutableFile(`${resolved}.exe`, platform)) return `; name the file with its extension, ${resolved}.exe`;
-  if (isDirectory(resolved)) {
-    const programs = entries(resolved).filter((name) => /\.exe$/i.test(name));
-    if (programs.length === 0) return '; name the app\'s .exe, not a folder';
-    const named = programs.slice(0, NAMED_EXECUTABLES).join(', ');
-    return `; name the app's .exe inside the folder (it holds ${named}${programs.length > NAMED_EXECUTABLES ? ', and more' : ''})`;
-  }
-  return '';
-}
-
 /**
- * The app a Squirrel.Windows launcher starts, when `file` is one: an
+ * Where a Squirrel.Windows launcher's app is, when `file` is one: an
  * installer made with Squirrel (electron-winstaller, Electron Forge's
  * default) puts the app in `app-<version>` folders beside `Update.exe`, and
- * a small launcher of the app's name next to them. The launcher starts the
- * newest version and exits, so the engine would be left holding a process
- * that is not the app.
+ * a small launcher of the app's name next to them. The launcher starts one
+ * of the versions and exits, so the engine would be left holding a process
+ * that is not the app. One installed version is named by its path; of
+ * several, the launcher's pick is its own rule, so their folders are named.
  */
 function squirrelApp(file: string): string | undefined {
   const directory = path.dirname(file);
   const name = path.basename(file);
   const siblings = entries(directory);
   if (!siblings.some((sibling) => sibling.toLowerCase() === 'update.exe')) return undefined;
-  const versions = siblings
-    .filter((sibling) => /^app-\d/.test(sibling) && existsSync(path.join(directory, sibling, name)))
-    .toSorted((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  const newest = versions.at(-1);
-  return newest === undefined ? undefined : path.join(directory, newest, name);
+  const versions = siblings.filter((sibling) => /^app-\d/.test(sibling) && existsSync(path.join(directory, sibling, name))).toSorted();
+  const [only] = versions;
+  if (only === undefined) return undefined;
+  return versions.length === 1 ? path.join(directory, only, name) : `${name} in one of the version folders beside it (${versions.join(', ')})`;
+}
+
+/** What to name instead of an `executablePath` that is no executable file, for the mistakes each platform invites. */
+function executableHint(resolved: string, platform: NodeJS.Platform): string {
+  if (/\.app[\\/]?$/.test(resolved)) return `; a macOS app runs as the binary inside its bundle, ${path.join(resolved, 'Contents', 'MacOS', path.basename(resolved, '.app'))}`;
+  if (platform !== 'win32') return '';
+  if (/\.lnk$/i.test(resolved)) return '; it is a shortcut: name the .exe it points to (its Target, under Properties)';
+  if (isExecutableFile(`${resolved}.exe`, platform)) return `; name the file with its extension, ${squirrelApp(`${resolved}.exe`) ?? `${resolved}.exe`}`;
+  if (!isDirectory(resolved)) return '';
+  const programs = entries(resolved)
+    .filter((name) => /\.exe$/i.test(name))
+    .toSorted();
+  if (programs.length === 0) return '; name the app\'s .exe, not a folder';
+  // A Squirrel install's own folder: the app is not the launcher at its top.
+  const installed = programs.map((name) => squirrelApp(path.join(resolved, name))).find((app) => app !== undefined);
+  if (installed !== undefined) return `; name the app's .exe, ${installed}`;
+  return `; name the app's .exe inside the folder (it holds ${programs.slice(0, NAMED_EXECUTABLES).join(', ')}${programs.length > NAMED_EXECUTABLES ? ', and more' : ''})`;
 }
 
 /** What a launch would start, or why it has nothing to start: the one answer `prepare`, `init`, and `doctor` each act on. */
