@@ -739,7 +739,11 @@ class LocatorImpl extends ScreenImpl implements Locator {
           negated: false,
           evaluate: async (reads) => {
             const { node, stale } = await engine.tryRead(this.expression, reads, ABSENCE_STATES.has(state) ? 'empty' : 'wait');
-            if (stale) return undefined;
+            // A screen that changed under the read is no answer: a node it could not read is not a detached or hidden one.
+            if (stale) {
+              samples.add('not read: the screen changed under the read');
+              return undefined;
+            }
             samples.add(node === null ? 'absent' : isNodeVisible(node) ? 'visible' : 'hidden');
             return inWaitForState(node, state);
           },

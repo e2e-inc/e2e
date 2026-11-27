@@ -439,16 +439,24 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
    * Reads one node for polling surfaces; returns null while zero matches.
    * A poll that waits for absence passes `missingFrame: 'empty'`: nothing
    * under a frame that is not in the document is attached, so the sample is
-   * zero matches rather than a wait for the frame. A ref that went stale
-   * before it was read is `stale`, one match with no node: a poll for
-   * absence samples again instead of reading the node as gone.
+   * zero matches rather than a wait for the frame. A read the engine found
+   * stale until the window's deadline (an app that re-created its elements
+   * under every read), or a ref superseded before it was read, is no node
+   * with `stale` set (one match for the superseded ref, none for a resolve
+   * that never answered): the poll samples again, and its timeout is its
+   * own failure, never a gone node.
    */
   async tryRead(
     expression: LocatorExpression,
     reads: ReadWindow,
     missingFrame: MissingFrame = 'wait',
   ): Promise<{ node: SemanticNode | null; count: number; stale: boolean }> {
-    return this.readOne(expression, reads, missingFrame);
+    try {
+      return await this.readOne(expression, reads, missingFrame);
+    } catch (cause) {
+      if (isStaleRead(cause)) return { node: null, count: 0, stale: true };
+      throw cause;
+    }
   }
 
   /**
@@ -470,7 +478,7 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
         'toBeInViewport is not available on this target: its engine does not implement viewportIntersection',
       );
     }
-    const { node, count, stale } = await this.readOne(expression, reads, 'empty');
+    const { node, count, stale } = await this.tryRead(expression, reads, 'empty');
     if (node === null) return { node, count, stale };
     try {
       const intersection = await reads.read((timeoutMs) =>
@@ -907,6 +915,19 @@ export function locatorDetails(expression: LocatorExpression, waitedMs?: number)
  */
 function lateAction(kind: string, target: string): TestError {
   return new TestError('ACTION_FAILED', `operation timed out before the ${kind} was sent: ${target}`);
+}
+
+/**
+ * Whether a failure is a read the engine found stale: a retryable
+ * `NODE_STALE`, bare or as the locator failure it was translated into once a
+ * resolve retried it until its deadline. A poll samples again on one.
+ */
+export function isStaleRead(cause: unknown): boolean {
+  const stale = (value: unknown): boolean => {
+    const engineError = asEngineError(value);
+    return engineError?.code === 'NODE_STALE' && engineError.retryable;
+  };
+  return stale(cause) || (isE2EError(cause) && cause.code === 'LOCATOR_NOT_FOUND' && stale(cause.cause));
 }
 
 /** Translates an engine error into the runner-owned public taxonomy. */

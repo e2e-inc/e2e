@@ -544,6 +544,14 @@ describe('LocatorEngine read contract', () => {
     });
   });
 
+  it('answers a resolve the engine found stale until the deadline as a stale sample, not a failure', async () => {
+    const { engine, calls } = makeEngine({ resolve: ['stale', 'stale', 'stale'] });
+    await expect(engine.tryRead(EXPRESSION, engine.reads(new Deadline(0)))).resolves.toEqual({ node: null, count: 0, stale: true });
+    expect(calls.resolve).toBeGreaterThan(0);
+    const failing = makeEngine({ resolve: ['failure'] });
+    await expect(failing.engine.tryRead(EXPRESSION, failing.engine.reads(new Deadline(5_000)))).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+  });
+
   it('direct read surfaces stale nodes as LOCATOR_NOT_FOUND', async () => {
     const { engine } = makeEngine({ read: ['stale'] });
     await expect(engine.read(EXPRESSION)).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
