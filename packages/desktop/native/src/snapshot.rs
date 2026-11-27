@@ -129,6 +129,9 @@ struct Walk {
     interactive: bool,
     deadline: Instant,
     focused: Option<Element>,
+    /// The app did not answer which element holds its focus in time: no node reads as focused, and the read is
+    /// incomplete, never filled in from each element's own `AXFocused` (a table's cells report the table's focus).
+    focus_unknown: bool,
     nodes: usize,
     complete: bool,
     /// Whether the deadline stopped the read.
@@ -613,6 +616,7 @@ impl Walk {
         // The app's focused element is the one source: a table's cells report the table's focus as their own.
         let focused = match &self.focused {
             Some(focused) => focused == element,
+            None if self.focus_unknown => false,
             None => read.focused == Some(true),
         };
         if focused {
@@ -768,7 +772,11 @@ pub(crate) fn content_name(texts: &[String]) -> Option<String> {
 pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
     let window = windows::find(request.pid, request.window)?;
     let app = Element::application(request.pid);
-    let focused = app.element("AXFocusedUIElement");
+    let (focused, focus_unknown) = match app.attribute("AXFocusedUIElement") {
+        Ok(Value::Element(focused)) => (Some(focused), false),
+        Err(ax::AX_CANNOT_COMPLETE) => (None, true),
+        _ => (None, false),
+    };
     let window_bounds = window.frame().map(|(x, y, width, height)| Rect { x, y, width, height });
     let title = window.text("AXTitle");
     let mut walk = Walk {
@@ -779,8 +787,9 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         interactive: request.interactive,
         deadline: request.deadline,
         focused,
+        focus_unknown,
         nodes: 0,
-        complete: true,
+        complete: !focus_unknown,
         timed_out: false,
         root_unread: false,
         lost: 0,
