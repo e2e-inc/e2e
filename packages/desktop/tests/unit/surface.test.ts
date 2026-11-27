@@ -398,7 +398,7 @@ describe('DesktopSurface: launching', () => {
     const open = launched({ launch: [spawnApp({ exits: true, runningBefore: [running] })], listWindows: [ok([])] }, { observe: false });
     await expect(open).rejects.toMatchObject({
       code: 'ENGINE_FAILURE',
-      message: `SpikeForm quit right after it launched, before it showed a window: a copy of it was already running (process ${running}), and an app that runs one copy at a time hands the launch to that copy and exits. The engine drives only a copy it launched, so quit the running one first`,
+      message: `SpikeForm quit right after it launched, before it showed a window: a copy of it was already running (process ${running}), and an app that runs one copy at a time hands the launch to that copy and exits. If this app does, quit the running copy first: the engine drives only a copy it launched`,
     });
     // The copy the engine did not launch is left running.
     expect(alive(running)).toBe(true);
@@ -415,7 +415,7 @@ describe('DesktopSurface: launching', () => {
     const { surface } = await initialized({ launch: [failure('TIMEOUT', 'delivered_unverified', 'Form.app was opened, but no new process carries this launch\'s token', { kind: 'unclaimed', running_before: [running] })] });
     await expect(surface.restart(operation())).rejects.toMatchObject({
       code: 'ACTION_MAY_HAVE_COMMITTED',
-      message: expect.stringMatching(new RegExp(`looks for it again; a copy of it was already running \\(process ${running}\\).*quit the running one first$`)),
+      message: expect.stringMatching(new RegExp(`looks for it again; a copy of it was already running \\(process ${running}\\).*quit the running copy first: the engine drives only a copy it launched$`)),
     });
   });
 });
@@ -440,10 +440,13 @@ describe('DesktopSurface: the launch wait', () => {
     );
   });
 
-  it('keeps what a launch wait saw out of the reads after it', async () => {
-    const { surface } = await launched({});
-    expect((surface as unknown as { launchReads: unknown }).launchReads).toBeUndefined();
-  });
+  it('names no failure a later read of the launch wait got past, and counts a window whose root never answers', async () => {
+    const listed = windows(() => [{ id: 'w-mine', is_focused: true }]);
+    const scenario = { listWindows: [failure('APP_NOT_FOUND', 'not_delivered'), listed], snapshot: [screen('w-mine', {}, { root_unread: true })] };
+    await expect(launched(scenario, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility: the last read listed 1 window, 0 unreadable, 1 whose root element did not answer. The window may be off screen',
+    );
+  }, 30_000);
 
   it('says a background app that opens no window needs headed, however the wait ends against a slow window list', async () => {
     await expect(launched({ listWindows: [{ ok: true, data: [], sleepMs: 700 }] }, { openTimeoutMs: 15_000 })).rejects.toThrow(/opened no window.*desktop\(\{ headed: true \}\)/);

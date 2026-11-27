@@ -503,7 +503,10 @@ export class DesktopSurface {
       }
       // A window whose root the app did not answer for is there but not readable yet, which is what this wait is for.
       if (screen !== undefined && !screen.rootUnread) return;
-      if (screen !== undefined) sawWindow = true;
+      if (screen !== undefined) {
+        sawWindow = true;
+        reads.rootUnread();
+      }
       else if (read) listedNone = true;
       // An app that quit (or crashed) on its own never shows a window.
       if (this.pid !== undefined && !(await this.running(this.pid))) {
@@ -797,6 +800,7 @@ export class DesktopSurface {
         return projectSnapshot(raw, () => `mask${(scratch += 1)}`);
       } catch (cause) {
         // A panel accessibility cannot read, or a window that just closed: try the next one.
+        if (cause instanceof DriverFailure && !NO_WINDOW_CODES.has(cause.code)) this.launchReads?.failed(cause);
         if (cause instanceof DriverFailure && NO_WINDOW_CODES.has(cause.code)) {
           this.launchReads?.unread(cause);
           if (chosen) {
@@ -851,7 +855,7 @@ export class DesktopSurface {
       this.launchReads?.windows(own);
       return own;
     } catch (cause) {
-      if (cause instanceof DriverFailure) this.launchReads?.unlisted(cause);
+      if (cause instanceof DriverFailure) this.launchReads?.failed(cause);
       if (cause instanceof DriverFailure && NO_WINDOW_CODES.has(cause.code)) {
         if (strict) {
           await this.requireRunning();

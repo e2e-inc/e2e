@@ -57,7 +57,9 @@ test('signs in', async ({ app, screen }) => {
 - `app.open()` launches the app fresh, in the background (in the foreground
   with `desktop({ headed: true })` or `e2e run --headed`), after quitting the
   copy the engine launched before. A copy you opened yourself is never read,
-  driven, or quit. Every test ends with the app quit.
+  driven, or quit; an app that runs one copy at a time hands the launch to
+  it, so `app.open()` fails and names that copy. Every test ends with the app
+  quit.
 - The app gets only `HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `TMPDIR`,
   `LANG`, `LC_*`, and `__CF_USER_TEXT_ENCODING` of the run's environment, and
   `E2E_DESKTOP_LAUNCH`, the token the engine finds its copy by. An app whose
