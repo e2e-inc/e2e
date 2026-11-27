@@ -172,9 +172,10 @@ export class FileCacheStore implements CacheStore {
    * its pair is read and published once, under one lock, for all of them,
    * so recording many steps of one test costs one rewrite, not one each.
    * Returns each write's answer, in order. When a test's pair cannot take
-   * them all at once (one that does not read, or the size cap), its writes
-   * fall back to one at a time, so each gets the answer it would alone. Not
-   * part of `CacheStore`: settlement calls it on the file store
+   * them all at once (one that does not read, the size cap, or a write that
+   * throws), its writes fall back to one at a time, so each gets the answer
+   * it would alone, undefined for one that throws. Not part of
+   * `CacheStore`: settlement calls it on the file store
    * (`settleStagedTraces`).
    */
   async writeAll(writes: readonly { readonly keyHash: string; readonly payload: ActionTrace }[]): Promise<({ bytes: number } | undefined)[]> {
@@ -194,8 +195,11 @@ export class FileCacheStore implements CacheStore {
         let recordings = file?.parsed.status === 'ok' ? hits(file.parsed) : [];
         for (const index of indexes) recordings = this.placed(recordings, writes[index]!.keyHash, writes[index]!.payload);
         return this.save(name, testId, recordings);
-      }, true);
-      for (const index of indexes) answers[index] = together ?? (await this.write(writes[index]!.keyHash, writes[index]!.payload));
+        // A write together that throws (a rename a scanner held, the lock's wait run out) falls back the same way.
+      }, true).catch(() => undefined);
+      for (const index of indexes) {
+        answers[index] = together ?? (await this.write(writes[index]!.keyHash, writes[index]!.payload).catch(() => undefined));
+      }
     }
     return answers;
   }

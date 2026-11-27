@@ -383,6 +383,39 @@ describe('FileCacheStore', () => {
     for (const [index, recordedFor] of steps.entries()) expect((await together.store.read(String(index).repeat(64), recordedFor)).status).toBe('hit');
   });
 
+  it('falls back to one write at a time when writing a batch together throws', async () => {
+    const { directory } = await makeStore();
+    const steps = [0, 1, 2].map((index) => step('web', { callIndex: index }));
+    // The first rename of the batch fails once, as a file a scanner holds open can on Windows.
+    const script = `
+      import fsp from 'node:fs/promises';
+      import { syncBuiltinESMExports } from 'node:module';
+      const { rename } = fsp;
+      let failed = false;
+      fsp.rename = (from, to) => {
+        if (!failed) {
+          failed = true;
+          return Promise.reject(Object.assign(new Error('busy'), { code: 'EPERM' }));
+        }
+        return rename(from, to);
+      };
+      syncBuiltinESMExports();
+      const { FileCacheStore } = await import('@e2e-dev/core/lib/cache/store');
+      const store = new FileCacheStore({ directory: ${JSON.stringify(directory)}, maxBytes: ${String(MAX_CACHE_WIRE_BYTES)}, writable: true });
+      const writes = ${JSON.stringify(steps.map((recordedFor, index) => ({ keyHash: String(index).repeat(64), payload: payload('web', { recordedFor }) })))};
+      process.stdout.write(JSON.stringify((await store.writeAll(writes)).map((answer) => answer !== undefined)));
+    `;
+    const output = await new Promise<string>((resolve) => {
+      let text = '';
+      const child = spawn(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd() });
+      child.stdout.on('data', (chunk: Buffer) => (text += chunk.toString()));
+      child.on('exit', () => resolve(text));
+    });
+    expect(JSON.parse(output)).toEqual([true, true, true]);
+    const store = new FileCacheStore({ directory, maxBytes: MAX_CACHE_WIRE_BYTES, writable: true });
+    for (const [index, recordedFor] of steps.entries()) expect((await store.read(String(index).repeat(64), recordedFor)).status).toBe('hit');
+  });
+
   it('answers each write of a batch as it would alone when the pair cannot take them together', async () => {
     const { directory, store } = await makeStore();
     await store.write(KEY, payload());
