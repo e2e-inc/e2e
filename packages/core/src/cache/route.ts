@@ -230,10 +230,24 @@ export function addressKey(location: string): string {
  */
 export function routeLocation(location: string): string {
   const route = routeOf(location);
-  if (route.kind === 'opaque') return route.location;
+  if (route.kind === 'opaque') return unparsedLocation(location);
   const path = `/${route.segments.map(spellPart).join('/')}`;
   const query = route.query.map(([key, value]) => `${spellPart(key)}=${value === '' ? '' : PARAM}`).join('&');
   return `${route.origin ?? ''}${path}${query === '' ? '' : `?${query}`}`;
+}
+
+/**
+ * A web address the URL parser refuses, as a recording keeps it: a secret's
+ * marker the ledger put in its host (`https://<secret:tenant>.example.org`)
+ * is no host a parser takes. Its scheme and authority stay as they read and
+ * the rest is spelled as a path on them, so a query value it carries is not
+ * kept either. Any other location is kept as it is.
+ */
+function unparsedLocation(location: string): string {
+  if (!/^\s*https?:/i.test(location)) return location;
+  const authority = URL_ORIGIN_PREFIX.exec(location)?.[0] ?? '';
+  const rest = location.slice(authority.length);
+  return `${authority}${routeLocation(rest.startsWith('/') ? rest : `/${rest}`)}`;
 }
 
 /** A secret's marker as the ledger writes it (`internal/redact.ts`). */

@@ -113,6 +113,13 @@ describe('routeLocation', () => {
     expect(routeLocation('https://idp.test/invite/<secret:token>')).toBe('https://idp.test/invite/<secret:token>');
   });
 
+  it('keeps the query values out of a web address whose host holds a secret marker', () => {
+    // A secret configured as a tenant name, masked in the host: no URL parser takes that host.
+    expect(routeLocation('https://<secret:tenant>.example.org/callback?code=SampleOnlyDoNotUse')).toBe('https://<secret:tenant>.example.org/callback?code=:id');
+    expect(routeLocation('https://<secret:tenant>.example.org/orders/123?tab=notes#top')).toBe('https://<secret:tenant>.example.org/orders/:id?tab=:id');
+    expect(routeLocation('https://<secret:tenant>.example.org?code=Sample')).toBe('https://<secret:tenant>.example.org/?code=:id');
+  });
+
   it('spells a lone surrogate a cache file holds as a URL parser does, without throwing', () => {
     expect(routeLocation('/settings/\ud800')).toBe('/settings/%EF%BF%BD');
   });
@@ -133,7 +140,14 @@ describe('routeLocation', () => {
   });
 
   it('spells a spelling as itself, and two addresses of one route alike', () => {
-    for (const location of ['/orders/123/edit?tab=notes', '/callback?code=482913&state=eyJhbGciOi.x1.y2', '/', 'https://idp.test/a b/c', '/invite/<secret:token>']) {
+    for (const location of [
+      '/orders/123/edit?tab=notes',
+      '/callback?code=482913&state=eyJhbGciOi.x1.y2',
+      '/',
+      'https://idp.test/a b/c',
+      '/invite/<secret:token>',
+      'https://<secret:tenant>.example.org/callback?code=abc',
+    ]) {
       expect(routeLocation(routeLocation(location))).toBe(routeLocation(location));
     }
     expect(routeLocation('/orders/123?tab=notes')).toBe(routeLocation('/orders/456?tab=history'));
