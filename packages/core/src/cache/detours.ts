@@ -285,6 +285,20 @@ function byActions(actions: readonly RecordedAction[]): TraceDetour[] {
 const MAX_DETOUR_REPORT_CHARS = 600;
 
 /**
+ * A step's detour text within the report's bound, cut between two words so
+ * no location is cut through: a stored location spells a space as `%20`,
+ * and a value a later step resolves may be in it in a spelling the ledger
+ * cannot read from a part of it (`settledDetour`). A text with no space
+ * left in the bound is cut where the bound falls.
+ */
+export function boundDetour(text: string): string {
+  if (text.length <= MAX_DETOUR_REPORT_CHARS) return text;
+  const head = bound(text, MAX_DETOUR_REPORT_CHARS).slice(0, -1);
+  const space = head.lastIndexOf(' ');
+  return `${space === -1 ? head : head.slice(0, space)}…`;
+}
+
+/**
  * A step's detour text once its attempt settled, masked by the ledger as it
  * is then: a secret a later step resolved may be in a location the text
  * names. Where the report's bound cut the text it ends in an ellipsis, so a
@@ -293,7 +307,7 @@ const MAX_DETOUR_REPORT_CHARS = 600;
  */
 export function settledDetour(detour: string, ledger: { readonly redact: (text: string) => string; readonly redactCut: (text: string) => string }): string {
   const masked = detour.endsWith('…') ? `${ledger.redactCut(detour.slice(0, -1))}…` : ledger.redact(detour);
-  return bound(masked, MAX_DETOUR_REPORT_CHARS);
+  return boundDetour(masked);
 }
 
 /**

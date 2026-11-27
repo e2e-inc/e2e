@@ -1,7 +1,7 @@
 /** Detours in a recorded flow: a screen left and come back to with nothing typed, chosen, or set on the way. */
 
 import { describe, expect, it } from 'vitest';
-import { describeDetour, findDetours, findDetoursAfterReplay, settledDetour } from '@e2e-dev/core/lib/cache/detours';
+import { boundDetour, describeDetour, findDetours, findDetoursAfterReplay, settledDetour } from '@e2e-dev/core/lib/cache/detours';
 import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { bound } from '@e2e-dev/core/lib/internal/text';
 import type { ActionTrace, RecordedAction } from '@e2e-dev/core/lib/cache/trace';
@@ -257,6 +257,18 @@ describe('settledDetour', () => {
     const settled = settledDetour(text, ledger());
     expect(settled).not.toContain('tok-ABC');
     expect(settled.length).toBeLessThanOrEqual(600);
+  });
+
+  it('cuts between words, so a secret a later step resolves is never left in part in a percent-encoded location', () => {
+    const invite = new SecretLedger();
+    invite.register('invite', 'Zebra/cornflakes');
+    const text = `actions 1-2 left / for /records/${'a'.repeat(550)}/Zebra%2Fcornflakes and came back with nothing typed, chosen, or set`;
+    // A cut through the location leaves a part the ledger cannot read in that spelling.
+    expect(settledDetour(bound(text, 600), invite)).toContain('Zebra%2Fcornf');
+    const cut = boundDetour(text);
+    expect(cut).toBe('actions 1-2 left / for…');
+    expect(settledDetour(cut, invite)).toBe('actions 1-2 left / for…');
+    expect(boundDetour('actions 1-2 left / for /x and came back')).toBe('actions 1-2 left / for /x and came back');
   });
 
   it('masks a whole secret and keeps the text within the report bound', () => {

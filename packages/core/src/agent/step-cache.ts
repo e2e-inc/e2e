@@ -15,7 +15,7 @@
 import { deltaEvidenced, deltaMismatch, describeDelta, type DeltaMismatch } from '../cache/anchors.ts';
 import type { AgentCacheContext, ClaimedKey } from '../cache/context.ts';
 import { decideTraceReplay, opensWithNavigate, type TraceReplayMissReason } from '../cache/decide.ts';
-import { describeDetour, findDetours, findDetoursAfterReplay, type TraceDetour } from '../cache/detours.ts';
+import { boundDetour, describeDetour, findDetours, findDetoursAfterReplay, type TraceDetour } from '../cache/detours.ts';
 import { routeLocation, sameRoute } from '../cache/route.ts';
 import { keyContextChanges, type CacheAgentIdentity } from '../cache/identity.ts';
 import { recordedProvenance, TraceRecorder } from '../cache/recorder.ts';
@@ -720,9 +720,9 @@ export class StepTraceSession {
     return this.describeDetours([...finished, ...inCut].toSorted((a, b) => a.from - b.from));
   }
 
-  /** Detours as the report names them, or undefined for none. */
+  /** Detours as the report names them, or undefined for none: redacted, then cut between words to the bound (`boundDetour`). */
   private describeDetours(detours: readonly TraceDetour[]): string | undefined {
-    return detours.length === 0 ? undefined : this.reportable(detours.map(describeDetour).join(', '));
+    return detours.length === 0 ? undefined : boundDetour(this.options.redact(detours.map(describeDetour).join(', ')));
   }
 
   /**
