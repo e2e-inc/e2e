@@ -309,6 +309,12 @@ Test lines: 2, 1 read not listed.
   drafted with the function's text and a comment: declare the variables it
   uses in the test. What the function itself calls is not drafted again. A
   passing `expect(value)` leaves no line.
+- A call whose argument holds only while the app runs is drafted the way
+  its engine says a test finds the same thing again. `desktop.useWindow(window)`
+  is drafted as
+  `desktop.useWindow((await desktop.windows()).find((window) => window.title === "Inbox"))`;
+  for an untitled window, or a window id passed as a string, the line keeps
+  the id and says in a comment that it holds only while the window is open.
 - Each action or matcher on `screen` waits `timeout` by default. A `timeout`
   in a line's own options replaces it. Without `timeout`, each waits 5000 ms,
   or the config's [`actionTimeout`](/reference/config#actiontimeout) or
