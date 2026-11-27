@@ -39,9 +39,10 @@ import {
 } from '@e2e-dev/core/engine';
 import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
 import { toCombo } from './keys.ts';
-import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_POLL_MS, LAUNCH_TOKEN, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
+import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_TOKEN, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
 import { launchArgumentList } from './launch-arguments.ts';
-import { describeLastRead, handOffClause, type WindowsRead } from './launch-report.ts';
+import { handOffClause, type WindowsRead } from './launch-report.ts';
+import { LAUNCH_READY_MS, QUIT, windowReadable } from './launch-wait.ts';
 import { ROOT_ID, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
@@ -58,9 +59,6 @@ const LATE_APP_MS = 2_000;
 /** How often it looks. */
 const LATE_APP_POLL_MS = 100;
 
-/** How long a launch waits for its process, and then for the app's window to become readable, before it reports why it did not. */
-const LAUNCH_READY_MS = 10_000;
-
 /** How far a swipe scrolls, in screens of the scrolled area, by its momentum: the web engine's strides, so a momentum means the same on every engine. */
 const SWIPE_PAGES = { slow: 0.75, none: 0.5, fast: 1.5 } as const;
 
@@ -69,9 +67,6 @@ const NOT_SENT = new Error('the operation ran out of budget before anything was 
 
 /** The cause of a read that found the app's windows but could read none of them. */
 const UNREADABLE = new Error('no window of the app could be read');
-
-/** The cause of a read of an app that quit since it launched. */
-const QUIT = new Error('the app quit');
 
 /** The cause of a screenshot withheld because its secure fields could not be shown masked, which the harness reads as masking it could not prove. */
 const UNMASKED = new Error('the secure fields of the screenshot could not be placed');
@@ -429,7 +424,20 @@ export class DesktopSurface {
     // The process and when it started, so a later run can quit it, and never a later process given the same id.
     await this.writeRecord({ token, pid: launched.pid, ...(this.started === undefined ? {} : { started: this.started }) });
     this.forget();
-    await this.windowReadable(operation, launched.running_before);
+    await windowReadable(operation, {
+      app: this.appName,
+      foreground: this.foreground,
+      runningBefore: launched.running_before,
+      read: (timeoutMs) => this.readWindows(withDeadline({ ...operation, timeoutMs })),
+      readable: (read) => this.readable(read),
+      exited: async () => {
+        if (this.pid === undefined || (await this.running(this.pid))) return false;
+        this.forget();
+        this.dropProcess();
+        return true;
+      },
+      screenLocked: () => driver.screenLocked(),
+    });
   }
 
   /** The engine error for a failed launch, naming what to fix where the driver says what went wrong. */
@@ -450,83 +458,6 @@ export class DesktopSurface {
     const file = path.join(this.home, APP_FILE);
     await writeFile(`${file}.partial`, JSON.stringify(record));
     await rename(`${file}.partial`, file);
-  }
-
-  /**
-   * Waits until the launched app's window can be read: a window exists soon
-   * after the launch, but its accessibility element can arrive a moment
-   * later, and an observation then would show the agent an empty screen. A
-   * window that stays unreadable for `LAUNCH_READY_MS` fails the open: every
-   * later step would only time out on an empty screen. Any other failure of a
-   * read is reported as it is. An app in the background is never brought
-   * forward: one that opens no window there (a document-based app opens its
-   * first one only when it comes forward) fails the open, and needs `headed`.
-   */
-  private async windowReadable(operation: OperationContext, runningBefore: readonly number[]): Promise<void> {
-    const budgetBound = operation.timeoutMs < LAUNCH_READY_MS;
-    const deadline = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
-    let sawWindow = false;
-    // Whether a read finished and listed no window of the app: only that shows it opened none. A read that ran out of time saw nothing.
-    let listedNone = false;
-    let timedOut = false;
-    // What the newest read came to, for the error of a window that never became readable.
-    let last: WindowsRead | DriverFailure | undefined;
-    while (Date.now() < deadline) {
-      if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
-      let screen: ProjectedScreen | undefined;
-      let read = false;
-      try {
-        // Each read gets what is left of the readiness wait, not of the whole operation, shared by its calls.
-        last = undefined;
-        last = await this.readWindows(withDeadline({ ...operation, timeoutMs: Math.max(deadline - Date.now(), 0) }));
-        screen = this.readable(last);
-        read = true;
-      } catch (cause) {
-        if (last === undefined && cause instanceof EngineError && cause.cause instanceof DriverFailure) last = cause.cause;
-        // The last read ran out of budget: the window never became readable in time.
-        if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') {
-          timedOut = true;
-          break;
-        }
-        // A window not readable yet, or one replaced while it was read, is what this wait looks at below; so is an app that quit.
-        const stale = cause instanceof EngineError && cause.code === 'NODE_STALE' && cause.retryable;
-        if (!(cause instanceof EngineError && (stale || cause.cause === QUIT))) throw cause;
-        if (stale) sawWindow = true;
-      }
-      // A window whose root the app did not answer for is there but not readable yet, which is what this wait is for.
-      if (screen !== undefined && !screen.rootUnread) return;
-      if (screen !== undefined) sawWindow = true;
-      else if (read) listedNone = true;
-      // An app that quit (or crashed) on its own never shows a window.
-      if (this.pid !== undefined && !(await this.running(this.pid))) {
-        this.forget();
-        this.dropProcess();
-        throw new EngineError('ENGINE_FAILURE', `${this.appName ?? 'the app'} quit right after it launched, before it showed a window${handOffClause(': ', runningBefore)}`, { retryable: false });
-      }
-      await sleep(Math.min(LAUNCH_POLL_MS, Math.max(deadline - Date.now(), 0)), operation.signal);
-    }
-    // The open's own budget ran out first: that is a timeout, not a window that cannot be read.
-    if (budgetBound) throw new EngineError('OPERATION_TIMEOUT', `${this.appName ?? 'the app'} launched, but the open ran out of time before its window could be read`, { retryable: false });
-    // A locked screen hides every window from accessibility: neither read tells it from an app with no window, so macOS is asked.
-    if (this.requireDriver().screenLocked() === true) {
-      throw new EngineError('ENGINE_FAILURE', `${this.appName ?? 'the app'} launched, but the Mac's screen is locked, so no window can be read through accessibility; unlock it and run again`, { retryable: false });
-    }
-    if (!sawWindow && listedNone && !this.foreground) {
-      throw new EngineError(
-        'ENGINE_FAILURE',
-        `${this.appName ?? 'the app'} launched in the background and opened no window. Some apps, such as document-based ones, show a window only once they come forward; set desktop({ headed: true }) for them, or run with --headed`,
-        { retryable: false },
-      );
-    }
-    // In the foreground there is no background to blame: the app listed no window at all.
-    if (!sawWindow && listedNone) {
-      throw new EngineError('ENGINE_FAILURE', `${this.appName ?? 'the app'} launched, but listed no window within ${LAUNCH_READY_MS / 1000} s: it may open none (a menu-bar app) or take longer to show its first window`, { retryable: false });
-    }
-    throw new EngineError(
-      'ENGINE_FAILURE',
-      `${this.appName ?? 'the app'} launched, but its window cannot be read through accessibility${timedOut ? ' (a read ran out of time)' : ''}: ${describeLastRead(last)}. The window may be off screen`,
-      { retryable: false },
-    );
   }
 
   /** The windows of the app the engine launched, for the `desktop` fixture; none while it is not running. */
