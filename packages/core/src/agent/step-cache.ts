@@ -367,7 +367,7 @@ export class StepTraceSession {
             keyHash: this.keyHash,
             stepIndex: this.options.stepIndex,
             recordedFor: recordedProvenance(this.claim.step, this.options.redact),
-            settledProvenance: () => recordedProvenance(this.claim.step, this.options.redact),
+            settledProvenance: this.settledProvenance(),
           });
         } else {
           const staged = await this.stage(recorder, verdictSummary, recordedBy);
@@ -669,9 +669,20 @@ export class StepTraceSession {
       keyHash: this.keyHash,
       trace: templated,
       stepIndex: this.options.stepIndex,
-      settledProvenance: () => recordedProvenance(this.claim.step, this.options.redact),
+      settledProvenance: this.settledProvenance(),
     });
     return 'staged';
+  }
+
+  /**
+   * The step's provenance as settlement redacts it again. It holds the step
+   * and the redactor only, not this session: a staged entry lives until the
+   * attempt settles, and the session holds the step's screens.
+   */
+  private settledProvenance(): () => TraceProvenance {
+    const { step } = this.claim;
+    const { redact } = this.options;
+    return () => recordedProvenance(step, redact);
   }
 
   /**
