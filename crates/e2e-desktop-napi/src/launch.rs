@@ -262,7 +262,7 @@ fn launched(pid: i32, bundle: &str, bundle_id: &str) -> Launched {
 
 #[cfg(test)]
 mod tests {
-    use super::{hidden_by, names_icloud_container};
+    use super::hidden_by;
 
     #[test]
     fn tells_which_signatures_hide_the_environment() {
@@ -277,6 +277,7 @@ mod tests {
 
     #[test]
     fn tells_which_entitlements_name_an_icloud_container() {
+        use super::names_icloud_container;
         let entitlements = |body: &str| format!(r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>{body}</dict></plist>"#);
         // TextEdit, a sandboxed app with no iCloud container, a container list left empty, and an unsigned app (`codesign` prints nothing).
         assert!(names_icloud_container(
