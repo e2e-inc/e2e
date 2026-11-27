@@ -179,12 +179,19 @@ describe('session screen presenter', () => {
     const sessionMatch = /^Session (\S+) open/.exec(opened);
     if (sessionMatch === null) throw new Error('open text names no session');
     const id = sessionMatch[1]!;
-    const revisionMatch = /Current screen \(revision (b\d+)/.exec(opened);
-    if (revisionMatch === null) throw new Error('open text shows no first screen');
-    const firstRevision = revisionMatch[1]!;
-    // The first screen lists the sidebar whole: no fold line yet.
-    expect(opened).toContain('link "Item 1"');
+    // The opening names the first screen without listing it, so nothing is
+    // on fold record yet: a fold can only name a revision that listed the
+    // subtree in full, and the opening did not.
+    expect(opened).toMatch(/Screen: revision b\d+, .*not listed\./);
+    expect(opened).not.toContain('link "Item 1"');
     expect(opened).not.toContain('same as revision');
+    const observed = textOf(await sessionHost.call(id, 'observe', {}, { signal: new AbortController().signal }));
+    const revisionMatch = /Current screen \(revision (b\d+)/.exec(observed);
+    if (revisionMatch === null) throw new Error('observe shows no screen');
+    const firstRevision = revisionMatch[1]!;
+    // Observe lists the sidebar whole: no fold line yet.
+    expect(observed).toContain('link "Item 1"');
+    expect(observed).not.toContain('same as revision');
     const tapped = await sessionHost.call(id, 'tap', { target: 'order-1' }, { signal: new AbortController().signal });
     const text = textOf(tapped);
     expect(text).toContain('Tapped #order-1.');
