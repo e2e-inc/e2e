@@ -155,6 +155,16 @@ translation moves or goes with it in the same change.
 | job, workflow | job, workflow (keep in English, o job, o workflow) |
 | viewport | viewport (keep in English, o viewport) |
 | origin, cross-origin | origem, de origem cruzada |
+| route (network), fulfill, abort | rota, responder, abortar |
+| predicate, trigger (a `waitFor*` callback) | predicado, gatilho |
+| accessor (`surfaceOf`) | acessor |
+| dismiss (a dialog) | dispensar |
+| wildcard | curinga |
+| persistent context (a browser's) | contexto persistente |
+| init script | script de inicialização |
+| container | contêiner |
+| error class (`category` values) | classe de erro (the class names stay in English) |
+| first-party (a package) | oficial |
 | Next (closing section heading) | Próximos passos |
 | MCP | MCP (keep in English) |
 | CI | CI (keep in English, a CI) |
