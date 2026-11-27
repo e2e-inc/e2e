@@ -83,10 +83,12 @@ export class Recorder {
       const taken = this.allowed(page) ? encoder.frame(Buffer.from(frame.data, 'base64')) : Promise.resolve();
       void taken.then(() => session.send('Page.screencastFrameAck', { sessionId: frame.sessionId })).catch(() => undefined);
     });
+    page.recording = true;
     this.source = {
       page,
       stop: async () => {
         off();
+        page.recording = false;
         await session.send('Page.stopScreencast').catch(() => undefined);
       },
     };
@@ -95,6 +97,7 @@ export class Recorder {
     } catch {
       // A window that closed as it was shown: the next one shown is recorded.
       off();
+      page.recording = false;
       this.source = undefined;
       return;
     }

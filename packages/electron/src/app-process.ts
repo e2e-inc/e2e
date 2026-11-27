@@ -415,24 +415,6 @@ export class AppProcess {
     return title ?? undefined;
   }
 
-  /**
-   * Whether the `BrowserWindow` of a page is one the app keeps hidden, as its
-   * main process says. False for a view, a shown window, and an app that does
-   * not answer: only a window known to be hidden is one.
-   */
-  async windowHidden(page: PageTarget): Promise<boolean> {
-    const main = this.app === undefined ? undefined : await answerWithin(this.app.main, TITLE_MS);
-    if (main === undefined) return false;
-    const visible = await answerWithin(
-      main.evaluate(({ BrowserWindow, webContents }, targetId) => {
-        const contents = webContents.fromDevToolsTargetId(targetId);
-        return contents === undefined ? undefined : BrowserWindow.fromWebContents(contents)?.isVisible();
-      }, page.targetId),
-      TITLE_MS,
-    );
-    return visible === false;
-  }
-
   /** Closes one window, past any `beforeunload` guard, and resolves once it is gone. */
   async closeWindow(page: PageTarget): Promise<void> {
     const app = this.app;

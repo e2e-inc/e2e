@@ -93,7 +93,7 @@ async function captureViewport(window: AppWindow, scale: 'css' | 'device'): Prom
     // whole inner size, scrollbars included, as a capture with no clip is.
     if (ratio !== 1) clip = { x: scrolled.pageX, y: scrolled.pageY, width, height, scale: 1 / ratio };
   }
-  const { data } = await page.session.send('Page.captureScreenshot', { format: 'png', ...(clip === undefined ? {} : { clip }) });
+  const { data } = await page.captured(() => page.session.send('Page.captureScreenshot', { format: 'png', ...(clip === undefined ? {} : { clip }) }));
   return Buffer.from(data, 'base64');
 }
 

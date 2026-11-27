@@ -145,6 +145,27 @@ export class PageTarget implements InputTarget {
     return run;
   }
 
+  /** Set while a recording's screencast runs on the page: a capture then leaves the screencast alone. */
+  recording = false;
+  private captures = 0;
+
+  /**
+   * Runs a capture with the page counted as being captured. Chromium draws
+   * nothing of a window that is hidden or minimized, and a screenshot of one
+   * never returns, unless something captures it: a screencast is the
+   * protocol's way to say so. Its frames are not read.
+   */
+  async captured<T>(capture: () => Promise<T>): Promise<T> {
+    this.captures += 1;
+    if (!this.recording && this.captures === 1) await this.session.send('Page.startScreencast', { format: 'jpeg', quality: 1, maxWidth: 16, maxHeight: 16 }).catch(() => undefined);
+    try {
+      return await capture();
+    } finally {
+      this.captures -= 1;
+      if (!this.recording && this.captures === 0) await this.session.send('Page.stopScreencast').catch(() => undefined);
+    }
+  }
+
   /** The execution context of the engine's isolated world in the page's main frame, made once per document. */
   world(): Promise<number> {
     if (this.isolated === undefined) {

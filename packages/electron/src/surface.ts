@@ -224,7 +224,7 @@ export class ElectronSurface {
       const left = this.leftApp(raw.window);
       if (left !== undefined) throw new ConfigurationError('POLICY_DENIED', left);
       const snapshot = projectRead(raw, 'tree', this.projection());
-      return options?.pixels === true && !(await this.undrawn(raw.window)) ? await withPixels(this.devtools, raw, snapshot) : snapshot;
+      return options?.pixels === true ? await withPixels(this.devtools, raw, snapshot) : snapshot;
     });
   }
 
@@ -281,11 +281,6 @@ export class ElectronSurface {
   /** Why the window is not one to observe, trace, or capture: it shows a local file outside the app's directory. */
   private leftApp(window: AppWindow): string | undefined {
     return outsideApp(window.page.url(), this.app.appDirectory);
-  }
-
-  /** Whether the window has no pixels to capture: Windows draws nothing of a window the app keeps hidden, and a capture of one never returns. */
-  private async undrawn(window: AppWindow): Promise<boolean> {
-    return process.platform === 'win32' && (await this.app.windowHidden(window.page));
   }
 
   /** Fails the step that follows a dialog nothing answered; see the `dialogs` option. */
@@ -450,7 +445,6 @@ export class ElectronSurface {
     return await withBudget(operation, 'screenshot', async () => {
       const left = this.leftApp(window);
       if (left !== undefined) throw new ConfigurationError('POLICY_DENIED', left);
-      if (await this.undrawn(window)) throw invalidState('the window is hidden, and Windows draws nothing of a hidden window to capture: show it (BrowserWindow.show()) before the screenshot');
       this.artifactCounter += 1;
       return await screenshotFile(this.devtools, window, attempt.artifactsDir, screenshotName(this.artifactCounter, label));
     });

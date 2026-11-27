@@ -101,10 +101,8 @@ test.describe('what an Electron target shares with the web', () => {
     expect(await place.inputValue()).toBe('New\u00a0York');
   });
 
-  test('says a hidden window has nothing to capture on Windows, and captures it elsewhere', async ({ app, electron }) => {
+  test('captures a window the app keeps hidden', async ({ app, electron }) => {
     await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.hide());
-    const shot = await app.screenshot('hidden').then(() => undefined, (error: unknown) => error);
-    if (process.platform === 'win32') expect(shot).toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/the window is hidden/) });
-    else expect(shot).toBeUndefined();
+    expect(statSync(await app.screenshot('hidden')).size).toBeGreaterThan(1000);
   });
 });

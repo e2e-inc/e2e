@@ -292,15 +292,6 @@ describe('pixels', () => {
     expect(result.maskedRegionCount).toBe(1);
   });
 
-  it('knows a window the app keeps hidden from one it shows, which is what a capture on Windows goes by', async () => {
-    const { app, windows, launch } = appWith(`app.whenReady().then(async () => { await ${LOADED}; });`);
-    await launch();
-    const { page } = windows.require();
-    expect(await app.windowHidden(page)).toBe(true);
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.showInactive(), undefined);
-    await expect.poll(() => app.windowHidden(page)).toBe(false);
-  });
-
   it('masks a nested document in a page its root zooms', async () => {
     const page = `<html style="zoom:2"><body style="margin:0"><div style="height:20px"></div><iframe style="border:0;margin-left:30px;width:100px;height:50px" srcdoc="<body style=margin:0;background:red>"></iframe></body></html>`;
     const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);

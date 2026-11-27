@@ -243,7 +243,6 @@ The engine adds `--no-sandbox` on Linux automatically.
 | Theme and locale | `prefers-color-scheme` follows `nativeTheme` and the OS. Chromium UI strings follow the OS locale; pass `args: ['--lang=en-US']` to pin English |
 | Long press | Holds for 800 ms by default, compared to 500 ms on the web |
 | CSS selectors | `electron.locator()` searches the window document and open shadow roots one root at a time, and never enters frames |
-| Hidden windows | On Windows, a window the app keeps hidden has no pixels: `app.screenshot()` fails and the agent gets no screenshot of it. Show the window first |
 | Crashed renderers | A crashed window fails reads until you reload it with `electron.evaluate()` or restart the app |
 
 ## Security
