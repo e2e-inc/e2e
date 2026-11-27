@@ -1,7 +1,7 @@
 /** Detours in a recorded flow: a screen left and come back to with nothing typed, chosen, or set on the way. */
 
 import { describe, expect, it } from 'vitest';
-import { boundDetour, describeDetour, findDetours, findDetoursAfterReplay, settledDetour } from '@e2e-dev/core/lib/cache/detours';
+import { boundDetour, describeDetour, findDetours, findDetoursAfterReplay, findReplayedDetours, settledDetour } from '@e2e-dev/core/lib/cache/detours';
 import { routeLocation } from '@e2e-dev/core/lib/cache/route';
 import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { bound } from '@e2e-dev/core/lib/internal/text';
@@ -281,6 +281,18 @@ describe('findDetoursAfterReplay', () => {
     );
     expect(findDetoursAfterReplay(trace, [{ from: 1, to: 3 }], 3, new Set([2]))).toEqual([{ from: 1, to: 3, at: '/orders', via: '/orders/:id', evidence: 'locations' }]);
   });
+});
+
+describe('findReplayedDetours', () => {
+  it('reads each span a hand-off cut on its own, so a match outside it takes none of its trips', () => {
+    // Order 1, Settings, Reports, Details, back to Reports, order 2, then Settings again; the replay stopped at the last action.
+    const stored = flow(
+      [tap('Settings', '/orders/:id', 'link'), tap('Reports', '/settings', 'link'), tap('Details', '/reports', 'link'), back('/details'), tap('Order 2', '/reports', 'link'), tap('Settings', '/orders/:id', 'link')],
+      { endPath: '/settings' },
+    );
+    expect(findReplayedDetours({ ...stored, detours: [{ from: 1, to: 6 }] }, 5)).toEqual([{ from: 2, to: 4, at: '/reports', via: '/details', evidence: 'locations' }]);
+  });
+
 });
 
 describe('findDetours on an entry recorded without locations', () => {

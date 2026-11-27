@@ -197,9 +197,12 @@ export function findReplayedDetours(trace: DetourInput, executed: number, live?:
   if (spans === undefined) return findDetours(ran);
   const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to < executed || (to === executed && returned)) }, routeLocation);
   const cut = spans.filter(({ from, to }) => from < executed && executed < to);
-  // Every place here is the entry's, spelled as it stores them.
-  const stored = new Set(Array.from({ length: executed + 1 }, (_, index) => index));
-  const inCut = cut.length === 0 ? [] : findDetours({ ...ran, stored }).filter(({ from, to }) => cut.some((span) => span.from <= from && to <= span.to));
+  // Each cut span read on its own, so a match outside it takes none of its trips; every place here is the entry's, spelled as it stores them.
+  const inCut = cut.flatMap((span) => {
+    const inside = { actions: ran.actions.slice(span.from), ...(next === undefined || !returned ? {} : { endPath: next }) };
+    const stored = new Set(Array.from({ length: inside.actions.length + 1 }, (_, index) => index));
+    return findDetours({ ...inside, stored }).map((detour) => ({ ...detour, from: detour.from + span.from, to: detour.to + span.from }));
+  });
   return [...finished, ...inCut].toSorted((a, b) => a.from - b.from);
 }
 
