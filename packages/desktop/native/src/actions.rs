@@ -1171,10 +1171,12 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option
         // A key sent as physical input goes to whatever app is frontmost: the user may have switched apps since the raise,
         // while the app still names its own focused control.
         if physical {
+            // The window check waits on the app: the frontmost check comes after it, the last read before the key, so a
+            // switch to another app while it ran is still caught.
+            key_window(pid, &element)?;
             if !frontmost(pid)? {
                 return Err(Failure::refused(codes::ACTION_FAILED, "another app came forward before the key was sent, so nothing was sent"));
             }
-            key_window(pid, &element)?;
         }
         go("press")?;
         input::press(&combo, route).map_err(Failure::delivered)
