@@ -16,7 +16,7 @@ import { readdir, rm, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { Command } from 'commander';
 import picocolors from 'picocolors';
-import { isLockToken } from '@e2e-dev/core/lib/cache/file-lock';
+import { isLockToken, withFileLock } from '@e2e-dev/core/lib/cache/file-lock';
 import { FileCacheStore, LOCK_EXTENSION, MAX_CACHE_WIRE_BYTES, RECORDING_EXTENSION } from '@e2e-dev/core/lib/cache/store';
 import { discoverConfig, loadConfigModule, missingConfigError } from '../config/load.ts';
 import { resolveConfig } from '../config/resolve-run.ts';
@@ -401,7 +401,15 @@ async function removeTemporaries(directory: string): Promise<number> {
   let removed = 0;
   for (const name of names) {
     if (workingFile(directory, name) !== 'stale') continue;
-    await rm(path.join(directory, name), { force: true });
+    const file = path.join(directory, name);
+    if (name.endsWith('.writing')) {
+      // Through the lock's own takeover, never by path: a writer may have just taken this one over, and
+      // removing its lock would let a second writer in beside it. Holding it and letting go removes it.
+      await withFileLock(file, async () => undefined).catch(() => undefined);
+      if (!existsSync(file)) removed += 1;
+      continue;
+    }
+    await rm(file, { force: true });
     removed += 1;
   }
   return removed;
