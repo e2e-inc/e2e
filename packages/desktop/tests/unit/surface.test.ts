@@ -436,7 +436,7 @@ describe('DesktopSurface: the launch wait', () => {
 
   it('reports a launch whose window reads ran out of time as unreadable, not as an app that opened no window', async () => {
     await expect(launched({ listWindows: [failure('TIMEOUT', 'not_delivered')] }, { openTimeoutMs: 15_000 })).rejects.toThrow(
-      'cannot be read through accessibility (a read ran out of time): no read listed its windows; the last read failed with TIMEOUT (TIMEOUT from the fake). The window may be off screen',
+      'cannot be read through accessibility (a read ran out of time): the last read failed with TIMEOUT (TIMEOUT from the fake). The window may be off screen',
     );
   });
 
@@ -445,6 +445,13 @@ describe('DesktopSurface: the launch wait', () => {
     const scenario = { listWindows: [failure('APP_NOT_FOUND', 'not_delivered'), listed], snapshot: [screen('w-mine', {}, { root_unread: true })] };
     await expect(launched(scenario, { openTimeoutMs: 15_000 })).rejects.toThrow(
       'SpikeForm launched, but its window cannot be read through accessibility: the last read listed 1 window, 0 unreadable, 1 whose root element did not answer. The window may be off screen',
+    );
+  }, 30_000);
+
+  it('reports a last read that listed nothing by its failure, not by the list of the read before it', async () => {
+    const scenario = { listWindows: [windows(() => [{ id: 'w-mine', is_focused: true, accessible: false }]), failure('APP_NOT_FOUND', 'not_delivered', 'no app has that process id.')] };
+    await expect(launched(scenario, { openTimeoutMs: 15_000 })).rejects.toThrow(
+      'SpikeForm launched, but its window cannot be read through accessibility: the last read failed with APP_NOT_FOUND (no app has that process id). The window may be off screen',
     );
   }, 30_000);
 

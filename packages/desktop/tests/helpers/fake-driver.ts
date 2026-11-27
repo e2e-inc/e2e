@@ -226,10 +226,10 @@ export function fakeDriver(scenario: Scenario = {}): FakeDriver {
  * `answer` replaces the success envelope: a failure the driver reports after
  * the process started.
  */
-export function spawnApp({ token = true, exits = false, sleepMs, answer, runningBefore }: { token?: boolean; exits?: boolean; sleepMs?: number; answer?: Answer; runningBefore?: readonly number[] } = {}): Scripted {
+export function spawnApp({ token = true, exits = false, sleepMs, answer, runningBefore = [] }: { token?: boolean; exits?: boolean; sleepMs?: number; answer?: Answer; runningBefore?: readonly number[] } = {}): Scripted {
   return (fake, args) => {
     const pid = fake.spawn({ token: token ? (args[0] as { token: string }).token : undefined, exits });
-    const reported = answer ?? { ok: true, data: { app: 'SpikeForm', pid, bundle_id: 'dev.e2e.spike.form', started: fake.processStarted(pid) ?? undefined, ...(runningBefore === undefined ? {} : { running_before: runningBefore }) } };
+    const reported = answer ?? { ok: true, data: { app: 'SpikeForm', pid, bundle_id: 'dev.e2e.spike.form', started: fake.processStarted(pid) ?? undefined, running_before: runningBefore } };
     return sleepMs === undefined ? reported : { ...reported, sleepMs };
   };
 }

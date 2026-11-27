@@ -56,7 +56,6 @@ pub struct Launched {
     pub started: Option<f64>,
     /// The copies of the app that ran before the launch. An app that runs one copy at a time hands the launch to one
     /// of them and exits, which the caller can then say.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub running_before: Vec<i32>,
 }
 
@@ -231,10 +230,10 @@ mod tests {
     use super::{Launched, hidden_by};
 
     #[test]
-    fn names_the_copies_that_ran_before_the_launch_only_when_some_did() {
+    fn names_the_copies_that_ran_before_the_launch() {
         let launched = |running_before| Launched { pid: 7, app: "Form".to_owned(), bundle_id: None, started: None, running_before };
         assert_eq!(serde_json::to_value(launched(vec![3, 5])).unwrap(), serde_json::json!({ "pid": 7, "app": "Form", "running_before": [3, 5] }));
-        assert_eq!(serde_json::to_value(launched(vec![])).unwrap(), serde_json::json!({ "pid": 7, "app": "Form" }));
+        assert_eq!(serde_json::to_value(launched(vec![])).unwrap(), serde_json::json!({ "pid": 7, "app": "Form", "running_before": [] }));
     }
 
     #[test]

@@ -88,8 +88,8 @@ export interface Launched {
   readonly bundle_id?: string;
   /** When the process started, in microseconds since the epoch, read as the driver claimed it. */
   readonly started?: number;
-  /** The copies of the app that ran before the launch, which the launch never claims; absent when none did. */
-  readonly running_before?: readonly number[];
+  /** The copies of the app that ran before the launch, which the launch never claims. */
+  readonly running_before: readonly number[];
 }
 
 /** What the driver can do: one function per native call. */
@@ -193,6 +193,12 @@ export class DriverFailure extends Error {
     this.code = failure.code;
     this.notDelivered = failure.disposition?.delivery === 'not_delivered';
     this.details = failure.details ?? {};
+  }
+
+  /** The copies of the app a failed launch says ran before it; none when it names none. */
+  get runningBefore(): readonly number[] {
+    const before = this.details.running_before;
+    return Array.isArray(before) ? before.filter((pid): pid is number => typeof pid === 'number') : [];
   }
 }
 

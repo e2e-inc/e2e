@@ -41,7 +41,7 @@ import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, t
 import { toCombo } from './keys.ts';
 import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_POLL_MS, LAUNCH_TOKEN, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
 import { launchArgumentList } from './launch-arguments.ts';
-import { handOff, LaunchReads, stillRunning } from './launch-report.ts';
+import { describeLastRead, handOffClause, type WindowsRead } from './launch-report.ts';
 import { ROOT_ID, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
@@ -238,8 +238,6 @@ export class DesktopSurface {
   /** The id handed out for each node identity since the app launched; see `projectSnapshot`. */
   private readonly ids = new Map<string, string>();
   private sequence = 0;
-  /** Set while `app.open()` waits for the launched app's window, so a wait that fails can say what its reads saw. */
-  private launchReads: LaunchReads | undefined;
   private driverVersion = 'unknown';
   /** The run's environment cut to `INHERITED_ENV`: all the app is given of it. */
   private appEnv: Readonly<Record<string, string>> = {};
@@ -441,8 +439,7 @@ export class DesktopSurface {
       if (cause.details.kind === 'not_started') return new EngineError('ENGINE_FAILURE', `launch ${target.label}: ${cause.message}`, { retryable: false, cause });
     }
     if (cause instanceof DriverFailure && cause.details.kind === 'unclaimed') {
-      const copies = handOff(stillRunning(cause.details.running_before, alive));
-      return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${cause.message}, so none can be shown to be its own; the end of the attempt looks for it again${copies === '' ? '' : `; ${copies}`}`, { retryable: false, cause });
+      return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${cause.message}, so none can be shown to be its own; the end of the attempt looks for it again${handOffClause('; ', cause.runningBefore)}`, { retryable: false, cause });
     }
     return translate(cause, `launch ${target.label}`, true);
   }
@@ -465,32 +462,27 @@ export class DesktopSurface {
    * forward: one that opens no window there (a document-based app opens its
    * first one only when it comes forward) fails the open, and needs `headed`.
    */
-  private async windowReadable(operation: OperationContext, runningBefore: readonly number[] | undefined): Promise<void> {
-    const reads = new LaunchReads();
-    this.launchReads = reads;
-    try {
-      await this.readableWithin(operation, reads, runningBefore);
-    } finally {
-      this.launchReads = undefined;
-    }
-  }
-
-  private async readableWithin(operation: OperationContext, reads: LaunchReads, runningBefore: readonly number[] | undefined): Promise<void> {
+  private async windowReadable(operation: OperationContext, runningBefore: readonly number[]): Promise<void> {
     const budgetBound = operation.timeoutMs < LAUNCH_READY_MS;
     const deadline = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
     let sawWindow = false;
     // Whether a read finished and listed no window of the app: only that shows it opened none. A read that ran out of time saw nothing.
     let listedNone = false;
     let timedOut = false;
+    // What the newest read came to, for the error of a window that never became readable.
+    let last: WindowsRead | DriverFailure | undefined;
     while (Date.now() < deadline) {
       if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
       let screen: ProjectedScreen | undefined;
       let read = false;
       try {
         // Each read gets what is left of the readiness wait, not of the whole operation, shared by its calls.
-        screen = await this.capture(withDeadline({ ...operation, timeoutMs: Math.max(deadline - Date.now(), 0) }));
+        last = undefined;
+        last = await this.readWindows(withDeadline({ ...operation, timeoutMs: Math.max(deadline - Date.now(), 0) }));
+        screen = this.readable(last);
         read = true;
       } catch (cause) {
+        if (last === undefined && cause instanceof EngineError && cause.cause instanceof DriverFailure) last = cause.cause;
         // The last read ran out of budget: the window never became readable in time.
         if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') {
           timedOut = true;
@@ -503,17 +495,13 @@ export class DesktopSurface {
       }
       // A window whose root the app did not answer for is there but not readable yet, which is what this wait is for.
       if (screen !== undefined && !screen.rootUnread) return;
-      if (screen !== undefined) {
-        sawWindow = true;
-        reads.rootUnread();
-      }
+      if (screen !== undefined) sawWindow = true;
       else if (read) listedNone = true;
       // An app that quit (or crashed) on its own never shows a window.
       if (this.pid !== undefined && !(await this.running(this.pid))) {
         this.forget();
         this.dropProcess();
-        const copies = handOff(stillRunning(runningBefore, alive));
-        throw new EngineError('ENGINE_FAILURE', `${this.appName ?? 'the app'} quit right after it launched, before it showed a window${copies === '' ? '' : `: ${copies}`}`, { retryable: false });
+        throw new EngineError('ENGINE_FAILURE', `${this.appName ?? 'the app'} quit right after it launched, before it showed a window${handOffClause(': ', runningBefore)}`, { retryable: false });
       }
       await sleep(Math.min(LAUNCH_POLL_MS, Math.max(deadline - Date.now(), 0)), operation.signal);
     }
@@ -536,7 +524,7 @@ export class DesktopSurface {
     }
     throw new EngineError(
       'ENGINE_FAILURE',
-      `${this.appName ?? 'the app'} launched, but its window cannot be read through accessibility${timedOut ? ' (a read ran out of time)' : ''}: ${reads.summary()}. The window may be off screen`,
+      `${this.appName ?? 'the app'} launched, but its window cannot be read through accessibility${timedOut ? ' (a read ran out of time)' : ''}: ${describeLastRead(last)}. The window may be off screen`,
       { retryable: false },
     );
   }
@@ -767,6 +755,24 @@ export class DesktopSurface {
    * retryable `NODE_STALE`, so a locator reads again until its deadline.
    */
   private async capture(operation: OperationContext, windowId = this.chosenWindow, forMask = false, whole = false): Promise<ProjectedScreen | undefined> {
+    return this.readable(await this.readWindows(operation, windowId, forMask, whole));
+  }
+
+  /** The screen of a read, as `capture` answers; throws the retryable `NODE_STALE` of a read that found windows and could read none. */
+  private readable({ windows, candidates, screen }: WindowsRead): ProjectedScreen | undefined {
+    if (screen !== undefined) return screen;
+    // Only a dialog macOS put over the app is open: no screen of the app's own, and no empty one either.
+    if (candidates === 0 && windows.some((window) => window.system === true)) {
+      throw new EngineError('NODE_STALE', `only a system dialog is over ${this.appName ?? 'the app'}; reading again (desktop.useWindow() reads the dialog itself)`, { retryable: true, cause: UNREADABLE });
+    }
+    if (candidates === 0) return undefined;
+    // A locked screen still lists the app's windows, none of them readable: say so rather than that each closed.
+    this.unlessLocked();
+    throw new EngineError('NODE_STALE', `no window of ${this.appName ?? 'the app'} could be read through accessibility, or each closed while it was read`, { retryable: true, cause: UNREADABLE });
+  }
+
+  /** One read for `capture`: the app's windows, and the first of those asked for that accessibility can read. */
+  private async readWindows(operation: OperationContext, windowId = this.chosenWindow, forMask = false, whole = false): Promise<WindowsRead> {
     const windows = await this.ownWindows(operation, true);
     const chosen = windowId !== undefined && windowId === this.chosenWindow;
     if (chosen && !windows.some((window) => window.id === windowId)) {
@@ -778,10 +784,8 @@ export class DesktopSurface {
     const open = new Set(windows.map((window) => window.id));
     for (const identity of this.ids.keys()) if (!open.has(identity.slice(0, identity.indexOf('|')))) this.ids.delete(identity);
     const candidates = windowId === undefined ? byPreference(windows) : windows.filter((window) => window.id === windowId);
-    // Only a dialog macOS put over the app is open: no screen of the app's own, and no empty one either.
-    if (candidates.length === 0 && windows.some((window) => window.system === true)) {
-      throw new EngineError('NODE_STALE', `only a system dialog is over ${this.appName ?? 'the app'}; reading again (desktop.useWindow() reads the dialog itself)`, { retryable: true, cause: UNREADABLE });
-    }
+    const read = { windows, candidates: candidates.length };
+    const failures: DriverFailure[] = [];
     const { pid } = this;
     for (const window of candidates) {
       if (pid === undefined || window.accessible === false) continue;
@@ -794,15 +798,14 @@ export class DesktopSurface {
         if (!forMask) {
           const projected = this.projectWindow(raw, window.minimized === true, interactive);
           const sheet = sheetKey(window);
-          return sheet === undefined ? projected : { ...projected, sheet };
+          return { ...read, failures, screen: sheet === undefined ? projected : { ...projected, sheet } };
         }
         let scratch = 0;
-        return projectSnapshot(raw, () => `mask${(scratch += 1)}`);
+        return { ...read, failures, screen: projectSnapshot(raw, () => `mask${(scratch += 1)}`) };
       } catch (cause) {
         // A panel accessibility cannot read, or a window that just closed: try the next one.
-        if (cause instanceof DriverFailure && !NO_WINDOW_CODES.has(cause.code)) this.launchReads?.failed(cause);
         if (cause instanceof DriverFailure && NO_WINDOW_CODES.has(cause.code)) {
-          this.launchReads?.unread(cause);
+          failures.push(cause);
           if (chosen) {
             this.unlessLocked();
             throw this.chosenClosed();
@@ -812,10 +815,7 @@ export class DesktopSurface {
         throw translate(cause, 'snapshot', false);
       }
     }
-    if (candidates.length === 0) return undefined;
-    // A locked screen still lists the app's windows, none of them readable: say so rather than that each closed.
-    this.unlessLocked();
-    throw new EngineError('NODE_STALE', `no window of ${this.appName ?? 'the app'} could be read through accessibility, or each closed while it was read`, { retryable: true, cause: UNREADABLE });
+    return { ...read, failures };
   }
 
   /**
@@ -851,16 +851,13 @@ export class DesktopSurface {
     }
     try {
       const windows = await this.read((driver) => driver.listWindows(pid), { label: 'list windows', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs });
-      const own = windows.filter((window) => window.pid === undefined || window.pid === pid);
-      this.launchReads?.windows(own);
-      return own;
+      return windows.filter((window) => window.pid === undefined || window.pid === pid);
     } catch (cause) {
-      if (cause instanceof DriverFailure) this.launchReads?.failed(cause);
       if (cause instanceof DriverFailure && NO_WINDOW_CODES.has(cause.code)) {
         if (strict) {
           await this.requireRunning();
           // The process still runs, so the list failed, not the app: no empty screen, which would let a negative assertion pass.
-          throw new EngineError('NODE_STALE', `the windows of ${this.appName ?? 'the app'} could not be listed while it runs; reading again`, { retryable: true, cause: UNREADABLE });
+          throw new EngineError('NODE_STALE', `the windows of ${this.appName ?? 'the app'} could not be listed while it runs; reading again`, { retryable: true, cause });
         }
         return [];
       }
