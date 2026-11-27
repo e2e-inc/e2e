@@ -542,6 +542,16 @@ describe('DesktopSurface: the launch wait', () => {
 });
 
 describe('DesktopSurface: reading', () => {
+  it('never locates the line rows folded out of view read as, by any text query', async () => {
+    const view = { role: 'button', name: 'View', ref_id: '@s:view', available_actions: ['Click'], bounds: { x: 0, y: 0, width: 80, height: 20 } };
+    const list = { role: 'scrollarea', ref_id: '@s:area', bounds: { x: 0, y: 30, width: 300, height: 100 }, children: [{ role: 'outline', name: 'Tasks', ref_id: '@s:list', children: [{ role: 'folded', folded: 182 }] }] };
+    const { surface } = await launched({ snapshot: [screen('w-mine', { name: 'Inbox', children: [view, list] })] }, { observe: false });
+    const text = (value: string) => ({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value, exact: false } } }) as const;
+    // A loose "view" would match "182 rows out of view" too, and make a tap on the button ambiguous.
+    expect((await surface.locate(text('view'), operation())).map((node) => node.name)).toEqual(['View']);
+    for (const value of ['rows', '182']) expect(await surface.locate(text(value), operation())).toEqual([]);
+  });
+
   it('reads again when the window list does not find the app while its process still runs, never an empty screen', async () => {
     const first = windows(() => [{ id: 'w-mine', is_focused: true }]);
     const lost = failure('APP_NOT_FOUND', 'not_delivered');
