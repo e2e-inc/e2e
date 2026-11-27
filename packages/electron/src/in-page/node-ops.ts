@@ -57,7 +57,7 @@ export interface NodeOps {
   isNativeRadio(): boolean;
   /** Whether the node is a file input, which takes files itself. */
   isFileInput(): boolean;
-  /** Whether the node, the focused element, takes typed text, or typed keys as a widget's typeahead. */
+  /** Whether the node, the focused element, takes typed text, typed keys as a widget's typeahead, or keys the app handles itself. */
   takesText(): boolean;
   /** The element's computed value of each named CSS property. */
   readStyle(names: readonly string[]): Record<string, string>;
@@ -340,7 +340,10 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       if (TYPEAHEAD_ROLES.has(active.getAttribute('role') ?? '')) return true;
       // A date or time input takes typed digits; a range or color picker takes none.
       if (active instanceof HTMLInputElement) return (TEXT_INPUT_TYPES.has(typeOf(active)) || TYPED_PICKER_TYPES.has(typeOf(active))) && !active.readOnly && !active.disabled;
-      return false;
+      // Keys to the page itself, a select, a button, or a link are lost or click. Any other element the app made
+      // focusable (a canvas, a widget with a tabindex and key handlers of its own) opted into keys, as on the web.
+      if (active === active.ownerDocument.body || active === active.ownerDocument.documentElement) return false;
+      return !(active instanceof HTMLSelectElement || active instanceof HTMLButtonElement || active instanceof HTMLAnchorElement);
     },
   };
   // TypeScript cannot tie `args` to the method `name` picks; `NodeOps` holds the two together for callers.
