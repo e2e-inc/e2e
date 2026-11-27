@@ -280,3 +280,12 @@ translation moves or goes with it in the same change.
 | below the fold | abaixo da dobra |
 | port reverse | redirecionamento reverso de portas |
 | dashboard | dashboard (keep in English, o dashboard) |
+| merge (reports, `e2e merge-reports`) | mesclar, mesclagem (relatório mesclado) |
+| folded report (`report-with-reruns.json`) | relatório combinado |
+| service (`services`) | serviço |
+| workspace (pnpm, Yarn) | workspace (keep in English, o workspace) |
+| helper (a test helper) | função auxiliar |
+| step boundary | fronteira de passo |
+| hide (a model, a key) | esconder (`ocultar` is for redact) |
+| async generator, yield | gerador assíncrono, fazer yield |
+| plain object | objeto simples |
