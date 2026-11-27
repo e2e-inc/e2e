@@ -147,6 +147,20 @@ test.describe('controls window', () => {
     expect(String(refused)).toMatch(/disabled/);
   });
 
+  for (const [button, effect] of [
+    ['Cancel', 'Kept the draft'],
+    ['Delete', 'Deleted the draft'],
+  ] as const) {
+    test(`taps ${button} in a SwiftUI alert, which closes it`, async ({ screen }) => {
+      await screen.getByRole('button', 'Delete draft…').tap();
+      await expect(screen.getByText('Delete draft?')).toBeVisible();
+      // SwiftUI answers the press with an error once it closed the alert: the tap still passes, as it landed.
+      await screen.getByRole('button', button).tap();
+      await expect(screen.getByTestId('controls-status')).toHaveText(effect);
+      await expect(screen.getByText('Delete draft?')).toBeHidden();
+    });
+  }
+
   test('waits for a disabled list to be enabled before it selects an option', async ({ screen }) => {
     await expect(screen.getByRole('combobox', 'Size')).toBeDisabled();
     // The app enables the list half a second after this tap: the select starts while it is still disabled.

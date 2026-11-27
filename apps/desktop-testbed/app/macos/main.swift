@@ -3,10 +3,11 @@
 // can check every control reached the app. "Controls…" opens a second
 // window with one control per engine capability the form does not reach
 // (a scrolling list, a key handler, a context menu, a slider, a disabled
-// button, and double-click and hover targets for physical input), each
-// writing what happened into that window's status line.
+// button, a SwiftUI alert, and double-click and hover targets for physical
+// input), each writing what happened into that window's status line.
 
 import AppKit
+import SwiftUI
 
 final class Controller: NSObject, NSApplicationDelegate {
   var window: NSWindow!
@@ -76,6 +77,21 @@ final class Controller: NSObject, NSApplicationDelegate {
   func applicationShouldTerminateAfterLastWindowClosed(_ app: NSApplication) -> Bool { true }
 }
 
+/// A SwiftUI button whose alert holds two more: a press on either closes the alert, and SwiftUI then answers that
+/// press with an error though it ran, unlike AppKit's alert.
+struct DraftAlert: View {
+  let report: (String) -> Void
+  @State private var asking = false
+
+  var body: some View {
+    Button("Delete draft…") { asking = true }
+      .alert("Delete draft?", isPresented: $asking) {
+        Button("Cancel", role: .cancel) { report("Kept the draft") }
+        Button("Delete", role: .destructive) { report("Deleted the draft") }
+      }
+  }
+}
+
 /// A view that reports the pointer entering it, for `hover`.
 final class HoverTarget: NSView {
   var onHover: () -> Void = {}
@@ -126,7 +142,7 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
 
   func show() {
     if let window { window.makeKeyAndOrderFront(nil); return }
-    let window = NSWindow(contentRect: NSRect(x: 660, y: 200, width: 360, height: 830),
+    let window = NSWindow(contentRect: NSRect(x: 660, y: 200, width: 360, height: 870),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.title = "Controls"
     window.isReleasedWhenClosed = false
@@ -237,7 +253,9 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
     hover.widthAnchor.constraint(equalToConstant: 120).isActive = true
     hover.heightAnchor.constraint(equalToConstant: 30).isActive = true
 
-    let stack = NSStackView(views: [scroll, accountScroll, note, opener, tabs, options, volume, disabled, enableLater, size, agree, closeTab, double, hover, hoverStatus, status])
+    let draft = NSHostingView(rootView: DraftAlert { [weak self] text in self?.status.stringValue = text })
+
+    let stack = NSStackView(views: [scroll, accountScroll, note, opener, tabs, options, volume, disabled, enableLater, size, agree, closeTab, draft, double, hover, hoverStatus, status])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
