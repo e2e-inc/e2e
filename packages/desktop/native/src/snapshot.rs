@@ -698,7 +698,7 @@ impl Walk {
 
 /// The name a row or cell takes from the text inside it, as an accessible name comes from content: every text, in
 /// reading order, joined by spaces.
-fn content_name(texts: &[String]) -> Option<String> {
+pub(crate) fn content_name(texts: &[String]) -> Option<String> {
     label(Some(texts.iter().map(|text| text.trim()).filter(|text| !text.is_empty()).collect::<Vec<_>>().join(" ")))
 }
 

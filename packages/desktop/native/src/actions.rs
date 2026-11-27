@@ -797,28 +797,58 @@ fn select_all(element: &Element, deadline: Instant) -> Outcome<()> {
     }
 }
 
-/// The text an item of a list or menu shows.
-fn item_label(element: &Element) -> Result<Option<String>, AXError> {
-    let values = match element.attributes(&["AXTitle", "AXValue", "AXDescription"]) {
+/// How deep `row_label` reads into a row for its text, and how many children of each element.
+const ROW_TEXT_DEPTH: usize = 6;
+const ROW_TEXT_CHILDREN: usize = 32;
+
+/// The name a list's row shows, as the snapshot names it: its own title or description (a text item's value), else,
+/// with none, every text inside it in reading order, joined by spaces.
+fn row_label(element: &Element) -> Result<Option<String>, AXError> {
+    if let Some(own) = own_label(element)? {
+        return Ok(Some(own));
+    }
+    let mut texts = Vec::new();
+    row_texts(element, 0, &mut texts)?;
+    Ok(crate::snapshot::content_name(&texts))
+}
+
+/// An element's own name: its title, else its description, else, for a text, its value.
+fn own_label(element: &Element) -> Result<Option<String>, AXError> {
+    let values = match element.attributes(&["AXRole", "AXTitle", "AXDescription", "AXValue"]) {
         Ok(values) => values,
         Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
         Err(_) => return Ok(None),
     };
-    if let Some(text) = values.into_iter().flatten().find_map(|value| value.text().map(str::to_owned).filter(|text| !text.trim().is_empty())) {
-        return Ok(Some(text));
+    let text = |index: usize| values[index].as_ref().and_then(Value::text).map(str::to_owned).filter(|text| !text.trim().is_empty());
+    let role = values[0].as_ref().and_then(Value::text).unwrap_or_default();
+    Ok(text(1).or_else(|| text(2)).or_else(|| if roles::text(roles::role(role, None)) { text(3) } else { None }))
+}
+
+/// The texts inside an element, in reading order, as the snapshot gathers a row's name from them.
+fn row_texts(element: &Element, depth: usize, texts: &mut Vec<String>) -> Result<(), AXError> {
+    if depth >= ROW_TEXT_DEPTH {
+        return Ok(());
     }
-    // A row's text is in a cell or a text inside it.
-    let children = match element.elements("AXChildren", 16) {
+    let children = match element.elements("AXChildren", ROW_TEXT_CHILDREN) {
         Ok(children) => children,
         Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
         Err(_) => Vec::new(),
     };
     for child in children {
-        if let Some(text) = item_label(&child)? {
-            return Ok(Some(text));
+        let role = match child.attribute("AXRole") {
+            Ok(value) => value.text().unwrap_or_default().to_owned(),
+            Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+            Err(_) => String::new(),
+        };
+        if roles::text(roles::role(&role, None)) {
+            if let Some(text) = own_label(&child)? {
+                texts.push(text);
+            }
+        } else {
+            row_texts(&child, depth + 1, texts)?;
         }
     }
-    Ok(None)
+    Ok(())
 }
 
 /// The open menu of a pop-up button, once it shows.
@@ -882,20 +912,26 @@ fn close_menu_with(stopped: impl Fn() -> bool, closed: impl Fn() -> bool, cancel
     until(Instant::now() + MENU_CLOSE_WAIT, closed)
 }
 
-/// The first item `matches` takes, and whether a read of one the app did not answer in time left an item unread: that
-/// item may be the one asked for. Each read waits on the app, and a list can hold thousands of items: the scan stops
-/// with the cut-off once the caller gave up or ran out of time.
-fn scan<T>(items: Vec<T>, what: &str, mut matches: impl FnMut(&T) -> Result<bool, AXError>) -> Outcome<(Option<T>, bool)> {
+/// The first `limit` items `matches` takes, and whether a read of one the app did not answer in time left an item
+/// unread: that item may be the one asked for. Each read waits on the app, and a list can hold thousands of items: the
+/// scan stops with the cut-off once the caller gave up or ran out of time.
+fn scan<T>(items: Vec<T>, what: &str, limit: usize, mut matches: impl FnMut(&T) -> Result<bool, AXError>) -> Outcome<(Vec<T>, bool)> {
+    let mut found = Vec::new();
     let mut stalled = false;
     for item in items {
         go(what)?;
         match matches(&item) {
-            Ok(true) => return Ok((Some(item), stalled)),
+            Ok(true) => {
+                found.push(item);
+                if found.len() >= limit {
+                    break;
+                }
+            }
             Ok(false) => {}
             Err(error) => stalled |= error == ax::AX_CANNOT_COMPLETE,
         }
     }
-    Ok((None, stalled))
+    Ok((found, stalled))
 }
 
 /// A select's failure before anything was chosen, once its menu was closed or failed to close. A menu that stayed open
@@ -928,11 +964,11 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         let unchosen = |failure: Failure| unclosed(failure, close_menu(entry.pid, &menu));
         let items = all(&menu, "AXChildren", "read the list's options").map_err(unchosen)?;
         // A title the app did not answer in time may be the option asked for: that is no proof it is missing.
-        let (item, stalled) = scan(items, "read the list's options", |candidate| {
+        let (found, stalled) = scan(items, "read the list's options", 1, |candidate| {
             candidate.attribute("AXTitle").map(|title| title.text() == Some(label) && candidate.boolean("AXEnabled") != Some(false))
         })
         .map_err(unchosen)?;
-        let Some(item) = item else {
+        let Some(item) = found.into_iter().next() else {
             return Err(unchosen(if stalled {
                 unread(ax::AX_CANNOT_COMPLETE, "read the list's options")
             } else {
@@ -965,8 +1001,12 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
             rows => rows,
         };
         // A row the app did not answer in time may be the option asked for: that is no proof it is missing.
-        let (row, stalled) = scan(rows, "read the list's rows", |candidate| item_label(candidate).map(|text| text.as_deref() == Some(label)))?;
-        let Some(row) = row else {
+        // Two rows that show the label leave the choice open: neither is selected, as no handler of the wrong one may run.
+        let (found, stalled) = scan(rows, "read the list's rows", 2, |candidate| row_label(candidate).map(|text| text.as_deref() == Some(label)))?;
+        if found.len() > 1 {
+            return Err(Failure::refused(codes::ACTION_FAILED, format!("more than one option of the list is \"{label}\"; select it another way")));
+        }
+        let Some(row) = found.into_iter().next() else {
             if stalled {
                 return Err(unread(ax::AX_CANNOT_COMPLETE, "read the list's rows"));
             }
@@ -1640,7 +1680,7 @@ mod tests {
         use super::scan;
         let read = Cell::new(0);
         let outcome = super::guarded(Some(1_000_051), later(), || {
-            scan(vec![1, 2, 3], "read the list's rows", |_| {
+            scan(vec![1, 2, 3], "read the list's rows", 1, |_| {
                 read.set(read.get() + 1);
                 crate::input::cancel_input(1_000_051);
                 Ok(false)
@@ -1648,14 +1688,16 @@ mod tests {
         });
         assert_eq!(outcome.expect_err("cancelled during the scan").code, crate::failure::codes::TIMEOUT);
         assert_eq!(read.get(), 1, "no row read after the cancel");
-        // Not cancelled: the first match, and a stall on the way is reported with a miss.
-        let found = super::guarded(Some(1_000_052), later(), || scan(vec![1, 2, 3], "scan", |item| Ok(*item == 2))).expect("scanned");
-        assert_eq!(found, (Some(2), false));
+        // Not cancelled: the first matches up to the limit, and a stall on the way is reported with a miss.
+        let found = super::guarded(Some(1_000_052), later(), || scan(vec![1, 2, 3], "scan", 1, |item| Ok(*item >= 2))).expect("scanned");
+        assert_eq!(found, (vec![2], false));
+        let both = super::guarded(Some(1_000_054), later(), || scan(vec![1, 2, 3, 4], "scan", 2, |item| Ok(*item >= 2))).expect("scanned");
+        assert_eq!(both, (vec![2, 3], false), "a second match is found, and the scan stops there");
         let missed = super::guarded(Some(1_000_053), later(), || {
-            scan(vec![1, 2], "scan", |item| if *item == 1 { Err(crate::ax::AX_CANNOT_COMPLETE) } else { Ok(false) })
+            scan(vec![1, 2], "scan", 1, |item| if *item == 1 { Err(crate::ax::AX_CANNOT_COMPLETE) } else { Ok(false) })
         })
         .expect("scanned");
-        assert_eq!(missed, (None, true));
+        assert_eq!(missed, (vec![], true));
     }
 
     #[test]
