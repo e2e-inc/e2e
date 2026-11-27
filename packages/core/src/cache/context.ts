@@ -148,19 +148,27 @@ function redactLocations(trace: ActionTrace, redact: (text: string) => string): 
   return { ...trace, actions: trace.actions.map((action) => (action.at === undefined ? action : { ...action, at: redact(action.at) })) };
 }
 
-/** Whether a trace keeps where any of its actions ran. */
-function located(trace: ActionTrace): boolean {
-  return trace.actions.some((action) => action.at !== undefined);
+/** Whether a trace keeps where any of its actions ran: a location, or the control a tap reached. */
+function placed(trace: ActionTrace): boolean {
+  return trace.detours !== undefined || trace.actions.some((action) => action.at !== undefined || 'controlRole' in action);
 }
 
-/** A trace without its locations and the detours found on them, read afterwards by its actions alone (`cache/detours.ts`). */
-function withoutLocations(trace: ActionTrace): ActionTrace {
+/**
+ * A trace without where its actions ran (locations, the control a tap
+ * reached) and the detours found on them, read afterwards by its actions
+ * alone (`cache/detours.ts`).
+ */
+function withoutProvenance(trace: ActionTrace): ActionTrace {
   const { detours: _detours, ...rest } = trace;
-  return { ...rest, actions: trace.actions.map((action) => {
-    if (action.at === undefined) return action;
-    const { at: _at, ...unplaced } = action;
-    return unplaced;
-  }) };
+  return {
+    ...rest,
+    actions: trace.actions.map((action) => {
+      const { at: _at, ...unplaced } = action;
+      if (!('controlRole' in unplaced)) return unplaced;
+      const { controlRole: _controlRole, ...tap } = unplaced;
+      return tap;
+    }),
+  };
 }
 
 /** The part of a trace that decides what a replay does, as canonical JSON. */
@@ -281,8 +289,8 @@ export async function settleStagedTraces(context: AgentCacheContext, settlement:
       }
       // Masked right before the write, so a value learned while the store read ran is masked too; the flow ignores locations.
       const trace = entry.redact === undefined ? entry.trace : redactLocations(entry.trace, entry.redact);
-      // Locations are provenance: a recording that fits the store only without them is written without them, as an earlier version wrote it.
-      const written = (await context.store.write(entry.keyHash, trace)) ?? (located(trace) ? await context.store.write(entry.keyHash, withoutLocations(trace)) : undefined);
+      // Where actions ran is provenance: a recording that fits the store only without it is written without it, as an earlier version wrote it.
+      const written = (await context.store.write(entry.keyHash, trace)) ?? (placed(trace) ? await context.store.write(entry.keyHash, withoutProvenance(trace)) : undefined);
       outcomes.set(entry.stepIndex, written === undefined ? 'not-written' : 'saved');
     } catch {
       // The cache is disposable; a failed flush is a slower next run only.

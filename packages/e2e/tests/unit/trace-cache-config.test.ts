@@ -308,14 +308,15 @@ describe('settleStagedTraces', () => {
         paths: Array.from({ length: 5 }, (_unused, file) => `/data/${String(file)}/${'f'.repeat(3_900)}.csv`),
         at: `/form/${'a'.repeat(4_000)}`,
       }));
+      const switchTap = { name: 'tap' as const, summary: 'tap image "Moon"', target: { role: 'image', name: 'Moon' }, controlRole: 'switch', at: '/form' };
       const context = contextWith(store);
-      context.staged.push({ kind: 'write', keyHash: KEY_A, trace: { ...trace('large'), actions, detours: [] }, stepIndex: 1 });
+      context.staged.push({ kind: 'write', keyHash: KEY_A, trace: { ...trace('large'), actions: [...actions.slice(1), switchTap], detours: [] }, stepIndex: 1 });
       const writes = await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
       expect(writes.get(1)).toBe('saved');
       const read = await store.read(KEY_A);
       assert(read.status === 'hit');
       expect(read.entry.payload.actions).toHaveLength(50);
-      expect(read.entry.payload.actions.some((action) => action.at !== undefined)).toBe(false);
+      expect(read.entry.payload.actions.some((action) => action.at !== undefined || 'controlRole' in action)).toBe(false);
       expect(read.entry.payload).not.toHaveProperty('detours');
     } finally {
       await rm(directory, { recursive: true, force: true });
