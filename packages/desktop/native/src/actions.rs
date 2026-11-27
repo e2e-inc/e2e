@@ -1162,9 +1162,15 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
     match action {
         Action::Click => click(&entry, deadline),
-        Action::DoubleClick => physical(&entry, Pointer::Click { right: false, count: 2 }),
+        // A press on a disabled control is acknowledged and ignored: each wait for it to be enabled, as a tap does. A
+        // hover presses nothing, so it goes to a disabled control too.
+        Action::DoubleClick => {
+            enabled(element, deadline, "double click")?;
+            physical(&entry, Pointer::Click { right: false, count: 2 })
+        }
         Action::Hover => physical(&entry, Pointer::Move),
         Action::RightClick => {
+            enabled(element, deadline, "right click")?;
             let names = action_names(element, "right click")?;
             if names.iter().any(|name| name == "AXShowMenu") {
                 let before = windows::open_menus(entry.pid);
@@ -1177,7 +1183,10 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         }
         Action::Focus => focus(element, deadline),
         Action::Clear => set_value(element, "", deadline),
-        Action::Check(wanted) => check(element, wanted, deadline),
+        Action::Check(wanted) => {
+            enabled(element, deadline, "check")?;
+            check(element, wanted, deadline)
+        }
         Action::ScrollTo => perform(element, "AXScrollToVisible", "scroll into view"),
         Action::SetValue(text) => set_value(element, &text, deadline),
         Action::SelectAll => select_all(element, deadline),
