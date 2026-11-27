@@ -128,6 +128,9 @@ struct Walk {
     lost: usize,
     truncated: bool,
     refs: Vec<(String, Entry)>,
+    /// The text of every text node read so far, in reading order, pruned ones too: a row or cell with no name of its
+    /// own takes it from the text inside it.
+    content: Vec<String>,
 }
 
 /// Whether a failed read leaves a hole: the app did not answer in time (it stalled), so an element that is there was
@@ -587,6 +590,7 @@ impl Walk {
         };
 
         let inner = inner_clip(role, read.bounds, clip);
+        let content_from = self.content.len();
         if role == "scrollbar" {
             // A scroll bar's arrows and page areas are its parts, not controls of their own.
         } else if level >= self.max_depth {
@@ -632,6 +636,14 @@ impl Walk {
                 node.subtree_truncated = true;
             }
         }
+        if node.name.is_none() && roles::named_by_content(role) {
+            node.name = content_name(&self.content[content_from..]);
+        }
+        if roles::text(role)
+            && let Some(name) = &node.name
+        {
+            self.content.push(name.clone());
+        }
 
         if self.interactive
             && !root
@@ -645,6 +657,12 @@ impl Walk {
         }
         Some(node)
     }
+}
+
+/// The name a row or cell takes from the text inside it, as an accessible name comes from content: every text, in
+/// reading order, joined by spaces.
+fn content_name(texts: &[String]) -> Option<String> {
+    label(Some(texts.iter().map(|text| text.trim()).filter(|text| !text.is_empty()).collect::<Vec<_>>().join(" ")))
 }
 
 /// Reads one window of a process.
@@ -667,6 +685,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         lost: 0,
         truncated: false,
         refs: Vec::new(),
+        content: Vec::new(),
     };
     // The window must answer: one that does not is gone, or its app is.
     match window.attribute("AXRole") {
@@ -694,9 +713,18 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::{expanded, inner_clip, level_of, missed, outside, selected};
+    use super::{content_name, expanded, inner_clip, level_of, missed, outside, selected};
     use crate::ax;
     use crate::windows::Rect;
+
+    #[test]
+    fn names_a_row_from_the_text_inside_it() {
+        let texts = |items: &[&str]| items.iter().map(|text| (*text).to_owned()).collect::<Vec<_>>();
+        assert_eq!(content_name(&texts(&["Item 1"])).as_deref(), Some("Item 1"));
+        assert_eq!(content_name(&texts(&["Invoice 42", " ", "Paid "])).as_deref(), Some("Invoice 42 Paid"));
+        assert_eq!(content_name(&texts(&[])), None);
+        assert_eq!(content_name(&texts(&["  "])), None);
+    }
 
     const WINDOW: Rect = Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
 

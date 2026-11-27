@@ -187,6 +187,12 @@ pub fn text(role: &str) -> bool {
     matches!(role, "statictext" | "heading")
 }
 
+/// Roles that take their name from the text inside them when they have none of their own: a table's row and cell, an
+/// outline's item, a list's option.
+pub fn named_by_content(role: &str) -> bool {
+    matches!(role, "row" | "cell" | "treeitem" | "option" | "listitem")
+}
+
 /// Roles that never take an action, so no action names are read for them. An image or a text label is not one: an app
 /// can make either a button of its own (`AXPress`), which needs a ref to be tapped.
 pub fn inert(role: &str) -> bool {
