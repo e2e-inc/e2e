@@ -82,6 +82,6 @@
     "node": "^22.22.3 || >=24.8.0"
   },
   "dependencies": {
-    "@agent-device/revyl": "0.21.43"
+    "@agent-device/revyl": "0.21.44"
   }
 }

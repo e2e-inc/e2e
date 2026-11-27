@@ -2041,9 +2041,9 @@ const launchArguments = checkLaunchArguments('device.openApp({ launchArguments }
 // device.openApp({ launchArguments }).env must be a string, number, boolean, or array of strings, got null
 ```
 
-- A list holds strings. An object maps a non-empty name with no whitespace or
-  control characters to a string, a finite number below 2^53 in magnitude, a
-  boolean, or a list of strings. Nothing holds a NUL character.
+- A list holds strings. An object maps a non-empty name to a string, a finite
+  number below 2^53 in magnitude, a boolean, or a list of strings. A name has
+  no control characters, and no whitespace but spaces inside it. Nothing holds a NUL character.
 - An object's argument name does not start with a dash: write `AppleLocale`,
   not `-AppleLocale`. The engine adds the dash, so a dashed name fails.
 - The engine adds its platform's rules after this check, with the same
