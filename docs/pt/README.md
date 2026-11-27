@@ -118,6 +118,16 @@ translation moves or goes with it in the same change.
 | lease (a device or browser) | reserva, reservar (`DeviceLease` in code) |
 | boot, booted | boot (fazer o boot), inicializado |
 | tap, swipe | toque (tocar), gesto de deslizar |
+| phone (a connected device) | aparelho (aparelhos conectados), celular |
+| press (a hardware button) | pressionar, botão físico |
+| lock, unlock (the screen), lock screen | bloquear, desbloquear, tela de bloqueio |
+| shake | sacudir |
+| warm-up (devices) | aquecimento |
+| pinned app, fresh launch | app fixado, nova inicialização |
+| home screen | tela inicial |
+| logical pixels | pixels lógicos |
+| stop (a recording) | encerrar, encerramento |
+| shorthand (`request.get`) | atalho |
 | trace | trace (keep in English, o trace) |
 | artifact | artefato |
 | matcher | matcher (keep in English, o matcher) |
