@@ -40,6 +40,8 @@ export class WindowVideo {
   private current: Segment | undefined;
   private segments: VideoSegment[] = [];
   private files = 0;
+  /** The first start `follow` could not make: why a video that recorded nothing has no file. */
+  private missed: unknown;
   /** The start or stop running now, which the next one waits for. */
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -62,9 +64,18 @@ export class WindowVideo {
       throw new EngineError('UNSUPPORTED_CAPABILITY', 'video of a desktop app needs macOS 15 or later, where ScreenCaptureKit records a window to a file', { retryable: false });
     }
     if (this.wanted) throw new EngineError('INVALID_STATE', 'a video is already recording', { retryable: false });
+    // Refused at once for the same reason: the first window's start comes later, in `follow`, which never fails a read.
+    if (!this.driver().status().screenRecording) {
+      throw new EngineError(
+        'ENGINE_FAILURE',
+        'video of a desktop app needs Screen Recording permission: allow the app that starts e2e in System Settings > Privacy & Security > Screen Recording, then run again',
+        { retryable: false },
+      );
+    }
     this.wanted = true;
     this.artifactsDir = artifactsDir;
     this.segments = [];
+    this.missed = undefined;
     try {
       await this.serially(() => this.switchTo(windowId, operation));
     } catch (cause) {
@@ -78,26 +89,37 @@ export class WindowVideo {
    * new one starts. Undefined ends the current file with nothing after it,
    * as before the app quits. Nothing happens while no video was asked for,
    * and a window that cannot be recorded leaves a gap, never a failure of
-   * the read or launch that called it.
+   * the read or launch that called it. The first such failure is kept for
+   * `end`.
    */
   async follow(windowId: string | undefined, operation: OperationContext): Promise<void> {
     if (!this.wanted || windowId === this.current?.windowId) return;
-    await this.serially(() => this.switchTo(windowId, operation)).catch(() => undefined);
+    await this.serially(() => this.switchTo(windowId, operation)).catch((cause: unknown) => {
+      this.missed ??= cause;
+    });
   }
 
-  /** `stopVideo`: ends the current file and answers every file of the attempt, in order. */
+  /**
+   * `stopVideo`: ends the current file and answers every file of the
+   * attempt, in order. A video that recorded no file because a start
+   * failed fails with that start's error, so the run says why.
+   */
   async end(operation: OperationContext): Promise<readonly VideoSegment[]> {
     if (!this.wanted) return [];
     this.wanted = false;
     await this.serially(() => this.switchTo(undefined, operation));
     const segments = this.segments;
+    const missed = this.missed;
     this.segments = [];
+    this.missed = undefined;
+    if (segments.length === 0 && missed !== undefined) throw missed;
     return segments;
   }
 
   /** Stops a recording still running when the attempt ends without `stopVideo`, and keeps nothing of it. */
   async abandon(operation: OperationContext): Promise<void> {
     this.wanted = false;
+    this.missed = undefined;
     await this.serially(() => this.switchTo(undefined, operation)).catch(() => undefined);
     this.segments = [];
   }

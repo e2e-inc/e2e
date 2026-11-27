@@ -83,7 +83,16 @@ describe('desktop video', () => {
     await deferred.startVideo(operation());
     await deferred.restart(operation());
     await expect(deferred.observe(operation(), undefined)).resolves.toBeDefined();
-    expect(await deferred.stopVideo(operation())).toEqual([]);
+    // With no file at all, the stop says why.
+    await expect(deferred.stopVideo(operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringContaining('ScreenCaptureKit') });
+  });
+
+  it('refuses video without Screen Recording permission before it waits for a window', async () => {
+    const { surface, fake } = await initialized();
+    fake.screenRecording = false;
+    await attempt(surface);
+    await expect(surface.startVideo(operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('Screen Recording') });
+    expect(fake.of('startVideo')).toEqual([]);
   });
 
   it('keeps a file the driver wrote but could not finish, and drops an empty one', async () => {
