@@ -9,6 +9,9 @@ const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'e2e-electron-bound-')
 const app = path.join(root, 'app');
 mkdirSync(path.join(app, 'renderer'), { recursive: true });
 writeFileSync(path.join(app, 'main.js'), '');
+writeFileSync(path.join(app, 'package.json'), '{}');
+mkdirSync(path.join(app, 'out', 'main'), { recursive: true });
+writeFileSync(path.join(app, 'out', 'main', 'index.js'), '');
 writeFileSync(path.join(app, 'renderer', 'index.html'), '');
 writeFileSync(path.join(root, 'secret.txt'), '');
 const page = pathToFileURL(path.join(app, 'renderer', 'index.html')).href;
@@ -21,6 +24,12 @@ describe('appDirectory', () => {
     expect(appDirectory({ reported: undefined, declared: app, firstDocument: page })).toBe(app);
     expect(appDirectory({ reported: undefined, declared: path.join(app, 'main.js'), firstDocument: page })).toBe(app);
     expect(appDirectory({ reported: undefined, declared: undefined, firstDocument: page })).toBe(path.join(app, 'renderer'));
+  });
+
+  it('is the package a declared main script is in, though the main process reports the script\'s own directory', () => {
+    const script = path.join(app, 'out', 'main', 'index.js');
+    expect(appDirectory({ reported: path.join(app, 'out', 'main'), declared: script, firstDocument: page })).toBe(app);
+    expect(outsideApp(page, appDirectory({ reported: path.join(app, 'out', 'main'), declared: script, firstDocument: page }))).toBeUndefined();
   });
 
   it('is the archive a packaged app shows its first page from, and nothing for an app that shows no local page', () => {
