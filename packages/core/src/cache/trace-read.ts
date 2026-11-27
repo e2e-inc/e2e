@@ -179,7 +179,8 @@ function readDetourSpans(document: unknown, actions: number): TraceDetourSpan[] 
     if (!Number.isInteger(from) || !Number.isInteger(to)) return undefined;
     const start = from as number;
     const end = to as number;
-    if (start < (spans.at(-1)?.to ?? 0) || end <= start || end > actions) return undefined;
+    // A detour spans two actions at least: one that left, one that came back.
+    if (start < (spans.at(-1)?.to ?? 0) || end - start < 2 || end > actions) return undefined;
     spans.push({ from: start, to: end });
   }
   return spans;

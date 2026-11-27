@@ -149,7 +149,7 @@ describe('TraceRecorder', () => {
     const stored = (detours: unknown) => readTraceEntry(JSON.parse(JSON.stringify({ ...buildTraceEntry(trace), payload: { ...trace, detours } })));
     expect(stored([{ from: 0, to: 2 }])?.payload.detours).toEqual([{ from: 0, to: 2 }]);
     expect(stored([])?.payload.detours).toEqual([]);
-    for (const malformed of [[{ from: 1, to: 1 }], [{ from: 0, to: 3 }], [{ from: 0, to: 2 }, { from: 1, to: 2 }], [{ from: '0', to: 2 }], 'none']) {
+    for (const malformed of [[{ from: 1, to: 1 }], [{ from: 0, to: 1 }], [{ from: 0, to: 3 }], [{ from: 0, to: 2 }, { from: 1, to: 2 }], [{ from: '0', to: 2 }], 'none']) {
       const read = stored(malformed);
       expect(read).toBeDefined();
       expect(read?.payload).not.toHaveProperty('detours');

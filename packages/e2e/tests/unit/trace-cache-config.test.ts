@@ -362,13 +362,14 @@ describe('settleStagedTraces', () => {
 
   it('writes a recording whose detours differ from the stored entry\'s, though its actions are the same', async () => {
     const store = memoryStore();
-    const flow = (detours: ActionTrace['detours']): ActionTrace => ({ ...trace('same actions'), ...(detours === undefined ? {} : { detours }) });
+    const tapTwice = trace('same actions');
+    const flow = (detours: ActionTrace['detours']): ActionTrace => ({ ...tapTwice, actions: [...tapTwice.actions, ...tapTwice.actions], ...(detours === undefined ? {} : { detours }) });
     store.entries.set(KEY_A, JSON.stringify(buildTraceEntry(flow([]))));
     const context = contextWith(store);
-    context.staged.push({ kind: 'write', keyHash: KEY_A, trace: flow([{ from: 0, to: 1 }]), stepIndex: 1 });
+    context.staged.push({ kind: 'write', keyHash: KEY_A, trace: flow([{ from: 0, to: 2 }]), stepIndex: 1 });
     const writes = await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
     expect(writes.get(1)).toBe('saved');
-    expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.detours).toEqual([{ from: 0, to: 1 }]);
+    expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.detours).toEqual([{ from: 0, to: 2 }]);
   });
 
   it('keeps an entry recorded before detours were kept when the new recording has none', async () => {
