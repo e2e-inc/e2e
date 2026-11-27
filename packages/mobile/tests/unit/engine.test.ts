@@ -96,7 +96,7 @@ function toggling(base: readonly RawNode[], flips: Readonly<Record<string, reado
   return {
     nodes: () => base.map((node) => (node.index !== undefined && flipped.has(node.index) ? { ...node, value: node.value === '1' ? '0' : '1' } : node)),
     press: (args) => {
-      for (const index of flips[(args as { ref: string }).ref.replace(/~s\d+$/, '')] ?? []) {
+      for (const index of flips[(args as { ref: string }).ref.replace(/-s\d+$/, '')] ?? []) {
         if (!flipped.delete(index)) flipped.add(index);
       }
     },
