@@ -5,9 +5,9 @@
  * step performed, each with a durable target descriptor and secret-free,
  * verbatim input — never model output, never plaintext secrets. An entry is
  * deliberately small: a schema version, when it was written, and the trace
- * with the provenance it had. It does not repeat its own key: the file name
- * is the key digest and a reader only ever opens the digest of the key it
- * just computed.
+ * with the provenance it had. It does not repeat its own key: a store files
+ * it under the key (the file store, in its test's YAML and lock, as
+ * `recording-file.ts` lays out).
  *
  * Actions are a discriminated union: each variant carries exactly the typed
  * input its grammar action needs, so validation in `trace-read.ts` is the
