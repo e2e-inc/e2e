@@ -6,7 +6,7 @@
  * Playwright observations and actions throughout.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
@@ -1653,5 +1653,41 @@ describe('trace cache: a hand-off inside a trip, after a trip it completed', () 
     const inner = 'actions 2-3 left /about for /echo and came back with nothing typed, chosen, or set';
     expect(step(outcome).cache).toMatchObject({ mode: 'agent-concluded', replayedActions: 3, detour: inner, write: 'saved' });
     expect(readOnlyEntry(project).entry.payload.detours).toEqual([{ from: 1, to: 3 }]);
+  }, 240_000);
+
+  it('claims no return at the action the replay stopped on when the screen there is not the recorded one', async () => {
+    // After a hand-off, goes home by its address wherever the replay left it, then taps Increment.
+    const goHome = (record: ExecutorRecord): StepExecutor => {
+      const fromTop = innerTripExecutor(app.url, record);
+      return {
+        name: 'go-home-executor',
+        version: 'test',
+        async runStep(context: StepExecutorContext) {
+          if (context.replayedPrefix === undefined) return fromTop.runStep(context);
+          await context.observe();
+          await context.actions.navigate(`${app.url}/`);
+          const observation = await context.observe();
+          await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+          return { status: 'passed' as const, summary: 'the counter shows 1' };
+        },
+      };
+    };
+    const options = (record: ExecutorRecord, cache: 'read-write' | 'read-only') => ({
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: goHome(record) } }, cache },
+    });
+    rmSync(path.join(project.dir, '.e2e', 'cache'), { recursive: true, force: true });
+    expect((await runExisting(project, options({ calls: 0, prefixes: [] }, 'read-write'))).exitCode).toBe(0);
+    // The way back from the echo page now leads to the storage page: the replay stops there, not on About where Home was recorded.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      detours: [{ from: 0, to: 4 }],
+      actions: payload.actions.map((action, index) => (index === 2 ? { name: 'navigate' as const, summary: 'navigate to /storage', url: '/storage', ...(action.at === undefined ? {} : { at: action.at }) } : action)),
+    }));
+    const outcome = await runExisting(project, options({ calls: 0, prefixes: [] }, 'read-only'));
+    expect(outcome.exitCode).toBe(0);
+    const step = resultByTitle(outcome, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect(step.cache).toMatchObject({ mode: 'agent-concluded', replayedActions: 3 });
+    expect(step.cache?.detour).toBeUndefined();
   }, 240_000);
 });

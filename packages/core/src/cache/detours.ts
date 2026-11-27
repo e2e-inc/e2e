@@ -147,7 +147,8 @@ export function findDetours(trace: DetourInput, spell?: (place: string) => strin
 /**
  * The detours of a recording made again after a replay ran its first
  * `executed` actions and handed off: the spans the entry kept for those
- * actions, and the ones this run found that end after them, a scan that
+ * actions, and the ones this run found that end where the agent took over
+ * or after it, a scan that
  * starts in none of the entry's and crosses none. The entry already judged
  * the replayed actions. The ones the replay ran without looking carry the
  * location their recording had (`kept`, from `TraceRecorder.keepLocations`),
@@ -162,7 +163,7 @@ export function findDetoursAfterReplay(
   executed: number,
   kept: ReadonlySet<number>,
 ): TraceDetour[] {
-  const found = findDetours({ ...trace, stored: kept, bounds: replayed }).filter(({ to }) => to > executed);
+  const found = findDetours({ ...trace, stored: kept, bounds: replayed }).filter(({ to }) => to >= executed);
   const spans = [...replayed, ...found].map(({ from, to }) => ({ from, to })).toSorted((x, y) => x.from - y.from);
   // This run's places are live addresses: named as an entry spells them, as `byLocations` names its own.
   return recorded({ ...trace, detours: spans }, routeLocation);

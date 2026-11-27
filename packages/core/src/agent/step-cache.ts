@@ -491,7 +491,9 @@ export class StepTraceSession {
     // The replayed actions are this step's recording now; the ones it ran without looking keep where they were recorded.
     const kept = this.recorder?.keepLocations(trace.actions.slice(0, outcome.executed)) ?? new Set<number>();
     // So are the detours they made: the report names them, and this step's recording keeps them (`findDetoursAfterReplay`).
-    const ran = this.prefixDetours(trace, outcome.executed);
+    // A replay that found no target looked at the screen it stopped on.
+    const looked = stopReason === 'target-not-found' || stopReason === 'target-ambiguous' || stopReason === 'viewport-changed';
+    const ran = this.prefixDetours(trace, outcome.executed, looked ? screens.at(-1)?.path : undefined);
     if (trace.detours !== undefined) this.replayed = { executed: outcome.executed, spans: ran.map(({ from, to }) => ({ from, to })), kept };
     this.handOff(outcome, stopReason, detail, this.describeDetours(ran));
     return undefined;
@@ -699,22 +701,27 @@ export class StepTraceSession {
    * The detours of the first `executed` actions of a recording, which a
    * replay ran before it handed off, read as a flow of their own that ends
    * where the next recorded action stood, so a trip the replay completed is
-   * not merged with one it never reached. A span the recording run found
-   * that ends inside them is kept as found: a stored location reads `:id`
-   * for a record id and a query value, so comparing again would lose a trip
-   * to another record. Only a span the hand-off cut through is read again,
-   * on the stored locations, and a trip found there counts only inside it.
+   * not merged with one it never reached. When the replay stopped because
+   * the screen it looked at had no recorded target (`live`), a return there
+   * counts only if that screen is where the action was recorded: a link
+   * that now leads elsewhere took the flow off the recorded route. A span
+   * the recording run found that ends inside them is kept as found: a
+   * stored location reads `:id` for a record id and a query value, so
+   * comparing again would lose a trip to another record. Only a span the
+   * hand-off cut through is read again, on the stored locations, and a trip
+   * found there counts only inside it.
    */
-  private prefixDetours(trace: ActionTrace, executed: number): TraceDetour[] {
+  private prefixDetours(trace: ActionTrace, executed: number, live?: string): TraceDetour[] {
     const next = trace.actions[executed]?.at;
+    const returned = live === undefined || next === undefined || routeLocation(live) === routeLocation(next);
     const ran = {
       actions: trace.actions.slice(0, executed),
       ...(trace.startPath === undefined ? {} : { startPath: trace.startPath }),
-      ...(next === undefined ? {} : { endPath: next }),
+      ...(next === undefined || !returned ? {} : { endPath: next }),
     };
     const spans = trace.detours;
     if (spans === undefined) return findDetours(ran);
-    const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to <= executed) }, routeLocation);
+    const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to < executed || (to === executed && returned)) }, routeLocation);
     const cut = spans.filter(({ from, to }) => from < executed && executed < to);
     // Every place here is the entry's, spelled as it stores them.
     const stored = new Set(Array.from({ length: executed + 1 }, (_, index) => index));
