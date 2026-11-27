@@ -135,11 +135,14 @@ export class ElectronSurface {
     if (this.uploadsDir !== undefined) rmSync(this.uploadsDir, { recursive: true, force: true });
     this.uploadsDir = undefined;
     this.attempt = undefined;
-    // A dialog the test's last step opened has no next step to fail: the attempt's end is it.
-    await answerWithin(this.dialogs.settled(), context.timeoutMs);
-    const unhandled = this.dialogs.take();
+    // settleAttempt reported what the attempt's dialogs left; its handlers go with it.
     this.dialogs.reset();
-    if (unhandled !== undefined) throw unhandled;
+  }
+
+  /** A dialog the test's last step opened has no next step to fail: the attempt fails with it, as a step would. */
+  async settleAttempt(context: EngineCleanupContext): Promise<void> {
+    await answerWithin(this.dialogs.settled(), context.timeoutMs);
+    this.failOnDialog();
   }
 
   async dispose(context: EngineCleanupContext): Promise<void> {

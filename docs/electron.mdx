@@ -171,7 +171,7 @@ await electron.onDialog(async (dialog) => {
 
 A function handler must call `accept()` or `dismiss()`. A dialog no handler
 takes is dismissed (`confirm()` returns `false`) and fails the test's next
-step.
+step, or the test when its last step opened it.
 
 ## Upload files
 
