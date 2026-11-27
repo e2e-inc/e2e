@@ -370,6 +370,29 @@ describe('FileCacheStore', () => {
     expect(short.status === 'hit' ? short.entry.payload.keyedBy?.platform : undefined).toBe('linux');
   });
 
+  it('writes many steps of a test together as the same file one at a time would', async () => {
+    const steps = Array.from({ length: 6 }, (_, index) => step('web', { callIndex: index }));
+    const writes = steps.map((recordedFor, index) => ({ keyHash: String(index).repeat(64), payload: payload('web', { recordedFor }) }));
+    const together = await makeStore();
+    const answers = await together.store.writeAll(writes);
+    expect(answers.every((answer) => answer !== undefined)).toBe(true);
+    const alone = await makeStore();
+    for (const { keyHash, payload: trace } of writes) await alone.store.write(keyHash, trace);
+    const shape = (yaml: string) => yaml.replaceAll(/createdAt: .*/gu, '');
+    expect(shape(await readFile(yamlPath(together.directory), 'utf8'))).toBe(shape(await readFile(yamlPath(alone.directory), 'utf8')));
+    for (const [index, recordedFor] of steps.entries()) expect((await together.store.read(String(index).repeat(64), recordedFor)).status).toBe('hit');
+  });
+
+  it('answers each write of a batch as it would alone when the pair cannot take them together', async () => {
+    const { directory, store } = await makeStore();
+    await store.write(KEY, payload());
+    const yaml = await readFile(yamlPath(directory), 'utf8');
+    // An edited recording: the pair takes no write, together or alone.
+    await writeFile(yamlPath(directory), yaml.replace('at: /settings', 'at: /plans'), 'utf8');
+    const answers = await store.writeAll([{ keyHash: OTHER_KEY, payload: payload('ios') }, { keyHash: 'c'.repeat(64), payload: payload('android') }]);
+    expect(answers).toEqual([undefined, undefined]);
+  });
+
   it('names an agent other than the default on its step', async () => {
     const { directory, store } = await makeStore();
     await store.write(KEY, payload('web', { recordedFor: step('web', { agent: 'admin' }) }));

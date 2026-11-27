@@ -155,8 +155,7 @@ export class FileCacheStore implements CacheStore {
   async write(keyHash: string, payload: ActionTrace): Promise<{ bytes: number } | undefined> {
     if (!this.writable || !KEY_HASH.test(keyHash)) return undefined;
     const testId = payload.recordedFor?.testId;
-    const slot = stepIdentity(payload.recordedFor);
-    if (testId === undefined || slot === undefined) return undefined;
+    if (testId === undefined || stepIdentity(payload.recordedFor) === undefined) return undefined;
     const base = recordingName(testId);
     return this.locked(base, async () => {
       const file = await this.locate(base, testId);
@@ -164,23 +163,63 @@ export class FileCacheStore implements CacheStore {
       if (file !== undefined && unreadable(file, keyHash) !== undefined) return undefined;
       const name = file?.name ?? (await this.exists(base) ? collisionName(base, testId) : base);
       const recordings = file?.parsed.status === 'ok' ? hits(file.parsed) : [];
-      const sameSlot = (recording: StoredRecording) =>
-        stepIdentity(recording.trace.recordedFor) === slot && recording.trace.recordedFor?.targetId === payload.recordedFor!.targetId;
-      const replaced = recordings.find((recording) => recording.keyHash === keyHash || sameSlot(recording));
-      const recording: StoredRecording = {
-        keyHash,
-        // A recording rewritten under its own key with the same flow (its provenance completed) keeps the
-        // time it was made; a new flow under the key is a new recording.
-        createdAt:
-          replaced?.keyHash === keyHash && canonicalJson(replayed(replaced.trace)) === canonicalJson(replayed(payload)) ? replaced.createdAt : timestamp(),
-        trace: wholeSeconds(payload),
-      };
-      const index = replaced === undefined ? -1 : recordings.indexOf(replaced);
-      const next = recordings.filter((existing) => existing.keyHash !== keyHash && !sameSlot(existing));
-      if (index >= 0) next.splice(Math.min(index, next.length), 0, recording);
-      else next.splice(this.placeFor(testId, slot, next), 0, recording);
-      return this.save(name, testId, next);
+      return this.save(name, testId, this.placed(recordings, keyHash, payload));
     }, true);
+  }
+
+  /**
+   * Writes several recordings, each as `write` would, and a test's together:
+   * its pair is read and published once, under one lock, for all of them,
+   * so recording many steps of one test costs one rewrite, not one each.
+   * Returns each write's answer, in order. When a test's pair cannot take
+   * them all at once (one that does not read, or the size cap), its writes
+   * fall back to one at a time, so each gets the answer it would alone. Not
+   * part of `CacheStore`: settlement calls it on the file store
+   * (`settleStagedTraces`).
+   */
+  async writeAll(writes: readonly { readonly keyHash: string; readonly payload: ActionTrace }[]): Promise<({ bytes: number } | undefined)[]> {
+    const answers: ({ bytes: number } | undefined)[] = writes.map(() => undefined);
+    const byTest = new Map<string, number[]>();
+    for (const [index, { keyHash, payload }] of writes.entries()) {
+      const testId = payload.recordedFor?.testId;
+      if (!this.writable || !KEY_HASH.test(keyHash) || testId === undefined || stepIdentity(payload.recordedFor) === undefined) continue;
+      byTest.set(testId, [...(byTest.get(testId) ?? []), index]);
+    }
+    for (const [testId, indexes] of byTest) {
+      const base = recordingName(testId);
+      const together = await this.locked(base, async () => {
+        const file = await this.locate(base, testId);
+        if (file !== undefined && indexes.some((index) => unreadable(file, writes[index]!.keyHash) !== undefined)) return undefined;
+        const name = file?.name ?? (await this.exists(base) ? collisionName(base, testId) : base);
+        let recordings = file?.parsed.status === 'ok' ? hits(file.parsed) : [];
+        for (const index of indexes) recordings = this.placed(recordings, writes[index]!.keyHash, writes[index]!.payload);
+        return this.save(name, testId, recordings);
+      }, true);
+      for (const index of indexes) answers[index] = together ?? (await this.write(writes[index]!.keyHash, writes[index]!.payload));
+    }
+    return answers;
+  }
+
+  /** `recordings` with `payload` in place under `keyHash`: replacing its key's or its slot's, else where the test runs it. */
+  private placed(recordings: readonly StoredRecording[], keyHash: string, payload: ActionTrace): StoredRecording[] {
+    const testId = payload.recordedFor!.testId;
+    const slot = stepIdentity(payload.recordedFor)!;
+    const sameSlot = (recording: StoredRecording) =>
+      stepIdentity(recording.trace.recordedFor) === slot && recording.trace.recordedFor?.targetId === payload.recordedFor!.targetId;
+    const replaced = recordings.find((recording) => recording.keyHash === keyHash || sameSlot(recording));
+    const recording: StoredRecording = {
+      keyHash,
+      // A recording rewritten under its own key with the same flow (its provenance completed) keeps the
+      // time it was made; a new flow under the key is a new recording.
+      createdAt:
+        replaced?.keyHash === keyHash && canonicalJson(replayed(replaced.trace)) === canonicalJson(replayed(payload)) ? replaced.createdAt : timestamp(),
+      trace: wholeSeconds(payload),
+    };
+    const index = replaced === undefined ? -1 : recordings.indexOf(replaced);
+    const next = recordings.filter((existing) => existing.keyHash !== keyHash && !sameSlot(existing));
+    if (index >= 0) next.splice(Math.min(index, next.length), 0, recording);
+    else next.splice(this.placeFor(testId, slot, next), 0, recording);
+    return next;
   }
 
   async delete(keyHash: string, step?: TraceProvenance): Promise<void> {

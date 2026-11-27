@@ -230,6 +230,8 @@ export interface SurvivedFailure {
 export async function settleStagedTraces(context: AgentCacheContext, settlement: AttemptSettlement | undefined): Promise<ReadonlyMap<number, CacheWrite>> {
   const outcomes = new Map<number, CacheWrite>();
   const staged = context.staged.splice(0);
+  /** The confirmed new recordings, written together once every entry is settled. */
+  const writes: { readonly stepIndex: number; readonly keyHash: string; readonly payload: ActionTrace }[] = [];
   for (const entry of staged) {
     if (entry.kind === 'decided') {
       outcomes.set(entry.stepIndex, entry.outcome);
@@ -259,14 +261,30 @@ export async function settleStagedTraces(context: AgentCacheContext, settlement:
         outcomes.set(entry.stepIndex, 'kept');
         continue;
       }
-      const written = await context.store.write(entry.keyHash, trace);
-      outcomes.set(entry.stepIndex, written === undefined ? 'not-written' : 'saved');
+      // Its outcome takes its place among the steps' now, and its answer once the writes are done.
+      outcomes.set(entry.stepIndex, 'not-written');
+      writes.push({ stepIndex: entry.stepIndex, keyHash: entry.keyHash, payload: trace });
     } catch {
       // The cache is disposable; a failed flush is a slower next run only.
       if (entry.kind === 'write' && confirmed) outcomes.set(entry.stepIndex, 'not-written');
     }
   }
+  for (const [index, written] of (await writeRecordings(context.store, writes)).entries()) {
+    outcomes.set(writes[index]!.stepIndex, written === undefined ? 'not-written' : 'saved');
+  }
   return outcomes;
+}
+
+/**
+ * Writes the settled recordings: the file store all of a test's at once,
+ * as one rewrite of its pair, and any other store one at a time. Each
+ * write's answer, undefined for one not written.
+ */
+async function writeRecordings(store: CacheStore, writes: readonly { readonly keyHash: string; readonly payload: ActionTrace }[]): Promise<readonly ({ bytes: number } | undefined)[]> {
+  if (store instanceof FileCacheStore) return store.writeAll(writes).catch(() => writes.map(() => undefined));
+  const answers: ({ bytes: number } | undefined)[] = [];
+  for (const { keyHash, payload } of writes) answers.push(await store.write(keyHash, payload).catch(() => undefined));
+  return answers;
 }
 
 /**
