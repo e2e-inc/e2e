@@ -194,10 +194,14 @@ class TreeProjector {
   placeAbsent(roots: Draft[]): void {
     const wanted = new Set(this.options.keep ?? []);
     if (this.policy.hiddenTestIds) {
+      // Content under aria-hidden or inert is out of the accessibility tree and on screen all the same: a text query
+      // finds it, as on the web, on the element that holds the text, each one under the element that hides them. It
+      // has no role, so a role query still does not.
+      const hides = (facts: DomFacts): boolean => facts.attributes['aria-hidden']?.toLowerCase() === 'true' || facts.attributes['inert'] !== undefined;
+      const hiding = new Set<number>();
+      for (const [backend, facts] of this.snapshot.elements()) if (hides(facts)) hiding.add(backend);
       for (const [backend, facts] of this.snapshot.elements()) {
-        // Content under aria-hidden or inert is out of the accessibility tree and on screen all the same: a text query
-        // finds it, as on the web, on the element that hides it. It has no role, so a role query still does not.
-        const offTree = (facts.attributes['aria-hidden']?.toLowerCase() === 'true' || facts.attributes['inert'] !== undefined) && facts.bounds !== undefined;
+        const offTree = facts.bounds !== undefined && (hiding.has(backend) || [...this.snapshot.ancestors(facts.index)].some((ancestor) => hiding.has(ancestor)));
         if (facts.attributes[this.testIdAttribute] !== undefined || offTree) wanted.add(backend);
       }
     }

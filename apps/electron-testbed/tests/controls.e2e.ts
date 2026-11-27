@@ -155,6 +155,9 @@ test.describe('controls page', () => {
     await expect(screen.getByText('Ref R77', { exact: true })).toHaveCount(1);
     await expect(screen.getByText('Unlisted directions', { exact: true })).toHaveCount(1);
     await expect(screen.getByText('Background task', { exact: true })).toHaveCount(1);
+    // Each element under it is found by its own text, and the one that hides them by all of it.
+    await expect(screen.getByText('North gate', { exact: true })).toHaveCount(1);
+    await expect(screen.getByText('North gate South gate', { exact: true })).toHaveCount(1);
   });
 
   test('checks a box its app replaces, unchecks a custom radio, and refuses to fill a field no user reaches', async ({ screen }) => {
