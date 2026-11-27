@@ -378,9 +378,11 @@ function actionProse(
 
 /**
  * The summary of an action read back from a recording, which keeps none: the
- * prose `describeAction` gave it when it ran, but for the page count of a
- * `scrollUntil`, which a recording does not keep. A gap's summary is its own
- * (`tool <name>`), so the store writes it, never this.
+ * prose `describeAction` gave it when it ran, but for what a recording does
+ * not keep: the page count of a `scrollUntil`, and the node under a point
+ * action that was not durable enough to keep as its `within` ("on group").
+ * A gap's summary is its own (`tool <name>`), so the store writes it, never
+ * this.
  */
 export function summarizeRecordedAction(action: Exclude<RecordedAction, { readonly name: 'tool' }>): string {
   const target =
