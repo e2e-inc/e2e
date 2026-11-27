@@ -560,7 +560,7 @@ describe('DesktopSurface: reading', () => {
     const both = windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }]);
     const fake = fakeDriver({ listWindows: [both, both, ok([])] });
     const { surface } = await launched(fake, { observe: false });
-    await surface.useWindow('w-panel', signal, 5_000);
+    await surface.useWindow({ id: 'w-panel' }, signal, 5_000);
     fake.locked = true;
     await expect(surface.locate(testId('username'), operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
     await surface.useWindow(undefined, signal, 5_000);
@@ -586,7 +586,7 @@ describe('DesktopSurface: reading', () => {
   it('reads again, never a closed window, when the screen locks between the window list and the read', async () => {
     const fake = fakeDriver({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }])], snapshot: [snapshotAnswer('macos/appkit-form'), failure('WINDOW_NOT_FOUND', 'not_delivered')] });
     const { surface } = await launched(fake, { observe: false });
-    await surface.useWindow('w-panel', signal, 5_000);
+    await surface.useWindow({ id: 'w-panel' }, signal, 5_000);
     fake.locked = true;
     await expect(surface.locate(testId('username'), operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
   });
@@ -612,7 +612,7 @@ describe('DesktopSurface: reading', () => {
     const { surface, fake } = await launched({ listWindows: [list] }, { observe: false });
     await surface.observe(operation(), undefined);
     expect((last(fake, 'snapshot') as { windowId: string }).windowId).toBe('w-doc');
-    await surface.useWindow('w-siri', signal, 5_000);
+    await surface.useWindow({ id: 'w-siri' }, signal, 5_000);
     await surface.observe(operation(), undefined);
     expect((last(fake, 'snapshot') as { windowId: string }).windowId).toBe('w-siri');
   });
@@ -778,8 +778,8 @@ describe('DesktopSurface: reading', () => {
 describe('DesktopSurface: windows', () => {
   it('reads only the window a test chose, until it goes back to the focused one', async () => {
     const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel', is_focused: false }])] });
-    await expect(surface.useWindow('w-gone', signal, 5_000)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    await surface.useWindow('w-panel', signal, 5_000);
+    await expect(surface.useWindow({ id: 'w-gone' }, signal, 5_000)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    await surface.useWindow({ id: 'w-panel' }, signal, 5_000);
     await surface.observe(operation(), undefined);
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-panel' });
     await surface.useWindow(undefined, signal, 5_000);
@@ -789,23 +789,100 @@ describe('DesktopSurface: windows', () => {
 
   it('acts on no node read in another window than the one a test chose', async () => {
     const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }])] });
-    await surface.useWindow('w-panel', signal, 5_000);
+    await surface.useWindow({ id: 'w-panel' }, signal, 5_000);
     await expect(surface.perform(byTestId('sign-in'), { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
     expect(inputs(fake)).toEqual([]);
   });
 
   it('refuses to read a chosen window that closed between the list and the read', async () => {
     const { surface } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }])], snapshot: [snapshotAnswer('macos/appkit-form'), snapshotAnswer('macos/appkit-form'), failure('WINDOW_NOT_FOUND', 'not_delivered')] });
-    await surface.useWindow('w-panel', signal, 5_000);
+    await surface.useWindow({ id: 'w-panel' }, signal, 5_000);
     await expect(surface.locate(testId('nowhere'), operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/useWindow\(\) chose/) });
   });
 
   it('refuses to read a chosen window once it closed, rather than show an empty screen', async () => {
     const both = windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }]);
     const { surface } = await launched({ listWindows: [both, both, both, windows(() => [{ id: 'w-mine', is_focused: true }])] });
-    await surface.useWindow('w-panel', signal, 5_000);
+    await surface.useWindow({ id: 'w-panel' }, signal, 5_000);
     await expect(surface.locate(testId('nowhere'), operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/useWindow\(\) chose/) });
     await expect(surface.pressKey('Enter', operation())).rejects.toThrow(/useWindow\(\) chose/);
+  });
+
+  it('chooses a window by its whole title, or by a pattern of it', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', title: 'Sign In', is_focused: true }, { id: 'w-panel', title: 'Find & Replace' }])] });
+    await surface.useWindow({ title: 'Find & Replace' }, signal, 5_000);
+    await surface.observe(operation(), undefined);
+    expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-panel' });
+    // A `g` pattern keeps where its last match ended, which must not make the next one miss.
+    const pattern = /sign/gi;
+    pattern.test('Sign In');
+    await surface.useWindow({ title: pattern }, signal, 5_000);
+    await surface.observe(operation(), undefined);
+    expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
+  });
+
+  it('waits for a window that is still opening when it is chosen by its title', async () => {
+    const one = windows(() => [{ id: 'w-mine', title: 'Sign In', is_focused: true }]);
+    const fake = fakeDriver({ listWindows: [one, one, one, one, windows(() => [{ id: 'w-mine', title: 'Sign In' }, { id: 'w-panel', title: 'Find & Replace', is_focused: true }])] });
+    const { surface } = await launched(fake);
+    const listed = fake.of('listWindows').length;
+    await surface.useWindow({ title: 'Find & Replace' }, signal, 5_000);
+    expect(fake.of('listWindows').length).toBeGreaterThan(listed + 1);
+    await surface.observe(operation(), undefined);
+    expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-panel' });
+  });
+
+  it('names the titles the app has when no window gets the title in time, and takes a title for no id', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', title: 'Sign In', is_focused: true }, { id: 'w-panel' }])] });
+    const before = Date.now();
+    await expect(surface.useWindow({ title: 'w-panel' }, signal, 400)).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: expect.stringMatching(/showed no window titled "w-panel" within 400 ms; its windows are "Sign In", ""$/),
+    });
+    expect(Date.now() - before).toBeGreaterThanOrEqual(250);
+    // The window in use stays the one it was.
+    await surface.observe(operation(), undefined);
+    expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
+  });
+
+  it('refuses a title two windows have, naming both, without waiting', async () => {
+    const { surface } = await launched({ listWindows: [windows(() => [{ id: 'w-one', title: 'Untitled', is_focused: true }, { id: 'w-two', title: 'Untitled 2' }])] });
+    const before = Date.now();
+    await expect(surface.useWindow({ title: /Untitled/ }, signal, 5_000)).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: expect.stringMatching(/2 windows of .* are titled \/Untitled\/: "Untitled" \(id w-one\), "Untitled 2" \(id w-two\); pass the one meant from desktop\.windows\(\)/),
+    });
+    expect(Date.now() - before).toBeLessThan(2_000);
+    await surface.useWindow({ title: 'Untitled' }, signal, 5_000);
+  });
+
+  it('waits for no title once the app quit, or before it is open', async () => {
+    const { surface: closed } = await initialized();
+    await expect(closed.useWindow({ title: 'Sign In' }, signal, 5_000)).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/app\.open\(\)/) });
+    const { surface, fake } = await launched({}, { observe: false });
+    process.kill(fake.pid, 'SIGKILL');
+    expect(await gone(fake.pid)).toBe(true);
+    const before = Date.now();
+    await expect(surface.useWindow({ title: 'Sign In' }, signal, 5_000)).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/quit/) });
+    expect(Date.now() - before).toBeLessThan(2_000);
+  });
+
+  it('takes a title, a pattern, or a listed window through desktop.useWindow()', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', title: 'Sign In', is_focused: true }, { id: 'w-panel', title: 'Controls' }])] });
+    const context = { operation: () => operation(), fixture: <T,>(_name: string, value: T) => value } as unknown as Parameters<typeof createDesktopFixture>[1];
+    const desktop = createDesktopFixture(surface, context);
+    const used = async () => {
+      await surface.observe(operation(), undefined);
+      return last<{ windowId: string }>(fake, 'snapshot')?.windowId;
+    };
+    await desktop.useWindow('Controls');
+    expect(await used()).toBe('w-panel');
+    await desktop.useWindow();
+    expect(await used()).toBe('w-mine');
+    await desktop.useWindow(/^Contr/);
+    expect(await used()).toBe('w-panel');
+    await desktop.useWindow((await desktop.windows()).find((window) => window.title === 'Sign In'));
+    expect(await used()).toBe('w-mine');
   });
 });
 
@@ -1582,7 +1659,7 @@ describe('DesktopSurface: points', () => {
     // The panel has focus once it is brought forward, the fifth listing.
     const { surface, fake } = await launched({ listWindows: [pair(), pair(), pair(), pair(), pair(true)] }, { options: { headed: true } });
     await surface.locate(testId('sign-in'), operation());
-    await surface.useWindow('w-panel', signal, 5_000);
+    await surface.useWindow({ id: 'w-panel' }, signal, 5_000);
     await surface.performAt({ x: 10, y: 20 }, { kind: 'tap' }, operation());
     expect(fake.of('focusWindow').at(-1)?.args[1]).toBe('w-panel');
     expect(fake.of('pointer').at(-1)?.args).toEqual([610, 120, 'tap']);

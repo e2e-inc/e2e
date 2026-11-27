@@ -44,6 +44,7 @@ import { launchArgumentList } from './launch-arguments.ts';
 import { ROOT_ID, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
+import { ambiguousTitle, noWindowTitled, titled, titleText, type WindowChoice } from './window-choice.ts';
 
 /** How long a quit waits for a launch whose outcome was unknown to report the process it started. */
 const PENDING_SETTLE_MS = 3_000;
@@ -56,6 +57,9 @@ const LATE_APP_MS = 2_000;
 
 /** How often it looks. */
 const LATE_APP_POLL_MS = 100;
+
+/** How often `desktop.useWindow()` lists the windows again while it waits for a title. */
+const WINDOW_POLL_MS = 100;
 
 /** How long a launch waits for its process, and then for the app's window to become readable, before it reports why it did not. */
 const LAUNCH_READY_MS = 10_000;
@@ -530,18 +534,39 @@ export class DesktopSurface {
   }
 
   /**
-   * `desktop.useWindow()`: reads and acts in the window `id` names from now
-   * on, until the app quits, rather than the focused one. With no id, goes
+   * `desktop.useWindow()`: reads and acts in the window `choice` names from
+   * now on, until the app quits, rather than the focused one. A title is
+   * waited for within `timeoutMs`, since a window still opening is not
+   * listed yet; an id names a window already listed. With no choice, goes
    * back to the focused window.
    */
-  async useWindow(id: string | undefined, signal: AbortSignal, timeoutMs: number): Promise<void> {
-    if (id !== undefined) {
-      const windows = await this.ownWindows({ signal, timeoutMs });
-      if (!windows.some((window) => window.id === id)) throw notActionable(`the app has no window ${id}; desktop.windows() lists the ones it has`);
-    }
-    this.chosenWindow = id;
+  async useWindow(choice: WindowChoice | undefined, signal: AbortSignal, timeoutMs: number): Promise<void> {
+    this.chosenWindow = choice === undefined ? undefined : 'id' in choice ? await this.listedWindow(choice.id, signal, timeoutMs) : await this.titledWindow(choice.title, signal, timeoutMs);
     // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
     this.pointWindow = undefined;
+  }
+
+  private async listedWindow(id: string, signal: AbortSignal, timeoutMs: number): Promise<string> {
+    const windows = await this.ownWindows({ signal, timeoutMs });
+    if (!windows.some((window) => window.id === id)) throw notActionable(`the app has no window with the id ${id}; desktop.windows() lists the ones it has, and desktop.useWindow('Title') picks one by its title`);
+    return id;
+  }
+
+  /** The id of the one window with the title, read again until it shows or the budget is spent. */
+  private async titledWindow(title: string | RegExp, signal: AbortSignal, timeoutMs: number): Promise<string> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (signal.aborted) throw new EngineError('CANCELLED', `the wait for a window titled ${titleText(title)} was cancelled`, { retryable: false });
+      if (this.pid === undefined) throw invalidState(`desktop.useWindow(${titleText(title)}) needs the app open; open it with app.open()`);
+      await this.requireRunning();
+      const windows = await this.ownWindows({ signal, timeoutMs: Math.max(deadline - Date.now(), 0) });
+      const matches = titled(windows, title);
+      const [match] = matches;
+      if (matches.length > 1) throw notActionable(ambiguousTitle(this.appName ?? 'the app', title, matches));
+      if (match !== undefined) return match.id;
+      if (Date.now() + WINDOW_POLL_MS >= deadline) throw notActionable(noWindowTitled(this.appName ?? 'the app', title, windows, timeoutMs));
+      await sleep(WINDOW_POLL_MS, signal);
+    }
   }
 
   private chosenClosed(): EngineError {
