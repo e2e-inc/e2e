@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { desktop } from '../../src/engine.ts';
-import { failure } from '../helpers/fake-driver.ts';
+import { failure, type Answer, type FakeDriver } from '../helpers/fake-driver.ts';
 import { cleanUp, initialized, launched, operation } from '../helpers/surface.ts';
 
 afterEach(cleanUp);
@@ -31,6 +31,40 @@ describe('app.back()', () => {
     const { surface } = await launched({ pressBack: [none, disabled] });
     await expect(surface.back(operation())).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', message: expect.stringContaining('app.back(): the app') });
     await expect(surface.back(operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringContaining('is disabled') });
+  });
+
+  describe('with a window made active that is not the key window', () => {
+    /** The app's two windows, `focused` the key window. */
+    const windows = (focused: string) => (fake: FakeDriver): Answer => ({
+      ok: true,
+      data: [
+        { id: 'w-main', title: 'Main', pid: fake.pid, is_focused: focused === 'w-main' },
+        { id: 'w-inspector', title: 'Inspector', pid: fake.pid, is_focused: focused === 'w-inspector' },
+      ],
+    });
+
+    it('refuses in the background, since the menu bar would go back in the key window', async () => {
+      const { surface, fake } = await launched({ listWindows: [windows('w-main')] });
+      await surface.activateWindow('w-inspector', operation());
+      await expect(surface.back(operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/not the app's key window.*nothing was pressed/) });
+      expect(fake.of('pressBack')).toEqual([]);
+      // The key window itself goes back.
+      await surface.activateWindow('w-main', operation());
+      await surface.back(operation());
+      expect(fake.of('pressBack')).toHaveLength(1);
+    });
+
+    it('brings the active window forward first with physicalInput', async () => {
+      let key = 'w-main';
+      const { surface, fake } = await launched(
+        { listWindows: [(driver) => windows(key)(driver)], focusWindow: [() => ((key = 'w-inspector'), { ok: true, data: null })] },
+        { options: { physicalInput: true } },
+      );
+      await surface.activateWindow('w-inspector', operation());
+      await surface.back(operation());
+      expect(fake.of('focusWindow').map((call) => call.args[1])).toEqual(['w-inspector']);
+      expect(fake.calls.map((call) => call.method).filter((method) => method === 'focusWindow' || method === 'pressBack')).toEqual(['focusWindow', 'pressBack']);
+    });
   });
 
   it('reports a press that failed after it may have reached the app as one that may have committed', async () => {

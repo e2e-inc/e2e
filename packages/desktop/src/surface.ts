@@ -1400,6 +1400,7 @@ export class DesktopSurface {
     const { pid } = this;
     if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
     await this.requireRunning();
+    await this.keyWindowForMenu(pid, 'app.back()', operation);
     // As for `tryRef`: a press still unsent once the call is given up is never sent.
     const inputId = this.requireDriver().inputId();
     try {
@@ -1414,6 +1415,32 @@ export class DesktopSurface {
       throw translate(cause, 'app.back()', true);
     }
     await this.settle(operation);
+  }
+
+  /**
+   * Makes sure a menu bar command goes to the window `screen` reads: the menu bar acts on the app's key window, so with
+   * an active window that is not the key window, the command would act on another one. Without `physicalInput` that is
+   * refused, nothing sent, as a key to a window that is not the key window is; with it, the active window comes forward
+   * first. With no window active, `screen` reads the focused window, which is the key window.
+   */
+  private async keyWindowForMenu(pid: number, label: string, operation: OperationContext): Promise<void> {
+    const windows = await this.ownWindows(operation);
+    const active = this.activeChoice(windows);
+    if (active === undefined || windows.find((window) => window.id === active)?.is_focused === true) return;
+    if (!this.options.physicalInput) {
+      throw notActionable(`${label}: the active window is not the app's key window, and the menu bar acts on the key window, so nothing was pressed; activate the key window, or set desktop({ physicalInput: true }) to bring the active one forward`);
+    }
+    const focusId = this.requireDriver().inputId();
+    await this.input((driver, timeoutMs) => driver.focusWindow(pid, active, focusId, timeoutMs), {
+      label: 'focus window',
+      input: true,
+      signal: operation.signal,
+      timeoutMs: operation.timeoutMs,
+      onCutOff: () => this.driver?.cancelInput(focusId),
+    }).catch((cause: unknown) => Promise.reject(translate(cause, 'focus window', true)));
+    if ((await this.ownWindows(operation)).find((window) => window.id === active)?.is_focused !== true) {
+      throw notActionable(`${label}: the active window did not become the app's key window as it was brought forward, so nothing was pressed`);
+    }
   }
 
   /**

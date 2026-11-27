@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { EngineAppInfo, OperationContext } from '@e2e-dev/core/engine';
-import { resolveOptions } from '../../src/options.ts';
+import { resolveOptions, type DesktopOptions } from '../../src/options.ts';
 import type { StateHost } from '../../src/state.ts';
 import { DesktopSurface } from '../../src/surface.ts';
 import { fakeDriver, killSpawned, type FakeDriver, type Scenario } from './fake-driver.ts';
@@ -42,12 +42,14 @@ interface Options {
   readonly projectRoot?: string;
   /** What the state commands ask of the machine; the real one by default. */
   readonly stateHost?: StateHost;
+  /** Engine options besides `settle`, which is off. */
+  readonly options?: Omit<DesktopOptions, 'settle'>;
 }
 
 /** A surface on the scripted driver, initialized with nothing launched. */
-export async function initialized(scenario: Scenario | FakeDriver = {}, { app = { bundleId: 'dev.e2e.spike.form' }, projectRoot = process.cwd(), stateHost }: Options = {}) {
+export async function initialized(scenario: Scenario | FakeDriver = {}, { app = { bundleId: 'dev.e2e.spike.form' }, projectRoot = process.cwd(), stateHost, options }: Options = {}) {
   const fake = 'calls' in scenario ? scenario : fakeDriver(scenario);
-  const surface = new DesktopSurface(resolveOptions({ settle: false }), 'macos', () => fake, stateHost === undefined ? undefined : () => stateHost);
+  const surface = new DesktopSurface(resolveOptions({ ...options, settle: false }), 'macos', () => fake, stateHost === undefined ? undefined : () => stateHost);
   surfaces.push(surface);
   await surface.init({ runId: 'run', targetName: 'macos', projectRoot, app, env: {}, headed: false, workerSlot: 0, signal, log: () => undefined });
   return { surface, fake };
