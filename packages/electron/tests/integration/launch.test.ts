@@ -412,10 +412,20 @@ describe('pixels', () => {
     const refusal = async (reaction: string): Promise<string> => {
       const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(`<body style="margin:0">${RED_FRAME}${onMasks(reaction)}</body>`))}));`);
       await launch();
-      return String(await screenshotFile(new DevTools(), windows.require(), directory, 'shot.png').then(() => 'taken', (error: unknown) => error));
+      return String(await screenshotFile(new DevTools(), windows.require(), directory, 'shot.png', () => undefined).then(() => 'taken', (error: unknown) => error));
     };
     expect(await refusal(`const field = document.createElement('input'); field.type = 'password'; document.body.append(field);`)).toMatch(/appeared while the screenshot was taken/);
     expect(await refusal(`document.querySelector('iframe').style.marginLeft = '60px';`)).toMatch(/moved while the screenshot was taken/);
+  });
+
+  it('writes no screenshot of a window that left the app while it was captured', async () => {
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,<title>Loaded</title>'));`);
+    await launch();
+    // In the app when the screenshot is asked for, gone from it once the capture is done.
+    const answers = [undefined, 'the window left the app'];
+    const refused = await screenshotFile(new DevTools(), windows.require(), directory, 'left.png', () => answers.shift()).then(() => undefined, (error: unknown) => error);
+    expect(refused).toMatchObject({ code: 'POLICY_DENIED', message: expect.stringMatching(/left the app/) });
+    expect(existsSync(path.join(directory, 'screenshots', 'left.png'))).toBe(false);
   });
 
   it('gives each of two captures taken at once its own masks', async () => {
