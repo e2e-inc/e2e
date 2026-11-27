@@ -58,7 +58,7 @@ ferramentas.
 | Responde | Como o agente que executa as ações deve trabalhar? | Como este app chama as coisas? |
 | Quem lê | Somente o loop de act | Toda chamada ao modelo: os turnos de act e os juízes por trás de `assert`, `waitFor` e `extract` |
 | O que vai aqui | Persona, cautela, o que verificar antes de terminar, como tratar diálogos inesperados | Nomes de telas e menus, onde fica um recurso, qual botão envia um formulário, termos do domínio |
-| Definido em | `agents.<name>.system` | `agents.<name>.context`, no máximo 16 KiB |
+| Definido em | `agents.<name>.system` | `agents.<name>.context`, no máximo 16 KiB, a menos que `maxContextBytes` aumente esse limite |
 
 Um juiz nunca vê `system`, então “um passo termina quando o formulário fecha”
 não pode baixar a exigência de um veredito. Regra prática: o que vale para
@@ -85,8 +85,8 @@ teste o nome do que ele cobre, não do veredito que você espera.
 
 ## Escolha um agente por execução
 
-`--agent` escolhe o agente para os testes que não selecionam um. Vários nomes
-rodam cada teste uma vez por agente:
+`--agent` escolhe qual agente roda nos testes que não fixam um. Passe uma
+lista separada por vírgulas para rodar cada teste uma vez por agente:
 
 <CodeGroup>
 ```bash npm
@@ -131,10 +131,10 @@ describe('checkout as a first-time buyer', { agent: 'buyer' }, () => {
 });
 ```
 
-`--agent` não substitui um agente que um teste seleciona. Um agente
-desconhecido em um teste ou grupo falha durante a coleta. Um agente
-desconhecido em uma chamada lança `INVALID_ARGUMENT`. Os relatórios registram
-o agente de cada passo.
+`--agent` não substitui um agente fixado em um teste. Um nome de agente
+desconhecido em um teste ou grupo faz a coleta falhar, e, passado em uma
+chamada, faz o passo falhar. Os relatórios registram qual agente rodou
+cada passo.
 
 ## Um fluxo, várias personas
 
@@ -144,7 +144,7 @@ o agente de cada passo.
   Quatro personas, uma por idioma, rodam a mesma suíte de localização.
 </Video>
 
-Selecione vários agentes para rodar o mesmo teste uma vez com cada um:
+Passe um array de agentes para rodar o mesmo teste uma vez com cada persona:
 
 ```ts title="tests/checkout.e2e.ts"
 import { describe, test } from 'e2e';

@@ -148,9 +148,10 @@ permissions:
 Quando ainda existe uma cópia, o pnpm cria o link da skill ao lado dela, com o
 nome `pnpm-e2e-e2e`, e os agentes carregam duas skills `e2e`. O `init` e o
 `upgrade` avisam sobre isso: apague a cópia e depois rode `pnpm install --force`
-para renomear o link para `e2e`. Nenhum dos dois comandos sobrescreve o link do
-pnpm, e o `init` não adiciona uma cópia onde o pnpm cria o link da skill,
-inclusive em um membro do workspace.
+para renomear o link para `e2e`. Os comandos preservam os links do pnpm. Você
+pode usar o `init` para restaurar um `SKILL.md` ausente em uma cópia existente
+em outra pasta de skills. Quando o `init` encontra um link de skill do pnpm no
+projeto ou na raiz do workspace que ele detecta, ele não cria novas cópias.
 
 </Accordion>
 

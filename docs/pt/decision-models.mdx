@@ -13,10 +13,9 @@ um modelo de texto pequeno escreve os valores dos campos. O runner continua
 autorizando cada ação.
 
 Qualquer modelo de decisão do AI SDK que responda a perguntas `choice` com
-probabilidades funciona, como TypeSafe Jev ou OpenAI `gpt-6-luna`. Instâncias
-de `evaluationModel()` também funcionam. Uma string de id de modelo ou um
-modelo de linguagem em `model` faz o carregamento da configuração falhar com
-`INVALID_CONFIG`.
+probabilidades funciona, como TypeSafe Jev ou OpenAI `gpt-6-luna` (incluindo
+instâncias de `evaluationModel()`). Passar uma string simples ou um modelo de
+linguagem padrão faz a validação da configuração falhar.
 
 O `decisionFilter()` do mesmo pacote roda somente os testes que um pull
 request pode afetar. Veja [Filtros de testes](/filters).
@@ -148,15 +147,11 @@ dois, o executor nunca oferece `type`, `upload`, `tap_at` ou `type_at`.
 
 ## Conclusão de um passo
 
-Quando o modelo de decisão responde `done` ou `failed`, o executor verifica a
-alegação em uma tela atualizada com uma única pergunta: a tarefa do passo está
-concluída? A verificação nunca vê o raciocínio do modelo nem um segredo.
-
-Um `done` confirmado faz o passo passar, e um `failed` confirmado o faz falhar
-com `ACTION_FAILED`. Uma alegação não confirmada volta ao modelo de decisão
-como histórico. Uma segunda alegação não confirmada encerra o passo:
-`ACTION_FAILED` quando a tela contradiz o objetivo, senão `blocked` com
-`AUTOMATION_UNSUPPORTED`.
+Quando o modelo de decisão diz `done` ou `failed`, o executor confere de novo,
+em uma tela atualizada, se a tarefa está de fato concluída (sem ver o
+raciocínio do modelo nem segredos). Resultados confirmados encerram o passo;
+uma alegação não confirmada volta ao modelo uma vez antes de o passo falhar ou
+ser bloqueado.
 
 ## Limiares
 
@@ -258,21 +253,17 @@ toda resposta vinda do fallback.
 
 ## Limites
 
-- Sem `navigate`. A navegação dentro do app é um `tap` em um link. URLs ficam
-  no código do teste (`browser.goto`, `app.open`).
-- Sem `listbox` de seleção múltipla e sem `scrollUntil`. `type_at` nunca limpa
-  um campo desenhado antes, então serve para campos vazios.
-- O modelo de texto que nomeia um controle desenhado não vê pixels. Ele não
-  consegue seguir uma instrução que existe só como texto desenhado, como um
-  assistente que desenha “toque no círculo”.
+- Sem a ferramenta `navigate`: clique nos links dentro do app e coloque as URLs
+  no código do teste (`app.open`, `browser.goto`).
+- Sem `listbox` de seleção múltipla nem `scrollUntil`, e `type_at` nunca limpa
+  um campo desenhado antes (serve para campos vazios).
+- O modelo de texto não vê capturas de tela, então não consegue ler instruções
+  que só existem como pixels desenhados (como uma instrução desenhada em um canvas).
 - Toda chamada de decisão e toda chamada de texto contam para `maxModelCalls`.
-- Três ações seguidas que falham ou não mudam nada bloqueiam o passo com
-  `AUTOMATION_UNSUPPORTED`.
-- Uma pergunta que o provedor recusa faz o passo falhar com
-  `MODEL_OUTPUT_INVALID`.
-- Uma pergunta tem no máximo 255 opções, o limite da TypeSafe. Em uma tela
-  maior, os nós no viewport vêm primeiro e o resto conta como omitido, para
-  que o modelo possa rolar.
+- Três ações seguidas que falham ou não mudam nada bloqueiam o passo.
+- Cada pergunta tem no máximo 255 opções (o limite da TypeSafe); em páginas
+  enormes, os elementos visíveis vêm primeiro, para que o modelo possa rolar
+  até alcançar o resto.
 
 ## Próximos passos
 

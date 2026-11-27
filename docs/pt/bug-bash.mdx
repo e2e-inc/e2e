@@ -20,16 +20,16 @@ e só o relata como bug quando o teste falha.
 
 ## Antes de começar
 
-- Garanta que o app consiga atender muitos exploradores ao mesmo tempo.
-  Inicie o app uma vez e defina `reuseExisting: true` no `app.command` do
-  alvo, ou defina a porta `0` na URL do app para que cada execução inicie sua
-  própria cópia. Quando `CI` está definido, o e2e ignora `reuseExisting`. Use
-  a porta `0`. Veja [Iniciar seu app](/web#starting-your-app).
-- No mobile, declare um alvo para cada simulador ou emulador. Cada explorador
-  precisa do próprio dispositivo.
-- Cada sessão de explore usa chamadas ao modelo. Cada execução termina
-  mostrando seus tokens, custo e duração.
-- Em um site publicado que outras pessoas usam, não altere dados.
+- Garanta que o seu app consiga atender vários exploradores ao mesmo tempo.
+  Ou inicie o app uma vez com `reuseExisting: true` no `app.command`, ou use
+  a porta `0` na URL para que cada execução tenha a própria cópia. (Na CI, o
+  e2e ignora `reuseExisting`, então use a porta `0`.) Veja
+  [Iniciar seu app](/web#starting-your-app).
+- No mobile, configure um alvo por simulador ou emulador, para que cada
+  explorador tenha o próprio dispositivo.
+- Cada sessão de explore faz chamadas ao modelo e, ao terminar, mostra o uso
+  de tokens, o custo e a duração.
+- Não altere dados em um site compartilhado ou de produção.
 
 O agente faz o resto da configuração, como as contas pré-carregadas e o
 login, a partir da skill.
@@ -78,9 +78,8 @@ Bug bash the checkout and account settings on this branch.
 6. Escreve um teste de reprodução para cada achado restante: os passos do
    achado como chamadas `agent.act` e o comportamento esperado dele como o
    `agent.assert` final. Ele pode iniciar um subagente por área.
-7. Roda os testes de reprodução. O achado só é um bug quando o teste dele
-   falha no defeito relatado: `ASSERTION_FAILED` na verificação final, ou um
-   `act` que falha no próprio defeito.
+7. Roda os testes de reprodução. Um achado só é confirmado como bug se o
+   teste de reprodução dele de fato falhar no defeito relatado.
 8. Relata, nesta ordem: bugs confirmados, riscos de produção que ele não
    consegue verificar localmente, achados rejeitados por motivo e avisos.
 

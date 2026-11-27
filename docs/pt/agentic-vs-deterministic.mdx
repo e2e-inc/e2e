@@ -3,14 +3,14 @@ title: Agêntico ou determinístico
 description: Escolha ações e asserções agênticas ou determinísticas para seus testes end-to-end.
 ---
 
-Os testes agênticos permitem que você descreva a intenção de um usuário e o
-resultado esperado em linguagem natural. O agente pode escolher as ações a
-executar e julgar se a tela atende às suas expectativas. Seu teste se
-concentra no resultado, sem seletores para manter conforme a UI muda.
+Os testes agênticos permitem que você descreva em linguagem natural o que um
+usuário quer fazer e o que a tela deve mostrar. O agente escolhe as ações e
+verifica o resultado, então você não perde tempo mantendo seletores quando a
+UI muda.
 
-Os testes determinísticos especificam as ações e as verificações em código.
-As duas abordagens podem testar resultados para o usuário, e o e2e permite
-combiná-las em um mesmo teste.
+Os testes determinísticos detalham cada interação e cada asserção em código.
+Os dois testam resultados para o usuário, e o e2e permite combiná-los
+livremente no mesmo teste.
 
 ## Quando usar testes agênticos?
 
@@ -45,10 +45,9 @@ produção sem popular dados determinísticos, porque os agentes se adaptam ao
 seu app. Use uma conta de teste nesses ambientes: o modelo vê o que está na
 tela. Veja [Segurança](/security).
 
-Para uma jornada complexa, escreva uma sequência de objetivos em linguagem
-simples. Limite cada objetivo a um resultado e verifique-o antes de continuar.
-Veja [Objetivos](/core-concepts#goals) para saber como dividir uma jornada em
-passos.
+Para um fluxo complexo, descreva em linguagem simples os passos rumo a um
+resultado. Veja [Objetivos](/core-concepts#goals) para saber quando dividir o
+fluxo em chamadas e esperar por um estado intermediário.
 
 ## Quando usar asserções agênticas?
 
@@ -74,9 +73,11 @@ de tempo para chegar ao estado esperado. Veja
 
 ## Quando usar testes determinísticos?
 
-Use localizadores para fluxos curtos e estáveis em que você já sabe quais
-controles usar. Você especifica cada campo e botão em código, como neste teste
-de desconto:
+Use localizadores para mecânicas de baixo nível que são o próprio objeto
+do teste (como um envio vazio, um atalho de teclado ou o deslocamento de um
+arraste), para testes de preparação que fazem login ou para projetos que
+rodam sem um modelo. Você especifica cada campo e botão em código, como neste
+teste de desconto:
 
 ```ts
 await app.open('/checkout');
@@ -115,13 +116,12 @@ importa, nomeie-o no objetivo ou use localizadores para essas ações. Um
 `expect` depois de `agent.act` detecta um objetivo que passou da maneira
 errada.
 
-Ações e asserções conduzidas pelo modelo adicionam latência e custo, e podem
-cometer erros. O [cache de replay](/cache) pode repetir ações gravadas de
-`agent.act` sem chamadas ao modelo. As asserções rodam de novo em toda
-execução de teste. Quando uma gravação não corresponde mais, o agente pode se
-adaptar à UI alterada, a menos que o modo de cache estrito esteja ativado.
-Veja [Testes com autocorreção](/self-healing) para entender como isso
-funciona.
+As chamadas ao modelo adicionam latência, custo e erros ocasionais. O
+[cache de replay](/cache) resolve a maior parte disso ao reproduzir ações
+gravadas de `agent.act` sem nenhuma chamada ao modelo, enquanto as asserções
+sempre rodam ao vivo. Quando a UI muda e uma gravação não corresponde mais, o
+agente entra em ação para se adaptar, a menos que você ative o modo de cache
+estrito. Veja [Testes com autocorreção](/self-healing).
 
 ## Próximos passos
 

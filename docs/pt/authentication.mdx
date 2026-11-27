@@ -8,10 +8,10 @@ description: Faça login uma vez, reutilize a sessão entre os testes e passe se
 import { Video } from '../snippets/video.jsx';
 
 Um teste de preparação faz login uma vez e salva uma sessão nomeada. Outros
-testes restauram essa sessão e já começam autenticados. Senhas e outros
-segredos são referências: o runner digita o valor e mostra `<secret:name>` no
-lugar dele na entrada do modelo e nos relatórios, com
-[algumas limitações](/reference/security#where-redaction-stops).
+testes restauram essa sessão para começar já autenticados. Senhas e outros
+segredos são referências opacas: o e2e digita o valor real para você e mostra
+`<secret:name>` em todos os outros lugares (com
+[algumas limitações](/reference/security#where-redaction-stops)).
 
 <Video>
   <video src="/images/authentication.mp4" aria-label="A configuração declara credenciais de admin, um teste de preparação faz login e salva a sessão admin, e uma execução com interface visível abre a página de clientes já autenticada. 15 testes passam em 12 segundos." muted loop playsInline controls />
@@ -76,28 +76,27 @@ asserção sobre a URL ou sobre um elemento que só aparece após o login.
 
 ## Regras de sessão
 
-| Regra | Se você a quebrar |
+| Regra | O que acontece se for quebrada |
 | --- | --- |
-| Testes de preparação ficam no nível superior, nunca dentro de `describe` | erro de coleta |
-| Cada nome de sessão é declarado por exatamente um teste de preparação | erro de coleta |
-| Todo nome em `sessions` é salvo pelo corpo | falha `SESSION_CONTRACT` |
-| Apenas os nomes declarados são salvos | falha `SESSION_CONTRACT` |
-| A engine do alvo salva e restaura o estado | erro de coleta, antes de qualquer teste rodar; um navegador hospedado reservado a cada tentativa não faz isso |
+| Defina os testes de preparação no nível superior, nunca dentro de `describe` | Erro de coleta |
+| Só um teste de preparação pode declarar um mesmo nome de sessão | Erro de coleta |
+| O corpo do teste de preparação precisa salvar todo nome que declara | Falha do contrato de sessão |
+| Não salve nomes de sessão não declarados | Falha do contrato de sessão |
+| A engine do alvo precisa permitir salvar e restaurar o estado | Erro de coleta antes de os testes rodarem (navegadores em nuvem por tentativa não conseguem salvar sessões) |
 
-Quando um teste de preparação falha, o runner pula os testes que dependem dele
-com a causa `setup-failed`. Os outros testes continuam rodando.
+Se um teste de preparação falha, os testes que dependem da sessão dele são
+pulados, enquanto os testes independentes continuam rodando.
 
-Em um alvo de navegador, uma sessão guarda cookies, local storage e IndexedDB,
-não o estado do servidor ou do banco de dados. Uma restauração não deixa
-nenhuma página aberta, então cada teste chama `app.open()` primeiro.
-
-Uma sessão dura uma execução. O runner a criptografa com uma chave mantida
-apenas em memória e a apaga na limpeza. Veja
+Em navegadores, uma sessão captura cookies, localStorage e IndexedDB (não o
+estado do servidor ou do banco de dados). Restaurar uma sessão não abre
+nenhuma página, então chame `app.open()` mesmo assim no início de cada teste.
+As sessões duram uma execução, são criptografadas em disco com uma chave
+mantida apenas em memória e são apagadas na limpeza. Veja
 [Sessões](/reference/security#sessions).
 
 ## Credenciais
 
-Declare cada conta na configuração. Leia a senha do ambiente:
+Declare as contas de teste na sua configuração e leia as senhas do ambiente:
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -114,10 +113,10 @@ export default {
 } satisfies E2EConfig;
 ```
 
-O carregamento da configuração verifica cada senha. Enquanto `ADMIN_PASSWORD`
-não estiver definida ou tiver menos de 6 caracteres, todo comando falha com
-`INVALID_CONFIG`, inclusive `e2e list`. Uma
-[substituição](#override-a-value-per-run) válida toma o lugar dela.
+O e2e valida as senhas ao carregar a configuração: se `ADMIN_PASSWORD` não
+estiver definida ou tiver menos de 6 caracteres, todo comando falha com um
+erro de configuração, a menos que você passe uma
+[substituição por variável de ambiente](#override-a-value-per-run).
 
 <Accordion title="Mantenha o valor fora do ambiente">
 
@@ -206,23 +205,19 @@ await agent.act('Connect Stripe with the given key', {
 });
 ```
 
-Uma entrada de `secrets` pode preencher qualquer campo editável. Um nome não
-configurado lança `SECRET_UNAVAILABLE`. Um campo comum não é mascarado, então
-as capturas de tela mostram o valor enquanto o campo o contém, inclusive as do
-modelo. `secrets.get()` retorna apenas entradas de `secrets`, então
-`credentials.admin` e `secrets.admin` podem existir ao mesmo tempo.
+Entradas de `secrets` podem preencher qualquer campo editável, e pedir um
+segredo não configurado faz o passo falhar. Como campos comuns, ao contrário dos campos de senha, não são mascarados, as capturas de tela (inclusive as do
+modelo) mostram o valor enquanto ele está visível no campo.
+`credentials.admin` e `secrets.admin` ficam em namespaces separados.
 
-Em `e2e.config.ts`, `secrets.get()` pode passar um segredo para uma opção da
-engine que declare aceitar segredos, como
-[`basicAuth`](/web#protected-previews). O carregamento da configuração
-verifica o nome. As capturas de tela continuam ativadas, então os pixels do
-app não são mascarados. Veja
+Você também pode passar `secrets.get()` para opções da engine que aceitam
+segredos, como [`basicAuth`](/web#protected-previews). Veja
 [Segredos em opções da engine](/reference/security#secrets-in-engine-options).
 
 ## Substitua um valor por execução
 
-Uma variável de ambiente substitui um valor da configuração durante uma
-execução:
+Substitua qualquer credencial ou segredo configurado durante uma única
+execução com uma variável de ambiente:
 
 | Entrada | Variável |
 | --- | --- |
@@ -230,10 +225,9 @@ execução:
 | `credentials.admin.password` | `E2E_USER_ADMIN_PASSWORD` |
 | `secrets['stripe-key']` | `E2E_SECRET_STRIPE_KEY` |
 
-A variável contém o nome da entrada em maiúsculas, com cada caractere fora de
-`A-Z` e `0-9` trocado por `_`. Quando duas entradas correspondem à mesma
-variável, como `stripe-key` e `stripe_key`, o carregamento da configuração
-falha com `INVALID_CONFIG`.
+Os nomes das entradas ficam em maiúsculas, com os caracteres não
+alfanuméricos trocados por `_` (dois nomes que resultam na mesma variável de
+ambiente fazem a validação da configuração falhar).
 
 <CodeGroup>
 ```bash npm

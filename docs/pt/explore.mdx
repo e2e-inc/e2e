@@ -37,15 +37,15 @@ bunx e2e explore 'Explore the checkout flow like a first-time buyer and report a
 ```
 </CodeGroup>
 
-Um limite pode ser “pare antes de fazer o pedido”. Sem um objetivo, o explore
-usa `Explore the app and find bugs`. Um passo que falha não interrompe a
-execução.
+Adicione eventuais limites direto no prompt (por exemplo, “pare antes de fazer o
+pedido”). Sem um prompt, o `e2e explore` usa por padrão
+`"Explore the app and find bugs"`. Passos individuais que falham não
+interrompem a exploração.
 
-Sem um `e2e.config.ts`, o explore roda primeiro o assistente do
-[`e2e init`](/reference/cli#e2e-init). A exploração começa logo em seguida
-quando não resta nada a fazer à mão. Caso contrário, o init lista os passos
-que faltam, como `npm install` ou definir a chave do modelo.
-Sem um terminal, como na CI, o explore falha com `CONFIG_NOT_FOUND`.
+Se você ainda não tem um `e2e.config.ts`, o `explore` roda primeiro o
+assistente do [`e2e init`](/reference/cli#e2e-init) e começa a explorar assim
+que a configuração termina. Em ambientes não interativos, como a CI, ele sai,
+em vez disso, com um erro de configuração não encontrada.
 
 ## Leia os resultados
 
@@ -134,26 +134,23 @@ bunx e2e explore --changed-since origin/main
 ```
 </CodeGroup>
 
-Só um defeito que a mudança pode causar conta como `issue`. Um defeito em
-outra parte do app conta como `warning` e não faz a execução falhar.
+Só os defeitos que a mudança pode ter causado contam como `issue`; problemas
+não relacionados em outras partes do app aparecem como `warning` e não fazem
+a execução falhar.
 
-Sem um objetivo, o objetivo é `Explore what this change affects and find bugs in
-it`. O planejador pode então pular uma mudança que nenhum usuário vê, como
-uma que só mexe em docs ou em testes. A execução termina como `skipped` e
-passa. Ele só pula quando leu a mudança inteira. Um diff grande, um arquivo
-binário ou um arquivo sem commit impede que ele pule.
+Sem um prompt explícito, o `explore` se concentra no que o seu diff mudou e
+pode pular mudanças que os usuários não veem (como PRs só de docs ou só de
+testes) se a árvore de trabalho estiver limpa e o diff inteiro couber. Uma
+execução pulada passa; as mensagens de commit, o texto do PR e o código da
+própria branch podem influenciar essa decisão (leia `run.explore.ended` para
+distinguir uma execução pulada de uma exploração limpa). Veja
+[Segurança](/reference/security#mcp-and-explore) para saber o que é enviado
+ao modelo.
 
-As mensagens de commit, a descrição do pull request e o código da própria
-branch podem influenciar essa decisão. Para distinguir uma execução pulada
-de uma exploração limpa, leia `run.explore.ended`.
-
-Para saber o que o modelo lê, veja
-[Segurança](/reference/security#mcp-and-explore).
-
-No GitHub Actions, rode-o em um job próprio no `pull_request`. Com o
-[reporter do GitHub](/github) na configuração, os achados vão para um
-comentário próprio no pull request. A execução de um fork não consegue
-postar; veja [quando nada é postado](/github#when-nothing-is-posted).
+No GitHub Actions, rode o `explore` em um job `pull_request` próprio. Com o
+[reporter do GitHub](/github), os achados vão direto para um comentário no PR
+(PRs de fork não publicam; veja
+[quando nada é publicado](/github#when-nothing-is-posted)).
 
 ```yaml title=".github/workflows/explore.yml"
 on: pull_request
@@ -177,18 +174,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 ```
 
-`fetch-depth: 0` coloca a branch base no checkout. Sem ele, a execução
-falha com `INVALID_CHANGED_SINCE`.
+`fetch-depth: 0` dá ao git o histórico da branch base de que ele precisa
+para comparar a sua branch; sem ele, a execução falha. Em pull requests do
+GitHub e merge requests do GitLab, o planejador também lê o título e a
+descrição do PR, então mencione o que deve mudar visivelmente.
 
-Em um job `pull_request` ou em um pipeline de merge request do GitLab, o
-planejador também lê o título e a descrição do pull request. Descreva ali o
-que um usuário deve ver mudar. O GitHub fornece o texto do evento que iniciou
-o job, então uma edição só aparece depois do próximo push, não ao rodar o job
-de novo.
-
-Mantenha a árvore de trabalho limpa depois da instalação e do build, ou a
-execução nunca é pulada. Ignore `.e2e/` e a saída do build. Rode o e2e com
-`npx`, não com `pnpm exec`, que pode reescrever o `pnpm-lock.yaml`.
+Mantenha a árvore de trabalho limpa depois da instalação e do build para que
+PRs só de docs ainda possam ser pulados (rode `npx` em vez de `pnpm exec` se
+o `pnpm` mexer no seu lockfile).
 
 <Warning>
 Nunca o rode em `pull_request_target`. Essa execução tem acesso aos seus

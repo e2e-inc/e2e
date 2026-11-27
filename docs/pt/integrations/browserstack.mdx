@@ -141,11 +141,13 @@ link dos vídeos umas das outras; com os valores padrão, isso nunca acontece.
   limite de inatividade do BrowserStack encerra a sessão depois do último
   comando dela.
 - Uma liberação faz a execução falhar quando o agent-device não consegue
-  confirmar que encerrou a sessão, mesmo quando todos os testes passaram. As
-  causas: o fim da sessão ultrapassou a janela de encerramento do
-  agent-device (cerca de 3 segundos), uma parada forçada do daemon, um
-  relatório de encerramento perdido ou um daemon que terminou durante a execução.
-  Encontre a sessão no dashboard pelos valores de `build` e `sessionName`.
+  confirmar que encerrou a sessão, mesmo quando todos os testes passaram. Isso
+  acontece quando a limpeza da sessão do BrowserStack falha (com mais de 20
+  segundos de `cleanupTimeout` restantes) ou fica sem confirmação durante a
+  parada do daemon, ou quando o daemon termina durante a execução. No Windows,
+  encerrar a sessão antes da parada do daemon também exige mais de 20 segundos
+  de `cleanupTimeout` restantes (mantenha o padrão de 30 segundos). Encontre a
+  sessão no dashboard pelos valores de `build` e `sessionName`.
 - Configurações do dispositivo (permissões, localização, rede, aparência),
   alertas do sistema, gravação e logs do dispositivo pelo agent-device, e
   redirecionamento reverso de portas não estão disponíveis. Leia os logs no
