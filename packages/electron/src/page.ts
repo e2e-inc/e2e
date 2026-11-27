@@ -7,6 +7,7 @@
 import type { Deadline } from '@e2e-dev/core/engine';
 import type { Session } from './cdp/connection.ts';
 import { Keyboard, Mouse, type InputTarget } from './cdp/input.ts';
+import { plainData } from './main-process.ts';
 
 /** How long past its operation's end a gesture may still hold the page's input, to release what it pressed. */
 const RELEASE_MS = 1_000;
@@ -14,12 +15,15 @@ const RELEASE_MS = 1_000;
 /** The isolated world the engine's own page-side reads run in, apart from the app's globals. */
 export const WORLD_NAME = '__e2e_electron__';
 
-type PageEvent = 'close' | 'crash' | 'load';
+type PageEvent = 'close' | 'crash' | 'load' | 'document';
 
 /** What a page function threw, as the protocol reports it. */
 export function thrown(details: { readonly text: string; readonly exception?: { readonly description?: string } }): string {
   return details.exception?.description ?? details.text;
 }
+
+/** What test code run in a page threw: its own failure, not the engine's. */
+export class PageEvaluateError extends Error {}
 
 export class PageTarget implements InputTarget {
   readonly keyboard: Keyboard;
@@ -28,6 +32,8 @@ export class PageTarget implements InputTarget {
   private closed = false;
   private isolated: Promise<number> | undefined;
   private documents = 0;
+  /** Whether the current document fired its load event. */
+  private loaded = false;
   private gestures: Promise<unknown> = Promise.resolve();
   private readonly handlers = new Map<PageEvent, Set<() => void>>();
 
@@ -76,6 +82,7 @@ export class PageTarget implements InputTarget {
   }
 
   emit(event: PageEvent): void {
+    if (event === 'load') this.loaded = true;
     if (event === 'close') {
       if (this.closed) return;
       this.closed = true;
@@ -106,6 +113,8 @@ export class PageTarget implements InputTarget {
   documentChanged(): void {
     this.isolated = undefined;
     this.documents += 1;
+    this.loaded = false;
+    this.emit('document');
   }
 
   /**
@@ -183,6 +192,36 @@ export class PageTarget implements InputTarget {
       });
     }
     return this.isolated;
+  }
+
+  /**
+   * Runs test code in the page's own world, where the app's globals are:
+   * `source` is a function expression called with `arg`, its promise awaited
+   * and its result returned by value. Rejects with `PageEvaluateError` when
+   * the code throws.
+   */
+  async evaluateInPage(source: string, argument: string | undefined): Promise<unknown> {
+    const expression = `(async () => (${plainData.toString()})(await (${source})(${argument ?? ''})))()`;
+    const { result, exceptionDetails } = await this.session.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true });
+    if (exceptionDetails !== undefined) throw new PageEvaluateError(thrown(exceptionDetails).split('\n')[0] ?? exceptionDetails.text);
+    // NaN, an infinity, and -0 have no JSON: the protocol names them instead.
+    return result.unserializableValue === undefined ? result.value : Number(result.unserializableValue);
+  }
+
+  /**
+   * Reloads the page's document and resolves once the new one has loaded: a
+   * load the document before it was still finishing does not count. Rejects
+   * when the window closes or its renderer crashes instead.
+   */
+  async reload(): Promise<void> {
+    const before = this.documents;
+    const ended = Promise.race([this.next('close'), this.next('crash')]).then(() => {
+      throw new Error('the window closed or its renderer crashed while it reloaded (Target closed)');
+    });
+    ended.catch(() => undefined);
+    await this.session.send('Page.reload');
+    while (this.documents === before) await Promise.race([this.next('document'), ended]);
+    await Promise.race([this.loaded ? Promise.resolve() : this.next('load'), ended]);
   }
 
   /** Calls a self-contained page function in the isolated world with JSON arguments and returns its JSON result. */

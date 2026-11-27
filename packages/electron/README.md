@@ -57,8 +57,10 @@ test('signs in', async ({ app, screen }) => {
 - **Act.** Trusted mouse and keyboard input, once the node is enabled, on
   screen, and topmost at its point.
 - **Windows.** The agent sees them as tabs. The `electron` fixture has
-  `evaluate` (main process), `windows`, `waitForWindow`, `window`,
-  `waitForDownload`, `onDialog`, and `locator` (CSS).
+  `launch` (per-test arguments and environment), `userDataDir`, `evaluate`
+  (main process), `windows`, `activeWindow`, `waitForWindow`, `window`,
+  `waitForDownload`, `onDialog`, `locator` (CSS), `keyboard`, and `mouse`. A
+  window has `evaluate` (its page) and `reload`.
 - **Video.** The shown window's screencast, encoded to one `.webm` by ffmpeg,
   which the engine downloads on the first recording when the machine has none.
 - **Secrets.** Password fields report no value, and screenshots paint them

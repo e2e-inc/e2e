@@ -86,12 +86,13 @@ export class MainProcess {
  * (`{ run() {} }.run`) prints without the `function` keyword, which is put
  * back. The source is only compiled here, never run.
  */
-export function functionSource(fn: (...args: never[]) => unknown): string {
+export function functionSource(fn: (...args: never[]) => unknown, caller = 'electron.evaluate'): string {
+  if (typeof fn !== 'function') throw new TestError('INVALID_ARGUMENT', `${caller} takes a function`);
   const source = fn.toString();
   if (compiles(source)) return source;
   const method = source.replace(/^(async\s+)?(\*\s*)?/, (_match, async: string | undefined, star: string | undefined) => `${async ?? ''}function ${star ?? ''}`);
   if (compiles(method)) return method;
-  throw new TestError('INVALID_ARGUMENT', 'electron.evaluate: its function cannot be sent as source text; pass an arrow function or a function expression');
+  throw new TestError('INVALID_ARGUMENT', `${caller}: its function cannot be sent as source text; pass an arrow function or a function expression`);
 }
 
 function compiles(source: string): boolean {

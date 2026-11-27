@@ -169,6 +169,13 @@ describe('nodeOp', () => {
     expect(await run(await element('#hands-off'), 'focus')).toBe('moved');
   });
 
+  it('counts focus a composite hands to a part of itself as held', async () => {
+    await window.setContent(`<div id="row" tabindex="0"><input id="editor"></div>`);
+    await window.inPage(() => document.querySelector('#row')!.addEventListener('focus', () => (document.querySelector('#editor') as HTMLInputElement).focus()));
+    expect(await run(await element('#row'), 'focus')).toBe('held');
+    expect(await window.inPage(() => document.activeElement?.id)).toBe('editor');
+  });
+
   it('points at the value an option has when a label names none', async () => {
     await window.setContent(`<select id="kind"><option value="work">Work</option></select>`);
     expect(await run(await element('#kind'), 'checkSelect', { label: 'work' })).toEqual({ ok: false, reason: 'no option matches {"label":"work"}; the options are "Work"; an option has the value "work": pass { value: "work" }' });

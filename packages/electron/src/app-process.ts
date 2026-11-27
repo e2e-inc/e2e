@@ -34,6 +34,14 @@ export interface LaunchSetup {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly userDataDir: string;
   readonly attempt: EngineAttemptContext;
+  /** What `electron.launch()` added for this attempt, over the target's arguments and the engine's `env`. */
+  readonly extra?: LaunchExtra;
+}
+
+/** The arguments and variables one attempt's launches add to the target's own. */
+export interface LaunchExtra {
+  readonly args: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
 }
 
 /** How long the main process gets to answer a question whose answer is optional. */
@@ -209,8 +217,8 @@ export class AppProcess {
   /** Starts the binary. Nothing is awaited: a binary that cannot start shows as a process that ended. */
   private start(setup: LaunchSetup): RunningApp {
     const { appPath, launchArguments } = setup.app;
-    const args = [`--user-data-dir=${setup.userDataDir}`, ...(appPath === undefined ? [] : [path.resolve(setup.projectRoot, appPath)]), ...(launchArguments ?? [])];
-    const process = new ElectronProcess({ executable: setup.executable, args, cwd: setup.projectRoot, env: launchEnv(setup.env, this.options.env) });
+    const args = [`--user-data-dir=${setup.userDataDir}`, ...(appPath === undefined ? [] : [path.resolve(setup.projectRoot, appPath)]), ...(launchArguments ?? []), ...(setup.extra?.args ?? [])];
+    const process = new ElectronProcess({ executable: setup.executable, args, cwd: setup.projectRoot, env: launchEnv(setup.env, { ...this.options.env, ...setup.extra?.env }) });
     let withoutMain: () => void = () => undefined;
     const none = new Promise<undefined>((resolve) => {
       withoutMain = () => resolve(undefined);
