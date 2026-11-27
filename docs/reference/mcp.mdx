@@ -311,10 +311,6 @@ Test lines: 2, 1 read not listed.
   drafted with the function's text and a comment: declare the variables it
   uses in the test. What the function itself calls is not drafted again. A
   passing `expect(value)` leaves no line.
-- A call whose argument holds only while the app runs is drafted the way
-  its engine says a test finds the same thing again, with the engine's
-  [`testLine`](/reference/engine#declaring-operations). When the engine has no such way,
-  the line keeps the argument and says so in a comment.
 - Each action or matcher on `screen` waits `timeout` by default. A `timeout`
   in a line's own options replaces it. Without `timeout`, each waits 5000 ms,
   or the config's [`actionTimeout`](/reference/config#actiontimeout) or
