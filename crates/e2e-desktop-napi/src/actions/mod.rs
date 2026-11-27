@@ -347,11 +347,21 @@ fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<bool> {
         Placement::Collapsed => return Err(Failure::refused(codes::ACTION_FAILED, "the element has no size on screen, so the user cannot reach it")),
         Placement::ScrolledOut => {}
     }
-    if !action_names(element, what)?.iter().any(|name| name == "AXScrollToVisible") {
+    let shown = || placement(element) == Ok(Placement::Shown);
+    let own = action_names(element, what)?.iter().any(|name| name == "AXScrollToVisible");
+    if own {
+        perform(element, "AXScrollToVisible", "scroll into view")?;
+        if until(deadline, shown) {
+            return Ok(true);
+        }
+    }
+    // An element with no scroll action of its own (a plain button), or one whose action left it out of view (a scroll
+    // area around its list): each scroll area around it moves its scroll bar until the element's frame is inside.
+    let moved = bring_into_view(element, what).map_err(|failure| if own { failure.delivered() } else { failure })?;
+    if !own && !moved {
         return Err(Failure::refused(codes::ACTION_FAILED, "the element is off screen and cannot be scrolled into view; scroll its list first"));
     }
-    perform(element, "AXScrollToVisible", "scroll into view")?;
-    if until(deadline, || placement(element) == Ok(Placement::Shown)) {
+    if until(deadline, shown) {
         return Ok(true);
     }
     Err(Failure::unconfirmed(codes::ACTION_FAILED, "the element is still off screen after it was scrolled into view"))
@@ -561,7 +571,19 @@ pub fn focus_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Inst
 
 #[cfg(test)]
 mod tests {
-    use super::{press_to_state, step_to};
+    use super::{offset_to_show, press_to_state, step_to};
+
+    #[test]
+    fn moves_a_scroll_area_the_least_that_shows_an_element() {
+        // Below the view: its end comes to the view's end.
+        assert_eq!(offset_to_show(500.0, 520.0, 100.0, 300.0), 220.0);
+        // Above: its start comes to the view's start.
+        assert_eq!(offset_to_show(20.0, 40.0, 100.0, 300.0), -80.0);
+        // Longer than the view: its start shows.
+        assert_eq!(offset_to_show(400.0, 900.0, 100.0, 300.0), 300.0);
+        // Partly in view: nothing moves.
+        assert_eq!(offset_to_show(290.0, 310.0, 100.0, 300.0), 0.0);
+    }
     use crate::failure::Outcome;
     use std::cell::Cell;
     use std::time::{Duration, Instant};

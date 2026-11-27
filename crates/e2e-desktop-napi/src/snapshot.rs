@@ -328,7 +328,7 @@ fn intersect(a: Rect, b: Rect) -> Rect {
 }
 
 /// The most ancestors `placement` walks up from an element to its window.
-const MAX_ANCESTORS: usize = 256;
+pub(crate) const MAX_ANCESTORS: usize = 256;
 
 /// Where an element is, as far as showing it goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -621,7 +621,7 @@ impl Walk {
         }
         let role = if root && read.role == "unknown" { "window" } else { read.role };
         let secure = read.subrole.as_deref() == Some("AXSecureTextField") || read.ax_role == "AXSecureTextField";
-        let (actions, scroll_axes) = self.actions(element, &read);
+        let (mut actions, scroll_axes) = self.actions(element, &read);
 
         // The name a control takes from its label element: a stall reading it leaves the name unknown, a hole in the read,
         // so a locator cannot take the control's absence by that name as proof.
@@ -686,6 +686,9 @@ impl Walk {
             && outside(bounds, clip)
         {
             states.push("offscreen");
+            // A scroll area that holds it out of view can bring it back, by its scroll bar where the element takes no
+            // scroll action of its own (a plain button in a sidebar): it gets a ref the scroll goes through.
+            push(&mut actions, "ScrollTo");
         }
 
         // A table's row gets a ref whatever it offers: an NSTableView selects it through the table's AXSelectedRows,
