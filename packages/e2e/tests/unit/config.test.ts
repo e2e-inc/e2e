@@ -536,6 +536,14 @@ describe('resolveConfig', () => {
     expect(() => resolve({ credentials })).toThrow(/credential "admin" has no username; set username or E2E_USER_ADMIN_USERNAME/);
   });
 
+  it('takes a credential set to undefined from E2E_USER_<NAME>_USERNAME and _PASSWORD, and rejects one missing from both', () => {
+    const credentials = { admin: undefined };
+    const resolved = resolve({ credentials }, { E2E_USER_ADMIN_USERNAME: 'from-env', E2E_USER_ADMIN_PASSWORD: 'from-env-pass' }).credentials.get('admin');
+    expect(resolved?.username).toBe('from-env');
+    expect(resolved?.password.value).toBe('from-env-pass');
+    expect(() => resolve({ credentials })).toThrow(/credential "admin" has no username; set username or E2E_USER_ADMIN_USERNAME/);
+  });
+
   it('rejects an empty credential password at config time, including an empty env override', () => {
     expect(() =>
       resolve({
@@ -594,6 +602,9 @@ describe('resolveConfig', () => {
       launchArguments: ['-e2e'],
       permissions: { camera: 'grant' },
     });
+    expect(resolveApp({ bundleId: 'dev.shop.app', permissions: { camera: 'grant', microphone: undefined } }).permissions).toStrictEqual({ camera: 'grant' });
+    // A name that is the prototype's accessor still reaches the engine, which rejects a name it doesn't know.
+    expect(Object.keys(resolveApp({ bundleId: 'dev.shop.app', permissions: { ['__proto__']: 'grant' } }).permissions ?? {})).toEqual(['__proto__']);
   });
 
   it("takes 'all' only on an engine that declares grantsAllPermissions, which receives it as allPermissions", () => {
@@ -1599,5 +1610,15 @@ describe('services', () => {
       ['beta', service],
       ['alpha', service],
     ]);
+  });
+
+  it('starts nothing for a service set to undefined', () => {
+    const service = {
+      async *start() {
+        yield {};
+      },
+    };
+
+    expect(resolve({ services: { email: undefined, alpha: service } }).services).toEqual([['alpha', service]]);
   });
 });

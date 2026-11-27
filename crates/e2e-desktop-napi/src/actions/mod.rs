@@ -177,6 +177,17 @@ fn until(deadline: Instant, mut check: impl FnMut() -> bool) -> bool {
 /// How long an action that answered with an error is watched for its element going away, the sign that it landed.
 const GONE_WAIT: Duration = Duration::from_millis(300);
 
+/// When the watch for an element going away ends: after `GONE_WAIT`, and in time for the answer to reach the caller
+/// before the action's deadline. An answer that comes after it is cut off, and reads as an action that may have
+/// landed even when the app refused it.
+fn gone_wait_end(now: Instant, deadline: Option<Instant>) -> Instant {
+    let end = now + GONE_WAIT;
+    match deadline {
+        Some(deadline) => end.min(deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline)),
+        None => end,
+    }
+}
+
 /// Performs an AX action. Once the action is sent, an error answer cannot show that nothing happened, so the element is
 /// read again to tell (`answered`).
 fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
@@ -187,12 +198,14 @@ fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
         Ok(()) => Ok(()),
         Err(error) => {
             let then = match error {
-                _ if refuses(error) || error == ax::AX_INVALID_ELEMENT => None,
+                // "No such attribute" is watched too: a SwiftUI alert's button answers it once its press closed the alert.
+                _ if error != ax::AX_ATTRIBUTE_UNSUPPORTED && (refuses(error) || error == ax::AX_INVALID_ELEMENT) => None,
                 // The app answers again or not: one read tells, and another would wait out the same stall.
                 ax::AX_CANNOT_COMPLETE => element.attribute("AXRole").err(),
                 // A press that closes what holds its element (a dismissed alert) can leave it readable a moment more.
                 _ => {
-                    let end = Instant::now() + GONE_WAIT;
+                    let deadline = CURRENT.with(|current| current.borrow().as_ref().map(|(_, deadline)| *deadline));
+                    let end = gone_wait_end(Instant::now(), deadline);
                     loop {
                         let then = element.attribute("AXRole").err();
                         if then == Some(ax::AX_INVALID_ELEMENT) || Instant::now() >= end {
@@ -218,6 +231,8 @@ fn refuses(error: AXError) -> bool {
 /// What an action's error answer means, from the error and a read of the element after it (`then`, its error, `None`
 /// when the element still answers):
 /// - refused outright: nothing reached the app;
+/// - "no such attribute" with the element gone after: a SwiftUI alert's button answers so once its press closed the
+///   alert, so it landed; with the element unread after (the button's handler keeps the app busy), it may have landed;
 /// - the element gone as the action was sent: the action may have closed what held it, so it may have landed;
 /// - gone after: the action closed what held it (an alert's button, a panel's), so it landed;
 /// - a timeout while the app still answers: the action opened a menu or a modal and runs inside the app's handler;
@@ -225,6 +240,8 @@ fn refuses(error: AXError) -> bool {
 /// - any other error: it may have landed, delivered but unverified. The caller reads the effect where it can.
 fn answered(error: AXError, then: Option<AXError>, what: &str) -> Outcome<()> {
     match (error, then) {
+        (ax::AX_ATTRIBUTE_UNSUPPORTED, Some(ax::AX_INVALID_ELEMENT)) => Ok(()),
+        (ax::AX_ATTRIBUTE_UNSUPPORTED, Some(_)) => Err(refused(error, what).delivered()),
         _ if refuses(error) => Err(refused(error, what)),
         (ax::AX_INVALID_ELEMENT, _) => Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("{what}: the element went away as the action was sent"))),
         (_, Some(ax::AX_INVALID_ELEMENT)) => Ok(()),
@@ -1047,6 +1064,12 @@ mod tests {
             assert_eq!(answer(refused, None).expect_err("refused").delivery, Delivery::NotDelivered);
         }
         assert!(answer(AX_FAILURE, Some(AX_INVALID_ELEMENT)).is_ok(), "gone after the press: it closed its alert");
+        assert!(answer(AX_ATTRIBUTE_UNSUPPORTED, Some(AX_INVALID_ELEMENT)).is_ok(), "a SwiftUI alert's button, gone after the press");
+        for unread in [AX_CANNOT_COMPLETE, AX_FAILURE] {
+            let busy = answer(AX_ATTRIBUTE_UNSUPPORTED, Some(unread)).expect_err("unread after: no proof the element stayed");
+            assert_eq!(busy.delivery, Delivery::Unknown);
+        }
+        assert_eq!(answer(AX_ACTION_UNSUPPORTED, Some(AX_INVALID_ELEMENT)).expect_err("no such action").delivery, Delivery::NotDelivered);
         assert!(answer(AX_CANNOT_COMPLETE, None).is_ok(), "a modal runs in the press's handler");
         let stalled = answer(AX_CANNOT_COMPLETE, Some(AX_CANNOT_COMPLETE)).expect_err("no answer after");
         assert_eq!((stalled.code, stalled.delivery), (codes::APP_UNRESPONSIVE, Delivery::Unknown));
@@ -1054,6 +1077,16 @@ mod tests {
         assert_eq!((failed.code, failed.delivery), (codes::ACTION_FAILED, Delivery::Unknown));
         let gone = answer(AX_INVALID_ELEMENT, None).expect_err("went away as it was sent");
         assert_eq!(gone.delivery, Delivery::Unknown);
+    }
+
+    #[test]
+    fn stops_watching_for_a_gone_element_in_time_to_answer() {
+        use super::{ANSWER_MARGIN, GONE_WAIT, gone_wait_end};
+        let now = Instant::now();
+        assert_eq!(gone_wait_end(now, None), now + GONE_WAIT);
+        assert_eq!(gone_wait_end(now, Some(now + Duration::from_secs(5))), now + GONE_WAIT);
+        let soon = now + ANSWER_MARGIN + Duration::from_millis(40);
+        assert_eq!(gone_wait_end(now, Some(soon)), now + Duration::from_millis(40));
     }
 
     #[test]
