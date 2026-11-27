@@ -325,9 +325,20 @@ impl Element {
 
     /// Up to `max` elements of an array attribute, from the first.
     pub fn elements(&self, name: &str, max: usize) -> Result<Vec<Element>, AXError> {
+        self.elements_from(name, 0, max)
+    }
+
+    /// Up to the last `max` elements of an array attribute.
+    pub fn last_elements(&self, name: &str, max: usize) -> Result<Vec<Element>, AXError> {
+        let count = self.count(name)?;
+        self.elements_from(name, count.saturating_sub(max), max)
+    }
+
+    /// Up to `max` elements of an array attribute, from `start`.
+    fn elements_from(&self, name: &str, start: usize, max: usize) -> Result<Vec<Element>, AXError> {
         let key = CFString::new(name);
         let mut values: CFArrayRef = std::ptr::null();
-        let error = unsafe { AXUIElementCopyAttributeValues(self.0, key.as_concrete_TypeRef(), 0, max as CFIndex, &mut values) };
+        let error = unsafe { AXUIElementCopyAttributeValues(self.0, key.as_concrete_TypeRef(), start as CFIndex, max as CFIndex, &mut values) };
         if error != AX_SUCCESS {
             return Err(error);
         }

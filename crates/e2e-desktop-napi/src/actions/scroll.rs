@@ -2,11 +2,14 @@
 
 use super::*;
 
-/// A scroll area's scroll bar for one axis. A SwiftUI `List` lists it only as a child, with no `AXVerticalScrollBar`.
+/// A scroll area's scroll bar for one axis. A SwiftUI `List` lists it only as a child, with no `AXVerticalScrollBar`; a
+/// scroll area that holds its content directly lists the bar after any number of children, so the last few are read too.
 pub fn scroll_bar(element: &Element, vertical: bool) -> Option<Element> {
     element.element(if vertical { "AXVerticalScrollBar" } else { "AXHorizontalScrollBar" }).or_else(|| {
         let orientation = if vertical { "AXVerticalOrientation" } else { "AXHorizontalOrientation" };
-        element.elements("AXChildren", 16).ok()?.into_iter().find(|child| {
+        let first = element.elements("AXChildren", 16).ok()?;
+        let last = if first.len() < 16 { Vec::new() } else { element.last_elements("AXChildren", 4).unwrap_or_default() };
+        first.into_iter().chain(last).find(|child| {
             child.text("AXRole").as_deref() == Some("AXScrollBar")
                 && match child.text("AXOrientation") {
                     Some(shown) => shown == orientation,
