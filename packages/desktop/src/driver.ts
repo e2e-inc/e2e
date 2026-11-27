@@ -103,6 +103,8 @@ export interface DesktopDriver {
   processesCarrying(marker: string): Promise<readonly number[] | null>;
   /** Drops the refs of a process that quit. */
   forgetProcess(pid: number): void;
+  /** The path of the installed app a bundle id or an app name names, as a launch finds it; null when none does. */
+  installedApp(target: string): string | null;
   launch(options: {
     path?: string;
     bundleId?: string;

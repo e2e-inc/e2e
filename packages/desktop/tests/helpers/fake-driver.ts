@@ -143,6 +143,13 @@ export class FakeDriver implements DesktopDriver {
     this.calls.push({ method: 'forgetProcess', args: [pid] });
   }
 
+  /** The installed apps `installedApp` finds, by bundle id or name. */
+  readonly installed = new Map<string, string>([['dev.e2e.spike.form', '/Applications/SpikeForm.app']]);
+
+  installedApp(target: string): string | null {
+    return this.installed.get(target) ?? null;
+  }
+
   launch(options: Parameters<DesktopDriver['launch']>[0]): Promise<Envelope<Launched>> {
     return this.answer('launch', [options], spawnApp());
   }

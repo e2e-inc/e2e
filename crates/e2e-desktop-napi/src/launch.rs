@@ -68,6 +68,11 @@ fn app_folders() -> Vec<String> {
 
 /// The bundle of an installed app: by bundle id first, then by name in the usual folders, in any case, then by name
 /// through LaunchServices.
+/// The path of the installed app a bundle id or an app name names, as a launch finds it; `None` when none does.
+pub fn installed_path(target: &str) -> Option<String> {
+    installed(target)?.path().map(|path| path.to_string())
+}
+
 fn installed(target: &str) -> Option<Retained<NSURL>> {
     let workspace = NSWorkspace::sharedWorkspace();
     if let Some(url) = workspace.URLForApplicationWithBundleIdentifier(&NSString::from_str(target)) {

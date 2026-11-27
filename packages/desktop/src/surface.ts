@@ -394,6 +394,15 @@ export class DesktopSurface {
           : { id: 'screen-recording', status: 'warn', message: 'Screenshots need Screen Recording: allow the app that starts e2e in System Settings > Privacy & Security > Screen Recording' },
       );
     }
+    if (info.app.appPath === undefined && info.app.bundleId !== undefined && driver !== undefined) {
+      // The lookup a launch makes: a typo here would otherwise fail every test at app.open(), each on its own.
+      const found = driver.installedApp(info.app.bundleId);
+      checks.push(
+        found === null
+          ? { id: 'app-bundle-id', status: 'fail', message: `no installed app has the name or bundle id "${info.app.bundleId}"; install it, or fix app.bundleId` }
+          : { id: 'app-bundle-id', status: 'pass', message: `${info.app.bundleId}: ${found}` },
+      );
+    }
     if (info.app.appPath !== undefined) {
       const bundle = path.resolve(info.projectRoot, info.app.appPath);
       // What init checks of the bundle, so a bundle doctor passes is one init accepts.

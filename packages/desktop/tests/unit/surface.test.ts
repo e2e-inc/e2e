@@ -2075,7 +2075,14 @@ describe('DesktopSurface: doctor', () => {
       { id: 'desktop-driver', status: 'pass', message: 'desktop driver 0.0.0-test' },
       { id: 'accessibility', status: 'pass', message: expect.any(String) },
       { id: 'screen-recording', status: 'warn', message: expect.stringMatching(/Screen Recording/) },
+      { id: 'app-bundle-id', status: 'fail', message: 'no installed app has the name or bundle id "com.example.app"; install it, or fix app.bundleId' },
     ]);
+  });
+
+  it('finds the app a bundleId names as a launch would', async () => {
+    const surface = new DesktopSurface(resolveOptions({}), 'macos', () => fakeDriver());
+    const checks = await surface.doctor({ targetName: 'mac', projectRoot: process.cwd(), app: { bundleId: 'dev.e2e.spike.form' }, env: {}, headed: false, signal, log: () => undefined });
+    expect(checks.find((check) => check.id === 'app-bundle-id')).toEqual({ id: 'app-bundle-id', status: 'pass', message: 'dev.e2e.spike.form: /Applications/SpikeForm.app' });
   });
 
   it('fails doctor when the native driver cannot be loaded', async () => {
