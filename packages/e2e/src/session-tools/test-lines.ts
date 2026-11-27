@@ -404,12 +404,27 @@ export class SessionTestLines {
     if (id === undefined) return { reason: 'the action names no node' };
     const listed = this.listed(id);
     if (listed === undefined) return { reason: `#${id.replace(/^#/, '')} is not on the newest screen` };
+    const frames = listed.node.framePath ?? [];
+    if (frames.length === 0) return this.findLocator(listed, (expression) => expression);
+    if (!this.options.engineFixtures?.includes('browser')) return { reason: 'no browser fixture to scope the locator to its frame' };
+    if (frames.some((selector) => this.options.redact(selector) !== selector || selector.includes('<secret:'))) {
+      return { reason: 'the frame selector contains a redacted secret' };
+    }
+    const inFrame = (expression: LocatorExpression) =>
+      frames.reduceRight<LocatorExpression>((source, selector) => ({ kind: 'frame', selector, source }), expression);
+    const found = await this.findLocator(listed, inFrame);
+    if ('reason' in found) return found;
+    const root = 'browser' + frames.map((selector) => `.frameLocator(${JSON.stringify(selector)})`).join('');
+    return { ...found, expression: inFrame(found.expression), code: root + found.code.slice('screen'.length) };
+  }
+
+  private async findLocator(listed: Listed, scopeExpression: (expression: LocatorExpression) => LocatorExpression): Promise<Found> {
     const { node } = listed;
     let tries = MAX_TRIES;
     const attempt = async (expression: LocatorExpression, within: ExecutorNode = listed.root): Promise<Probe | undefined> => {
       if (tries <= 0) return undefined;
       tries -= 1;
-      return this.probe(expression, listed, within);
+      return this.probe(scopeExpression(expression), listed, within);
     };
     let twins: { readonly located: Located; readonly probe: Probe } | undefined;
     let match: SemanticNode | undefined;

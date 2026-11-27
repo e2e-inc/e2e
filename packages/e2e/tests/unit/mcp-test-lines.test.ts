@@ -30,11 +30,13 @@ interface Fake {
   readonly placeholder?: string;
   /** Top edge; every node is 100 by 20 at x 0, so no two boxes overlap. */
   readonly y: number;
+  readonly framePath?: readonly string[];
   readonly children?: readonly Fake[];
 }
 
 const listed = (node: Fake): ExecutorNode => ({
   id: node.id,
+  ...(node.framePath === undefined ? {} : { framePath: node.framePath }),
   ...(node.role === undefined ? {} : { role: node.role }),
   ...(node.name === undefined ? {} : { name: node.name }),
   ...(node.text === undefined ? {} : { text: node.text }),
@@ -105,6 +107,7 @@ async function harness(options: {
   let resolves = 0;
   const lines = new SessionTestLines({
     query: locateQuery,
+    engineFixtures: ['browser'],
     resolve: async (expression: LocatorExpression): Promise<readonly NodeRef[]> => {
       resolves += 1;
       return (options.matches[describeExpression(expression)] ?? []).map((node) => ({ id: `located-${node.id}`, revision: 'l1' }));
@@ -174,6 +177,13 @@ describe('SessionTestLines', () => {
   });
 
   const save: Fake = { id: 'n2', role: 'button', name: 'Save', y: 40 };
+
+  it.each(['sk-live-0000', '<secret:apiKey>'])('does not probe or print a secret frame selector (%s)', async (value) => {
+    const session = await harness({ screen: [{ ...save, framePath: [`iframe[name="${value}"]`] }], matches: {} });
+    expect(noteOf(await session.run('tap', { target: save.id }))).toBe('No test line: the frame selector contains a redacted secret.');
+    expect(session.resolves()).toBe(0);
+    expect(await session.run('test_lines', {})).not.toContain(value);
+  });
 
   it('answers an action with its line after the lead, and test_lines collects it', async () => {
     const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] } });
