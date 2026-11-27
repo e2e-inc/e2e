@@ -7,7 +7,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
+import { accessSync, closeSync, constants, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { ConfigurationError, InfrastructureError } from '@e2e-dev/core/engine';
@@ -49,16 +49,82 @@ function electronPackage(projectRoot: string): ElectronPackage | undefined {
  * Whether a path names a regular file this process may execute: a directory
  * passes the execute-permission check too (search permission), so it is
  * ruled out first. A packaged macOS app is the binary inside the bundle,
- * `MyApp.app/Contents/MacOS/MyApp`, not the `.app` directory.
+ * `MyApp.app/Contents/MacOS/MyApp`, not the `.app` directory. Windows has no
+ * execute permission, and starts only a program image: a file that begins
+ * with the `MZ` signature, which a shortcut or a script does not.
  */
-function isExecutableFile(file: string): boolean {
+function isExecutableFile(file: string, platform: NodeJS.Platform): boolean {
   try {
     if (!statSync(file).isFile()) return false;
-    accessSync(file, constants.X_OK);
-    return true;
+    if (platform !== 'win32') {
+      accessSync(file, constants.X_OK);
+      return true;
+    }
+    const signature = Buffer.alloc(2);
+    const handle = openSync(file, 'r');
+    try {
+      return readSync(handle, signature, 0, 2, 0) === 2 && signature.toString('latin1') === 'MZ';
+    } finally {
+      closeSync(handle);
+    }
   } catch {
     return false;
   }
+}
+
+function isDirectory(file: string): boolean {
+  try {
+    return statSync(file).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** The names in a directory, or none when it cannot be read. */
+function entries(directory: string): string[] {
+  try {
+    return readdirSync(directory);
+  } catch {
+    return [];
+  }
+}
+
+/** How many `.exe` files of a folder a hint names. */
+const NAMED_EXECUTABLES = 5;
+
+/** What to name instead of an `executablePath` that is no executable file, for the mistakes each platform invites. */
+function executableHint(resolved: string, platform: NodeJS.Platform): string {
+  if (/\.app[\\/]?$/.test(resolved)) return `; a macOS app runs as the binary inside its bundle, ${path.join(resolved, 'Contents', 'MacOS', path.basename(resolved, '.app'))}`;
+  if (platform !== 'win32') return '';
+  if (/\.lnk$/i.test(resolved)) return '; it is a shortcut: name the .exe it points to (its Target, under Properties)';
+  if (isExecutableFile(`${resolved}.exe`, platform)) return `; name the file with its extension, ${resolved}.exe`;
+  if (isDirectory(resolved)) {
+    const programs = entries(resolved).filter((name) => /\.exe$/i.test(name));
+    if (programs.length === 0) return '; name the app\'s .exe, not a folder';
+    const named = programs.slice(0, NAMED_EXECUTABLES).join(', ');
+    return `; name the app's .exe inside the folder (it holds ${named}${programs.length > NAMED_EXECUTABLES ? ', and more' : ''})`;
+  }
+  return '';
+}
+
+/**
+ * The app a Squirrel.Windows launcher starts, when `file` is one: an
+ * installer made with Squirrel (electron-winstaller, Electron Forge's
+ * default) puts the app in `app-<version>` folders beside `Update.exe`, and
+ * a small launcher of the app's name next to them. The launcher starts the
+ * newest version and exits, so the engine would be left holding a process
+ * that is not the app.
+ */
+function squirrelApp(file: string): string | undefined {
+  const directory = path.dirname(file);
+  const name = path.basename(file);
+  const siblings = entries(directory);
+  if (!siblings.some((sibling) => sibling.toLowerCase() === 'update.exe')) return undefined;
+  const versions = siblings
+    .filter((sibling) => /^app-\d/.test(sibling) && existsSync(path.join(directory, sibling, name)))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const newest = versions.at(-1);
+  return newest === undefined ? undefined : path.join(directory, newest, name);
 }
 
 /** What a launch would start, or why it has nothing to start: the one answer `prepare`, `init`, and `doctor` each act on. */
@@ -71,13 +137,17 @@ type Executable =
   | { readonly kind: 'undownloaded'; readonly package: ElectronPackage }
   | { readonly kind: 'misconfigured'; readonly problem: string };
 
-function locateExecutable(projectRoot: string, executablePath: string | undefined): Executable {
+function locateExecutable(projectRoot: string, executablePath: string | undefined, platform: NodeJS.Platform): Executable {
   if (executablePath !== undefined) {
     const resolved = path.resolve(projectRoot, executablePath);
-    if (isExecutableFile(resolved)) return { kind: 'named', file: resolved };
-    // The fix for the common case: a macOS `.app` bundle.
-    const bundle = /\.app\/?$/.test(resolved) ? `; a macOS app runs as the binary inside its bundle, ${path.join(resolved, 'Contents', 'MacOS', path.basename(resolved, '.app'))}` : '';
-    return { kind: 'misconfigured', problem: `electron({ executablePath }) names ${resolved}, which is not an executable file${bundle}` };
+    if (!isExecutableFile(resolved, platform)) {
+      return { kind: 'misconfigured', problem: `electron({ executablePath }) names ${resolved}, which is not an executable file${executableHint(resolved, platform)}` };
+    }
+    const launched = platform === 'win32' ? squirrelApp(resolved) : undefined;
+    if (launched !== undefined) {
+      return { kind: 'misconfigured', problem: `electron({ executablePath }) names ${resolved}, the launcher its installer left there: it starts the app and exits, so name the app itself, ${launched}` };
+    }
+    return { kind: 'named', file: resolved };
   }
   const installed = electronPackage(projectRoot);
   if (installed === undefined) {
@@ -95,8 +165,8 @@ function locateExecutable(projectRoot: string, executablePath: string | undefine
 }
 
 /** The executable a launch starts, checked: an `executablePath` that runs, or the project's downloaded Electron binary. */
-export function resolveExecutable(projectRoot: string, executablePath: string | undefined): string {
-  const found = locateExecutable(projectRoot, executablePath);
+export function resolveExecutable(projectRoot: string, executablePath: string | undefined, platform: NodeJS.Platform = process.platform): string {
+  const found = locateExecutable(projectRoot, executablePath, platform);
   switch (found.kind) {
     case 'named':
     case 'installed':
@@ -117,7 +187,7 @@ export function resolveExecutable(projectRoot: string, executablePath: string | 
  * here, once for the run rather than once per test.
  */
 export async function ensureElectronBinary(projectRoot: string, executablePath: string | undefined, log: (line: string) => void, signal: AbortSignal): Promise<void> {
-  const found = locateExecutable(projectRoot, executablePath);
+  const found = locateExecutable(projectRoot, executablePath, process.platform);
   if (found.kind === 'misconfigured') throw new ConfigurationError('INVALID_CONFIG', found.problem);
   if (found.kind !== 'undownloaded') return;
   await download(found.package, log, signal);
@@ -150,8 +220,8 @@ async function download(installed: ElectronPackage, log: (line: string) => void,
 }
 
 /** For `e2e doctor`: what a run would start, without downloading anything. */
-export function describeExecutable(projectRoot: string, executablePath: string | undefined): { readonly status: 'pass' | 'warn' | 'fail'; readonly message: string } {
-  const found = locateExecutable(projectRoot, executablePath);
+export function describeExecutable(projectRoot: string, executablePath: string | undefined, platform: NodeJS.Platform = process.platform): { readonly status: 'pass' | 'warn' | 'fail'; readonly message: string } {
+  const found = locateExecutable(projectRoot, executablePath, platform);
   switch (found.kind) {
     case 'named':
       return { status: 'pass', message: `starts ${found.file}` };
