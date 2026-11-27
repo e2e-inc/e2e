@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 /// Whether a failed input may have reached the app.
 ///
 /// The line is drawn at the app's content: text typed, a value set, a press,
-/// a selection, an item chosen, or focus moved into a control. Bringing a
+/// a selection, an item chosen, focus moved into a control, or a list
+/// scrolled to bring a control into view. Bringing a
 /// window forward, and opening a list's menu that closed again with nothing
 /// chosen, change nothing the app keeps, so a failure after only those is
 /// still `NotDelivered`.
