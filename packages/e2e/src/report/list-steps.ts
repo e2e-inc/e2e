@@ -7,6 +7,7 @@
 import type { StepPrompt } from '../run/step-hold.ts';
 import type { PausedStep, RunEventOf } from '../run/events.ts';
 import type { StepRecord } from '@e2e-dev/core/lib/run/steps';
+import { missesEveryRun } from '@e2e-dev/core/lib/cache/decide';
 import { modelLabel } from '@e2e-dev/core/lib/config/agent';
 import { sanitizeText, truncateUtf8 } from '@e2e-dev/core/lib/internal/errors';
 import { collapseText } from '@e2e-dev/core/lib/internal/text';
@@ -68,15 +69,12 @@ const F_RUNNING = '◌';
 const DEPTH_INDENT = '  ';
 
 /**
- * ` · not replayed: truncated` for a step whose recording was cut short. It
- * is the one miss no later run ends: the step records again, and is cut
- * short again, until the test changes. Any other miss or hand-off is told
- * by the summary row and the trace page.
+ * ` · not replayed: truncated` for a step whose miss no later run ends. Any
+ * other miss or hand-off is told by the summary row and the trace page.
  */
 function missNotice(pc: Colors, outcome: StepOutcome): string {
   const { cache } = outcome;
-  if (cache?.mode !== 'missed' || cache.reason !== 'truncated') return '';
-  return `${pc.dim(' · ')}${pc.yellow('not replayed: truncated')}`;
+  return missesEveryRun(cache) ? `${pc.dim(' · ')}${pc.yellow(`not replayed: ${cache.reason}`)}` : '';
 }
 
 /**
@@ -99,9 +97,10 @@ export function stepLine(pc: Colors, step: Pick<ListedStep, 'api' | 'label' | 'k
     const calls = outcome.modelCalls > 0 ? ` · ${outcome.modelCalls} model call${outcome.modelCalls === 1 ? '' : 's'}` : '';
     const notice = missNotice(pc, outcome);
     const status = outcome.status === 'passed' ? '' : pc.dim(` ${outcome.status}`);
-    tail = `${pc.dim(`${formatTime(outcome.durationMs)}${calls}`)}${notice}${status}`;
+    const tailOf = (shownCalls: string): string => `${pc.dim(`${formatTime(outcome.durationMs)}${shownCalls}`)}${notice}${status}`;
+    tail = tailOf(calls);
     // On a narrow row the notice outranks the model calls, which the summary counts.
-    if (notice !== '' && (roomBeside(tail) ?? MIN_STEP_LABEL_COLUMNS) < MIN_STEP_LABEL_COLUMNS) tail = `${pc.dim(formatTime(outcome.durationMs))}${notice}${status}`;
+    if (notice !== '' && (roomBeside(tail) ?? MIN_STEP_LABEL_COLUMNS) < MIN_STEP_LABEL_COLUMNS) tail = tailOf('');
   }
   const room = roomBeside(tail);
   return `${head}${titled ? fitLabel(step.label, room) : quotedLabel(step.label, room)}${tail === '' ? '' : ` ${tail}`}`;
