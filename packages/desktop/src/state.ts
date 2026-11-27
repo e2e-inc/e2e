@@ -71,10 +71,17 @@ export function nativeStateHost(driver: () => DesktopDriver): StateHost {
         throw translate(cause, `look up the copies of ${bundleId}`, false);
       });
       // Spotlight finds a copy LaunchServices never registered, such as one a build left in another directory. Spotlight
-      // turned off finds nothing, which leaves LaunchServices' answer.
+      // turned off finds nothing, which leaves LaunchServices' answer; a Spotlight that did not answer in time is no
+      // evidence there is no other copy, so the check fails.
       const indexed = await execFileAsync('/usr/bin/mdfind', [`kMDItemCFBundleIdentifier == '${bundleId}'`], { signal, timeout: COMMAND_MS }).then(
         ({ stdout }) => stdout.split('\n').filter((line) => line !== ''),
-        () => [],
+        (cause: unknown) => {
+          if (signal.aborted) throw cause;
+          if ((cause as { killed?: boolean }).killed === true) {
+            throw new EngineError('OPERATION_TIMEOUT', `Spotlight did not answer in time, so no other copy of ${bundleId} could be ruled out`, { retryable: false });
+          }
+          return [];
+        },
       );
       return { paths: [...copies.registered, ...indexed], running: copies.running };
     },
@@ -88,6 +95,8 @@ export function nativeStateHost(driver: () => DesktopDriver): StateHost {
         let errors = '';
         child.stderr.on('data', (chunk: Buffer) => (errors += chunk.toString()));
         child.once('error', reject);
+        // A `defaults` that exits before it read the whole plist closes the pipe: the exit below says why, not an unhandled EPIPE.
+        child.stdin.once('error', () => undefined);
         child.once('exit', (code) => (code === 0 ? resolve() : reject(new Error(`defaults import exited with ${String(code)}: ${errors.trim()}`))));
         child.stdin.end(plist);
       });
