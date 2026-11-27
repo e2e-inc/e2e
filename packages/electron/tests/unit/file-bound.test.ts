@@ -22,22 +22,31 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe('appDirectory', () => {
   it('is what the main process reports, else the declared app path, else where the first local page is', () => {
-    expect(appDirectory({ reported: app, declared: '/elsewhere', firstDocument: page })).toBe(app);
-    expect(appDirectory({ reported: undefined, declared: app, firstDocument: page })).toBe(app);
-    expect(appDirectory({ reported: undefined, declared: path.join(app, 'main.js'), firstDocument: page })).toBe(app);
-    expect(appDirectory({ reported: undefined, declared: undefined, firstDocument: page })).toBe(path.join(app, 'renderer'));
+    expect(appDirectory({ reported: app, declared: '/elsewhere', firstDocument: page, projectRoot: app })).toBe(app);
+    expect(appDirectory({ reported: undefined, declared: app, firstDocument: page, projectRoot: app })).toBe(app);
+    expect(appDirectory({ reported: undefined, declared: path.join(app, 'main.js'), firstDocument: page, projectRoot: app })).toBe(app);
+    expect(appDirectory({ reported: undefined, declared: undefined, firstDocument: page, projectRoot: app })).toBe(path.join(app, 'renderer'));
   });
 
   it('is the package a declared main script is in, past a manifest that only sets the module type, though the main process reports the script\'s own directory', () => {
     const script = path.join(app, 'out', 'main', 'index.js');
-    expect(appDirectory({ reported: path.join(app, 'out', 'main'), declared: script, firstDocument: page })).toBe(app);
-    expect(outsideApp(page, appDirectory({ reported: path.join(app, 'out', 'main'), declared: script, firstDocument: page }))).toBeUndefined();
+    expect(appDirectory({ reported: path.join(app, 'out', 'main'), declared: script, firstDocument: page, projectRoot: app })).toBe(app);
+    expect(outsideApp(page, appDirectory({ reported: path.join(app, 'out', 'main'), declared: script, firstDocument: page, projectRoot: app }))).toBeUndefined();
+  });
+
+  it('looks for a main script\'s package no higher than the project, whose root may sit under another package', () => {
+    // A project with no manifest of its own beside its script, inside a directory that has one (a home directory, a monorepo).
+    const project = path.join(app, 'loose');
+    mkdirSync(project, { recursive: true });
+    writeFileSync(path.join(project, 'main.js'), '');
+    expect(appDirectory({ reported: project, declared: path.join(project, 'main.js'), firstDocument: page, projectRoot: project })).toBe(project);
+    expect(outsideApp(pathToFileURL(path.join(app, 'main.js')).href, project)).toMatch(/outside it/);
   });
 
   it('is the archive a packaged app shows its first page from, and nothing for an app that shows no local page', () => {
     const archive = path.join(root, 'Resources', 'app.asar');
-    expect(appDirectory({ reported: undefined, declared: undefined, firstDocument: pathToFileURL(path.join(archive, 'dist', 'index.html')).href })).toBe(archive);
-    expect(appDirectory({ reported: undefined, declared: undefined, firstDocument: 'http://localhost:3000/' })).toBeUndefined();
+    expect(appDirectory({ reported: undefined, declared: undefined, firstDocument: pathToFileURL(path.join(archive, 'dist', 'index.html')).href, projectRoot: app })).toBe(archive);
+    expect(appDirectory({ reported: undefined, declared: undefined, firstDocument: 'http://localhost:3000/', projectRoot: app })).toBeUndefined();
   });
 });
 
