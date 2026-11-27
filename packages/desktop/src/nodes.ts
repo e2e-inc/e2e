@@ -202,6 +202,9 @@ const CHECKABLE_ROLES = new Set(['checkbox', 'switch', 'radiobutton']);
 /** Roles whose name labels what they hold, so it is never their text. */
 const INPUT_ROLES = new Set(['textfield', 'combobox', 'slider', 'incrementor', 'datefield', 'timefield', 'colorwell']);
 
+/** Roles that float above their window, as the driver reads them: an open menu and a popover, never cut by a scroll area. */
+const FLOATING_ROLES = new Set(['menu', 'popover']);
+
 /** Roles the driver reads text into `value`, which the contract calls `text`. */
 const TEXT_ROLES = new Set(['statictext', 'heading']);
 
@@ -386,7 +389,9 @@ export function projectSnapshot(
       const childStable = stable && identity !== undefined;
       const childId = idFor(childStable ? `${id}/${identity}` : undefined);
       const childPrior = childStable ? childId : prior !== undefined && seen !== undefined ? priorIdOf?.(`${prior}/${seen}`) : undefined;
-      return project(child, childId, childStable, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, states.hidden === true ? (scrolledOut ? 'scrolled' : 'other') : (underHidden.get(child) ?? false), childPrior);
+      const above = states.hidden === true ? (scrolledOut ? 'scrolled' : 'other') : (underHidden.get(child) ?? false);
+      // An open menu or popover floats above the window, so a scroll that took its trigger out of view does not hide it (the driver reads it as on screen).
+      return project(child, childId, childStable, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, above === 'scrolled' && FLOATING_ROLES.has(child.role) ? false : above, childPrior);
     });
     return {
       ref: { id, revision: '' },

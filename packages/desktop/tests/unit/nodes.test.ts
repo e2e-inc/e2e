@@ -315,6 +315,41 @@ describe('projectSnapshot', () => {
     expect(screen.truncated).toBe(true);
   });
 
+  it('reads an open menu as on screen when the button that opened it scrolled out of view', () => {
+    const screen = projectSnapshot(
+      {
+        snapshot_id: 's',
+        complete: true,
+        tree: {
+          role: 'window',
+          name: 'W',
+          children: [
+            {
+              role: 'scrollarea',
+              ref_id: '@s:area',
+              children: [
+                {
+                  role: 'menubutton',
+                  name: 'Sort',
+                  ref_id: '@s:sort',
+                  states: ['offscreen'],
+                  children: [{ role: 'menu', ref_id: '@s:menu', children: [{ role: 'menuitem', name: 'By Priority', ref_id: '@s:item', available_actions: ['Click'] }] }],
+                },
+                { role: 'group', name: 'Pane', ref_id: '@s:pane', states: ['offscreen'], children: [{ role: 'button', name: 'Inside', ref_id: '@s:inside' }] },
+              ],
+            },
+          ],
+        },
+      },
+      minter(),
+    );
+    const named = (name: string) => all(screen.root).find((node) => node.name === name);
+    expect(named('Sort')?.states?.hidden).toBe(true);
+    expect(named('By Priority')?.states?.hidden).toBeUndefined();
+    // Anything else under a node scrolled out of view is out of view with it.
+    expect(named('Inside')?.states?.hidden).toBe(true);
+  });
+
   describe('rows folded out of view', () => {
     const row = (title: string, y: number) => ({
       role: 'treeitem',
