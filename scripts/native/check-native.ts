@@ -6,7 +6,7 @@
  * `place-native.ts` write the addon and its stamp. The addon is the
  * package's `main`, which npm packs whatever `files` says.
  *
- * Usage: `node ../../scripts/native/check-native.ts <addon>`, from the platform package directory.
+ * Usage: `node ../../../../scripts/native/check-native.ts <addon>`, from the platform package directory.
  */
 
 import { existsSync, readFileSync } from 'node:fs';

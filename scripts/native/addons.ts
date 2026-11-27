@@ -20,7 +20,8 @@ interface AddonSpec {
   readonly file: string;
   /**
    * The target triples the addon ships for, each to its NAPI-RS platform
-   * name. Each platform is one npm package, `packages/<package>-<platform>`.
+   * name. Each platform is one npm package, `@e2e-dev/<package>-<platform>`,
+   * in `packages/<package>/npm/<platform>`.
    */
   readonly targets: Readonly<Record<string, string>>;
 }
@@ -62,7 +63,7 @@ export function addonFile(addon: Addon, platform: string): string {
 
 /** The directory of the platform package that ships the addon for one platform. */
 export function platformPackageDir(addon: Addon, platform: string): string {
-  return path.join(ROOT, 'packages', `${addon.package}-${platform}`);
+  return path.join(ROOT, 'packages', addon.package, 'npm', platform);
 }
 
 /**

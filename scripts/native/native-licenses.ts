@@ -1,6 +1,6 @@
 /**
  * Writes the notices of the crates a native addon links into its platform
- * packages, `packages/desktop-darwin-*\/THIRD_PARTY_LICENSES.md` for the
+ * packages, `packages/desktop/npm/darwin-*\/THIRD_PARTY_LICENSES.md` for the
  * desktop driver. The addon is a static library of them, and their licenses
  * (MIT, Apache-2.0, and the like) ask that their notices go with every copy.
  *

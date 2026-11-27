@@ -6,7 +6,7 @@
  * Usage: `node scripts/native/build-native.ts <addon> [--target x86_64-apple-darwin] [--out <dir>]`,
  * or `pnpm --filter @e2e-dev/desktop build:native` for the desktop driver.
  * `--out` copies the addon into another directory too, the platform package
- * (`packages/desktop-darwin-*`) before it is published, with a stamp naming
+ * (`packages/desktop/npm/darwin-*`) before it is published, with a stamp naming
  * that package's version, which its `prepublishOnly` checks. Needs a Rust
  * toolchain (`rustup`). A macOS target builds on macOS only.
  */

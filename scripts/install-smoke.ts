@@ -36,7 +36,7 @@ if (pnpmVersion === undefined) {
 }
 
 /** The packages a new user installs: the runner and its engines, and the core both build on. */
-const PACKAGES = ['core', 'e2e', 'web', 'mobile', 'desktop', 'desktop-darwin-arm64', 'desktop-darwin-x64'] as const;
+const PACKAGES = ['core', 'e2e', 'web', 'mobile', 'desktop', 'desktop/npm/darwin-arm64', 'desktop/npm/darwin-x64'] as const;
 
 const root = mkdtempSync(join(tmpdir(), 'e2e-install-smoke-'));
 const tarballs = join(root, 'tarballs');

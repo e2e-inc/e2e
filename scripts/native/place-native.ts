@@ -1,6 +1,6 @@
 /**
  * Puts the builds of a native addon a release made into its platform
- * packages (`packages/desktop-darwin-*` for the desktop driver), each
+ * packages (`packages/desktop/npm/darwin-*` for the desktop driver), each
  * stamped with its package's version, so their `prepublishOnly`
  * (`check-native.ts`) passes. Run after the version step, right before
  * publishing.
