@@ -193,22 +193,12 @@ pub fn named_by_content(role: &str) -> bool {
     matches!(role, "row" | "cell" | "treeitem" | "option" | "listitem")
 }
 
-/// Roles that never take an action, so no action names are read for them. An image or a text label is not one: an app
-/// can make either a button of its own (`AXPress`), which needs a ref to be tapped.
+/// Roles that never take an action, so no action names are read for them. An image, a text label, or a heading is not
+/// one: an app can make any of them a button of its own (`AXPress`), which needs a ref to be tapped.
 pub fn inert(role: &str) -> bool {
     matches!(
         role,
-        "separator"
-            | "splitter"
-            | "layoutitem"
-            | "matte"
-            | "heading"
-            | "paragraph"
-            | "progressbar"
-            | "levelindicator"
-            | "relevanceindicator"
-            | "helptag"
-            | "tooltip"
+        "separator" | "splitter" | "layoutitem" | "matte" | "paragraph" | "progressbar" | "levelindicator" | "relevanceindicator" | "helptag" | "tooltip"
     )
 }
 
@@ -223,5 +213,14 @@ mod tests {
     fn reads_an_appkit_tab_as_a_tab_not_a_radio_button() {
         assert_eq!(super::role("AXRadioButton", Some("AXTabButton")), "tab");
         assert_eq!(super::role("AXRadioButton", None), "radiobutton");
+    }
+
+    #[test]
+    fn reads_the_actions_of_a_label_an_image_and_a_heading() {
+        // Any of them can be a button of its own, which needs a ref to be tapped.
+        for role in ["statictext", "image", "heading"] {
+            assert!(!super::inert(role), "{role}");
+        }
+        assert!(super::inert("separator"));
     }
 }
