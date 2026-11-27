@@ -132,6 +132,9 @@ pub(super) fn same(a: f64, b: f64, step: Option<f64>) -> bool {
 ///
 /// A start within rounding of the target, but not equal to it, may be the target summed by earlier steps or a value a
 /// small step away from it: one step tells which, and when it was the target, a step back puts it as it was.
+///
+/// Its failures name no value: the target may be a secret, and the ledger that redacts one does not match it re-parsed as
+/// a number (`0042` as `42`), nor the stepper's values a step from it.
 pub(super) fn step_to(
     target: f64,
     shown: Option<f64>,
@@ -170,7 +173,7 @@ pub(super) fn step_to(
         if (up && next < now) || (!up && next > now) {
             return Err(Failure::unconfirmed(
                 codes::ACTION_FAILED,
-                format!("the stepper went from {now} to {next} on a step toward {target}: it wraps, and cannot reach the value"),
+                "the stepper went the other way on a step toward the value: it wraps, and cannot reach the value",
             ));
         }
         size = Some((next - now).abs());
@@ -194,15 +197,15 @@ pub(super) fn step_to(
                 } else {
                     Err(Failure::unconfirmed(
                         codes::ACTION_FAILED,
-                        format!("the stepper already showed {start}; a step to tell it from {target} left it at {value}"),
+                        "the stepper already showed about the value; a step to tell it from the value left it changed",
                     ))
                 };
             }
-            let failure = Failure::unconfirmed(codes::ACTION_FAILED, format!("the stepper steps from {now} to {next}, past {target}"));
+            let failure = Failure::unconfirmed(codes::ACTION_FAILED, "the stepper's step goes past the value");
             return Err(if same(value, start, size) {
-                Failure { message: format!("{}; it was stepped back to {start}", failure.message), ..failure }
+                Failure { message: format!("{}; it was stepped back to where it started", failure.message), ..failure }
             } else {
-                Failure { message: format!("{}, and could not be stepped back to {start}", failure.message), ..failure }
+                Failure { message: format!("{}, and could not be stepped back to where it started", failure.message), ..failure }
             });
         }
         now = next;
@@ -246,7 +249,7 @@ pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Out
                 _ => None,
             };
             if outside(target, bound("AXMinValue"), bound("AXMaxValue")) {
-                return Err(Failure::refused(codes::ACTION_FAILED, format!("{} is outside the range of this {role}", text.trim())));
+                return Err(Failure::refused(codes::ACTION_FAILED, format!("the value is outside the range of this {role}")));
             }
             let number = || match element.attribute("AXValue") {
                 Ok(Value::Number(number)) => Some(number),
@@ -265,7 +268,7 @@ pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Out
                     shown
                 },
             )?;
-            return if reached { Ok(()) } else { Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("the {role} stopped short of {}", text.trim()))) };
+            return if reached { Ok(()) } else { Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("the {role} stopped short of the value"))) };
         }
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("the value of this {role} cannot be set")));
     }

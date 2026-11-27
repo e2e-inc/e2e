@@ -649,7 +649,8 @@ mod tests {
         );
         let failure = past.expect_err("2 does not divide 3");
         assert_eq!(failure.delivery, crate::failure::Delivery::Unknown);
-        assert!(failure.message.contains("stepped back to 0"), "{}", failure.message);
+        assert!(failure.message.contains("stepped back to where it started"), "{}", failure.message);
+        assert!(!failure.message.contains('3'), "names no value: {}", failure.message);
         assert_eq!(value.get(), 0.0);
         let count = Cell::new(0);
         let stuck = step_to(
