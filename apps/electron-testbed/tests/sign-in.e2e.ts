@@ -314,7 +314,7 @@ test.describe('screenshots', () => {
     await app.open();
   });
 
-  test('paints the password field over and keeps the field beside it', async ({ app, screen }) => {
+  test('paints the password field over and keeps the field beside it', async ({ app, screen, electron }) => {
     const password = screen.getByTestId('password');
     await screen.getByTestId('username').fill('ada');
     await password.fill(credentials.user('ada').password);
@@ -323,8 +323,9 @@ test.describe('screenshots', () => {
     expect(field).not.toBeNull();
     expect(beside).not.toBeNull();
     const image = decode(new Uint8Array(readFileSync(await app.screenshot('filled'))));
-    // The window is 640 CSS pixels wide: the capture's width over that is its scale.
-    const scale = image.width / 640;
+    // The capture's width over the content's is its scale: the window's own width counts its frame on Windows.
+    const { width } = await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getContentBounds());
+    const scale = image.width / width;
     expect(blackShare(image, field!, scale)).toBe(1);
     expect(blackShare(image, beside!, scale)).toBeLessThan(0.5);
   });
