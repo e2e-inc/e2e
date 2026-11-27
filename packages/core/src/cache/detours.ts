@@ -170,6 +170,40 @@ export function findDetoursAfterReplay(
 }
 
 /**
+ * The detours of the first `executed` actions of a recording, which a
+ * replay ran before it handed off, read as a flow of their own that ends
+ * where the next recorded action stood, so a trip the replay completed is
+ * not merged with one it never reached. When the replay saw where it
+ * stopped (`live`: a screen with no recorded target, or an end that never
+ * reached the recorded route), a return there counts only if that screen
+ * is where the recording stood: a link that now leads elsewhere took the
+ * flow off the recorded route. A span
+ * the recording run found that ends inside them is kept as found: a
+ * stored location reads `:id` for a record id and a query value, so
+ * comparing again would lose a trip to another record. Only a span the
+ * hand-off cut through is read again, on the stored locations, and a trip
+ * found there counts only inside it.
+ */
+export function findReplayedDetours(trace: DetourInput, executed: number, live?: string): TraceDetour[] {
+  // Where the action the replay stopped at was recorded, or the recorded end when it ran them all.
+  const next = executed < trace.actions.length ? trace.actions[executed]?.at : trace.endPath;
+  const returned = live === undefined || next === undefined || routeLocation(live) === routeLocation(next);
+  const ran = {
+    actions: trace.actions.slice(0, executed),
+    ...(trace.startPath === undefined ? {} : { startPath: trace.startPath }),
+    ...(next === undefined || !returned ? {} : { endPath: next }),
+  };
+  const spans = trace.detours;
+  if (spans === undefined) return findDetours(ran);
+  const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to < executed || (to === executed && returned)) }, routeLocation);
+  const cut = spans.filter(({ from, to }) => from < executed && executed < to);
+  // Every place here is the entry's, spelled as it stores them.
+  const stored = new Set(Array.from({ length: executed + 1 }, (_, index) => index));
+  const inCut = cut.length === 0 ? [] : findDetours({ ...ran, stored }).filter(({ from, to }) => cut.some((span) => span.from <= from && to <= span.to));
+  return [...finished, ...inCut].toSorted((a, b) => a.from - b.from);
+}
+
+/**
  * The spans the recording run kept, named by the actions' locations as
  * stored (or as `spell` writes them): the screen the span started on, and
  * the first other location it reached, which is the first known place
@@ -212,7 +246,7 @@ interface PlaceKeys {
  * same address that followed a departure from it, with nothing typed,
  * chosen, or set on the way. Each wrong turn from one menu is a detour of
  * its own, so a replay that stops between two of them still has the first
- * whole (`prefixDetours` in `agent/step-cache.ts`).
+ * whole (`findReplayedDetours`).
  *
  * A stored place (`DetourInput.stored`) has no record ids or query values
  * left to compare, so it is the same place as any other with its spelling.

@@ -15,7 +15,7 @@
 import { deltaEvidenced, deltaMismatch, describeDelta, type DeltaMismatch } from '../cache/anchors.ts';
 import type { AgentCacheContext, ClaimedKey } from '../cache/context.ts';
 import { decideTraceReplay, opensWithNavigate, type TraceReplayMissReason } from '../cache/decide.ts';
-import { boundDetour, describeDetour, findDetours, findDetoursAfterReplay, type TraceDetour } from '../cache/detours.ts';
+import { boundDetour, describeDetour, findDetours, findDetoursAfterReplay, findReplayedDetours, type TraceDetour } from '../cache/detours.ts';
 import { routeLocation, sameRoute } from '../cache/route.ts';
 import { keyContextChanges, type CacheAgentIdentity } from '../cache/identity.ts';
 import { recordedProvenance, TraceRecorder } from '../cache/recorder.ts';
@@ -493,7 +493,7 @@ export class StepTraceSession {
     // So are the detours they made: the report names them, and this step's recording keeps them (`findDetoursAfterReplay`).
     // A replay that found no target looked at the screen it stopped on; one whose end never reached the recorded route saw where it stayed.
     const looked = stopReason === 'target-not-found' || stopReason === 'target-ambiguous' || stopReason === 'viewport-changed';
-    const ran = this.prefixDetours(trace, outcome.executed, looked ? screens.at(-1)?.path : end?.seen);
+    const ran = findReplayedDetours(trace, outcome.executed, looked ? screens.at(-1)?.path : end?.seen);
     if (trace.detours !== undefined) this.replayed = { executed: outcome.executed, spans: ran.map(({ from, to }) => ({ from, to })), kept };
     this.handOff(outcome, stopReason, detail, this.describeDetours(ran));
     return undefined;
@@ -695,40 +695,6 @@ export class StepTraceSession {
       this.info = detour === undefined ? info : { ...info, detour };
     }
     return 'staged';
-  }
-
-  /**
-   * The detours of the first `executed` actions of a recording, which a
-   * replay ran before it handed off, read as a flow of their own that ends
-   * where the next recorded action stood, so a trip the replay completed is
-   * not merged with one it never reached. When the replay saw where it
-   * stopped (`live`: a screen with no recorded target, or an end that never
-   * reached the recorded route), a return there counts only if that screen
-   * is where the recording stood: a link that now leads elsewhere took the
-   * flow off the recorded route. A span
-   * the recording run found that ends inside them is kept as found: a
-   * stored location reads `:id` for a record id and a query value, so
-   * comparing again would lose a trip to another record. Only a span the
-   * hand-off cut through is read again, on the stored locations, and a trip
-   * found there counts only inside it.
-   */
-  private prefixDetours(trace: ActionTrace, executed: number, live?: string): TraceDetour[] {
-    // Where the action the replay stopped at was recorded, or the recorded end when it ran them all.
-    const next = executed < trace.actions.length ? trace.actions[executed]?.at : trace.endPath;
-    const returned = live === undefined || next === undefined || routeLocation(live) === routeLocation(next);
-    const ran = {
-      actions: trace.actions.slice(0, executed),
-      ...(trace.startPath === undefined ? {} : { startPath: trace.startPath }),
-      ...(next === undefined || !returned ? {} : { endPath: next }),
-    };
-    const spans = trace.detours;
-    if (spans === undefined) return findDetours(ran);
-    const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to < executed || (to === executed && returned)) }, routeLocation);
-    const cut = spans.filter(({ from, to }) => from < executed && executed < to);
-    // Every place here is the entry's, spelled as it stores them.
-    const stored = new Set(Array.from({ length: executed + 1 }, (_, index) => index));
-    const inCut = cut.length === 0 ? [] : findDetours({ ...ran, stored }).filter(({ from, to }) => cut.some((span) => span.from <= from && to <= span.to));
-    return [...finished, ...inCut].toSorted((a, b) => a.from - b.from);
   }
 
   /**
