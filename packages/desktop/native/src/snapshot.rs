@@ -783,11 +783,18 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         Err(ax::AX_CANNOT_COMPLETE) => {
             return Err(Failure::refused(codes::APP_UNRESPONSIVE, "the app did not answer in time").with_details(serde_json::json!({ "retryable": true })));
         }
+        Err(ax::AX_API_DISABLED) => return Err(Failure::refused(codes::PERM_DENIED, "this process has no Accessibility permission")),
         Err(_) => {}
     }
     let tree = walk
         .node(&window, 1, true, window_bounds)
-        .ok_or_else(|| Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {} could not be read", request.window)))?;
+        .ok_or_else(|| Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {} could not be read", request.window)));
+    // Accessibility permission taken away during the walk answers every read with an error the walk takes for an
+    // element's own answer, and leaves it out: the tree would read as complete, and empty where it was not read.
+    if !ax::trusted() {
+        return Err(Failure::refused(codes::PERM_DENIED, "this process lost its Accessibility permission while it read the window"));
+    }
+    let tree = tree?;
     let ref_count = walk.refs.len();
     refs::insert_all(std::mem::take(&mut walk.refs));
     Ok(RawSnapshot {
