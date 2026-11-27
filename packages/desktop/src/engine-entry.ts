@@ -10,5 +10,5 @@ export type { DesktopEngine } from './engine.ts';
 export { desktop as default } from './engine.ts';
 export type { DesktopOptions, DesktopPlatform } from './options.ts';
 export type { Desktop } from './desktop.ts';
-export type { DesktopWindow } from './surface.ts';
+export type { DesktopWindow, WindowChoice } from './surface.ts';
 export type { DesktopFixtures } from './fixtures.ts';

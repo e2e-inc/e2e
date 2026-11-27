@@ -100,6 +100,33 @@ export interface DesktopWindow {
   readonly focused: boolean;
 }
 
+/**
+ * The window `desktop.useWindow()` names: one `desktop.windows()` listed, a
+ * window id, or a title. A window id holds only while the window stays open
+ * and changes at every launch, so a choice whose id names no open window
+ * falls back to its title: a test written from a listed window still runs on
+ * the next launch.
+ */
+export type WindowChoice = string | { readonly id?: string; readonly title?: string | RegExp };
+
+/**
+ * The id of the open window `choice` names: the one with its id, else the
+ * one with its title (a string matches the whole title, a RegExp any part).
+ * A title two windows share names neither.
+ */
+function chooseWindow(choice: WindowChoice, windows: readonly { readonly id: string; readonly title: string }[]): string {
+  const { id, title } = typeof choice === 'string' ? { id: choice, title: choice } : choice;
+  if (id !== undefined && windows.some((window) => window.id === id)) return id;
+  const listed = windows.map((window) => (window.title === '' ? `${window.id} (untitled)` : `${window.id} "${window.title}"`)).join(', ') || 'none';
+  const named = typeof choice === 'string' ? `"${choice}"` : [id === undefined ? undefined : `id ${id}`, title === undefined ? undefined : `title ${String(title)}`].filter(Boolean).join(' or ');
+  if (title === undefined) throw notActionable(`the app has no window with ${named}; its windows: ${listed}`);
+  const matches = windows.filter((window) => (typeof title === 'string' ? window.title === title : title.test(window.title)));
+  const [only] = matches;
+  if (only !== undefined && matches.length === 1) return only.id;
+  if (matches.length > 1) throw notActionable(`${matches.length} windows match ${named}; pass one desktop.windows() lists. Its windows: ${listed}`);
+  throw notActionable(`the app has no window ${typeof choice === 'string' ? `with id or title ${named}` : `with ${named}`}; its windows: ${listed}`);
+}
+
 /** What a target launches: a `.app` bundle on disk, or an installed app by bundle id or name. */
 type LaunchTarget = { readonly path: string; readonly label: string } | { readonly bundleId: string; readonly label: string };
 
@@ -533,16 +560,17 @@ export class DesktopSurface {
   }
 
   /**
-   * `desktop.useWindow()`: reads and acts in the window `id` names from now
-   * on, until the app quits, rather than the focused one. With no id, goes
-   * back to the focused window.
+   * `desktop.useWindow()`: reads and acts in the window `choice` names from
+   * now on, until the app quits, rather than the focused one. With no
+   * choice, goes back to the focused window.
    */
-  async useWindow(id: string | undefined, signal: AbortSignal, timeoutMs: number): Promise<void> {
-    if (id !== undefined) {
+  async useWindow(choice: WindowChoice | undefined, signal: AbortSignal, timeoutMs: number): Promise<void> {
+    if (choice === undefined) {
+      this.chosenWindow = undefined;
+    } else {
       const windows = await this.ownWindows({ signal, timeoutMs });
-      if (!windows.some((window) => window.id === id)) throw notActionable(`the app has no window ${id}; desktop.windows() lists the ones it has`);
+      this.chosenWindow = chooseWindow(choice, windows.map((window) => ({ id: window.id, title: window.title ?? '' })));
     }
-    this.chosenWindow = id;
     // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
     this.pointWindow = undefined;
   }

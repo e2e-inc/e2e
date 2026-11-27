@@ -136,10 +136,19 @@ by its placeholder, so find that field with
 `.accessibilityIdentifier`).
 
 The `desktop` fixture lists the app's windows (`desktop.windows()`), picks
-the one `screen` reads (`desktop.useWindow(window)`), presses a key into the
-app's window for an app with no control that takes keyboard focus
-(`desktop.press('ControlOrMeta+2')`), and quits the app
+the one `screen` reads (`desktop.useWindow({ title: 'Settings' })`), presses
+a key into the app's window for an app with no control that takes keyboard
+focus (`desktop.press('ControlOrMeta+2')`), and quits the app
 (`desktop.closeApp()`).
+
+`desktop.useWindow()` takes a window as `desktop.windows()` lists it, a
+`{ title }` (a string matches the whole title, a RegExp any part of it), or
+a string that is a window id or else a title. A window id changes at every
+launch, so a listed window whose id is gone is found by its title. A title
+that two open windows share, or one no window has, fails and lists the
+windows the app has. `desktop.useWindow()` with no argument goes back to the
+focused window; `undefined` passed explicitly, as from a `find()` that
+matched nothing, fails with `INVALID_ARGUMENT`.
 
 ## What differs from the web
 

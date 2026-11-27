@@ -787,6 +787,31 @@ describe('DesktopSurface: windows', () => {
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
   });
 
+  it('chooses a window by title, and by the title of a listed window whose id a relaunch changed', async () => {
+    const listed = [
+      { id: 'w-mine', title: 'Sign In', is_focused: true },
+      { id: 'w-panel', title: 'Controls' },
+      { id: 'w-a', title: 'Untitled' },
+      { id: 'w-b', title: 'Untitled' },
+    ];
+    const { surface, fake } = await launched({ listWindows: [windows(() => listed)] });
+    const readsIn = async (): Promise<unknown> => {
+      await surface.observe(operation(), undefined);
+      return (last(fake, 'snapshot') as { windowId?: string }).windowId;
+    };
+    await surface.useWindow({ title: 'Controls' }, signal, 5_000);
+    expect(await readsIn()).toBe('w-panel');
+    await surface.useWindow('Sign In', signal, 5_000);
+    expect(await readsIn()).toBe('w-mine');
+    await surface.useWindow({ title: /^Contr/ }, signal, 5_000);
+    expect(await readsIn()).toBe('w-panel');
+    // A window desktop.windows() listed in an earlier launch: its id is gone, its title is not.
+    await surface.useWindow({ id: 'w-1234', title: 'Sign In' }, signal, 5_000);
+    expect(await readsIn()).toBe('w-mine');
+    await expect(surface.useWindow({ title: 'Untitled' }, signal, 5_000)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/2 windows match/) });
+    await expect(surface.useWindow('Settings', signal, 5_000)).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringContaining('w-panel "Controls"') });
+  });
+
   it('acts on no node read in another window than the one a test chose', async () => {
     const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }, { id: 'w-panel' }])] });
     await surface.useWindow('w-panel', signal, 5_000);
