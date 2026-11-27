@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { desktop } from '../../src/engine.ts';
@@ -95,12 +95,24 @@ describe('desktop video', () => {
     expect(fake.of('startVideo')).toEqual([]);
   });
 
-  it('keeps a file the driver wrote but could not finish, and drops an empty one', async () => {
-    const { surface } = await launched({ stopVideo: [failure('TIMEOUT', 'not_delivered')] });
+  it('drops a file whose stop failed, which no player opens, and says why when it was the only one', async () => {
+    const broke = failure('ACTION_FAILED', 'not_delivered', 'the video could not be finished: the stream stopped');
+    const { surface } = await launched({ stopVideo: [broke] });
     const artifactsDir = await attempt(surface);
     await surface.startVideo(operation());
-    expect(await surface.stopVideo(operation())).toHaveLength(1);
-    expect(existsSync(path.join(artifactsDir, 'video', 'window-001.mp4'))).toBe(true);
+    await expect(surface.stopVideo(operation())).rejects.toMatchObject({ message: expect.stringContaining('could not be finished') });
+    expect(existsSync(path.join(artifactsDir, 'video', 'window-001.mp4'))).toBe(false);
+  });
+
+  it('drops the empty file of a window that closed before its first frame, and says why when it was the only one', async () => {
+    const empty = (fake: FakeDriver, args: readonly unknown[]): Answer => {
+      writeFileSync(fake.videos.get(args[0] as number)!, '');
+      return { ok: true, data: { bytes: 0 } };
+    };
+    const { surface } = await launched({ stopVideo: [empty] });
+    await attempt(surface);
+    await surface.startVideo(operation());
+    await expect(surface.stopVideo(operation())).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('got no frame') });
   });
 
   it('stops a recording the attempt left running when it ends', async () => {

@@ -40,7 +40,7 @@ export class WindowVideo {
   private current: Segment | undefined;
   private segments: VideoSegment[] = [];
   private files = 0;
-  /** The first start `follow` could not make: why a video that recorded nothing has no file. */
+  /** The first file the video lost (a start `follow` could not make, or a stop that left no playable file): why a video that recorded nothing has no file. */
   private missed: unknown;
   /** The start or stop running now, which the next one waits for. */
   private queue: Promise<unknown> = Promise.resolve();
@@ -101,8 +101,9 @@ export class WindowVideo {
 
   /**
    * `stopVideo`: ends the current file and answers every file of the
-   * attempt, in order. A video that recorded no file because a start
-   * failed fails with that start's error, so the run says why.
+   * attempt, in order. A video that recorded no file, because a start
+   * failed or a stop left no playable file, fails with that error, so the
+   * run says why.
    */
   async end(operation: OperationContext): Promise<readonly VideoSegment[]> {
     if (!this.wanted) return [];
@@ -159,7 +160,11 @@ export class WindowVideo {
     this.current = { id: answer.id, windowId, relative, startedAt: new Date().toISOString() };
   }
 
-  /** Ends the current file and keeps it when the driver wrote one, even one it could not finish cleanly. */
+  /**
+   * Ends the current file and keeps it when the driver finished it. A stop that failed (the recording broke off, or
+   * did not finish in time) leaves a file with no index, which no player opens, and a window that closed before its
+   * first frame leaves none: either is dropped, and the first such loss kept for `end`.
+   */
   private async finish(operation: OperationContext): Promise<void> {
     const segment = this.current;
     if (segment === undefined || this.artifactsDir === undefined) return;
@@ -169,9 +174,17 @@ export class WindowVideo {
     // operation was cancelled, as cleanup: `call` sends nothing on an aborted signal, and the recording would outlive
     // the one handle that could stop it.
     const timeoutMs = Math.max(Math.min(operation.timeoutMs, VIDEO_CALL_MS), ORPHAN_STOP_MS);
-    await call(() => this.driver().stopVideo(segment.id, timeoutMs), { label: 'stop the video', input: false, signal: new AbortController().signal, timeoutMs }).catch(() => undefined);
-    const written = await stat(absolute).then((file) => file.size > 0, () => false);
-    if (written) this.segments.push({ path: segment.relative, startedAt: segment.startedAt });
-    else await rm(absolute, { force: true });
+    const label = 'stop the video';
+    const stopped = await call(() => this.driver().stopVideo(segment.id, timeoutMs), { label, input: false, signal: new AbortController().signal, timeoutMs }).then(
+      () => undefined,
+      (cause: unknown) => translate(cause, label, false),
+    );
+    const written = stopped === undefined && (await stat(absolute).then((file) => file.size > 0, () => false));
+    if (written) {
+      this.segments.push({ path: segment.relative, startedAt: segment.startedAt });
+      return;
+    }
+    await rm(absolute, { force: true });
+    this.missed ??= stopped ?? new EngineError('ENGINE_FAILURE', `the recording of window ${segment.windowId} got no frame before it stopped`, { retryable: false });
   }
 }
