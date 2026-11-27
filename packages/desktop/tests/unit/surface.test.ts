@@ -700,6 +700,74 @@ describe('DesktopSurface: reading', () => {
     await expect(alone.surface.observe(operation(), undefined)).rejects.toMatchObject({ code: 'NODE_STALE', message: expect.stringMatching(/system dialog/) });
   });
 
+  describe('a window the agent opens while the test made one active', () => {
+    /** A driver whose window list is `list` at each call, and whose snapshot of a window holds one button named after it. */
+    const app = (list: { current: readonly Record<string, unknown>[] }) =>
+      fakeDriver({
+        listWindows: [(fake) => ok(list.current.map((window) => ({ pid: fake.pid, ...window })))],
+        snapshot: [(_fake, args) => screen((args[0] as { windowId: string }).windowId, { name: (args[0] as { windowId: string }).windowId, children: [{ role: 'button', name: `In ${(args[0] as { windowId: string }).windowId}`, ref_id: `@s:${(args[0] as { windowId: string }).windowId}` }] })],
+      });
+    const read = (fake: FakeDriver) => (last(fake, 'snapshot') as { windowId: string }).windowId;
+    const main = { id: 'w-main', title: 'Inbox' };
+
+    it("follows a window that opened and took focus after the agent's read, and leaves the test on the active one", async () => {
+      const list = { current: [{ ...main, is_focused: true }] as readonly Record<string, unknown>[] };
+      const fake = app(list);
+      const { surface } = await launched(fake, { observe: false });
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(operation('agent'), undefined);
+      expect(read(fake)).toBe('w-main');
+      list.current = [main, { id: 'w-prefs', title: 'Preferences', is_focused: true }];
+      const observed = await surface.observe(operation('agent'), undefined);
+      expect(read(fake)).toBe('w-prefs');
+      // The agent acts on what it reads there, and a key it presses goes to that window.
+      await surface.perform(observed.root.children![0]!.ref, { kind: 'tap' }, operation('agent'));
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:w-prefs', action: 'click' });
+      await surface.pressKey('Enter', operation('agent'));
+      expect(last(fake, 'press')).toMatchObject({ windowId: 'w-prefs' });
+      // The test's own read stays on the active window, and the next agent step starts from it again.
+      await surface.locate(testId('nowhere'), operation('test'));
+      expect(read(fake)).toBe('w-main');
+      await surface.observe(operation('agent'), undefined);
+      expect(read(fake)).toBe('w-main');
+    });
+
+    it('never follows a window that was there before, one not in focus, or a dialog macOS put over the app', async () => {
+      const list = { current: [{ ...main, is_focused: true }, { id: 'w-old', title: 'Old' }] as readonly Record<string, unknown>[] };
+      const fake = app(list);
+      const { surface } = await launched(fake, { observe: false });
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(operation('agent'), undefined);
+      list.current = [main, { id: 'w-old', title: 'Old', is_focused: true }, { id: 'w-panel', title: 'Panel' }];
+      await surface.observe(operation('agent'), undefined);
+      expect(read(fake)).toBe('w-main');
+      list.current = [main, { id: 'w-siri', is_focused: true, system: true }];
+      await surface.observe(operation('agent'), undefined);
+      expect(read(fake)).toBe('w-main');
+    });
+
+    it('goes back to the active window once the one it followed closes, and follows nothing without an active window', async () => {
+      const list = { current: [{ ...main, is_focused: true }] as readonly Record<string, unknown>[] };
+      const fake = app(list);
+      const { surface } = await launched(fake, { observe: false });
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(operation('agent'), undefined);
+      list.current = [main, { id: 'w-prefs', is_focused: true }];
+      await surface.observe(operation('agent'), undefined);
+      expect(read(fake)).toBe('w-prefs');
+      list.current = [{ ...main, is_focused: true }];
+      await surface.observe(operation('agent'), undefined);
+      expect(read(fake)).toBe('w-main');
+      // activate() ends the following too.
+      list.current = [main, { id: 'w-prefs', is_focused: true }];
+      await surface.observe(operation('agent'), undefined);
+      expect(read(fake)).toBe('w-prefs');
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(operation('agent'), undefined);
+      expect(read(fake)).toBe('w-main');
+    });
+  });
+
   it('reads the main window before the first one listed when the app in the background has none focused', async () => {
     const list = windows(() => [{ id: 'w-dialog', visible: true }, { id: 'w-doc', visible: true, is_main: true }]);
     const { surface, fake } = await launched({ listWindows: [list] }, { observe: false });

@@ -229,6 +229,10 @@ export class DesktopSurface {
   private lifecycle: Promise<unknown> = Promise.resolve();
   /** The window a test made active with `window.activate()`, which every read and command then uses until it closes or the app quits. */
   private chosenWindow: string | undefined;
+  /** A window the agent's own step opened while the test had one chosen, which the agent reads and acts in while it is open (see `follow`). */
+  private followed: string | undefined;
+  /** The windows the agent's newest read listed while a window was chosen; none before its first read, and after a read of the test's own. */
+  private agentSeen: ReadonlySet<string> | undefined;
   /**
    * The window of the newest screen handed to the harness, by observe or locate: the one a point is measured in, the
    * agent's as core hit-tests it, against the newest observation. `sheet` says whether a sheet held its focus then: one
@@ -487,6 +491,8 @@ export class DesktopSurface {
     const windows = await this.ownWindows(operation);
     if (!windows.some((window) => window.id === id)) throw notActionable('the window has closed; desktop.windows() lists the open ones');
     this.chosenWindow = id;
+    this.followed = undefined;
+    this.agentSeen = undefined;
     // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
     this.pointWindow = undefined;
     // The video records what `screen` reads, from now on, not from the next read.
@@ -535,6 +541,40 @@ export class DesktopSurface {
   private activeWindow(windows: readonly RawWindow[]): RawWindow | undefined {
     const chosen = this.activeChoice(windows);
     return chosen === undefined ? byPreference(windows)[0] : windows.find((window) => window.id === chosen);
+  }
+
+  /**
+   * The window a read or command with none named goes to: the active one
+   * (`activeChoice`), else none, which reads the windows `byPreference`.
+   * While a window is active, the agent follows a window its own step opened
+   * (Preferences, from a button it pressed): one its previous read did not
+   * list, that is the app's key window now, and that is not a dialog macOS
+   * put over the app. It reads and acts there while that window is open. The
+   * test's own steps stay on the active window, and a read of the test's ends
+   * the following, so the next agent step starts from the active window again.
+   */
+  private follow(windows: readonly RawWindow[], origin: OperationContext['origin']): string | undefined {
+    const active = this.activeChoice(windows);
+    if (active === undefined || origin !== 'agent') {
+      this.followed = undefined;
+      this.agentSeen = undefined;
+      return active;
+    }
+    // A list that came back empty (the app quit) is no evidence of a window the agent opened next.
+    if (windows.length === 0) return this.followed ?? active;
+    const listed = new Set(windows.map((window) => window.id));
+    if (this.followed !== undefined && !listed.has(this.followed)) this.followed = undefined;
+    const seen = this.agentSeen;
+    this.agentSeen = listed;
+    const opened = seen === undefined ? undefined : windows.find((window) => !seen.has(window.id) && window.is_focused === true && window.system !== true && window.accessible !== false && window.minimized !== true);
+    if (opened !== undefined) this.followed = opened.id;
+    return this.followed ?? active;
+  }
+
+  /** The window `follow` answers for an operation, from the windows listed now. */
+  private inUse(windows: readonly RawWindow[], operation: OperationContext): RawWindow | undefined {
+    const id = this.follow(windows, operation.origin);
+    return id === undefined ? byPreference(windows)[0] : windows.find((window) => window.id === id);
   }
 
   /** `desktop.closeApp()`: the app quit, as at the end of every test. */
@@ -675,6 +715,8 @@ export class DesktopSurface {
   private forget(): void {
     this.pointWindow = undefined;
     this.chosenWindow = undefined;
+    this.followed = undefined;
+    this.agentSeen = undefined;
     this.bindings.clear();
     this.ids.clear();
   }
@@ -758,7 +800,7 @@ export class DesktopSurface {
   /** One read for `capture`: the app's windows, and the first of those asked for that accessibility can read. */
   private async readWindows(operation: OperationContext, windowId?: string, forMask = false, whole = false): Promise<WindowsRead> {
     const windows = await this.ownWindows(operation, true);
-    const target = windowId ?? this.activeChoice(windows);
+    const target = windowId ?? this.follow(windows, operation.origin);
     if (windows.length === 0 && this.pid !== undefined) this.unlessLocked();
     // A window the list no longer has is closed: its identities go, so windows opened and closed one after another do not pile them up.
     const open = new Set(windows.map((window) => window.id));
@@ -841,9 +883,9 @@ export class DesktopSurface {
     }
   }
 
-  /** The window of the launched process a command reads or acts in. */
+  /** The window of the launched process a command reads or acts in: the active one (or one the agent followed from it, see `follow`), else the first by `byPreference`. */
   private async ownWindow(operation: OperationContext): Promise<RawWindow | undefined> {
-    return this.activeWindow(await this.ownWindows(operation));
+    return this.inUse(await this.ownWindows(operation), operation);
   }
 
   async observe(context: OperationContext, options: EngineObserveOptions | undefined): Promise<EngineSnapshot> {
@@ -922,7 +964,8 @@ export class DesktopSurface {
     const binding = this.bindings.get(ref.id);
     if (binding === undefined) throw new EngineError('NODE_STALE', `node ${ref.id} is not on the screen`, { retryable: true });
     // A node read before a test made another window active is not on the screen in use: the harness locates it again there.
-    if (this.chosenWindow !== undefined && binding.windowId !== this.chosenWindow) {
+    // One in a window the agent followed from the active one is the agent's screen.
+    if (this.chosenWindow !== undefined && binding.windowId !== this.chosenWindow && (this.followed === undefined || binding.windowId !== this.followed)) {
       throw new EngineError('NODE_STALE', `node ${ref.id} is in another window than the active one`, { retryable: true });
     }
     return binding;
