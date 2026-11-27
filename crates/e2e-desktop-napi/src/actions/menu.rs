@@ -17,8 +17,7 @@ struct Item {
     key: Option<KeyEquivalent>,
 }
 
-/// The children of a menu-bar element, or of the menu an item opens. A stall fails the walk: a menu bar read in part
-/// cannot show that no item has a key equivalent.
+/// The children of a menu-bar element, or of the menu an item opens.
 fn below(element: &Element) -> Outcome<Vec<Element>> {
     all(element, "AXChildren", "read the menu bar")
 }
@@ -54,23 +53,23 @@ fn key_character(text: &str) -> Option<char> {
 }
 
 /// Every item of the app's own menus whose key equivalent is `combo`: its path of titles, and whether it is enabled.
-/// The Apple menu, the menu bar's first, is the system's (Force Quit, Log Out) and is left out. None for an app with no
-/// menu bar.
-fn triggered(pid: i32, combo: &Combo, deadline: Instant) -> Outcome<Vec<(Vec<String>, bool)>> {
-    let Some(bar) = Element::application(pid).element("AXMenuBar") else { return Ok(Vec::new()) };
+/// The Apple menu, the menu bar's first, is the system's (Force Quit, Log Out) and is left out. `None` when the menu
+/// bar could not be read whole (a menu that did not answer, no time left, more items than a walk reads): what was not
+/// read may hold an enabled item with the same key.
+fn triggered(pid: i32, combo: &Combo, deadline: Instant) -> Option<Vec<(Vec<String>, bool)>> {
+    let Some(bar) = Element::application(pid).element("AXMenuBar") else { return Some(Vec::new()) };
+    // The answer must reach the caller before its deadline, with time left to send the key.
+    let stop = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
     let mut found = Vec::new();
     let mut read_items = 0;
     // Each entry: the item's element, and the titles above it.
-    let mut pending: Vec<(Element, Vec<String>)> = below(&bar)?.into_iter().skip(1).rev().map(|menu| (menu, Vec::new())).collect();
+    let mut pending: Vec<(Element, Vec<String>)> = below(&bar).ok()?.into_iter().skip(1).rev().map(|menu| (menu, Vec::new())).collect();
     while let Some((element, above)) = pending.pop() {
-        if Instant::now() >= deadline {
-            return Err(Failure::timeout("reading the menu bar"));
-        }
         read_items += 1;
-        if read_items > MAX_ITEMS {
-            break;
+        if read_items > MAX_ITEMS || Instant::now() >= stop {
+            return None;
         }
-        let item = read(&element)?;
+        let item = read(&element).ok()?;
         let mut path = above;
         path.push(item.title);
         if let Some(key) = &item.key
@@ -78,46 +77,61 @@ fn triggered(pid: i32, combo: &Combo, deadline: Instant) -> Outcome<Vec<(Vec<Str
         {
             found.push((path.clone(), item.enabled));
         }
-        if path.len() >= MAX_DEPTH {
+        // Most items open no menu: one count says so, where reading the children takes two requests.
+        if path.len() >= MAX_DEPTH || element.count("AXChildren") == Ok(0) {
             continue;
         }
         // An item's children are the one menu it opens, whose children are the items.
-        for menu in below(&element)? {
-            for child in below(&menu)?.into_iter().rev() {
+        for menu in below(&element).ok()? {
+            for child in below(&menu).ok()?.into_iter().rev() {
                 pending.push((child, path.clone()));
             }
         }
     }
-    Ok(found)
+    Some(found)
 }
 
-/// Refuses a Command shortcut sent into the process's event queue when the menu item it triggers is disabled: AppKit
-/// hands a Command key to key equivalents only, so the key would do nothing, and the press would pass. An app in the
-/// background has no key window, so every item whose command the focused control or window handles (Copy, Select All,
-/// Find) is disabled there. The item is not waited for, as a disabled control is: it stays disabled for as long as the
-/// app is in the background. A shortcut no item has, or one of an enabled item, goes on.
+/// The item to name in a refusal: the first the shortcut triggers, when it triggers some and the app has none of them
+/// enabled.
+fn all_disabled(items: &[(Vec<String>, bool)]) -> Option<&[String]> {
+    let (path, _) = items.first()?;
+    if items.iter().any(|(_, enabled)| *enabled) { None } else { Some(path) }
+}
+
+/// Refuses a Command shortcut sent into the event queue of an app in the background when the menu item it triggers is
+/// disabled: the app has no key window there, so AppKit hands a Command key to the menu bar only, the key would do
+/// nothing, and the press would pass. Every item whose command the focused control or window handles (Copy, Select
+/// All, Find) is disabled in the background. The item is not waited for, as a disabled control is: such an item stays
+/// disabled for as long as the app is in the background. A shortcut goes on when no item has it, when one that has it
+/// is enabled, when the menu bar could not be read whole, and when the app is in front, where its key window can take
+/// the key before the menu does.
 pub(super) fn refuse_disabled_shortcut(pid: i32, combo: &Combo, deadline: Instant) -> Outcome<()> {
-    if !combo.command() {
+    if !combo.command() || Element::application(pid).boolean("AXFrontmost") == Some(true) {
         return Ok(());
     }
-    let items = triggered(pid, combo, deadline)?;
-    let Some((path, _)) = items.first() else { return Ok(()) };
-    if items.iter().any(|(_, enabled)| *enabled) {
-        return Ok(());
-    }
+    let items = triggered(pid, combo, deadline).unwrap_or_default();
+    let Some(path) = all_disabled(&items) else { return Ok(()) };
     Err(Failure::refused(
         codes::ACTION_FAILED,
         format!(
-            "the menu item \"{}\" this shortcut triggers is disabled, so the key would do nothing and was not sent. An app in the background has no key window, which disables the menu commands of its focused control; press it with desktop({{ headed: true }})",
+            "the menu item \"{}\" this shortcut triggers is disabled, so the key would do nothing and was not sent. macOS disables a menu command of the focused control or window (Select All, Find) while the app is in the background; press it with desktop({{ headed: true }})",
             path.join(" > ")
         ),
-    )
-    .with_details(serde_json::json!({ "cause": "menu_item_disabled" })))
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::key_character;
+    use super::{all_disabled, key_character};
+
+    #[test]
+    fn refuses_only_when_every_item_the_shortcut_triggers_is_disabled() {
+        let item = |title: &str, enabled: bool| (vec!["Edit".to_owned(), title.to_owned()], enabled);
+        assert_eq!(all_disabled(&[]), None);
+        assert_eq!(all_disabled(&[item("Find", true)]), None);
+        assert_eq!(all_disabled(&[item("Find", false), item("Find Again", true)]), None);
+        assert_eq!(all_disabled(&[item("Find", false), item("Find Again", false)]).map(|path| path.join(" > ")), Some("Edit > Find".to_owned()));
+    }
 
     #[test]
     fn reads_a_key_equivalents_character_in_lowercase() {
