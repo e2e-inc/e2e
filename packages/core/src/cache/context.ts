@@ -131,9 +131,10 @@ export type CacheWrite = 'saved' | 'kept' | 'unconfirmed' | 'evicted' | 'no-chan
  * gap whatever its rule, which only names the hand-off in the report. Where
  * each action ran (`at`) and the control a tap was on (`controlRole`) are
  * provenance too, and a page between the start and the end may carry a
- * fresh id on every run. The detours the run found (`detours`) do count:
- * they compare routes, not addresses, and an entry that kept an old
- * recording's detours would hide a new one from `e2e cache check`. An entry
+ * fresh id on every run. The detours the run found (`detours`) do count,
+ * as spans of action positions: each run finds them on the addresses it
+ * saw, so two runs of one flow find the same spans, and an entry that kept
+ * an old recording's detours would hide a new one from `e2e cache check`. An entry
  * recorded before detours were kept has none, which reads as an empty list:
  * a flow with no detour leaves it as stored, so a committed cache does not
  * churn once for every step that runs live.
