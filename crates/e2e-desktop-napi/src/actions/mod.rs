@@ -291,12 +291,18 @@ fn center(element: &Element) -> Outcome<(f64, f64)> {
     Ok((x + width / 2.0, y + height / 2.0))
 }
 
+/// Asks the app to come forward, for physical input; the caller waits for it to be in front.
+fn activate(pid: i32) -> Outcome<()> {
+    go("bring the app forward")?;
+    let _ = Element::application(pid).set_bool("AXFrontmost", true);
+    Ok(())
+}
+
 /// Brings the window forward and the app with it, for physical input. A sheet or an alert on it may take focus.
 pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
     let app = Element::application(pid);
     // Each write moves the focus: none goes once the caller gave up.
-    go("bring the window forward")?;
-    let _ = app.set_bool("AXFrontmost", true);
+    activate(pid)?;
     go("bring the window forward")?;
     let _ = window.perform("AXRaise");
     go("bring the window forward")?;

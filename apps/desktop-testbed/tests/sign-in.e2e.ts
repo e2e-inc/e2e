@@ -104,7 +104,7 @@ test.describe('sign-in form', () => {
     await expect(screen.getByTestId('status')).toHaveText('Reset from the menu');
   });
 
-  test('refuses a menu item the background disables, a missing one, and a menu', async ({ screen, desktop }) => {
+  test('refuses a menu item the background disables, a missing one, a menu, and a path past an item', async ({ screen, desktop }) => {
     const refusal = (path: [string, ...string[]]): Promise<string> =>
       desktop.menu(...path).then(
         () => 'chosen',
@@ -113,6 +113,8 @@ test.describe('sign-in form', () => {
     expect(await refusal(['Edit', 'Select All'])).toMatch(/the menu item "Edit > Select All" is disabled, so nothing was sent/);
     expect(await refusal(['Form', 'Restart'])).toMatch(/the menu "Form" has no item "Restart"; it has "Reset"/);
     expect(await refusal(['Form'])).toMatch(/"Form" opens a menu; name one of its items: "Reset"/);
+    expect(await refusal(['Form', 'Reset', 'Now'])).toMatch(/"Form > Reset" is a menu item, not a menu, so it has no item "Now"/);
+    expect(await refusal(['Form', ''])).toMatch(/a menu item is named by its titles from the menu bar down, none empty/);
     await expect(screen.getByTestId('status')).toHaveText('Not signed in');
   });
 

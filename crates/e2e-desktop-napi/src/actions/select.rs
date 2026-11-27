@@ -3,28 +3,29 @@
 use super::*;
 
 /// The first of `options` (the items of one title) that is enabled, waited for within the action's budget, as
-/// `enabled` waits for one control; refused, naming the option, when none is enabled in time.
-pub(super) fn enabled_of(options: &[Element], deadline: Instant, label: &str) -> Outcome<Element> {
+/// `enabled` waits for one control; refused with `disabled`, which names the option, when none is enabled in time.
+/// `what` names the action in a failure of the wait itself.
+pub(super) fn enabled_of(options: &[Element], deadline: Instant, what: &str, disabled: &str) -> Outcome<Element> {
     let refuse_at = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
     loop {
         // An option the menu dropped since the scan is skipped: a live one of the title may still be enabled. With every
-        // one gone, the menu changed under the select.
+        // one gone, the menu changed under the action.
         let mut live = 0;
         for option in options {
             match option.attribute("AXEnabled") {
                 Ok(value) if value.boolean() == Some(false) => live += 1,
                 Err(ax::AX_INVALID_ELEMENT) => {}
-                Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_API_DISABLED)) => return Err(unread(error, "select")),
+                Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_API_DISABLED)) => return Err(unread(error, what)),
                 _ => return Ok(option.clone()),
             }
         }
         if live == 0 {
-            return Err(unread(ax::AX_INVALID_ELEMENT, "select"));
+            return Err(unread(ax::AX_INVALID_ELEMENT, what));
         }
         if Instant::now() + POLL >= refuse_at {
-            return Err(Failure::refused(codes::ACTION_FAILED, format!("the option \"{label}\" is disabled")));
+            return Err(Failure::refused(codes::ACTION_FAILED, disabled));
         }
-        go("select")?;
+        go(what)?;
         sleep(POLL);
     }
 }
@@ -235,7 +236,7 @@ pub(super) fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<(
         // An enabled option of that title is the one; a disabled one that comes first must not hide it. A disabled option
         // takes the press and ignores it: every one of that title is waited for, and the select refused as disabled, not
         // as missing, only when none is enabled in time.
-        let item = enabled_of(&found, deadline, label).map_err(unchosen)?;
+        let item = enabled_of(&found, deadline, "select", &format!("the option \"{label}\" is disabled")).map_err(unchosen)?;
         perform(&item, "AXPress", "choose the option").map_err(|failure| match failure.delivery {
             // Refused before the press (out of time, cancelled, the item gone): nothing was chosen.
             Delivery::NotDelivered => unchosen(failure),

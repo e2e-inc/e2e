@@ -1033,14 +1033,7 @@ export class DesktopSurface {
         // below still run before the key.
         if (this.options.headed && this.pid !== undefined) {
           const pid = this.pid;
-          const focusId = this.requireDriver().inputId();
-          await this.input((driver, timeoutMs) => driver.focusWindow(pid, window, focusId, timeoutMs), {
-            label: 'focus window',
-            input: true,
-            signal: operation.signal,
-            timeoutMs: operation.timeoutMs,
-            onCutOff: () => this.driver?.cancelInput(focusId),
-          }).catch((cause: unknown) => Promise.reject(translate(cause, 'focus window', true)));
+          await this.cancellableInput('focus window', operation, (driver, inputId, timeoutMs) => driver.focusWindow(pid, window, inputId, timeoutMs)).catch((cause: unknown) => Promise.reject(translate(cause, 'focus window', true)));
         }
         await this.refCommand('focus', binding, operation);
         try {
@@ -1115,15 +1108,7 @@ export class DesktopSurface {
   /** One action on a node's ref, a failure left as the driver reported it so a caller can tell what was sent. */
   private async tryRef(action: string, binding: NodeBinding, operation: OperationContext, extra: { value?: string; direction?: string; pages?: number; physical?: boolean } = {}): Promise<unknown> {
     const ref = this.refOf(binding, action);
-    // Input still to send once the call is given up is never sent: the app may be another's by then, or the step over.
-    const inputId = this.requireDriver().inputId();
-    return await this.input((driver, timeoutMs) => driver.act({ ref, action, inputId, timeoutMs, ...extra }), {
-      label: action,
-      input: true,
-      signal: operation.signal,
-      timeoutMs: operation.timeoutMs,
-      onCutOff: () => this.driver?.cancelInput(inputId),
-    });
+    return await this.cancellableInput(action, operation, (driver, inputId, timeoutMs) => driver.act({ ref, action, inputId, timeoutMs, ...extra }));
   }
 
   /**
@@ -1236,14 +1221,7 @@ export class DesktopSurface {
     if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
     // Physical input lands on whatever is frontmost at the point: bring the window forward first.
     // Finding the window can wait on the app: a call given up on must not bring it forward later, over what the user or the next step is doing.
-    const focusId = this.requireDriver().inputId();
-    await this.input((driver, timeoutMs) => driver.focusWindow(pid, target.id, focusId, timeoutMs), {
-      label: 'focus window',
-      input: true,
-      signal: operation.signal,
-      timeoutMs: operation.timeoutMs,
-      onCutOff: () => this.driver?.cancelInput(focusId),
-    }).catch((cause: unknown) => Promise.reject(translate(cause, 'focus window', true)));
+    await this.cancellableInput('focus window', operation, (driver, inputId, timeoutMs) => driver.focusWindow(pid, target.id, inputId, timeoutMs)).catch((cause: unknown) => Promise.reject(translate(cause, 'focus window', true)));
     // Coming forward can move the window (onto another space, out from under the menu bar): the click is measured from where it is now.
     const forward = (await this.ownWindows(operation)).find((candidate) => candidate.id === target.id);
     const focused = forward?.bounds;
@@ -1262,17 +1240,9 @@ export class DesktopSurface {
     }
     // Unrounded: the driver takes fractional points, and rounding could carry a point past the window's edge.
     const kind = action.kind;
-    // As for `tryRef`: pointer input still unsent once the call is given up is never sent.
-    const inputId = this.requireDriver().inputId();
     // The driver checks the window again after the move, before the click: a sheet or window that opens meanwhile would take it.
     const takes = { pid, windowId: target.id, sheet: sheetNow !== undefined, ...(sheetNow === undefined || sheetNow === UNKNOWN_SHEET ? {} : { sheetId: sheetNow }), ...(content ? { content } : {}) };
-    await this.input((driver, timeoutMs) => driver.pointer(focused.x + point.x, focused.y + point.y, kind, inputId, timeoutMs, takes), {
-      label: kind,
-      input: true,
-      signal: operation.signal,
-      timeoutMs: operation.timeoutMs,
-      onCutOff: () => this.driver?.cancelInput(inputId),
-    }).catch((cause: unknown) => Promise.reject(translate(cause, kind, true)));
+    await this.cancellableInput(kind, operation, (driver, inputId, timeoutMs) => driver.pointer(focused.x + point.x, focused.y + point.y, kind, inputId, timeoutMs, takes)).catch((cause: unknown) => Promise.reject(translate(cause, kind, true)));
     await this.settle(operation);
   }
 
@@ -1351,20 +1321,14 @@ export class DesktopSurface {
     const operation = withDeadline(context);
     const pid = this.pid;
     if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
-    if (titles.length === 0 || titles.some((title) => title === '')) throw notActionable("desktop.menu() takes the item's titles from the menu bar down, none empty, such as desktop.menu('Edit', 'Select All')");
     const label = `menu ${titles.join(' > ')}`;
     // A minimized window cannot come forward: the app does alone, as one with no window does.
     const inUse = this.options.headed ? await this.ownWindow(operation) : undefined;
     if (this.options.headed && inUse === undefined && this.chosenWindow !== undefined) throw this.chosenClosed();
     const window = inUse?.minimized === true ? undefined : inUse;
-    const inputId = this.requireDriver().inputId();
-    await this.input((driver, timeoutMs) => driver.menu({ pid, path: [...titles], physical: this.options.headed, inputId, timeoutMs, ...(window === undefined ? {} : { windowId: window.id }) }), {
-      label,
-      input: true,
-      signal: operation.signal,
-      timeoutMs: operation.timeoutMs,
-      onCutOff: () => this.driver?.cancelInput(inputId),
-    }).catch((cause: unknown) => Promise.reject(translate(cause, label, true)));
+    await this.cancellableInput(label, operation, (driver, inputId, timeoutMs) =>
+      driver.menu({ pid, path: titles, physical: this.options.headed, inputId, timeoutMs, ...(window === undefined ? {} : { windowId: window.id }) }),
+    ).catch((cause: unknown) => Promise.reject(translate(cause, label, true)));
     await this.settle(operation);
   }
 
@@ -1380,16 +1344,8 @@ export class DesktopSurface {
     const pid = this.pid;
     if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
     const physical = this.options.headed;
-    // As for `tryRef`: a key still unsent once the call is given up is never sent.
-    const inputId = this.requireDriver().inputId();
     try {
-      await this.input((driver, timeoutMs) => driver.press({ pid, windowId: window, combo, physical, inputId, timeoutMs, ...(focusedRef === undefined ? {} : { focusedRef }) }), {
-        label,
-        input: true,
-        signal: operation.signal,
-        timeoutMs: operation.timeoutMs,
-        onCutOff: () => this.driver?.cancelInput(inputId),
-      });
+      await this.cancellableInput(label, operation, (driver, inputId, timeoutMs) => driver.press({ pid, windowId: window, combo, physical, inputId, timeoutMs, ...(focusedRef === undefined ? {} : { focusedRef }) }));
     } catch (cause) {
       if (cause instanceof DriverFailure && cause.notDelivered && cause.details.cause === 'exact_window_focus_unconfirmed') {
         throw notActionable(`${label}: the window is not the app's key window, so a key sent to the app would land in another; nothing was sent`);
@@ -1492,6 +1448,15 @@ export class DesktopSurface {
   /** A driver call that reads: refused once the budget is spent, its failure left untranslated for the caller. */
   private read<T>(start: (driver: DesktopDriver, timeoutMs: number) => Promise<Envelope<T>>, options: { label: string; input: false; signal: AbortSignal; timeoutMs: number }): Promise<T> {
     return this.driverCall(start, options);
+  }
+
+  /**
+   * A driver call that sends input under an id of its own, cancelled when the call is given up: input still unsent by
+   * then is never sent, since the app may be another's, or the step over. Its failure is left untranslated.
+   */
+  private cancellableInput<T>(label: string, operation: OperationContext, start: (driver: DesktopDriver, inputId: number, timeoutMs: number) => Promise<Envelope<T>>): Promise<T> {
+    const inputId = this.requireDriver().inputId();
+    return this.input((driver, timeoutMs) => start(driver, inputId, timeoutMs), { label, input: true, signal: operation.signal, timeoutMs: operation.timeoutMs, onCutOff: () => this.driver?.cancelInput(inputId) });
   }
 
   /** A driver call that sends input: refused once the budget is spent, its failure left untranslated for the caller. */

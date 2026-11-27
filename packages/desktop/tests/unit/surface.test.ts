@@ -1232,11 +1232,11 @@ describe('DesktopSurface: the menu bar', () => {
     await expect(closed.surface.chooseMenu(['File', 'New'], operation())).rejects.toThrow(/useWindow\(\) chose/);
   });
 
-  it('refuses a path with no title, or an empty one, before anything is read', async () => {
-    const { surface, fake } = await launched({});
-    await expect(surface.chooseMenu([], operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    await expect(surface.chooseMenu(['Edit', ''], operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
-    expect(fake.of('menu')).toHaveLength(0);
+  it('leaves a path with an empty title to the driver, and reports its refusal as not actionable', async () => {
+    const empty = failure('ACTION_FAILED', 'not_delivered', 'a menu item is named by its titles from the menu bar down, none empty');
+    const { surface, fake } = await launched({ menu: [empty] });
+    await expect(surface.chooseMenu(['Edit', ''], operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/none empty/) });
+    expect(last(fake, 'menu')).toMatchObject({ path: ['Edit', ''] });
   });
 
   it('refuses a menu item before the app is open', async () => {
