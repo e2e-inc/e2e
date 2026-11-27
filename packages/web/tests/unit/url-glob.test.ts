@@ -110,6 +110,26 @@ describe('URL globs', () => {
     expect(matches('about:`*', 'about:%60a')).toBe(false);
   });
 
+  it.each([
+    ['/p?x="*', '/p?x="1', 'p?x=%221'],
+    ['/a"*', '/a"1', 'a%221'],
+    ['/a<*', '/a<1', 'a%3C1'],
+    ['/p#a>*', '/p#a>1', 'p#a%3E1'],
+    ['/a^*', '/a^1', 'a%5E1'],
+  ])('matches %s against the browser serialization of %s', (glob, path, encoded) => {
+    const url = new URL(path, BASE).href;
+    expect(url).toBe(BASE + encoded);
+    expect(matches(glob, url)).toBe(true);
+  });
+
+  it('matches only the browser spelling in each brace alternative', () => {
+    const glob = "/{search?next=,authors}/O'Neil";
+    expect(matches(glob, BASE + "authors/O'Neil")).toBe(true);
+    expect(matches(glob, BASE + 'authors/O%27Neil')).toBe(false);
+    expect(matches(glob, BASE + 'search?next=/O%27Neil')).toBe(true);
+    expect(matches(glob.replace("'", '%27'), BASE + 'authors/O%27Neil')).toBe(true);
+  });
+
   it('restores each glob segment to its own place when the glob or the base holds text like a placeholder', () => {
     expect(matches('/$_2_$/x*', 'http://localhost:3000/$_2_$/xyz')).toBe(true);
     expect(matches('/$_2_$/x*', 'http://localhost:3000/xyz/$_2_$')).toBe(false);

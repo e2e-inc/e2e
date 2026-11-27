@@ -641,8 +641,9 @@ await browser.waitForURL(/\/orders\/\d+$/, { timeout: 15_000 });
   base URL unless it starts with `*` or is an absolute URL such as
   `https://x.test/**` or `about:blank`, and a
   resolved glob's scheme and host match in any letter case. Globs match
-  non-ASCII text, spaces, apostrophes in special URL queries such as HTTP and
-  HTTPS, and backticks in paths and fragments as the browser encodes them.
+  non-ASCII text and spaces as the browser encodes them. For an HTTP or HTTPS
+  query, a raw apostrophe matches `%27`. Other punctuation follows the
+  browser's encoding for its part of the URL.
   The empty string matches any URL.
 - `expect(browser).toHaveURL` reads `*` and `{` as themselves, as Playwright's
   does; [`route`](#route), `unroute`, `waitForResponse`, and `waitForRequest`

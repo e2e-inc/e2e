@@ -92,20 +92,36 @@ function escapeRegexpChar(ch: string): string {
   return /[a-zA-Z0-9_-]/.test(ch) ? ch : `\\${ch}`;
 }
 
-// Assert the component on the matched URL: a wildcard or brace alternative
-// can cross a delimiter. Check for the encoded bytes before scanning the prefix.
-const QUERY_APOSTROPHE = /(?:'|(?=%27)(?<=^(?:https?|wss?|ftp|file):[^?#]*\?[^#]*)%27)/.source;
-const PATH_OR_FRAGMENT_BACKTICK =
-  /(?:`|(?=%60)(?<=^(?:[a-z][a-z0-9+.-]*:(?:\/\/[^/?#]*\/|\/(?!\/))[^?#]*|[^#]*#[\s\S]*))%60)/.source;
+// A glob alternative can cross a delimiter. Check the actual URL component
+// only after seeing the corresponding percent-encoded bytes.
+const URL_PATH = /[a-z][a-z0-9+.-]*:(?:\/\/[^/?#]*\/|\/(?!\/))[^?#]*/.source;
+const URL_QUERY = /[^?#]*\?[^#]*/.source;
+const URL_FRAGMENT = /[^#]*#[\s\S]*/.source;
+const SPECIAL_QUERY = /(?:https?|wss?|ftp|file):[^?#]*\?[^#]*/.source;
+
+function encodedLiteral(character: string, component: string): string {
+  const encoded = encodeURIComponent(character).replace("'", '%27');
+  return `(?:${escapeRegexpChar(character)}|(?=${encoded})(?<=^(?:${component}))${encoded})`;
+}
+
+const PATH_QUERY_FRAGMENT = [URL_PATH, URL_QUERY, URL_FRAGMENT].join('|');
+const ENCODED_LITERALS = new Map([
+  ["'", encodedLiteral("'", SPECIAL_QUERY)],
+  ['`', encodedLiteral('`', [URL_PATH, URL_FRAGMENT].join('|'))],
+  ['"', encodedLiteral('"', PATH_QUERY_FRAGMENT)],
+  ['<', encodedLiteral('<', PATH_QUERY_FRAGMENT)],
+  ['>', encodedLiteral('>', PATH_QUERY_FRAGMENT)],
+  ['^', encodedLiteral('^', URL_PATH)],
+]);
 
 /**
- * One literal glob character as a regexp source. Apostrophes and backticks
- * follow their URL component's percent-encoding rules. Other printable ASCII
- * stays literal, and non-ASCII text and spaces match their percent encoding.
+ * One literal glob character as a regexp source. Printable punctuation that
+ * the browser encodes follows the rules of its URL component. Other printable
+ * ASCII stays literal, and non-ASCII text and spaces match their encoding.
  */
 function literalSource(ch: string): string {
-  if (ch === "'") return QUERY_APOSTROPHE;
-  if (ch === '`') return PATH_OR_FRAGMENT_BACKTICK;
+  const encodedLiteral = ENCODED_LITERALS.get(ch);
+  if (encodedLiteral !== undefined) return encodedLiteral;
   if (/^[\x21-\x7e]$/.test(ch)) return escapeRegexpChar(ch);
   let encoded: string;
   try {
@@ -165,7 +181,11 @@ function resolveUrlGlob(glob: string, base: () => string): string {
   const relative = glob.split('/').map((segment, index) => {
     if (segment === '.' || segment === '..' || segment === '') return segment;
     if (index === 0 && inSchemePlace(segment)) return isSchemePattern(segment) ? hold(segment, 'http:') : segment;
-    if (!/[*?{}\\]/.test(segment)) return segment;
+    if (!/[*?{}\\]/.test(segment)) {
+      // A delimiter in an earlier alternative does not determine the actual
+      // component of a literal in this segment. Preserve its spelling.
+      return segment.replace(/['`"<>^]/g, (literal, offset: number) => hold(literal, `${tag}${index}_${offset}_$`));
+    }
     // The query or fragment is held behind its own `?` or `#`, so the URL parser still sees where the path ends
     // and a later `..` stays in the query or fragment instead of eating a path segment.
     const end = segment.search(/[?#]/);
