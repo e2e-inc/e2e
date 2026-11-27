@@ -156,14 +156,16 @@ export function findDetoursAfterReplay(trace: DetourInput, replayed: readonly Pi
 }
 
 /**
- * The spans the recording run kept, named by the locations as stored (or
- * as `spell` writes them): the screen the span started on, and the first
- * other location it reached, which is the first known place after the
- * action that left, since `byLocations` starts a span at the last action
- * that stood home.
+ * The spans the recording run kept, named by the actions' locations as
+ * stored (or as `spell` writes them): the screen the span started on, and
+ * the first other location it reached, which is the first known place
+ * after the action that left, since `byLocations` starts a span at the last
+ * action that stood home. Never by the start path, which an entry keeps
+ * with its query values as the replay's anchor: a first action whose
+ * location the reader dropped (one spelled past its bound) names none.
  */
 function recorded(trace: DetourInput, spell: (place: string) => string = (place) => place): TraceDetour[] {
-  const where = places(trace);
+  const where = trace.actions.map((action) => action.at);
   return (trace.detours ?? []).map(({ from, to }) => {
     const home = where[from];
     const away = where.slice(from + 1, to).find((place) => place !== undefined);

@@ -192,6 +192,14 @@ describe('findDetours by recorded locations', () => {
     expect(findDetours(flow([tap('Menu', '/docs#/menu', 'link'), tap('Menu', '/docs/#/menu', 'link')], { endPath: '/docs#/menu' }))).toEqual([]);
   });
 
+  it('names a stored span by the actions\' own locations, never by the start path an entry keeps raw', () => {
+    // A copied entry whose first action lost its location: the start path still holds the code.
+    const stored = flow([tap('About', undefined, 'link'), back('/about'), tap('Increment', '/?code=:id')], { startPath: '/?code=LoginCodeExample', endPath: '/?code=LoginCodeExample' });
+    const [detour] = findDetours({ ...stored, detours: [{ from: 0, to: 2 }] });
+    expect(detour).toEqual({ from: 0, to: 2, via: '/about', evidence: 'locations' });
+    expect(describeDetour(detour!)).toBe('actions 1-2 left a screen for /about and came back with nothing typed, chosen, or set');
+  });
+
   it('does not read a cut recording\'s end location as where its last kept action led', () => {
     // Actions past the cap (typing, then the way back) ran but were not kept.
     expect(findDetours(flow([tap('Edit', '/'), scroll('/edit')], { endPath: '/', truncated: true }))).toEqual([]);
