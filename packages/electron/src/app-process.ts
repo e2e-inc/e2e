@@ -5,6 +5,7 @@
  * Launches and quits run one at a time.
  */
 
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import type { Protocol } from 'devtools-protocol';
 import { Deadline, EngineError, pollCondition, raceAbort, TestError, type EngineAppInfo, type EngineAttemptContext, type OperationContext } from '@e2e-dev/core/engine';
@@ -550,11 +551,25 @@ async function readVersions(app: RunningApp, main: MainProcess | undefined): Pro
  * Sends downloads to the attempt's own directory, never the user's: Electron
  * saves one without asking in a hidden window. A download the app placed
  * itself, in its own `will-download` handler, stays where the app put it.
+ * A name already taken in the directory, by this launch or one before it in
+ * the attempt, gets a number (`note (1).txt`), as a browser numbers one, so
+ * no download replaces another.
  */
 async function placeDownloads(main: MainProcess, directory: string, withinMs: number): Promise<void> {
+  const saved = existsSync(directory) ? readdirSync(directory) : [];
   await answerWithin(
-    main.evaluate(({ app: electronApp, session, webContents }, downloads) => {
+    main.evaluate(({ app: electronApp, session, webContents }, { downloads, saved: earlier }) => {
       electronApp.setPath('downloads', downloads);
+      // Compared without case: two names that differ only in case are one file on macOS and Windows.
+      const taken = new Set(earlier.map((name) => name.toLowerCase()));
+      const unique = (name: string): string => {
+        const dot = name.lastIndexOf('.');
+        const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+        let candidate = name;
+        for (let count = 1; taken.has(candidate.toLowerCase()); count += 1) candidate = `${stem} (${count})${extension}`;
+        taken.add(candidate.toLowerCase());
+        return candidate;
+      };
       // A session's path is read when it starts, which may be before this runs: each download is placed explicitly, in
       // the sessions there are (a partition the app's ready handler made, too) and in every one made later.
       const placed = new Set<Electron.Session>();
@@ -562,7 +577,7 @@ async function placeDownloads(main: MainProcess, directory: string, withinMs: nu
         if (placed.has(target)) return;
         placed.add(target);
         target.on('will-download', (_event, item) => {
-          if (item.getSavePath() === '') item.setSavePath(`${downloads}/${item.getFilename()}`);
+          if (item.getSavePath() === '') item.setSavePath(`${downloads}/${unique(item.getFilename())}`);
           // What `electron.waitForDownload` reads: each download the app started, and how it ended.
           const entry = { filename: item.getFilename(), path: item.getSavePath(), state: 'progressing' };
           const log = ((globalThis as { e2eDownloads?: (typeof entry)[] }).e2eDownloads ??= []);
@@ -576,7 +591,7 @@ async function placeDownloads(main: MainProcess, directory: string, withinMs: nu
       place(session.defaultSession);
       for (const contents of webContents.getAllWebContents()) place(contents.session);
       electronApp.on('session-created', place);
-    }, directory),
+    }, { downloads: directory, saved }),
     withinMs,
   );
 }

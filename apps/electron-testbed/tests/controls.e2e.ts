@@ -150,6 +150,9 @@ test.describe('controls page', () => {
     expect(realpathSync(path.dirname(downloads))).toBe(realpathSync(userData));
     await screen.getByRole('link', 'Download note').tap();
     await expect.poll(() => existsSync(path.join(downloads, 'note.txt'))).toBe(true);
+    // A second file of the same name is kept beside the first, not over it.
+    await screen.getByRole('link', 'Download note').tap();
+    await expect.poll(() => existsSync(path.join(downloads, 'note (1).txt'))).toBe(true);
   });
 
   test('finds text that inline markup splits, and text under aria-hidden or inert, as web() does', async ({ screen }) => {
