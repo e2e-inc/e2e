@@ -377,6 +377,9 @@ agent takes the same wrong turn, name the destination in the instruction.
 - A plain button tap does not end a detour. A tap that deletes a record and
   returns to the list, or adds to a cart before `back`, takes one in a
   correct recording.
+- Repeated scrolls are recorded as one action, on the screen the first one
+  ran on. A page that moves to another address while you scroll it, a feed
+  that pages its URL for example, isn't seen as a departure.
 - An instruction that asks to look at a page and return records one on
   purpose.
 - An entry recorded by an earlier version has no screens. There, only a tap
