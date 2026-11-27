@@ -367,6 +367,9 @@ agent takes the same wrong turn, name the destination in the instruction.
   `/orders/7` to `/orders/8` and back to `/orders/7` is one, `/orders/7`
   to `/orders/8` is not. Both pages are stored as `/orders/:id`, so the
   text reads `left /orders/:id for another /orders/:id`.
+- Addresses are read as replay reads routes: an empty path segment
+  doesn't count (`/docs/` is `/docs`), and in an app that routes in the
+  fragment, a query before `#` and one after it are one query.
 - On a device, the address is the screen title. Two screens with the same
   title count as one. On Android, a screen with no toolbar (a React Native
   header, for example) reports only the app, so a detour between such
