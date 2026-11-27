@@ -59,7 +59,8 @@ pub struct RawNode {
     description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     hint: Option<String>,
-    /// A heading's level, 1-based, from `AXHeadingLevel` (macOS 26).
+    /// A heading's level, 1-based, from `AXHeadingLevel` (macOS 26), else from the number a web view reports as the
+    /// heading's value.
     #[serde(skip_serializing_if = "Option::is_none")]
     level: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -236,6 +237,15 @@ fn level_of(value: Option<Value>) -> Option<u32> {
     match value {
         Some(Value::Number(number)) if number.fract() == 0.0 && (1.0..=f64::from(u32::MAX)).contains(&number) => Some(number as u32),
         _ => None,
+    }
+}
+
+/// The value a node shows as text. A web view reports a heading's level as its value, a number, and the heading's text
+/// as its title, so a heading's number is its level and never its text.
+fn shown_value(role: &str, value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::Number(_)) if role == "heading" => None,
+        value => value.and_then(Value::display),
     }
 }
 
@@ -609,7 +619,7 @@ impl Walk {
             }
             None => None,
         };
-        let text_value = if secure { None } else { read.value.as_ref().and_then(Value::display) };
+        let text_value = if secure { None } else { shown_value(role, read.value.as_ref()) };
         let name = read
             .title
             .clone()
@@ -685,7 +695,7 @@ impl Walk {
             value: text_value,
             description,
             hint: read.help.clone(),
-            level: if role == "heading" { read.heading_level } else { None },
+            level: if role == "heading" { read.heading_level.or_else(|| level_of(read.value.clone())) } else { None },
             placeholder: read.placeholder.clone(),
             native_id: read.identifier.clone().map(|value| NativeId { kind: "ax_identifier", value }),
             states,
@@ -847,7 +857,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::{content_name, expanded, inner_clip, level_of, missed, outside, selected};
+    use super::{content_name, expanded, inner_clip, level_of, missed, outside, selected, shown_value};
     use crate::ax;
     use crate::windows::Rect;
 
@@ -868,6 +878,17 @@ mod tests {
         for value in [Some(ax::Value::Number(0.0)), Some(ax::Value::Number(1.5)), Some(ax::Value::Number(-1.0)), Some(ax::Value::Bool(true)), None] {
             assert_eq!(level_of(value), None);
         }
+    }
+
+    #[test]
+    fn reads_a_headings_number_as_its_level_and_not_its_text() {
+        let level = ax::Value::Number(2.0);
+        assert_eq!(shown_value("heading", Some(&level)), None);
+        assert_eq!(level_of(Some(level.clone())), Some(2));
+        assert_eq!(shown_value("heading", Some(&ax::Value::Text("Settings".into()))).as_deref(), Some("Settings"));
+        assert_eq!(shown_value("statictext", Some(&level)).as_deref(), Some("2"));
+        assert_eq!(shown_value("slider", Some(&level)).as_deref(), Some("2"));
+        assert_eq!(shown_value("heading", None), None);
     }
 
     #[test]

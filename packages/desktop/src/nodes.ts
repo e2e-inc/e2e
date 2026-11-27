@@ -197,6 +197,9 @@ const INPUT_ROLES = new Set(['textfield', 'combobox', 'slider', 'incrementor', '
 /** Roles the driver reads text into `value`, which the contract calls `text`. */
 const TEXT_ROLES = new Set(['statictext', 'heading']);
 
+/** Roles the driver names by the text inside them when they have no name of their own. */
+const CONTENT_ROLES = new Set(['row', 'cell', 'treeitem', 'option', 'listitem']);
+
 const STATE_NAMES = ['focused', 'disabled', 'secure', 'expanded', 'selected', 'hidden', 'pressed'] as const;
 
 /**
@@ -206,6 +209,33 @@ const STATE_NAMES = ['focused', 'disabled', 'secure', 'expanded', 'selected', 'h
  */
 function label(value: string | undefined): string | undefined {
   return value === undefined || value.trim() === '' ? undefined : value;
+}
+
+/** What a text node shows: its value, which the app may name otherwise (a `5` named `Words`). */
+function shownText(node: RawNode): string | undefined {
+  return label(node.value ?? node.name);
+}
+
+/**
+ * What a row or a cell shows: every text inside it in reading order, joined
+ * by spaces, as the driver joins the names of those texts into its name. The
+ * two differ when a text inside has a name of its own, and then the name is
+ * not text the row shows. `undefined` with no text inside.
+ */
+function contentText(node: RawNode): string | undefined {
+  const texts: string[] = [];
+  const collect = (parent: RawNode): void => {
+    for (const child of parent.children ?? []) {
+      if (!TEXT_ROLES.has(child.role)) {
+        collect(child);
+        continue;
+      }
+      const shown = shownText(child);
+      if (shown !== undefined) texts.push(shown.trim());
+    }
+  };
+  collect(node);
+  return label(texts.join(' '));
 }
 
 /** A node the driver reports but nothing reads: a wrapper with no name, value, id, ref, or text of its own. */
@@ -294,9 +324,7 @@ export function projectSnapshot(
     const isText = TEXT_ROLES.has(node.role);
     const name = label(node.name ?? (isText ? node.value : undefined));
     // A control shows its name (a button's title) as its text, as on a device; an input's name is a label, not what it holds.
-    // A heading's text is its name: a web view reports the heading's level as its value.
-    const shown = node.role === 'heading' ? (node.name ?? node.value) : (node.value ?? node.name);
-    const text = isText ? label(shown) : INPUT_ROLES.has(node.role) ? undefined : name;
+    const text = isText ? shownText(node) : INPUT_ROLES.has(node.role) ? undefined : ((CONTENT_ROLES.has(node.role) ? contentText(node) : undefined) ?? name);
     // A checkbox's value is its state ("0", "1"), already in `checked`; a secure field's is never reported.
     // A snapshot may leave out the value of an empty text field; it is the empty string, as inputValue() reads it, so getByDisplayValue('') finds the field.
     const value = secure || isText || CHECKABLE_ROLES.has(node.role) ? undefined : node.role === 'textfield' ? (node.value ?? '') : node.value;
