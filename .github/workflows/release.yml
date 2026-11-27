@@ -80,14 +80,14 @@ jobs:
           node packages/desktop/scripts/build-native.ts --target x86_64-apple-darwin
       # Only an Intel Mac could load the x64 build; reading its architecture catches a wrong or cut-short build here.
       - name: Check each build's architecture
-        working-directory: packages/desktop/native
+        working-directory: packages/desktop
         run: |
           test "$(lipo -archs desktop.darwin-arm64.node)" = arm64
           test "$(lipo -archs desktop.darwin-x64.node)" = x86_64
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-native
-          path: packages/desktop/native/desktop.darwin-*.node
+          path: packages/desktop/desktop.darwin-*.node
           if-no-files-found: error
           retention-days: 1
 

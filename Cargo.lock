@@ -92,7 +92,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "e2e-desktop-native"
+name = "e2e-desktop-napi"
 version = "0.0.0"
 dependencies = [
  "block2",

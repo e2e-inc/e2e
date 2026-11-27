@@ -78,7 +78,7 @@ const UNMASKED = new Error('the secure fields of the screenshot could not be pla
 /** Launch arguments every launch gets first: no window or document the app saved at its last quit comes back. */
 const FRESH_STATE_ARGUMENTS = ['-ApplePersistenceIgnoreState', 'YES'];
 
-/** The most elements one driver snapshot reads (`MAX_NODES` in `native/src/snapshot.rs`): a larger window is read in part. */
+/** The most elements one driver snapshot reads (`MAX_NODES` in `crates/e2e-desktop-napi/src/snapshot.rs`): a larger window is read in part. */
 const MAX_SNAPSHOT_NODES = '8,000';
 
 /** How much sooner than the call's cut-off the driver stops a read, so a read cut short still answers with what it read. */

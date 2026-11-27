@@ -1,12 +1,15 @@
 /**
  * Finds cargo for the native driver's scripts: a Homebrew rustup puts no
- * `cargo` on `PATH` of its own, and the toolchain `rust-toolchain.toml`
- * pins may not be installed yet.
+ * `cargo` on `PATH` of its own, and the toolchain the workspace's
+ * `rust-toolchain.toml` pins may not be installed yet.
  */
 
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+
+/** The repository root: the Cargo workspace, and the `rust-toolchain.toml` every crate builds with. */
+const WORKSPACE = path.join(import.meta.dirname, '..', '..', '..');
 
 /** How to run cargo for the native driver: the program, the arguments before cargo's own, and the environment. */
 export interface Cargo {
@@ -29,18 +32,18 @@ export interface Cargo {
 export function cargo(directory: string): Cargo {
   if (spawnSync('rustup', ['--version'], { stdio: 'ignore' }).error !== undefined) {
     if (spawnSync('cargo', ['--version'], { cwd: directory, stdio: 'ignore' }).error === undefined) return { file: 'cargo', prefix: [], env: process.env };
-    throw new Error('the native driver needs Rust: install rustup (https://rustup.rs), which installs the toolchain native/rust-toolchain.toml pins');
+    throw new Error('the native driver needs Rust: install rustup (https://rustup.rs), which installs the toolchain rust-toolchain.toml pins');
   }
-  const channel = /^channel\s*=\s*"([^"]+)"/m.exec(readFileSync(path.join(directory, 'rust-toolchain.toml'), 'utf8'))?.[1];
-  if (channel === undefined) throw new Error('native/rust-toolchain.toml names no channel');
+  const channel = /^channel\s*=\s*"([^"]+)"/m.exec(readFileSync(path.join(WORKSPACE, 'rust-toolchain.toml'), 'utf8'))?.[1];
+  if (channel === undefined) throw new Error('rust-toolchain.toml names no channel');
   if (spawnSync('rustup', ['which', '--toolchain', channel, 'cargo'], { cwd: directory, stdio: 'ignore' }).status !== 0) {
-    // With no toolchain named, rustup installs the one the crate's `rust-toolchain.toml` pins, with its targets and
+    // With no toolchain named, rustup installs the one the workspace's `rust-toolchain.toml` pins, with its targets and
     // components. A `RUSTUP_TOOLCHAIN` override would name another, so it is left out.
     const { RUSTUP_TOOLCHAIN: _override, ...env } = process.env;
     spawnSync('rustup', ['toolchain', 'install'], { cwd: directory, stdio: 'inherit', env });
   }
   const pinned = spawnSync('rustup', ['which', '--toolchain', channel, 'cargo'], { cwd: directory, encoding: 'utf8' });
-  if (pinned.status !== 0) throw new Error('rustup could not install the toolchain native/rust-toolchain.toml pins');
+  if (pinned.status !== 0) throw new Error('rustup could not install the toolchain rust-toolchain.toml pins');
   // `rustup run` alone leaves the toolchain off PATH where rustup is the only tool there (Homebrew's), and cargo then
   // finds no rustc: its bin goes first too.
   const bin = path.dirname(pinned.stdout.trim());

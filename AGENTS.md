@@ -32,8 +32,11 @@ There are no RFCs or design documents in the repo. The why lives in PR
 descriptions and commit bodies; `git log` and `gh pr view` are the archive.
 ## Layout
 
-`packages/` holds what publishes to npm; `apps/` holds the private apps and
-suites that consume the built packages the way a user would.
+`packages/` holds what publishes to npm; `crates/` holds every Rust crate,
+one Cargo workspace with one `Cargo.lock` and one `rust-toolchain.toml` at
+the root (sources only: a build places each addon in its npm package);
+`apps/` holds the private apps and suites that consume the built packages
+the way a user would.
 
 - `packages/core` — the published `@e2e-dev/core` package, which `e2e` is built
   on and depends on at its exact version (a changesets `fixed` group keeps
@@ -139,7 +142,7 @@ suites that consume the built packages the way a user would.
   the same public `defineEngine`, contributing the `desktop` fixture. It
   imports from `@e2e-dev/core/engine` only, and a target names it as
   `engine: desktop()`. The engine drives macOS through its own Rust driver,
-  `native/` (a NAPI-RS crate), loaded into the worker's process and called
+  `crates/e2e-desktop-napi` (a NAPI-RS crate), loaded into the worker's process and called
   directly (`src/driver.ts`): no CLI process and no JSON-RPC. Every native
   call that talks to another process runs on a blocking thread and resolves
   with an envelope that says whether input reached the app; `call` bounds it
@@ -150,12 +153,12 @@ suites that consume the built packages the way a user would.
   launches through `open -n` with exactly that environment, since
   LaunchServices hands the app the environment of the process that asks.
   `pnpm --filter @e2e-dev/desktop build:native` (needs `rustup`) builds
-  `native/desktop.<platform>-<arch>.node`, which the loader takes in a
+  `packages/desktop/desktop.<platform>-<arch>.node`, which the loader takes in a
   checkout; a release ships it in `packages/desktop-darwin-arm64` and
   `packages/desktop-darwin-x64`, optional dependencies with `os`/`cpu` set,
   in a changesets `fixed` group with the engine, each with a
   `THIRD_PARTY_LICENSES.md` of the crates the addon links. After a change under
-  `native/`, run `cargo clippy` and `cargo fmt --check` there, rebuild, and
+  `crates/`, run `cargo clippy --workspace` and `cargo fmt --all --check` at the root, rebuild, and
   run the desktop testbed; after a dependency change, also
   `pnpm --filter @e2e-dev/desktop licenses:native`, which CI checks. A prototype that runs on macOS only: `prepare`
   and `init` refuse any other OS.

@@ -1,7 +1,7 @@
 /**
- * Builds the native driver (`native/`, a NAPI-RS crate) for this Mac, or
- * for the target triple given, and puts it where the engine loads it from
- * in a checkout: `native/desktop.<platform>-<arch>.node`.
+ * Builds the native driver (`crates/e2e-desktop-napi`, a NAPI-RS crate) for
+ * this Mac, or for the target triple given, and puts it where the engine
+ * loads it from in a checkout: `packages/desktop/desktop.<platform>-<arch>.node`.
  *
  * Usage: `pnpm --filter @e2e-dev/desktop build:native [--target x86_64-apple-darwin] [--out <dir>]`.
  * `--out` copies the addon into another directory too, the platform package
@@ -33,18 +33,19 @@ const target = values.target ?? (process.arch === 'arm64' ? 'aarch64-apple-darwi
 const platform = TARGETS[target];
 if (platform === undefined) throw new Error(`no native driver build for ${target}; one of ${Object.keys(TARGETS).join(', ')}`);
 
-const crate = path.join(import.meta.dirname, '..', 'native');
+const engine = path.join(import.meta.dirname, '..');
+const crate = path.join(engine, '..', '..', 'crates', 'e2e-desktop-napi');
 const run = cargo(crate);
 const env = { ...run.env, MACOSX_DEPLOYMENT_TARGET: DEPLOYMENT_TARGET };
 // A pinned toolchain installed before (another checkout's, or under a `RUSTUP_TOOLCHAIN` override) may lack this
 // target's standard library; adding one already there is a no-op.
 if (run.toolchain !== undefined) execFileSync('rustup', ['target', 'add', '--toolchain', run.toolchain, target], { cwd: crate, stdio: 'inherit', env });
 execFileSync(run.file, [...run.prefix, 'build', '--release', '--locked', '--target', target], { cwd: crate, stdio: 'inherit', env });
-// Where cargo wrote it: `CARGO_TARGET_DIR` or a cargo config can move the target directory off `native/target`.
+// Where cargo wrote it: `CARGO_TARGET_DIR` or a cargo config can move the target directory off the workspace's `target`.
 const metadata = JSON.parse(execFileSync(run.file, [...run.prefix, 'metadata', '--format-version', '1', '--no-deps'], { cwd: crate, encoding: 'utf8', env })) as { target_directory: string };
-const built = path.join(metadata.target_directory, target, 'release', 'libe2e_desktop_native.dylib');
+const built = path.join(metadata.target_directory, target, 'release', 'libe2e_desktop_napi.dylib');
 const name = `desktop.${platform}.node`;
-replace(built, path.join(crate, name));
+replace(built, path.join(engine, name));
 if (values.out !== undefined) {
   mkdirSync(values.out, { recursive: true });
   replace(built, path.join(values.out, name));
@@ -54,7 +55,7 @@ if (values.out !== undefined) {
     writeFileSync(path.join(values.out, '.build.json'), `${JSON.stringify({ version })}\n`);
   }
 }
-process.stdout.write(`built ${path.join(crate, name)}\n`);
+process.stdout.write(`built ${path.join(engine, name)}\n`);
 
 /**
  * Copies an addon over an older one as a new file. macOS keeps the code

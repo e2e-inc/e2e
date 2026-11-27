@@ -1,5 +1,5 @@
 /**
- * The native driver: the engine's Rust code (`native/`), loaded into this
+ * The native driver: the engine's Rust code (`crates/e2e-desktop-napi`), loaded into this
  * process through NAPI-RS. Each call that talks to another process runs on
  * a thread of its own and resolves with an envelope, `{ ok, data }` or
  * `{ ok, error }`; `call` bounds it by the operation's budget and signal and
@@ -92,7 +92,7 @@ export interface Launched {
 
 /** What the driver can do: one function per native call. */
 export interface DesktopDriver {
-  /** The version of the package the driver came from, or `checkout build` for one built in this package's `native/`. */
+  /** The version of the package the driver came from, or `checkout build` for one built into this package's directory. */
   readonly version: string;
   status(): { readonly accessibility: boolean; readonly screenRecording: boolean };
   /** Whether the screen is locked; null when that cannot be told. */
@@ -150,7 +150,7 @@ const ownRequire = createRequire(import.meta.url);
 
 /**
  * Loads the driver built for this machine: a build in this package's
- * `native/` directory (`pnpm build:native` in a checkout), else the
+ * directory (`pnpm build:native` in a checkout), else the
  * platform package npm installed beside this one. Throws
  * `UNSUPPORTED_CAPABILITY` on a platform no driver is built for, and
  * `ENGINE_FAILURE` naming what is missing on one that has a driver.
@@ -162,10 +162,10 @@ export function loadNativeDriver(): DesktopDriver {
     throw new EngineError('UNSUPPORTED_CAPABILITY', `@e2e-dev/desktop has no native driver for ${process.platform} on ${process.arch}: it drives macOS apps only`, { retryable: false });
   }
   const failures: string[] = [];
-  // A build in `native/` exists only in a checkout (the package ships `dist` alone), and is the one just built there:
+  // A build in the package directory exists only in a checkout (the package ships `dist` alone), and is the one just built there:
   // a platform package placed by a canary build stays in the checkout, and must not hide it.
   const builds: readonly [string, () => string][] = [
-    [path.join(import.meta.dirname, '..', 'native', `desktop.${platform}.node`), () => 'checkout build'],
+    [path.join(import.meta.dirname, '..', `desktop.${platform}.node`), () => 'checkout build'],
     [packageName, () => (ownRequire(`${packageName}/package.json`) as { version: string }).version],
   ];
   for (const [specifier, version] of builds) {

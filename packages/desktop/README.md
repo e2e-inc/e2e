@@ -86,8 +86,9 @@ test('signs in', async ({ app, screen }) => {
 ## Building the driver
 
 In a checkout, `pnpm --filter @e2e-dev/desktop build:native` builds the
-driver (`native/`, a Rust crate) with `cargo` for this Mac, and the engine
-loads it from there. It needs a Rust toolchain from
+driver (`crates/e2e-desktop-napi`, a Rust crate in the repository's Cargo
+workspace) with `cargo` for this Mac into this package's directory, and the
+engine loads it from there. It needs a Rust toolchain from
 [rustup](https://rustup.rs).
 
 ## License

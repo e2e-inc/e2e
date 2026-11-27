@@ -31,7 +31,6 @@ interface CargoPackage {
 interface Metadata {
   readonly packages: readonly CargoPackage[];
   readonly resolve: {
-    readonly root: string;
     readonly nodes: readonly { readonly id: string; readonly deps: readonly { readonly pkg: string; readonly dep_kinds: readonly { readonly kind: string | null }[] }[] }[];
   };
 }
@@ -39,8 +38,8 @@ interface Metadata {
 /** A license file's name: `LICENSE`, `LICENSE-MIT`, `COPYING`, `UNLICENSE`, with any extension. */
 const LICENSE_FILE = /^(licen[cs]e|copying|unlicense)/i;
 
-const crate = path.join(import.meta.dirname, '..', 'native');
-/** License texts of repositories whose crates publish none of their own, by `<owner>/<repo>` (`native/licenses/README.md`). */
+const crate = path.join(import.meta.dirname, '..', '..', '..', 'crates', 'e2e-desktop-napi');
+/** License texts of repositories whose crates publish none of their own, by `<owner>/<repo>` (`licenses/README.md` in the crate). */
 const vendored = path.join(crate, 'licenses');
 const packages = path.join(import.meta.dirname, '..', '..');
 const outputs = ['desktop-darwin-arm64', 'desktop-darwin-x64'].map((name) => path.join(packages, name, 'THIRD_PARTY_LICENSES.md'));
@@ -55,7 +54,7 @@ const metadata = JSON.parse(
     maxBuffer: 64 * 1024 * 1024,
   }),
 ) as Metadata;
-const text = notices(linked(metadata));
+const text = notices(linked(metadata, path.join(crate, 'Cargo.toml')));
 
 if (process.argv.includes('--check')) {
   const stale = outputs.filter((file) => !existsSync(file) || readFileSync(file, 'utf8') !== text);
@@ -72,15 +71,19 @@ if (process.argv.includes('--check')) {
 /**
  * The crates built into the addon: what the driver depends on, through
  * normal dependencies only, less the proc macros and build-time crates
- * that run in the compiler and are not linked.
+ * that run in the compiler and are not linked. The walk starts at the
+ * crate whose manifest is given, not at `resolve.root`, which names the
+ * package of the directory cargo runs in and is null at the workspace root.
  */
-function linked(graph: Metadata): CargoPackage[] {
+function linked(graph: Metadata, manifest: string): CargoPackage[] {
+  const root = graph.packages.find((cargoPackage) => cargoPackage.manifest_path === manifest);
+  if (root === undefined) throw new Error(`cargo metadata lists no package at ${manifest}`);
   const byId = new Map(graph.packages.map((cargoPackage) => [cargoPackage.id, cargoPackage]));
   const nodes = new Map(graph.resolve.nodes.map((node) => [node.id, node]));
   // A proc macro and what it depends on run in the compiler: the walk does not go through one.
   const procMacro = (id: string): boolean => byId.get(id)?.targets.every((target) => target.kind.includes('proc-macro')) ?? false;
   const seen = new Set<string>();
-  const pending = [graph.resolve.root];
+  const pending = [root.id];
   while (pending.length > 0) {
     const node = nodes.get(pending.pop() ?? '');
     for (const dep of node?.deps ?? []) {
@@ -97,7 +100,7 @@ function linked(graph: Metadata): CargoPackage[] {
 
 /**
  * The license texts of a crate that publishes no license file, from its repository's texts vendored under
- * `native/licenses/<owner>/<repo>`. A crate with neither stops the generator: a sentence naming the license would drop
+ * `crates/e2e-desktop-napi/licenses/<owner>/<repo>`. A crate with neither stops the generator: a sentence naming the license would drop
  * the copyright and permission notice the license requires.
  */
 function repositoryTexts(cargoPackage: CargoPackage): string[] {
@@ -105,11 +108,11 @@ function repositoryTexts(cargoPackage: CargoPackage): string[] {
   const directory = slug === undefined ? undefined : path.join(vendored, slug);
   const files = directory !== undefined && existsSync(directory) ? readdirSync(directory).filter((name) => LICENSE_FILE.test(name)).toSorted() : [];
   if (directory === undefined || files.length === 0) {
-    throw new Error(`${cargoPackage.name} ${cargoPackage.version} publishes no license file, and native/licenses has none for its repository (${cargoPackage.repository ?? 'none named'}); add that repository's license texts there`);
+    throw new Error(`${cargoPackage.name} ${cargoPackage.version} publishes no license file, and crates/e2e-desktop-napi/licenses has none for its repository (${cargoPackage.repository ?? 'none named'}); add that repository's license texts there`);
   }
   const texts = files.map((name) => readFileSync(path.join(directory, name), 'utf8').trim());
   // An empty file is a fetch that found nothing, never a license.
-  if (texts.some((body) => body === '')) throw new Error(`a vendored license text for ${cargoPackage.name} under native/licenses/${slug} is empty`);
+  if (texts.some((body) => body === '')) throw new Error(`a vendored license text for ${cargoPackage.name} under crates/e2e-desktop-napi/licenses/${slug} is empty`);
   return texts;
 }
 
@@ -124,5 +127,5 @@ function notices(crates: readonly CargoPackage[]): string {
     for (const body of texts) groups.set(body, [...(groups.get(body) ?? []), label]);
   }
   const sections = [...groups].map(([body, labels]) => `## ${[...new Set(labels)].join('; ')}\n\n\`\`\`text\n${body}\n\`\`\``);
-  return `# Third-party licenses\n\nThe native driver in this package is built from these Rust crates, generated from \`packages/desktop/native/Cargo.lock\` by \`packages/desktop/scripts/native-licenses.ts\`.\n\n${sections.join('\n\n')}\n`;
+  return `# Third-party licenses\n\nThe native driver in this package is built from these Rust crates, generated from \`Cargo.lock\` by \`packages/desktop/scripts/native-licenses.ts\`.\n\n${sections.join('\n\n')}\n`;
 }
