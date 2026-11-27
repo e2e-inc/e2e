@@ -124,7 +124,7 @@ open_session {target: "web", headed: true}
 | `path` | string | no | Where on the app URL to open instead of its root, such as `/settings/members`. The session opens on that page. Not with `test`. |
 | `test` | string | no | One test to run first, named like an `e2e run` positional. The session stops where the test stopped. See [Running a test](#running-a-test). |
 | `engine` | string or object | no | The session's engine in a directory with no config file, as a package name or `{package, export, options}`. See [Without a config](#without-a-config). |
-| `app` | object | no | The app under test for an `engine` session, as `url`, `bundleId`, or `appPath`. |
+| `app` | object | no | The app under test for an `engine` session, as `url`, `bundleId`, or `appPath`, with optional `launchArguments`. |
 | `attach` | string | no | ID from the pause header of a [held test](#attaching-to-a-held-test). Pass only this field. |
 
 #### `tools`
@@ -576,10 +576,12 @@ options, or to name an export, write `engine` as an object:
   the error names the command that installs it for every project:
   `npm install --prefix ~/.e2e/engines @e2e-dev/web`. An agent that cannot
   run it, such as one in a sandbox without network access, asks you to.
-- **`app`** takes `url`, `bundleId`, and `appPath`, as a target's
-  [`app`](/reference/config#the-app-under-test) does. `@e2e-dev/web` needs
-  `url`. `@e2e-dev/mobile` and `@e2e-dev/desktop` need `bundleId` or
-  `appPath`.
+- **`app`** takes `url`, `bundleId`, `appPath`, and `launchArguments`, as a
+  target's [`app`](/reference/config#the-app-under-test) does. `@e2e-dev/web`
+  needs `url`. `@e2e-dev/mobile` and `@e2e-dev/desktop` need `bundleId` or
+  `appPath`, and launch the app with
+  [`launchArguments`](/reference/config#launcharguments), a list or an
+  object.
 - **Files.** The project root is the server's working directory, and the
   session writes `.e2e/` there.
 - **Tests.** `e2e run` and `open_session {test}` need a config. To keep

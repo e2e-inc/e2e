@@ -615,6 +615,19 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
       const closed = (await other.callTool({ name: 'close_session', arguments: {} })) as { isError?: boolean };
       expect(closed.isError).not.toBe(true);
 
+      // Both forms of launchArguments pass the schema and reach the config's own checks, which a web target fails.
+      const list = await open({ engine: '@e2e-dev/web', app: { url: app.url, launchArguments: ['-e2e', 'YES'] } });
+      expect(list.isError).toBe(true);
+      expect(list.text).toContain('INVALID_CONFIG');
+      expect(list.text).toContain('declares app.launchArguments, which describes an installed device app');
+      const named = await open({ engine: '@e2e-dev/web', app: { url: app.url, launchArguments: { e2e: true, tags: ['a'] } } });
+      expect(named.isError).toBe(true);
+      expect(named.text).toContain('INVALID_CONFIG');
+      expect(named.text).toContain('app.launchArguments is an object, and engine "web" takes only a list of strings');
+      const nested = await open({ engine: '@e2e-dev/web', app: { url: app.url, launchArguments: { e2e: { on: true } } } });
+      expect(nested.isError).toBe(true);
+      expect(nested.text).toContain('Invalid arguments for tool open_session');
+
       const dual = await open({ engine: 'dual-engine', app: { url: app.url } });
       expect(dual.isError, dual.text).toBe(false);
       expect(dual.text).toMatch(/^Session \S+ open on target "web" \(platform web, engine web [^)]+\), headless; no config file: one target on dual-engine, every other setting at its default\./);

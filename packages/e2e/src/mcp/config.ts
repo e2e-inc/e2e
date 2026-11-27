@@ -30,8 +30,8 @@ export function locateProjectConfig(options: ProjectOptions): string {
 
 /** What `open_session` names to open a session where the project has no config file: the engine's factory call, and the app. */
 export interface EngineSession extends FactoryRef {
-  /** The target's app: the URL it opens, or the installed app or build a device launches. */
-  readonly app?: Pick<TargetApp, 'url' | 'bundleId' | 'appPath'> | undefined;
+  /** The target's app: the URL it opens, or the installed app or build a device launches, and the arguments it launches with. */
+  readonly app?: Pick<TargetApp, 'url' | 'bundleId' | 'appPath' | 'launchArguments'> | undefined;
 }
 
 /**

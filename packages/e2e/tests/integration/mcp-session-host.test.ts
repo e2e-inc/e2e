@@ -322,6 +322,18 @@ describe('SessionHost', { timeout: 60_000 }, () => {
     await bare.close('done');
   });
 
+  it("hands an engine session's launch arguments to the engine, checked as a config target's are", async () => {
+    const made = engines({ device: true });
+    const bare = host(made.next);
+    await bare.open({ engine: '@acme/kiosk', app: { bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'] } });
+    expect(made.made[0]!.inits[0]?.app).toMatchObject({ bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'] });
+    await bare.close('done');
+    await expect(bare.open({ engine: '@acme/kiosk', app: { bundleId: 'com.example.greeter', launchArguments: { '-profile': 'a' } } })).rejects.toMatchObject({
+      code: 'INVALID_CONFIG',
+      message: expect.stringContaining('app.launchArguments argument name "-profile" starts with a dash'),
+    });
+  });
+
   it.each([
     [{ engine: '@acme/kiosk', target: 'kiosk' }, 'target names part of a config file'],
     [{ engine: '@acme/kiosk', config: 'e2e.config.ts' }, 'config names part of a config file'],

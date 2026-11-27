@@ -784,6 +784,10 @@ export class SessionHost {
             url: z.string().min(1).optional().describe('The URL the session opens, and the base of relative navigation'),
             bundleId: z.string().min(1).optional().describe('An installed app to launch: its bundle id, package, or display name'),
             appPath: z.string().min(1).optional().describe("A build to install and launch: an .app, .ipa, or .apk, relative to the server's working directory"),
+            launchArguments: z
+              .union([z.array(z.string()), z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))])
+              .optional()
+              .describe('Arguments a device or desktop app launches with: a list, or {name: value}'),
           })
           .strict()
           .optional()
