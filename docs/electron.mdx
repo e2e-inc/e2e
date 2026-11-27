@@ -231,7 +231,8 @@ To test a packaged build, point `executablePath` at the binary (not the
 - If the build disables the `EnableNodeCliInspectArguments` fuse, `screen`,
   `expect`, and the agent still work, but `electron.evaluate()` fails and
   `electron.window({ title })` matches document titles only. On Windows, a
-  screenshot of a window the app hid with `hide()` also times out.
+  screenshot of a window the app hid with `hide()` also times out, and a
+  recording of one has no frames.
 - On macOS, an unsigned build that reads the keychain (`safeStorage`) can
   hang on a system prompt. Add `--use-mock-keychain` to `app.launchArguments`.
 

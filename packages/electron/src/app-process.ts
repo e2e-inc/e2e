@@ -433,17 +433,7 @@ export class AppProcess {
 async function unthrottle(app: RunningApp, targetId: string): Promise<(() => Promise<void>) | undefined> {
   const main = await answerWithin(app.main, ANSWER_MS);
   if (main === undefined) return undefined;
-  const throttled = await answerWithin(
-    main.evaluate(({ webContents }, id) => {
-      const contents = webContents.fromDevToolsTargetId(id);
-      if (contents === undefined || contents.isDestroyed() || !contents.getBackgroundThrottling()) return false;
-      contents.setBackgroundThrottling(false);
-      return true;
-    }, targetId),
-    ANSWER_MS,
-  );
-  if (throttled !== true) return undefined;
-  return async () => {
+  const restore = async (): Promise<void> => {
     await answerWithin(
       main.evaluate(({ webContents }, id) => {
         const contents = webContents.fromDevToolsTargetId(id);
@@ -452,6 +442,17 @@ async function unthrottle(app: RunningApp, targetId: string): Promise<(() => Pro
       ANSWER_MS,
     );
   };
+  const turnedOff = main.evaluate(({ webContents }, id) => {
+    const contents = webContents.fromDevToolsTargetId(id);
+    if (contents === undefined || contents.isDestroyed() || !contents.getBackgroundThrottling()) return false;
+    contents.setBackgroundThrottling(false);
+    return true;
+  }, targetId);
+  const answered = await answerWithin(turnedOff, ANSWER_MS);
+  if (answered === true) return restore;
+  // A busy main process runs the call later, when no capture waits for it any more: throttling goes back on then.
+  if (answered === undefined) void turnedOff.then((off) => (off ? restore() : undefined)).catch(() => undefined);
+  return undefined;
 }
 
 const NO_INSPECTOR =
