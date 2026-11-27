@@ -194,7 +194,12 @@ class TreeProjector {
   placeAbsent(roots: Draft[]): void {
     const wanted = new Set(this.options.keep ?? []);
     if (this.policy.hiddenTestIds) {
-      for (const [backend, facts] of this.snapshot.elements()) if (facts.attributes[this.testIdAttribute] !== undefined) wanted.add(backend);
+      for (const [backend, facts] of this.snapshot.elements()) {
+        // Content under aria-hidden is out of the accessibility tree and on screen all the same: a text query finds
+        // it, as on the web, on the element that hides it. It has no role, so a role query still does not.
+        const offTree = facts.attributes['aria-hidden']?.toLowerCase() === 'true' && facts.bounds !== undefined;
+        if (facts.attributes[this.testIdAttribute] !== undefined || offTree) wanted.add(backend);
+      }
     }
     const absent = [...wanted].flatMap((backend) => {
       const facts = this.drafted.has(backend) ? undefined : this.snapshot.element(backend);
@@ -230,14 +235,23 @@ class TreeProjector {
       (backend !== undefined && this.options.keep?.has(backend) === true) ||
       isFocusable(node) ||
       (!node.ignored && name !== '');
-    if (backend === undefined || (silent && !addressable)) return this.children(node);
-    if (!this.take()) return [];
+    if (backend === undefined) return this.children(node);
+    let children: Draft[] | undefined;
+    if (silent && !addressable) {
+      children = this.children(node);
+      // Inline markup splits a sentence into parts (`Order <strong>ABC123</strong>`). A locator finds the sentence
+      // on the container that holds all of it, as on the web: a container with text of its own beside other
+      // content stays, with its parts under it.
+      const sentence = this.policy.descendantText && children.length > 1 && children.some((child) => child.isText);
+      if (!sentence) return children;
+    }
+    if (!this.take()) return children ?? [];
     const draft = this.element(backend, node, facts, silent ? 'generic' : role);
     if (name !== '') draft.name = cut(name, this.policy.nameLimit);
     if (isSecure(facts)) return [draft];
     // A native field's inner editor repeats its value as text, which says nothing new. An editing host
     // (contenteditable) keeps its content, which is its text.
-    if (!isTextField(facts)) draft.children = this.children(node);
+    if (!isTextField(facts)) draft.children = children ?? this.children(node);
     this.foldText(draft);
     // A closed select's option has no text run: its text is its label, which Chromium names it by.
     if (draft.text === undefined && facts?.nodeName === 'OPTION' && name !== '') draft.text = cut(name, this.policy.textLimit);

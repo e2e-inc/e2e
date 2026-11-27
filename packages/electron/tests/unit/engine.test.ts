@@ -44,6 +44,9 @@ describe('resolveOptions', () => {
     expect(() => resolveOptions({ args: ['--inspect=9229'] })).toThrow(/--inspect/);
     expect(() => resolveOptions({ args: ['--remote-debugging-port=9222'] })).toThrow(/--remote-debugging-port/);
     expect(() => resolveOptions({ env: { ELECTRON_RUN_AS_NODE: '1' } })).toThrow(/ELECTRON_RUN_AS_NODE/);
+    // Windows reads a variable's name in any case.
+    expect(() => resolveOptions({ env: { electron_run_as_node: '1' } })).toThrow(/electron_run_as_node/);
+    expect(() => resolveOptions({ env: { Node_Options: '--inspect' } })).toThrow(/Node_Options/);
     expect(() => resolveOptions({ env: { A: 1 } } as never)).toThrow(/string value/);
     expect(() => resolveOptions({ launchTimeout: 0 })).toThrow(/launchTimeout/);
     expect(() => resolveOptions({ testIdAttribute: 'data test' })).toThrow(/testIdAttribute/);

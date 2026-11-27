@@ -40,6 +40,7 @@ import { screenshotFile, screenshotName, withPixels } from './capture.ts';
 import { DevTools } from './devtools.ts';
 import type { ElectronMainModule } from './fixtures.ts';
 import { closedWindow, invalidState, notActionable } from './errors.ts';
+import { outsideApp } from './file-bound.ts';
 import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
 import { locateIn, projectRead, readWindow, type ProjectionContext, type RawRead } from './locate.ts';
 import type { ResolvedElectronOptions } from './options.ts';
@@ -99,6 +100,7 @@ export class ElectronSurface {
   startAttempt(context: EngineAttemptContext): Promise<void> {
     this.attempt = context;
     this.artifactCounter = 0;
+    this.app.takeUnhandledDialog();
     // The app's data lives here for the whole attempt: `app.restart()` keeps it, `app.clearState()` empties it.
     this.userDataDir = mkdtempSync(path.join(tmpdir(), 'e2e-electron-'));
     return Promise.resolve();
@@ -110,6 +112,8 @@ export class ElectronSurface {
     if (this.userDataDir !== undefined) rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     this.userDataDir = undefined;
     this.attempt = undefined;
+    // A dialog the test's last step opened has no next step to fail: the attempt's end is it.
+    this.failOnDialog();
   }
 
   async dispose(context: EngineCleanupContext): Promise<void> {
@@ -132,7 +136,8 @@ export class ElectronSurface {
       await this.app.quit(operation, DISCARD_CLOSE_MS);
       if (this.userDataDir !== undefined) {
         rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-        mkdirSync(this.userDataDir, { recursive: true });
+        // As private as mkdtemp made it: the app's data is no other local user's to list.
+        mkdirSync(this.userDataDir, { recursive: true, mode: 0o700 });
       }
       await this.launch(operation);
     });
@@ -197,6 +202,9 @@ export class ElectronSurface {
       // An observation (the agent's, failure evidence) never waits on a crashed window.
       const raw = await this.readShown(new Deadline(0));
       if (raw === undefined) return { root: { ref: { id: ROOT_ID, revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } };
+      // An observation goes to a model, a report, or a file: never of a local file the app's own pages are not.
+      const left = this.leftApp(raw.window);
+      if (left !== undefined) throw new ConfigurationError('POLICY_DENIED', left);
       const snapshot = projectRead(raw, 'tree', this.projection());
       return options?.pixels === true ? await withPixels(this.devtools, raw, snapshot) : snapshot;
     });
@@ -204,6 +212,7 @@ export class ElectronSurface {
 
   async locate(expression: LocatorExpression, operation: OperationContext): Promise<readonly SemanticNode[]> {
     // An app that is not running has nothing to find, ever: say so rather than let the locator wait out its timeout.
+    this.failOnDialog();
     if (!this.app.running) throw this.app.notRunning();
     return await withBudget(operation, 'locate', async (budget) => {
       // A crashed window is waited on briefly, for a reload already under way; every read waiting the whole timeout
@@ -211,7 +220,7 @@ export class ElectronSurface {
       const raw = await this.readShown(new Deadline(Math.min(CRASH_RELOAD_WAIT_MS, budget.waits.remaining())));
       if (raw === undefined) return [];
       const sink = this.attempt?.screen;
-      if (sink !== undefined) {
+      if (sink !== undefined && this.leftApp(raw.window) === undefined) {
         try {
           sink(projectRead(raw, 'tree', this.projection()));
         } catch {
@@ -231,7 +240,7 @@ export class ElectronSurface {
     if (sink === undefined) return;
     try {
       const raw = await answerWithin(this.readShown(new Deadline(0)), TRACE_READ_MS);
-      if (raw !== undefined) sink(projectRead(raw, 'tree', this.projection()));
+      if (raw !== undefined && this.leftApp(raw.window) === undefined) sink(projectRead(raw, 'tree', this.projection()));
     } catch {
       // The trace is evidence; a read that fails or a sink that throws never fails the step.
     }
@@ -243,7 +252,19 @@ export class ElectronSurface {
     return { devtools: this.devtools, windows: this.windowList, projectRoot: this.projectRoot };
   }
 
+  /** Why the window is not one to observe, trace, or capture: it shows a local file outside the app's directory. */
+  private leftApp(window: AppWindow): string | undefined {
+    return outsideApp(window.page.url(), this.app.appDirectory);
+  }
+
+  /** Fails the step that follows a dialog nothing answered; see the `dialogs` option. */
+  private failOnDialog(): void {
+    const unhandled = this.app.takeUnhandledDialog();
+    if (unhandled !== undefined) throw unhandled;
+  }
+
   private requireWindow(): AppWindow {
+    this.failOnDialog();
     if (!this.app.running) throw this.app.notRunning();
     return this.windowList.require();
   }
@@ -268,6 +289,7 @@ export class ElectronSurface {
       await this.act(operation, 'swipe', window, (budget) => swipeWindow(this.actions(), window, action, budget));
       return;
     }
+    this.failOnDialog();
     const { window, backendNodeId } = this.windowList.bind(ref);
     await this.act(operation, action.kind, window, (budget) => {
       // Bound again once its turn has come: the gesture before it may have loaded another document.
@@ -316,6 +338,7 @@ export class ElectronSurface {
 
   /** Runs a function in the app's main process. */
   async evaluate<R, A>(fn: (electron: ElectronMainModule, arg: A) => R | Promise<R>, arg: A, operation: OperationContext): Promise<R> {
+    this.failOnDialog();
     // Started outside the bound, so a failure of the function's own is reported as it is.
     const run = this.app.evaluate(fn, arg);
     // A cancelled step never awaits it.
@@ -331,6 +354,8 @@ export class ElectronSurface {
     const attempt = this.attempt;
     if (attempt === undefined) throw invalidState('a screenshot is taken inside a test');
     return await withBudget(operation, 'screenshot', async () => {
+      const left = this.leftApp(window);
+      if (left !== undefined) throw new ConfigurationError('POLICY_DENIED', left);
       this.artifactCounter += 1;
       return await screenshotFile(this.devtools, window, attempt.artifactsDir, screenshotName(this.artifactCounter, label));
     });

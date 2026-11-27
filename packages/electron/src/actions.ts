@@ -7,12 +7,14 @@
 
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import type { Protocol } from 'devtools-protocol';
 import {
   EngineError,
   parseKey,
   sleep,
   TestError,
   pollCondition,
+  withTimeout,
   type LocatorAction,
   type Momentum,
   type PointerAction,
@@ -23,7 +25,7 @@ import { actionablePoint, contentBox, waitReady, whole, type WaitTarget } from '
 import type { Budget } from './budget.ts';
 import { hasKey, type MouseButton } from './cdp/input.ts';
 import type { DevTools } from './devtools.ts';
-import { lostFocus, notActionable, unsupported } from './errors.ts';
+import { GONE, lostFocus, notActionable, unsupported } from './errors.ts';
 import { nextFrame, viewportSize } from './in-page/node-ops.ts';
 import type { AppWindow, Windows } from './windows.ts';
 
@@ -208,15 +210,29 @@ async function setChecked(step: Step, want: boolean): Promise<void> {
   const now = await devtools.callOn(window.page, backendNodeId, 'readChecked');
   if (now === null) throw notActionable(`the element has no checked state to ${kind}: it is no checkbox, radio, or switch`);
   if (now === want) return;
-  // A click on a checked radio leaves it checked: only another radio of its group clears it.
-  if (!want && (await devtools.callOn(window.page, backendNodeId, 'isRadio'))) throw notActionable('uncheck cannot clear a radio button; select another radio in its group');
+  // A click on a checked native radio leaves it checked: only another radio of its group clears it. A custom radio
+  // clears if its app says so, which the read after the click finds out.
+  if (!want && (await devtools.callOn(window.page, backendNodeId, 'isNativeRadio'))) throw notActionable('uncheck cannot clear a radio button; select another radio in its group');
   await click(step.budget, window, await actionablePoint(step, true), {});
   // A custom widget can set its state in a later task: the state is polled until the deadline, as the checks before the click are.
+  let read = false;
   await pollCondition({
     deadline: step.deadline,
     signal: step.operation.signal,
     negated: false,
-    evaluate: async () => (await devtools.callOn(window.page, backendNodeId, 'readChecked')) === want,
+    evaluate: async () => {
+      let state: boolean | null;
+      try {
+        state = await devtools.callOn(window.page, backendNodeId, 'readChecked');
+      } catch (cause) {
+        // The app answered the click by replacing the control (a "Saved" in its place): the click did its work. One
+        // that goes away after it was read unchanged did not take it.
+        if (!read && isGone(cause)) return true;
+        throw cause;
+      }
+      read = true;
+      return state === want;
+    },
     onTimeout: () => notActionable(`clicking the element did not ${kind} it`),
   });
 }
@@ -243,6 +259,7 @@ async function setInputFiles(step: Step, action: ActionOf<'setInputFiles'>): Pro
   // The DevTools call takes a path that names nothing and attaches nothing, reporting success.
   const missing = files.find((file) => !existsSync(file));
   if (missing !== undefined) throw new TestError('INVALID_ARGUMENT', `setInputFiles: no file at ${missing}`);
+  if (!(await step.devtools.callOn(step.window.page, step.backendNodeId, 'isFileInput'))) return await chooseFiles(step, files);
   await waitReady(step, 'checkFileInput');
   const takes = await step.devtools.callOn(step.window.page, step.backendNodeId, 'takesFiles', files.length);
   if (!takes.ok) throw new TestError('INVALID_ARGUMENT', `setInputFiles: ${takes.reason}`);
@@ -252,6 +269,36 @@ async function setInputFiles(step: Step, action: ActionOf<'setInputFiles'>): Pro
     return;
   }
   await step.budget.send(() => step.window.page.session.send('DOM.setFileInputFiles', { files, backendNodeId: step.backendNodeId }));
+}
+
+/**
+ * Files for a control that is no file input itself: a button whose click
+ * opens a file chooser. The chooser is held back from the screen, the control
+ * clicked, and the files given to the input the chooser belongs to.
+ */
+async function chooseFiles(step: Step, files: readonly string[]): Promise<void> {
+  const { session } = step.window.page;
+  let opened: (event: Protocol.Page.FileChooserOpenedEvent) => void = () => undefined;
+  const chooser = new Promise<Protocol.Page.FileChooserOpenedEvent>((resolve) => {
+    opened = resolve;
+  });
+  const stopListening = session.on('Page.fileChooserOpened', (event) => opened(event));
+  await session.send('Page.setInterceptFileChooserDialog', { enabled: true });
+  try {
+    await click(step.budget, step.window, await actionablePoint(step, true), {});
+    const { backendNodeId, mode } = await withTimeout(chooser, Math.max(1, step.deadline.remaining()), () => notActionable('the element is not a file input, and clicking it opened no file chooser'));
+    if (backendNodeId === undefined) throw notActionable('the file chooser the element opened belongs to no input in the window');
+    if (files.length > 1 && mode !== 'selectMultiple') throw new TestError('INVALID_ARGUMENT', `setInputFiles: the file chooser takes one file, not ${files.length}`);
+    await step.budget.send(() => session.send('DOM.setFileInputFiles', { files: [...files], backendNodeId }));
+  } finally {
+    stopListening();
+    await session.send('Page.setInterceptFileChooserDialog', { enabled: false }).catch(() => undefined);
+  }
+}
+
+/** Whether a failure says the node is no longer in the document. */
+function isGone(cause: unknown): boolean {
+  return (cause instanceof EngineError && cause.code === 'NODE_STALE') || GONE.test(cause instanceof Error ? cause.message : String(cause));
 }
 
 async function dragTo(step: Step, action: ActionOf<'dragTo'>): Promise<void> {

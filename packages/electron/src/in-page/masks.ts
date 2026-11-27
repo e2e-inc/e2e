@@ -47,23 +47,54 @@ export function placeMasks(selector: string): MaskState {
     }
   }
 
+  // Every declaration is !important: the app's own rule for a div or a popover, however it is marked, loses to an
+  // inline one that is.
+  const important = (declarations: readonly string[]): string => declarations.map((declaration) => `${declaration} !important;`).join(' ');
   const style = document.createElement('style');
   style.textContent = '* { caret-color: transparent !important; }';
   const layer = document.createElement('div');
-  // A popover is in the top layer, above a modal dialog and anything else the app put there before it.
-  layer.popover = 'manual';
-  layer.style.cssText = 'all: initial; position: fixed; inset: 0; width: 100%; height: 100%; margin: 0; border: 0; padding: 0; background: transparent; overflow: visible; pointer-events: none;';
+  // A popover is in the top layer, above a modal dialog and anything else the app put there before it. An Electron
+  // older than 25 has none: the layer is then the topmost of the page's own, and anything in the top layer is over it.
+  const popover = typeof layer.showPopover === 'function';
+  if (popover) layer.popover = 'manual';
+  layer.style.cssText = important([
+    'all: initial',
+    'display: block',
+    'position: fixed',
+    'inset: 0',
+    'width: 100%',
+    'height: 100%',
+    'margin: 0',
+    'border: 0',
+    'padding: 0',
+    'background: transparent',
+    'overflow: visible',
+    'opacity: 1',
+    'visibility: visible',
+    'z-index: 2147483647',
+    'pointer-events: none',
+  ]);
   document.documentElement.append(style, layer);
-  layer.showPopover();
-  // A zoom on the root scales the layer's own lengths, which the measured boxes already include.
-  const zoom = layer.currentCSSZoom;
-  const boxes: string[] = [];
   let covered = true;
+  if (popover) {
+    layer.showPopover();
+  } else {
+    // What the app holds in the top layer would paint over the masks: there is no telling pixels under one are covered.
+    try {
+      covered = document.querySelector('dialog:modal, :fullscreen') === null;
+    } catch {
+      covered = false;
+    }
+  }
+  // A zoom on the root scales the layer's own lengths, which the measured boxes already include. Where the page
+  // cannot say its zoom, the boxes are measured below all the same, and one that misses its element withholds the capture.
+  const zoom = (layer as { readonly currentCSSZoom?: number }).currentCSSZoom ?? 1;
+  const boxes: string[] = [];
   for (const element of elements) {
     const { x, y, width, height } = element.getBoundingClientRect();
     boxes.push([x, y, width, height].map(Math.round).join(','));
     const box = document.createElement('div');
-    box.style.cssText = `all: initial; position: fixed; left: ${x / zoom}px; top: ${y / zoom}px; width: ${width / zoom}px; height: ${height / zoom}px; background: #000000;`;
+    box.style.cssText = important(['all: initial', 'display: block', 'position: fixed', `left: ${x / zoom}px`, `top: ${y / zoom}px`, `width: ${width / zoom}px`, `height: ${height / zoom}px`, 'background: #000000', 'opacity: 1', 'visibility: visible']);
     layer.append(box);
     // Measured, not assumed: a page can lay the layer out in ways no formula here foresees.
     const drawn = box.getBoundingClientRect();
@@ -72,7 +103,7 @@ export function placeMasks(selector: string): MaskState {
   const painted = layer.outerHTML;
   Reflect.set(globalThis, 'e2eRemoveMasks', (): boolean => {
     // A page script can reach the masks through the document: they count only as painted, each one, to the end.
-    const whole = layer.parentNode === document.documentElement && layer.matches(':popover-open') && layer.outerHTML === painted;
+    const whole = layer.parentNode === document.documentElement && (!popover || layer.matches(':popover-open')) && layer.outerHTML === painted;
     style.remove();
     layer.remove();
     for (const animation of resume) {

@@ -170,10 +170,16 @@ describe('projectTree', () => {
   it('keeps a container a locator selected, which the tree would leave out', () => {
     const label = captured.ax.find((node) => node.role?.value === 'LabelText')!;
     const id = `1.${label.backendDOMNodeId}`;
-    expect(all(project('node').root).some((node) => node.ref.id === id)).toBe(false);
+    expect(all(project('tree').root).some((node) => node.ref.id === id)).toBe(false);
     const kept = find(project('node', { keep: new Set([label.backendDOMNodeId!]) }).root, (node) => node.ref.id === id);
     expect(kept).toMatchObject({ role: 'generic', text: 'Username' });
     expect(kept.children?.map((child) => child.testId ?? child.text)).toEqual(['Username', 'username']);
+  });
+
+  it('keeps, for a locator, a container with text of its own beside other content: the whole sentence is found on it', () => {
+    const label = captured.ax.find((node) => node.role?.value === 'LabelText')!;
+    const kept = find(project('node').root, (node) => node.ref.id === `1.${label.backendDOMNodeId}`);
+    expect(kept).toMatchObject({ role: 'generic', text: 'Username' });
   });
 
   it('reads the text of a label that names a checkbox, which Chromium leaves out of its tree', () => {

@@ -11,7 +11,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { EngineAttemptContext, OperationContext } from '@e2e-dev/core/engine';
 import { AppProcess, type LaunchSetup } from '../../src/app-process.ts';
-import { withPixels } from '../../src/capture.ts';
+import { screenshotFile, withPixels } from '../../src/capture.ts';
 import { DevTools } from '../../src/devtools.ts';
 import { readWindow } from '../../src/locate.ts';
 import { resolveOptions } from '../../src/options.ts';
@@ -31,7 +31,7 @@ interface Launched {
 }
 
 /** An app whose main script runs `body` once Electron is ready, with `electron`'s exports in scope. */
-function appWith(body: string, options: { readonly launchTimeout?: number; readonly args?: readonly string[] } = {}): Launched {
+function appWith(body: string, options: { readonly launchTimeout?: number; readonly args?: readonly string[]; readonly dialogs?: 'accept' | 'dismiss' } = {}): Launched {
   const directory = mkdtempSync(path.join(tmpdir(), 'e2e-electron-launch-'));
   directories.push(directory);
   writeFileSync(path.join(directory, 'main.js'), `const { app, BrowserWindow, WebContentsView } = require('electron');\n${body}\n`);
@@ -214,6 +214,28 @@ describe('quit', () => {
   });
 });
 
+describe('dialogs', () => {
+  const ASKING = `new BrowserWindow({ show: false }).loadURL('data:text/html,<title>Asking</title><script>setTimeout(() => { alert("Heads up"); document.title = String(confirm("Sure?")); }, 50)</script>')`;
+
+  it('dismisses a dialog nothing answers, and holds it as the failure of the next step', async () => {
+    const { app, windows, logs, launch } = appWith(`app.whenReady().then(() => { ${ASKING}; });`);
+    await launch();
+    await expect.poll(() => windows.require().page.title()).toBe('false');
+    expect(app.takeUnhandledDialog()).toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/^unhandled alert dialog: Heads up; answer every dialog with electron/) });
+    // Once: the step after the one it failed goes on.
+    expect(app.takeUnhandledDialog()).toBeUndefined();
+    expect(logs.join('\n')).toMatch(/unhandled confirm dialog dismissed: Sure\?/);
+  });
+
+  it('answers every dialog as the dialogs option says', async () => {
+    const { app, windows, logs, launch } = appWith(`app.whenReady().then(() => { ${ASKING}; });`, { dialogs: 'accept' });
+    await launch();
+    await expect.poll(() => windows.require().page.title()).toBe('true');
+    expect(app.takeUnhandledDialog()).toBeUndefined();
+    expect(logs.join('\n')).toMatch(/confirm dialog "Sure\?" opened; accepting it per electron\(\{ dialogs: 'accept' \}\)/);
+  });
+});
+
 describe('electron.evaluate', () => {
   it('returns a number JSON has no word for, and refuses an argument that is not JSON as the test\'s own mistake', async () => {
     const { app, launch } = appWith(`app.whenReady().then(() => { ${LOADED}; });`);
@@ -261,9 +283,9 @@ describe('pixels', () => {
     await launch();
     const window = windows.require();
     const devtools = new DevTools();
-    const observed = await withPixels(devtools, await readWindow(devtools, window), { root: { ref: { id: 'window', revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } });
-    expect(observed.pixels).toBeUndefined();
-    expect(observed.maskedRegionCount).toBe(1);
+    const result = await withPixels(devtools, await readWindow(devtools, window), { root: { ref: { id: 'window', revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } });
+    expect(result.pixels).toBeUndefined();
+    expect(result.maskedRegionCount).toBe(1);
   });
 
   it('masks a nested document in a page its root zooms', async () => {
@@ -277,6 +299,40 @@ describe('pixels', () => {
     let red = 0;
     for (let at = 0; at < rgba.length; at += rgba.length / (pixels!.width * pixels!.height)) if (rgba[at]! > 200 && rgba[at + 1]! < 50) red += 1;
     expect(red).toBe(0);
+  });
+
+  /** An observation with pixels of a window showing `page`, and how many of its pixels are red. */
+  async function observed(page: string): Promise<{ readonly pixels: boolean; readonly red: number; readonly masked: number | undefined }> {
+    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);
+    await launch();
+    const window = windows.require();
+    const devtools = new DevTools();
+    const { pixels, maskedRegionCount } = await withPixels(devtools, await readWindow(devtools, window), { root: { ref: { id: 'window', revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } });
+    if (pixels === undefined) return { pixels: false, red: 0, masked: maskedRegionCount };
+    const rgba = new Transformer(pixels.data).rawPixelsSync();
+    let red = 0;
+    for (let at = 0; at < rgba.length; at += rgba.length / (pixels.width * pixels.height)) if (rgba[at]! > 200 && rgba[at + 1]! < 50) red += 1;
+    return { pixels: true, red, masked: maskedRegionCount };
+  }
+
+  const RED_FRAME = `<iframe style="border:0;width:200px;height:100px" srcdoc="<body style=margin:0;background:red>"></iframe>`;
+  /** Runs `reaction` in the page the moment the masks are placed. */
+  const onMasks = (reaction: string): string => `<script>new MutationObserver((records) => { for (const record of records) for (const node of record.addedNodes) if (node.popover) { ${reaction} } }).observe(document.documentElement, { childList: true });</script>`;
+
+  it('paints its masks over the app\'s own !important styles', async () => {
+    for (const rule of ['[popover]{opacity:0 !important}', 'div{opacity:0 !important}', 'div{background:transparent !important}', 'div{visibility:hidden !important}']) {
+      expect(await observed(`<style>${rule}</style><body style="margin:0">${RED_FRAME}</body>`), rule).toEqual({ pixels: true, red: 0, masked: 1 });
+    }
+  });
+
+  it('refuses a screenshot when a password field appears, or a masked element moves, after the masks are placed', async () => {
+    const refusal = async (reaction: string): Promise<string> => {
+      const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(`<body style="margin:0">${RED_FRAME}${onMasks(reaction)}</body>`))}));`);
+      await launch();
+      return String(await screenshotFile(new DevTools(), windows.require(), directory, 'shot.png').then(() => 'taken', (error: unknown) => error));
+    };
+    expect(await refusal(`const field = document.createElement('input'); field.type = 'password'; document.body.append(field);`)).toMatch(/appeared while the screenshot was taken/);
+    expect(await refusal(`document.querySelector('iframe').style.marginLeft = '60px';`)).toMatch(/moved while the screenshot was taken/);
   });
 
   it('gives each of two captures taken at once its own masks', async () => {

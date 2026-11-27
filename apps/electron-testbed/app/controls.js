@@ -80,3 +80,17 @@ tray.addEventListener('drop', (event) => {
   event.preventDefault();
   document.querySelector('[data-testid="tray-status"]').textContent = `Tray holds ${event.dataTransfer.getData('text/plain')}`;
 });
+
+// A control its own change handler replaces: the click did its work, and the checkbox is gone.
+document.querySelector('[data-testid="replace-box"]').addEventListener('change', () => document.querySelector('#replace-label').replaceWith('Saved'));
+
+// An upload button: its click opens the chooser of a file input nothing shows.
+const picked = document.querySelector('#picked');
+document.querySelector('[data-testid="upload-button"]').addEventListener('click', () => picked.click());
+picked.addEventListener('change', () => {
+  document.querySelector('[data-testid="picked-name"]').textContent = picked.files[0]?.name ?? 'No file';
+});
+
+// A custom radio that a click clears, which a native one never does.
+const ariaRadio = document.querySelector('[data-testid="aria-radio"]');
+ariaRadio.addEventListener('click', () => ariaRadio.setAttribute('aria-checked', ariaRadio.getAttribute('aria-checked') === 'true' ? 'false' : 'true'));

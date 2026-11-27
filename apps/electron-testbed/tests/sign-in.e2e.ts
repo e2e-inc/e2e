@@ -253,12 +253,15 @@ test.describe('sign-in window', () => {
     await expect(screen.getByTestId('late-check')).toBeChecked();
   });
 
-  test('presses a key on a node that cannot take focus, taps a slotted label, and dismisses a dialog', async ({ screen }) => {
+  test('presses a key on a node that cannot take focus, taps a slotted label, and fails the step after a dialog nothing answers', async ({ screen }) => {
     await screen.getByTestId('key-target').press('Enter');
     await expect(screen.getByTestId('key-result')).toHaveText('Key Enter');
     await screen.getByText('Save', { exact: true }).tap();
     await expect(screen.getByTestId('word-result')).toHaveText('Word button clicked');
     await screen.getByRole('button', 'Ask').tap();
+    // The app asked its user something and nothing answered: the next step says so, once.
+    const unanswered = await expect(screen.getByTestId('ask-result')).toHaveText('confirm returned false').then(() => undefined, (error: unknown) => error);
+    expect(String((unanswered as { cause?: unknown } | undefined)?.cause ?? unanswered)).toMatch(/unhandled confirm dialog: Sure\?; answer every dialog with electron\(\{ dialogs: 'accept' \}\)/);
     await expect(screen.getByTestId('ask-result')).toHaveText('confirm returned false');
   });
 

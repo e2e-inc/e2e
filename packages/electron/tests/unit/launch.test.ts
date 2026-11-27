@@ -4,12 +4,13 @@ import { launchEnv } from '../../src/app-process.ts';
 import { engineArguments } from '../../src/launcher.ts';
 
 describe('launchEnv', () => {
-  it('passes the run\'s environment without ELECTRON_RUN_AS_NODE and NODE_OPTIONS, the engine\'s own entries over it', () => {
-    expect(launchEnv({ PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect', UNSET: undefined, MODE: 'run' }, { MODE: 'test', EXTRA: '1' })).toEqual({ PATH: '/bin', MODE: 'test', EXTRA: '1' });
+  it('gives the app what a process needs to start and draw, never the rest of the run\'s environment', () => {
+    const run = { PATH: '/bin', HOME: '/home/ada', DISPLAY: ':99', LC_ALL: 'C', SystemRoot: 'C:\\Windows', OPENAI_API_KEY: 'sk-secret', AI_GATEWAY_API_KEY: 'secret', GITHUB_TOKEN: 'ghs', MODE: 'run', UNSET: undefined };
+    expect(launchEnv(run, {})).toEqual({ PATH: '/bin', HOME: '/home/ada', DISPLAY: ':99', LC_ALL: 'C', SystemRoot: 'C:\\Windows' });
   });
 
-  it('lets the engine\'s env option set ELECTRON_RUN_AS_NODE on purpose', () => {
-    expect(launchEnv({}, { ELECTRON_RUN_AS_NODE: '1' })).toEqual({ ELECTRON_RUN_AS_NODE: '1' });
+  it('adds the engine\'s env option over it, and never ELECTRON_RUN_AS_NODE or NODE_OPTIONS in any case', () => {
+    expect(launchEnv({ PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect' }, { PATH: '/app/bin', API_URL: 'http://localhost', electron_run_as_node: '1', Node_Options: '--x' })).toEqual({ PATH: '/app/bin', API_URL: 'http://localhost' });
   });
 });
 

@@ -1,4 +1,5 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from '@e2e-dev/electron';
 import { credentials, expect } from 'e2e';
@@ -141,6 +142,47 @@ test.describe('controls page', () => {
     expect(realpathSync(path.dirname(downloads))).toBe(realpathSync(userData));
     await screen.getByRole('link', 'Download note').tap();
     await expect.poll(() => existsSync(path.join(downloads, 'note.txt'))).toBe(true);
+  });
+
+  test('finds text that inline markup splits, and text under aria-hidden, as web() does', async ({ screen }) => {
+    await expect(screen.getByText('Order ABC123', { exact: true })).toHaveCount(1);
+    await expect(screen.getByText('Order ABC123')).toHaveCount(1);
+    await expect(screen.getByText('ABC123', { exact: true })).toHaveCount(1);
+    await expect(screen.getByText('Ref R77', { exact: true })).toHaveCount(1);
+    await expect(screen.getByText('Unlisted directions', { exact: true })).toHaveCount(1);
+  });
+
+  test('checks a box its app replaces, unchecks a custom radio, and refuses to fill a field no user reaches', async ({ screen }) => {
+    await screen.getByTestId('replace-box').check();
+    await expect(screen.getByText('Saved', { exact: true })).toBeVisible();
+    await screen.getByTestId('aria-radio').uncheck();
+    await expect(screen.getByTestId('aria-radio')).toHaveAttribute('aria-checked', 'false');
+    const hidden = await failure(screen.getByTestId('hidden-date').fill('2026-01-01', { timeout: 500 }));
+    expect(hidden).toMatchObject({ cause: { message: expect.stringMatching(/it is not visible/) } });
+    await expect(screen.getByTestId('hidden-date')).toHaveValue('');
+  });
+
+  test('gives files to the chooser a button opens', async ({ screen }) => {
+    await screen.getByTestId('upload-button').setInputFiles('app/settings.html');
+    await expect(screen.getByTestId('picked-name')).toHaveText('settings.html');
+    // A button that opens no chooser is no place for a file.
+    const refused = await failure(screen.getByRole('button', 'Hold').setInputFiles('app/settings.html', { timeout: 500 }));
+    expect(refused).toMatchObject({ cause: { message: expect.stringMatching(/opened no file chooser/) } });
+  });
+
+  test('withholds a window that left the app for a local file from screenshots and observations', async ({ app, screen, electron }) => {
+    const outside = path.join(tmpdir(), `e2e-electron-outside-${process.pid}.txt`);
+    writeFileSync(outside, 'outside the app');
+    try {
+      await electron.evaluate(({ BrowserWindow }, file) => BrowserWindow.getAllWindows()[0]?.loadFile(file), outside);
+      // A test's own locator still reads what its app shows.
+      await expect(screen.getByText('outside the app')).toBeVisible();
+      const refused = await failure(app.screenshot('outside'));
+      expect(refused).toMatchObject({ code: 'POLICY_DENIED' });
+      expect(String(refused)).toMatch(/left the app's directory/);
+    } finally {
+      rmSync(outside, { force: true });
+    }
   });
 
   test('drags a draggable element onto a drop target, with the data its dragstart set', async ({ screen }) => {

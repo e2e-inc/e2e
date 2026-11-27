@@ -58,9 +58,6 @@
   "peerDependenciesMeta": {
     "e2e": {
       "optional": true
-    },
-    "electron": {
-      "optional": true
     }
   },
   "devDependencies": {

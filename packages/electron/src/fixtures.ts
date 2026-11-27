@@ -24,8 +24,8 @@ export type WindowMatcher = number | { readonly title?: string | RegExp; readonl
 
 /**
  * The main process's `electron` module, as a function passed to `evaluate`
- * receives it: typed by the project's own `electron` package, the optional
- * peer every Electron project installs.
+ * receives it: typed by the project's own `electron` package, a peer of
+ * this one.
  */
 export type ElectronMainModule = typeof import('electron');
 

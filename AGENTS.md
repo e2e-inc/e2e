@@ -182,7 +182,12 @@ the way a user would.
   in Chromium (`tests/integration/`). Windows are the tabs. Screenshots
   mask password fields and nested documents, and are withheld when the DOM
   snapshot finds one inside a closed shadow root, which no mask reaches
-  (`unmaskableCount`, independent of the accessibility tree).
+  (`unmaskableCount`, independent of the accessibility tree). The app gets
+  only a few variables of the run's environment (`INHERITED_ENV` in
+  `src/app-process.ts`) and `electron({ env })`. A window that shows a local
+  file outside the app's directory is not observed, traced, or captured
+  (`src/file-bound.ts`): an Electron target has no `app.url` for core's
+  file-app bound to key on.
 - `packages/core/src/engine/protocol/` - the engine protocol: the engine
   contract as LSP-style JSON-RPC (`connectEngine` client, `serveEngine`
   server, spawn/socket/loopback transports), so an engine can run in

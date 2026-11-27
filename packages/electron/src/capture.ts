@@ -17,10 +17,16 @@ import type { AppWindow } from './windows.ts';
 /** Everything that can hold a secure value or show another document in a screenshot: masked, or the capture is not taken. */
 const MASKED_SELECTOR = ['input[type=password i]', ...MASKED_TAGS.map((tag) => tag.toLowerCase())].join(', ');
 
-/** How many password fields and nested documents in the window's document no selector mask reaches; see `DomSnapshot.unmaskableCount`. */
-async function unmaskable(devtools: DevTools, window: AppWindow): Promise<number> {
-  return (await devtools.snapshot(window.page))?.dom.unmaskableCount() ?? 0;
+/**
+ * How many password fields and nested documents in the window's document no
+ * selector mask reaches; see `DomSnapshot.unmaskableCount`. Undefined when the
+ * document could not be read: nothing is then known to be masked.
+ */
+async function unmaskable(devtools: DevTools, window: AppWindow): Promise<number | undefined> {
+  return (await devtools.snapshot(window.page))?.dom.unmaskableCount();
 }
+
+const UNREAD = 'the window\'s document could not be read to check what its masks cover, so the screenshot is withheld';
 
 /** A capture with its masks painted over, or why it is withheld; `masked` says how many regions the masks cover either way. */
 type MaskedCapture = { readonly masked: number } & ({ readonly image: Buffer } | { readonly withheld: string });
@@ -38,7 +44,7 @@ function outOfReach(count: number): string {
  * capture runs, inside a closed shadow root or beside the masks already
  * placed, so the document is read again before the pixels go out.
  */
-function maskedCapture(devtools: DevTools, window: AppWindow, unmaskableBefore: number, scale: 'css' | 'device'): Promise<MaskedCapture> {
+function maskedCapture(devtools: DevTools, window: AppWindow, unmaskableBefore: number | undefined, scale: 'css' | 'device'): Promise<MaskedCapture> {
   // One capture of a page at a time: the masks are the page's, and a second capture would take the first one's away.
   const turn = (captures.get(window.page) ?? Promise.resolve()).then(() => captureUnderMasks(devtools, window, unmaskableBefore, scale));
   captures.set(window.page, turn.catch(() => undefined));
@@ -47,8 +53,9 @@ function maskedCapture(devtools: DevTools, window: AppWindow, unmaskableBefore: 
 
 const captures = new WeakMap<PageTarget, Promise<unknown>>();
 
-async function captureUnderMasks(devtools: DevTools, window: AppWindow, unmaskableBefore: number, scale: 'css' | 'device'): Promise<MaskedCapture> {
+async function captureUnderMasks(devtools: DevTools, window: AppWindow, unmaskableBefore: number | undefined, scale: 'css' | 'device'): Promise<MaskedCapture> {
   const { page } = window;
+  if (unmaskableBefore === undefined) return { masked: (await page.evaluate(removeMasks, MASKED_SELECTOR)).count, withheld: UNREAD };
   if (unmaskableBefore > 0) return { masked: (await page.evaluate(removeMasks, MASKED_SELECTOR)).count, withheld: outOfReach(unmaskableBefore) };
   const placed = await page.evaluate(placeMasks, MASKED_SELECTOR);
   const { count: masked } = placed;
@@ -64,6 +71,7 @@ async function captureUnderMasks(devtools: DevTools, window: AppWindow, unmaskab
   if (!placed.placed) return { masked, withheld: 'a mask did not cover the password field or nested document it was placed over, so the screenshot is withheld' };
   if (after?.placed !== true) return { masked, withheld: 'the masks did not last through the screenshot (the window loaded another document, or the page removed them), so the screenshot is withheld' };
   const unmaskableAfter = await unmaskable(devtools, window);
+  if (unmaskableAfter === undefined) return { masked, withheld: UNREAD };
   if (unmaskableAfter > 0) return { masked, withheld: outOfReach(unmaskableAfter) };
   if (after.count > masked) {
     return { masked, withheld: 'a password field or nested document appeared while the screenshot was taken, after its masks were placed, so the screenshot is withheld' };

@@ -91,14 +91,17 @@ describe('nodeOp', () => {
     await expect(run(gone, 'checkEnabled', true)).rejects.toThrow(/Node is detached/);
   });
 
-  it('says whether a file input takes several files, empties one, and tells a radio', async () => {
+  it('says whether a file input takes several files, empties one, and tells a native radio and a file input', async () => {
     await window.setContent(`<input id="one" type="file"><input id="many" type="file" multiple><input id="radio" type="radio"><div id="aria" role="radio"></div><input id="box" type="checkbox">`);
     expect(await run(await element('#one'), 'takesFiles', 2)).toEqual({ ok: false, reason: 'the file input takes one file, not 2: it has no multiple attribute' });
     expect(await run(await element('#many'), 'takesFiles', 2)).toEqual({ ok: true });
     await run(await element('#one'), 'clearFiles');
-    expect(await run(await element('#radio'), 'isRadio')).toBe(true);
-    expect(await run(await element('#aria'), 'isRadio')).toBe(true);
-    expect(await run(await element('#box'), 'isRadio')).toBe(false);
+    expect(await run(await element('#radio'), 'isNativeRadio')).toBe(true);
+    // A custom radio's click may clear it: uncheck() tries.
+    expect(await run(await element('#aria'), 'isNativeRadio')).toBe(false);
+    expect(await run(await element('#box'), 'isNativeRadio')).toBe(false);
+    expect(await run(await element('#one'), 'isFileInput')).toBe(true);
+    expect(await run(await element('#box'), 'isFileInput')).toBe(false);
   });
 
   it('reads a checked state from the input or aria-checked on a role that has one, and null for none', async () => {

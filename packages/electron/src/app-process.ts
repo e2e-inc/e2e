@@ -12,9 +12,10 @@ import { answerWithin, Budget } from './budget.ts';
 import { consoleText } from './console-text.ts';
 import type { ElectronMainModule } from './fixtures.ts';
 import { closedWindow, invalidState, unsupported } from './errors.ts';
+import { appDirectory } from './file-bound.ts';
 import { ElectronProcess, type ProcessExit } from './launcher.ts';
 import { MainEvaluateError, MainProcess } from './main-process.ts';
-import type { ResolvedElectronOptions } from './options.ts';
+import { REFUSED_ENV, type ResolvedElectronOptions } from './options.ts';
 import { PageTarget } from './page.ts';
 import type { Windows } from './windows.ts';
 
@@ -73,11 +74,15 @@ interface RunningApp {
 interface AppReport {
   log(entry: Parameters<EngineAttemptContext['appLog']>[0]): void;
   navigated(url: string): void;
+  /** A dialog nothing answered: the failure of the test's next step. */
+  dialog(unhandled: EngineError): void;
 }
 
 export class AppProcess {
   private app: RunningApp | undefined;
   private exit: string | undefined;
+  private directory: string | undefined;
+  private dialog: EngineError | undefined;
   private queue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -88,6 +93,18 @@ export class AppProcess {
   /** Whether an app is running. */
   get running(): boolean {
     return this.app !== undefined;
+  }
+
+  /** The directory the running app's own pages are in, once it launched; see `appDirectory`. */
+  get appDirectory(): string | undefined {
+    return this.directory;
+  }
+
+  /** The dialog the app opened that nothing answered, once: undefined when there was none since the last call. */
+  takeUnhandledDialog(): EngineError | undefined {
+    const { dialog } = this;
+    this.dialog = undefined;
+    return dialog;
   }
 
   /** Why nothing can be read or run: the app quit on its own during the test, or was never opened. */
@@ -112,6 +129,7 @@ export class AppProcess {
     const app = this.app;
     this.app = undefined;
     this.exit = undefined;
+    this.directory = undefined;
     this.windows.clear();
     if (app === undefined) return;
     await stop(app, Math.min(budget.timeoutMs, graceMs));
@@ -181,6 +199,10 @@ export class AppProcess {
     }
     const versions = await answerWithin(readVersions(app, main), left());
     if (versions !== undefined) setup.attempt.environment(versions);
+    const reported = main === undefined ? undefined : await answerWithin(main.evaluate(({ app: electronApp }) => electronApp.getAppPath(), undefined), Math.min(left(), ANSWER_MS));
+    const { appPath } = setup.app;
+    const firstDocument = this.windows.current()?.page.url() ?? '';
+    this.directory = appDirectory({ reported, declared: appPath === undefined ? undefined : path.resolve(setup.projectRoot, appPath), firstDocument });
   }
 
   /** Starts the binary. Nothing is awaited: a binary that cannot start shows as a process that ended. */
@@ -221,6 +243,10 @@ export class AppProcess {
       },
       navigated: (url) => {
         if (current()) attempt.navigation(url);
+      },
+      dialog: (unhandled) => {
+        // The first one is the one to report: the app's later dialogs follow from it.
+        if (current()) this.dialog ??= unhandled;
       },
     };
     /** The targets being attached right now; one that is destroyed meanwhile is taken out. */
@@ -281,11 +307,23 @@ export class AppProcess {
     session.on('Runtime.exceptionThrown', ({ exceptionDetails }) => {
       log({ source: 'error', level: 'error', text: exceptionDetails.exception?.description?.split('\n')[0] ?? exceptionDetails.text });
     });
-    // The dialog is dismissed here, and the log says the app asked. A beforeunload guard is accepted instead:
-    // dismissing it would keep the window open through the engine's own quit.
+    // A beforeunload guard is accepted: dismissing it would keep the window open through the engine's own quit. Any
+    // other dialog is answered as the `dialogs` option says. With none, it is dismissed so the app goes on, and the
+    // test's next step fails: the app asked its user something and nothing answered.
     session.on('Page.javascriptDialogOpening', (dialog) => {
-      if (dialog.type !== 'beforeunload') log({ source: 'error', level: 'error', text: `unhandled ${dialog.type} dialog dismissed: ${dialog.message}` });
-      void session.send('Page.handleJavaScriptDialog', { accept: dialog.type === 'beforeunload' }).catch(() => undefined);
+      const { dialogs } = this.options;
+      const { type, message } = dialog;
+      if (type === 'beforeunload') {
+        void session.send('Page.handleJavaScriptDialog', { accept: true }).catch(() => undefined);
+        return;
+      }
+      if (dialogs === undefined) {
+        log({ source: 'error', level: 'error', text: `unhandled ${type} dialog dismissed: ${message}` });
+        report.dialog(new EngineError('INVALID_STATE', `unhandled ${type} dialog: ${message}; answer every dialog with electron({ dialogs: 'accept' }) or electron({ dialogs: 'dismiss' })`, { retryable: false }));
+      } else {
+        log({ source: 'console', level: 'info', text: `${type} dialog ${JSON.stringify(message)} opened; ${dialogs === 'accept' ? 'accepting' : 'dismissing'} it per electron({ dialogs: '${dialogs}' })` });
+      }
+      void session.send('Page.handleJavaScriptDialog', { accept: dialogs === 'accept' }).catch(() => undefined);
     });
     // A crashed renderer answers nothing, and reads say so until it reloads. The session lives on: the renderer the
     // reload starts answers on it, in a new document.
@@ -525,20 +563,33 @@ async function placeDownloads(main: MainProcess, directory: string, withinMs: nu
 }
 
 /**
- * The run's environment for the app, with the engine's `env` option over it.
- * Left out: `ELECTRON_RUN_AS_NODE`, which a runner started from an
- * Electron-based editor inherits and which would start the binary as plain
- * Node.js, and `NODE_OPTIONS`, whose loaders and inspector flags are the
- * runner's own.
+ * The app's environment: the few variables of the run's that a process needs
+ * to start and draw (`INHERITED_ENV`, and the locale's `LC_*`), with the
+ * engine's `env` option over them. The rest of the run's environment stays
+ * with the runner: it holds provider keys and tokens, and an app can log or
+ * upload what it is given. Never `ELECTRON_RUN_AS_NODE`, which would start
+ * the binary as plain Node.js, nor `NODE_OPTIONS`.
  */
 export function launchEnv(runEnv: Readonly<Record<string, string | undefined>>, extra: Readonly<Record<string, string>>): Record<string, string> {
   const env: Record<string, string> = {};
   // Windows reads a variable's name in any case.
-  for (const [key, value] of Object.entries(runEnv)) if (value !== undefined && !LEFT_OUT.has(key.toUpperCase())) env[key] = value;
-  return { ...env, ...extra };
+  for (const [key, value] of Object.entries(runEnv)) {
+    const name = key.toUpperCase();
+    if (value !== undefined && (INHERITED_ENV.has(name) || name.startsWith('LC_'))) env[key] = value;
+  }
+  for (const [key, value] of Object.entries(extra)) if (!REFUSED_ENV.has(key.toUpperCase())) env[key] = value;
+  return env;
 }
 
-const LEFT_OUT: ReadonlySet<string> = new Set(['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS']);
+/** The variables of the run's environment an app is started with, by their upper-case names. */
+const INHERITED_ENV: ReadonlySet<string> = new Set([
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LANGUAGE', 'TZ', 'TMPDIR', 'TMP', 'TEMP', '__CF_USER_TEXT_ENCODING',
+  // A display to draw on, and the session it belongs to.
+  'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR', 'XDG_SESSION_TYPE', 'XDG_CURRENT_DESKTOP', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'DBUS_SESSION_BUS_ADDRESS',
+  // What Windows processes read to find the system and the user's profile.
+  'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', 'COMSPEC', 'PATHEXT', 'USERPROFILE', 'USERNAME', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMDATA', 'PROGRAMFILES', 'PROGRAMFILES(X86)',
+]);
+
 
 function levelOf(type: string): 'error' | 'warning' | 'info' {
   return type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'info';

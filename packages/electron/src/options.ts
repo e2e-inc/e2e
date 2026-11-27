@@ -6,6 +6,9 @@
 
 import { ConfigurationError, rejectUnknownKeys } from '@e2e-dev/core/engine';
 
+/** Variables no app is started with, whoever sets them, by their upper-case names. */
+export const REFUSED_ENV: ReadonlySet<string> = new Set(['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS']);
+
 /**
  * Options of the Electron engine. Every optional value also accepts
  * `undefined`, so values read straight from `process.env` need no
@@ -36,6 +39,12 @@ export interface ElectronOptions {
    * own steps never wait: `expect` polls their outcome. Default 100.
    */
   readonly settle?: number | false | undefined;
+  /**
+   * How every `alert` and `confirm` the app opens is answered: `'accept'`
+   * as clicking OK does, or `'dismiss'`. Electron has no `prompt`. Unset, a dialog is dismissed and fails the test's next step:
+   * the app asked its user something, and nothing answered.
+   */
+  readonly dialogs?: 'accept' | 'dismiss' | undefined;
 }
 
 const OPTION_KEYS = Object.keys({
@@ -45,6 +54,7 @@ const OPTION_KEYS = Object.keys({
   launchTimeout: true,
   testIdAttribute: true,
   settle: true,
+  dialogs: true,
 } satisfies Record<keyof ElectronOptions, true>);
 
 /** The options with defaults applied, checked once at config load. */
@@ -55,6 +65,7 @@ export interface ResolvedElectronOptions {
   readonly launchTimeoutMs: number;
   readonly testIdAttribute: string;
   readonly settleMs: number;
+  readonly dialogs?: 'accept' | 'dismiss';
 }
 
 const DEFAULT_LAUNCH_TIMEOUT_MS = 30_000;
@@ -86,7 +97,10 @@ export function resolveOptions(options: ElectronOptions | undefined): ResolvedEl
   const bag: ElectronOptions = options === undefined ? {} : options;
   if (typeof bag !== 'object' || bag === null || Array.isArray(bag)) throw new ConfigurationError('INVALID_CONFIG', 'electron() options must be an object');
   rejectUnknownKeys('electron() options', bag, OPTION_KEYS);
-  const { executablePath, args, env, launchTimeout, testIdAttribute, settle } = bag;
+  const { executablePath, args, env, launchTimeout, testIdAttribute, settle, dialogs } = bag;
+  if (dialogs !== undefined && dialogs !== 'accept' && dialogs !== 'dismiss') {
+    throw new ConfigurationError('INVALID_CONFIG', `electron({ dialogs }) must be "accept" or "dismiss", got ${JSON.stringify(dialogs)}`);
+  }
   if (executablePath !== undefined && (typeof executablePath !== 'string' || executablePath === '')) {
     throw new ConfigurationError('INVALID_CONFIG', 'electron({ executablePath }) must be a path to an executable');
   }
@@ -98,8 +112,13 @@ export function resolveOptions(options: ElectronOptions | undefined): ResolvedEl
   if (env !== undefined && (typeof env !== 'object' || env === null || Array.isArray(env) || Object.values(env).some((value) => typeof value !== 'string'))) {
     throw new ConfigurationError('INVALID_CONFIG', 'electron({ env }) must be an object of variable name to string value');
   }
-  if (env !== undefined && 'ELECTRON_RUN_AS_NODE' in env) {
-    throw new ConfigurationError('INVALID_CONFIG', 'electron({ env }) must not set ELECTRON_RUN_AS_NODE: it starts the binary as plain Node.js, which opens no window');
+  // Windows reads a variable's name in any case.
+  const refused = env === undefined ? undefined : Object.keys(env).find((name) => REFUSED_ENV.has(name.toUpperCase()));
+  if (refused !== undefined) {
+    throw new ConfigurationError(
+      'INVALID_CONFIG',
+      `electron({ env }) must not set ${refused}: ${refused.toUpperCase() === 'NODE_OPTIONS' ? 'the engine starts the app with its own Node.js switches' : 'it starts the binary as plain Node.js, which opens no window'}`,
+    );
   }
   if (launchTimeout !== undefined && (!Number.isInteger(launchTimeout) || launchTimeout < 1)) {
     throw new ConfigurationError('INVALID_CONFIG', 'electron({ launchTimeout }) must be a whole number of milliseconds, at least 1');
@@ -117,5 +136,6 @@ export function resolveOptions(options: ElectronOptions | undefined): ResolvedEl
     launchTimeoutMs: launchTimeout ?? DEFAULT_LAUNCH_TIMEOUT_MS,
     testIdAttribute: testIdAttribute ?? 'data-testid',
     settleMs: settle === false ? 0 : (settle ?? DEFAULT_SETTLE_MS),
+    ...(dialogs === undefined ? {} : { dialogs }),
   };
 }

@@ -53,8 +53,10 @@ export interface NodeOps {
   takesFiles(count: number): Readiness;
   /** Empties a file input, with its input and change events. */
   clearFiles(): void;
-  /** A native radio, or an element with a radio role. */
-  isRadio(): boolean;
+  /** A native radio: one a click never clears. A custom one clears if its app says so. */
+  isNativeRadio(): boolean;
+  /** Whether the node is a file input, which takes files itself. */
+  isFileInput(): boolean;
   /** Whether the node, the focused element, takes typed text, or typed keys as a widget's typeahead. */
   takesText(): boolean;
 }
@@ -189,6 +191,8 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       if (isDisabled(element)) return { ok: false, reason: 'it is disabled' };
       if (element.closest('[inert]') !== null) return { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
       if (field?.readOnly === true) return { ok: false, reason: 'it is read-only' };
+      // A value can be set on a field no user reaches; typing into one would fail on its own.
+      if (!element.checkVisibility({ visibilityProperty: true })) return { ok: false, reason: 'it is not visible' };
       return { ok: true };
     },
     setValue(value) {
@@ -270,9 +274,13 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       input.value = '';
       fire(input);
     },
-    isRadio() {
+    isNativeRadio() {
       const target = live();
-      return (target instanceof HTMLInputElement && target.type === 'radio') || ['radio', 'menuitemradio'].includes(target.getAttribute('role') ?? '');
+      return target instanceof HTMLInputElement && target.type === 'radio';
+    },
+    isFileInput() {
+      const target = live();
+      return target instanceof HTMLInputElement && target.type === 'file';
     },
     takesText() {
       const active = live();

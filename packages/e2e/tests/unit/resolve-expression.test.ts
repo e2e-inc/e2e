@@ -136,6 +136,10 @@ describe('resolveExpression', () => {
     expect(resolveExpression(scoped('toast'), nodes, { textQuery: 'text' }).map((found) => found.ref.id)).toEqual(['toast']);
     expect(resolveExpression(scoped('card'), nodes, { textQuery: 'text' }).map((found) => found.ref.id)).toEqual(['line']);
     expect(resolveExpression(scoped('toast'), nodes)).toEqual([]);
+    // Only a text query: a label names what is inside the scope, never the scope by its own name.
+    const named = [node('group', { testId: 'group', name: 'Saved', text: 'Saved' })];
+    const labelled: LocatorExpression = { kind: 'query', query: { kind: 'label', value: { kind: 'string', value: 'Saved', exact: true } }, scope: query('testId', 'group') };
+    expect(resolveExpression(labelled, named, { textQuery: 'text' })).toEqual([]);
   });
 
   it('scopes, filters, and indexes', () => {
@@ -283,12 +287,14 @@ describe('expressionSelectors', () => {
       kind: 'union',
       left: {
         kind: 'index',
-        source: { kind: 'filter', source: { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'button', exact: true } }, scope: { kind: 'selector', selector: '#form' } }, has: { kind: 'selector', selector: '.icon' }, hasNot: { kind: 'selector', selector: '#form' } },
+        source: { kind: 'filter', source: { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'button', exact: true } }, scope: { kind: 'selector', selector: '#form' } }, has: { kind: 'selector', selector: '.icon' }, hasNot: { kind: 'selector', selector: '.spinner' } },
         index: 'first',
       },
       right: { kind: 'selector', selector: 'button.primary' },
     };
-    expect(expressionSelectors(expression)).toEqual(['#form', '.icon', 'button.primary']);
+    expect(expressionSelectors(expression)).toEqual(['#form', '.icon', '.spinner', 'button.primary']);
+    // A selector named twice is listed once.
+    expect(expressionSelectors({ kind: 'union', left: { kind: 'selector', selector: '#form' }, right: { kind: 'selector', selector: '#form' } })).toEqual(['#form']);
   });
 
   it('leaves out a frame, which the resolve refuses', () => {

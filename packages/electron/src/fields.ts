@@ -222,7 +222,10 @@ function valueOf(node: AXNode | undefined, facts: DomFacts | undefined, role: st
  * path, a query and a fragment only as `?…` and `#…` (they routinely carry
  * tokens), and a scheme with no origin (`data:`, `javascript:`), whose path
  * is a whole file or script, as `scheme:…`. A relative link resolves against
- * the document's URL.
+ * the document's URL. The web engine's own copy is `originAndPath` in
+ * `packages/web/src/in-page/read-semantics.ts`: a change to what either hides
+ * belongs in both. They differ in one place on purpose: this one shows a
+ * `file:` path, since an Electron app's own pages are local files.
  */
 function originAndPath(value: string, base: string | undefined): string {
   const elided = (query: boolean, fragment: boolean): string => `${query ? '?…' : ''}${fragment ? '#…' : ''}`;
