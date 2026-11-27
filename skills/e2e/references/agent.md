@@ -198,10 +198,7 @@ of sleeping.
 
 A redacted snapshot of the screen (roles, names, text, states), prior-step
 summaries, and your context; never raw HTML, cookies, headers, environment
-values, or a `Secret`'s value. When most of a screen changed, the whole
-screen goes out again with large subtrees that have not changed since the
-last screen folded to one line each, naming the node count and the revision
-that last listed them in full; `observe` still returns the complete tree. Pixels arrive through `vision` on a judgment,
+values, or a `Secret`'s value. Pixels arrive through `vision` on a judgment,
 and in `act` through its screenshot and point tools, an opening screenshot
 when the screen lists no interactive node, and a screenshot when the browser
 engine's tree capture times out (a judgment gets that one only with `vision`
@@ -278,10 +275,8 @@ flow. Full reference: docs/debugging.mdx.
 
 A custom `executor` (`StepExecutor` or `createToolLoopExecutor`) keeps the
 runner's observations, budgets, and report; `system` or `tools` beside
-`executor` is `INVALID_CONFIG`. A `complete_step` sent in the same turn as
-other calls waits for the calls before it, and is refused when one failed or
-the last one changed nothing; calls after it don't run. Full reference:
-docs/tools.mdx, docs/executors.mdx.
+`executor` is `INVALID_CONFIG`. Full reference: docs/tools.mdx,
+docs/executors.mdx.
 
 ## In CI
 

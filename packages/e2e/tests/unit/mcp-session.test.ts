@@ -202,4 +202,83 @@ describe('session screen presenter', () => {
     expect(text).toContain('heading "Order 42"');
     await sessionHost.close('done', id);
   });
+
+  it('lists the sidebar in full after a large change when no observe listed it first', { timeout: 60_000 }, async () => {
+    // The same orders page as the fold test above, but the tap comes
+    // straight after the opening, which only named the first screen.
+    // Nothing has listed the sidebar in full, so the tap's whole screen
+    // lists it whole: a fold here would name a revision the model was
+    // only told about, never shown.
+    const sidebar: ScriptedNode = {
+      id: 'sidebar',
+      role: 'navigation',
+      name: 'Sidebar',
+      children: Array.from({ length: 12 }, (_, i) => ({ id: `item-${String(i + 1)}`, role: 'link', name: `Item ${String(i + 1)}` })),
+    };
+    const details: ScriptedNode[] = [
+      { id: 'detail-heading', role: 'heading', name: 'Order 42' },
+      { id: 'detail-total', role: 'text', name: 'Total $12' },
+      { id: 'detail-placed', role: 'text', name: 'Placed yesterday' },
+      { id: 'detail-refund', role: 'button', name: 'Refund' },
+      { id: 'detail-ship', role: 'button', name: 'Ship' },
+      { id: 'detail-print', role: 'button', name: 'Print' },
+      { id: 'detail-archive', role: 'button', name: 'Archive' },
+      { id: 'detail-note', role: 'text', name: 'Ships in 2 days' },
+      { id: 'detail-history', role: 'link', name: 'Order history' },
+      { id: 'detail-back', role: 'link', name: 'Back to orders' },
+    ];
+    const main: ScriptedNode = {
+      id: 'main',
+      role: 'main',
+      name: 'Order list',
+      children: [
+        { id: 'list-heading', role: 'heading', name: 'Orders' },
+        {
+          id: 'order-1',
+          role: 'button',
+          name: 'Order 1',
+          on: () => {
+            main.name = 'Order details';
+            main.children = details;
+          },
+        },
+        { id: 'order-2', role: 'button', name: 'Order 2' },
+      ],
+    };
+    const fake = createFakeEngine({ scene: () => [sidebar, main] });
+    const sessionHost = new SessionHost({
+      locateConfig: (requested) => path.join(dir, requested ?? 'e2e.config.ts'),
+      loadConfig: async (configPath) => ({
+        ...resolveConfig(
+          {
+            targets: [{ name: 'kiosk', platform: 'kiosk', engine: fake.engine, app: FAKE_APP }],
+            credentials: { admin: { username: 'admin', password: 'kiosk-pw' } },
+          } as never,
+          { projectRoot: dir, env: {}, configPath },
+        ),
+        configPath,
+      }),
+      loadEngineConfig: async () => {
+        throw new Error('this test opens no engine session');
+      },
+      env: {},
+      headed: false,
+      log: () => undefined,
+    });
+    host = sessionHost;
+    const opened = await sessionHost.open({});
+    const sessionMatch = /^Session (\S+) open/.exec(opened);
+    if (sessionMatch === null) throw new Error('open text names no session');
+    const id = sessionMatch[1]!;
+    expect(opened).toMatch(/Screen: revision b\d+, .*not listed\./);
+    expect(opened).not.toContain('link "Item 1"');
+    const tapped = await sessionHost.call(id, 'tap', { target: 'order-1' }, { signal: new AbortController().signal });
+    const text = textOf(tapped);
+    expect(text).toContain('Tapped #order-1.');
+    expect(text).not.toContain('same as revision');
+    expect(text).toContain('link "Item 1"');
+    expect(text).toContain('link "Item 12"');
+    expect(text).toContain('heading "Order 42"');
+    await sessionHost.close('done', id);
+  });
 });

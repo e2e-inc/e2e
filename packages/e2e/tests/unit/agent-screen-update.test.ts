@@ -407,6 +407,17 @@ describe('ScreenPresenter folds large unchanged subtrees in the full-screen fall
     expect(text).toContain(' #n37 link "Back to orders"');
   });
 
+  it('records no folds for a screen it only named, so the next whole screen lists it in full', () => {
+    const presenter = foldingPresenter();
+    presenter.unlisted(screen('b1', orderScreen(MAIN_LIST, 12)));
+    const text = presenter.update(screen('b2', orderScreen(MAIN_DETAILS, 12), { path: '/orders' }), { lead: 'Tapped #n22.' });
+    expect(text).toContain('The screen changed substantially since revision b1.');
+    expect(text).not.toContain('nodes inside, same as revision');
+    expect(text).toContain(' #n3 link "Item 1"');
+    expect(text).toContain(' #n14 link "Item 12"');
+    expect(text).toContain(' #n30 heading "Order 42"');
+  });
+
   it('keeps a small unchanged subtree listed in full', () => {
     const presenter = foldingPresenter();
     presenter.initial(screen('b1', orderScreen(MAIN_LIST, 3)));

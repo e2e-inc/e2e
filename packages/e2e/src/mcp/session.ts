@@ -55,8 +55,6 @@ const CLOSE_GRACE_MS = 60 * 1000;
 const SESSION_INSTRUCTION = 'Interactive session: a coding agent drives the app over MCP.';
 /** The `session` argument of every tool that takes one. */
 const SESSION_ARGUMENT = 'Session ID from open_session; optional while one session is open';
-
-
 /** Where an agent reads how to write a test, said in the server's instructions and every session's opening. */
 export const READ_WRITING_GUIDE = 'Before you write or edit a test, read the writing-tests guide: the resource e2e://guide/writing-tests, or npx e2e guide writing-tests in a shell.';
 
