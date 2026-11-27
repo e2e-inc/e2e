@@ -889,7 +889,6 @@ function readRecording(testId: string, entry: LockEntry, index: number, step: Re
   };
   const read = readTraceEntry(document);
   if (read === undefined) return invalid(`${where} is not a replayable recording`);
-  if (lock['keyedBy'] !== undefined && read.payload.keyedBy === undefined) return invalid(`${where} has a malformed keyedBy`);
   if (read.payload.recordedFor?.callIndex === undefined || read.payload.recordedFor.paramsDigest === undefined || read.payload.recordedFor.agent === undefined) {
     return invalid(`${where} does not name its whole step`);
   }

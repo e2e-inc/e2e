@@ -354,6 +354,22 @@ describe('FileCacheStore', () => {
     expect((await store.read(KEY, setup)).status).toBe('hit');
   });
 
+  it('saves and replays a recording whose key context the trace reader leaves out', async () => {
+    const { store } = await makeStore();
+    // A platform label longer than the trace reader keeps: provenance for diagnostics, not a replay input.
+    const keyedBy = {
+      cacheSchema: 'trace-1', policyVersion: '1', project: 'p', platform: 'linux-ui-'.repeat(35), engineName: 'web', engineSpiVersion: 1, appIdentity: 'http://127.0.0.1:4280/', agentContextDigest: 'd'.repeat(64),
+    };
+    expect(await store.write(KEY, payload('web', { keyedBy }))).toBeDefined();
+    const read = await store.read(KEY, step());
+    expect(read.status).toBe('hit');
+    expect(read.status === 'hit' ? read.entry.payload.keyedBy : 'missing').toBeUndefined();
+    // The same context with a short label is kept.
+    await store.write(KEY, payload('web', { keyedBy: { ...keyedBy, platform: 'linux' } }));
+    const short = await store.read(KEY, step());
+    expect(short.status === 'hit' ? short.entry.payload.keyedBy?.platform : undefined).toBe('linux');
+  });
+
   it('names an agent other than the default on its step', async () => {
     const { directory, store } = await makeStore();
     await store.write(KEY, payload('web', { recordedFor: step('web', { agent: 'admin' }) }));
