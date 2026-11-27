@@ -494,25 +494,33 @@ async function relocateEnds(
 ): Promise<Ends | undefined> {
   const refused = new Set<TraceTargetDescriptor>();
   let latest: Ends | undefined;
-  const judge = (descriptor: TraceTargetDescriptor, screen: SemanticScreen): { readonly relocated: Relocated; readonly wait: boolean } => {
+  let sourceNeedsPoint = false;
+  const judge = (descriptor: TraceTargetDescriptor, screen: SemanticScreen, needsPoint = false): { readonly relocated: Relocated; readonly wait: boolean } => {
     const result = relocateDescriptor(descriptor, screen.nodes);
     if (result.kind === 'found') {
       const node = screen.nodes.get(result.id);
-      return node === undefined ? { relocated: { kind: 'failed', failure: 'target-not-found' }, wait: true } : { relocated: { ...result, node }, wait: false };
+      if (node === undefined) return { relocated: { kind: 'failed', failure: 'target-not-found' }, wait: true };
+      // Once the point distinguished the source, a lone named match may
+      // be the other control. Require the point on the new observation.
+      if (needsPoint) return { relocated: { kind: 'failed', failure: 'target-ambiguous', candidates: [result.id], screen }, wait: false };
+      return { relocated: { ...result, node }, wait: false };
     }
     if (result.failure === 'target-ambiguous' && result.twinLeft === true) refused.add(descriptor);
     const marked = refused.has(descriptor) && result.failure === 'target-ambiguous' ? { ...result, twinLeft: true as const } : result;
     return { relocated: marked.failure === 'target-ambiguous' ? { ...marked, screen } : marked, wait: retryable(marked, descriptor) };
   };
   const settled = await pollSettled(host, (screen) => {
-    const from = source === undefined ? undefined : judge(source, screen);
+    const from = source === undefined ? undefined : judge(source, screen, sourceNeedsPoint);
     const to = destination === undefined ? undefined : judge(destination, screen);
     const unresolved = (descriptor: TraceTargetDescriptor | undefined, judged: typeof from) =>
       descriptor !== undefined && refused.has(descriptor) && judged?.relocated.kind === 'failed';
     latest = { screen, ends: [from?.relocated, to?.relocated], refused: unresolved(source, from) || unresolved(destination, to) };
     if (from?.relocated.kind === 'failed') {
       if (from.wait) return undefined;
-      if (to?.wait === true && shouldWaitForDestination?.(from.relocated, to.relocated) === true) return undefined;
+      if (to?.wait === true && shouldWaitForDestination?.(from.relocated, to.relocated) === true) {
+        sourceNeedsPoint = true;
+        return undefined;
+      }
       return latest;
     }
     return to?.wait === true ? undefined : latest;
