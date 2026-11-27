@@ -508,6 +508,9 @@ export class DesktopSurface {
       if (windows.some((window) => window.is_focused === true && window.system !== true)) return;
       await sleep(Math.min(LAUNCH_POLL_MS, Math.max(until - Date.now(), 0)), operation.signal);
     }
+    // A cancel during the last read or sleep, or an app that quit while it was waited for, is no app opened, as for `windowReadable`.
+    if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
+    await this.requireRunning();
   }
 
   /** The windows of the app the engine launched, for the `desktop` fixture; none while it is not running. */
