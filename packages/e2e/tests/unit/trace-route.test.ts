@@ -150,6 +150,10 @@ describe('routeLocation', () => {
     expect(routeLocation('<secret:gateway>/about?token=super-secret-token#frag')).toBe('<secret:gateway>/about?token=:id');
     // A port the URL names stays beside the marker.
     expect(routeLocation('<secret:gateway>:8443/callback?code=SyntheticCallbackValue')).toBe('<secret:gateway>:8443/callback?code=:id');
+    // A marker that took the slash before the path, or more of it, leaves no address; its query values still read :id.
+    expect(routeLocation('<secret:gateway>about?token=super-secret-token#frag')).toBe('<secret:gateway>about?token=:id');
+    expect(routeLocation('<secret:invite>welcome?code=MockCallbackCode')).toBe('<secret:invite>welcome?code=:id');
+    expect(routeLocation('<secret:app> › Delete it?')).toBe('<secret:app> › Delete it?');
     // A device title that opens with a marker is no address.
     expect(routeLocation('<secret:app> › Settings')).toBe('<secret:app> › Settings');
   });
@@ -171,6 +175,7 @@ describe('routeLocation', () => {
       '<secret:gateway>/orders/123?token=abc',
       '<secret:gateway>:8443/orders/123?token=abc',
       '/x;jsessionid=ABCDEF/y',
+      '<secret:invite>welcome?code=MockCallbackCode',
       'file:///srv/app/about.html?tab=summary',
       '/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fw',
     ]) {

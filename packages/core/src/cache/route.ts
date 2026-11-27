@@ -274,7 +274,15 @@ function storedSegment(segment: string): string {
  */
 function unparsedLocation(location: string): string {
   const parts = unparsedParts(location);
-  return parts === undefined ? location : `${parts.authority}${routeLocation(parts.path)}`;
+  if (parts !== undefined) return `${parts.authority}${routeLocation(parts.path)}`;
+  // A marker that took part of the path with the origin (`<secret:app>welcome?code=...`) leaves no address to read; its query is still one.
+  const at = location.indexOf('?');
+  if (at === -1 || !SECRET_MARKER.test(location.slice(0, at))) return location;
+  const hash = location.indexOf('#', at);
+  const search = location.slice(at + 1, hash === -1 ? undefined : hash);
+  if (search === '') return location;
+  const query = [...new URLSearchParams(search)].map(([key, value]) => `${spellPart(key)}=${value === '' ? '' : PARAM}`).join('&');
+  return `${location.slice(0, at)}?${query}`;
 }
 
 /** A secret's marker standing for a whole origin, with the port the URL names if any, then the path, query, or fragment. */
