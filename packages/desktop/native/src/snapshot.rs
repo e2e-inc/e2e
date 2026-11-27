@@ -287,6 +287,43 @@ fn intersect(a: Rect, b: Rect) -> Rect {
     Rect { x, y, width: (right - x).max(0.0), height: (bottom - y).max(0.0) }
 }
 
+/// The most ancestors `on_screen` walks up from an element to its window.
+const MAX_ANCESTORS: usize = 256;
+
+/// Whether an element shows in its window now, by the test the snapshot reads `offscreen` with: its frame is not wholly
+/// outside the window and every scroll area it is in, up to a menu or popover, which floats above the window. An element
+/// with no frame has no place to judge, and shows. `Err` when the app did not answer in time.
+pub(crate) fn on_screen(element: &Element) -> Result<bool, ax::AXError> {
+    let Some((x, y, width, height)) = element.frame() else {
+        return Ok(true);
+    };
+    let bounds = Rect { x, y, width, height };
+    let mut clip: Option<Rect> = None;
+    let mut next = element.element("AXParent");
+    for _ in 0..MAX_ANCESTORS {
+        let Some(parent) = next else { break };
+        let role = match parent.attribute("AXRole") {
+            Ok(value) => value.text().unwrap_or_default().to_owned(),
+            Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+            Err(_) => String::new(),
+        };
+        if floats(roles::role(&role, None)) {
+            break;
+        }
+        if matches!(role.as_str(), "AXScrollArea" | "AXWindow")
+            && let Some((x, y, width, height)) = parent.frame()
+        {
+            let frame = Rect { x, y, width, height };
+            clip = Some(clip.map_or(frame, |clip| intersect(clip, frame)));
+        }
+        if role == "AXWindow" {
+            break;
+        }
+        next = parent.element("AXParent");
+    }
+    Ok(clip.is_none_or(|clip| !outside(bounds, clip)))
+}
+
 /// Whether `inner` lies wholly outside `outer`.
 fn outside(inner: Rect, outer: Rect) -> bool {
     // A node with no size has no place to judge: an open menu reports a zero frame while its items have real ones.

@@ -424,6 +424,24 @@ fn enabled(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
     }
 }
 
+/// Brings an element a scroll area holds out of view into view (`AXScrollToVisible`), and waits for it to show. An
+/// element already on screen gets nothing; one that cannot be scrolled is refused, as an action on it would reach a
+/// control the user cannot.
+fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
+    let shown = || crate::snapshot::on_screen(element);
+    if shown().map_err(|error| unread(error, what))? {
+        return Ok(());
+    }
+    if !action_names(element, what)?.iter().any(|name| name == "AXScrollToVisible") {
+        return Err(Failure::refused(codes::ACTION_FAILED, "the element is off screen and cannot be scrolled into view; scroll its list first"));
+    }
+    perform(element, "AXScrollToVisible", "scroll into view")?;
+    if until(deadline, || shown() == Ok(true)) {
+        return Ok(());
+    }
+    Err(Failure::unconfirmed(codes::ACTION_FAILED, "the element is still off screen after it was scrolled into view"))
+}
+
 fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
     let element = &entry.element;
     enabled(element, deadline, "click")?;
@@ -509,6 +527,10 @@ fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
         // the app may have set it meanwhile. A box that already shows the state asked for is left alone, disabled or not.
         enabled(element, deadline, what)?;
         shown = read()?;
+    }
+    if shown != Some(target) {
+        // A box a scroll area holds out of view is pressed all the same through accessibility, out of the user's reach.
+        reveal(element, deadline, what)?;
     }
     // A box whose state cannot be read may already show the one asked for: a press would turn it the other way.
     if shown.is_none() {
@@ -1226,7 +1248,7 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         Action::Focus => focus(element, deadline),
         Action::Clear => set_value(element, "", deadline),
         Action::Check(wanted) => check(element, wanted, deadline),
-        Action::ScrollTo => perform(element, "AXScrollToVisible", "scroll into view"),
+        Action::ScrollTo => reveal(element, deadline, "scroll into view"),
         Action::SetValue(text) => set_value(element, &text, deadline),
         Action::SelectAll => select_all(element, deadline),
         Action::Select(label) => select(&entry, &label, deadline),
