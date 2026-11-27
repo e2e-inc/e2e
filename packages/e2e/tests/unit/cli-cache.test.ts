@@ -251,6 +251,8 @@ describe('e2e cache clear', () => {
     // Named like recordings, but nothing in them says the runner wrote them.
     writeFileSync(path.join(directory, 'ci.yml'), 'on: push\n', 'utf8');
     writeFileSync(path.join(directory, 'tool.lock.json'), '{"version": 1}\n', 'utf8');
+    // A manifest that names the store's format somewhere inside, not as its own.
+    writeFileSync(path.join(directory, 'artifacts.lock.json'), '{\n  "artifacts": [{ "format": "e2e-replay-lock-1" }]\n}\n', 'utf8');
     // Named like the store's lock, but with something in it: another tool's.
     writeFileSync(path.join(directory, '.index.writing'), 'pid 42\n', 'utf8');
     // Named like the store's pending pair record, but not one.
@@ -261,7 +263,7 @@ describe('e2e cache clear', () => {
     expect(written(stderrSpy)).toContain('notes.md');
     expect(written(stderrSpy)).toContain('ci.yml');
     expect(written(stderrSpy)).toContain('.index.pending');
-    expect(readdirSync(directory).toSorted()).toEqual(['.index.pending', '.index.writing', 'ci.yml', 'notes.md', 'tool.lock.json']);
+    expect(readdirSync(directory).toSorted()).toEqual(['.index.pending', '.index.writing', 'artifacts.lock.json', 'ci.yml', 'notes.md', 'tool.lock.json']);
   });
 
   it('leaves a YAML another tool wrote over a recording, and deletes the lock beside it', async () => {

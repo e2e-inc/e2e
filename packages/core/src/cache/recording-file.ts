@@ -55,10 +55,12 @@ export const RECORDING_LOCK_FORMAT = 'e2e-replay-lock-1';
 const RECORDING_HEADER = '# Replay recording of one e2e test.';
 
 /**
- * The lock's `format` line, matched as text so that a lock JSON cannot parse (a merge conflict) still shows it.
- * Any version: a lock another `e2e` wrote in a format this one does not read is still the store's own file.
+ * How every lock this runner writes opens: its `format`, the first field, matched as text so that a lock JSON
+ * cannot parse (a merge conflict, whose markers come later) still shows it. A format named anywhere else in a
+ * file is not this. Any version: a lock another `e2e` wrote in a format this one does not read is still the
+ * store's own file.
  */
-const LOCK_FORMAT_FIELD = /"format"\s*:\s*"e2e-replay-lock-\d+"/u;
+const LOCK_FORMAT_FIELD = /^\{\s*"format"\s*:\s*"e2e-replay-lock-\d+"/u;
 
 /**
  * Whether a pair's files say this runner wrote them, from the start of each:
