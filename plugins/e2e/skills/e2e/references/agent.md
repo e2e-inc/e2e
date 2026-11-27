@@ -241,7 +241,9 @@ takes over from the current screen when the app no longer matches.
 - A cached coordinate drag can wait for the drop target when the recorded
   point identifies the source among same-named controls. Replay stops if
   fewer visible, placeable controls match the initial source identity
-  during that wait or a recovered endpoint has no visible, usable box.
+  during that wait, even if only an unrelated neighbor disappears.
+  During that same wait, a recovered source or drop target needs a
+  visible, usable box.
 - While you fix a test, keep the cache on so confirmed goals replay (topic
   `debugging`, "Rerunning a test while you fix it"). Use `--no-cache` to
   rule out a stale replay (topic `debugging`, "Tools") and for one live run
