@@ -1406,7 +1406,8 @@ describe('DesktopSurface: keys', () => {
   it("refuses a key the driver could not send to the app's key window, and says nothing was sent", async () => {
     const unconfirmed = failure('ACTION_FAILED', 'not_delivered', 'the window is not the key window', { cause: 'exact_window_focus_unconfirmed' });
     const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], press: [unconfirmed] });
-    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Tab' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/key window.*nothing was sent/) });
+    // A locator's press focused the control first, so its refusal may have committed; the window's press focused nothing.
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Tab' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/key window.*nothing was sent/) });
     await expect(surface.pressKey('Enter', operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
     expect(fake.of('press').map((call) => (call.args[0] as { combo: string; windowId: string }).combo)).toEqual(['tab', 'return']);
   });
@@ -1468,9 +1469,10 @@ describe('DesktopSurface: keys', () => {
     expect(last(fake, 'press')).toMatchObject({ combo: 'return', windowId: 'w-mine' });
   });
 
-  it('refuses the key when the driver finds the control lost focus, as when focusing it opened a dialog', async () => {
+  it('refuses the key when the driver finds the control lost focus, as when focusing it opened a dialog, as possibly committed', async () => {
     const { surface, byTestId } = await launched({ snapshot: [renamed('macos/sign-in-form', 'w-8321', 'w-mine')], press: [failure('ACTION_FAILED', 'not_delivered', 'the control lost keyboard focus before the key was sent, so nothing was sent')] });
-    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/lost keyboard focus/) });
+    // No key went, but the focus did, and whatever it opened stays open: a retry would focus the control again.
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/lost keyboard focus/) });
   });
 
   it('presses a key into one of two look-alike fields by its own element, whatever box it has once focused', async () => {
