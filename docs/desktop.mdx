@@ -59,16 +59,17 @@ bunx e2e doctor
 ```
 </CodeGroup>
 
-It checks the driver, both permissions, and the `appPath` build.
+It checks the driver, both permissions, and the `appPath` build, or that an installed app has the `bundleId`.
 
 ## Point at your app
 
 Set the target's `app.appPath` to a built `.app` bundle. Or set
 `app.bundleId` to an installed app's bundle id or name, such as
 `com.apple.calculator`. With both, the `appPath` build is launched, and its
-bundle id must be `bundleId`. `app.launchArguments` go to every launch. An
-object entry becomes `-name value`, as on iOS, so
-`{ AppleLanguages: ['fr'] }` opens the app in French.
+bundle id must be `bundleId`. `app.launchArguments` go to every launch: an
+array of strings goes as it is, and an object's every key becomes
+`-name value`, as on iOS, so `launchArguments: { AppleLanguages: ['fr'] }`
+opens the app in French.
 
 The launched app gets only a minimal environment (`HOME`, `USER`, `LOGNAME`,
 `SHELL`, `PATH`, `TMPDIR`, `LANG`, `LC_*`, `__CF_USER_TEXT_ENCODING`, plus
@@ -154,7 +155,7 @@ matched nothing, fails with `INVALID_ARGUMENT`.
 
 | Area | On a desktop target |
 | --- | --- |
-| Input | The app runs in the background. Actions use the macOS Accessibility API and keys go into the app's own event queue, so your mouse and keyboard stay free. Apps that don't open a window in the background (like document-based apps) need `headed: true` or `--headed`. A tap, `doubleTap`, `secondaryTap`, `check`, `uncheck`, `fill`, `clear`, or `selectOption` on a disabled control waits within the action's timeout for the app to enable it, then fails with `ACTION_FAILED` (refused, so nothing was sent); a box that already shows the state `check` or `uncheck` asks for is left alone. |
+| Input | The app runs in the background. Actions use the macOS Accessibility API and keys go into the app's own event queue, so your mouse and keyboard stay free. An app that opens no window in the background needs `headed: true` or `--headed`, and `app.open()` says so when it fails. A document-based app such as TextEdit opens its Open panel there. A tap, `doubleTap`, `secondaryTap`, `check`, `uncheck`, `fill`, `clear`, or `selectOption` on a disabled control waits within the action's timeout for the app to enable it, then fails with `ACTION_FAILED` (refused, so nothing was sent); a box that already shows the state `check` or `uncheck` asks for is left alone. |
 | Physical input | `doubleTap`, `hover`, and coordinate taps require `desktop({ headed: true })`, which brings the app forward and uses the real pointer. Keys and typing then use the real keyboard. A click is refused when another window, of the app or any other, or a control inside the element (a row's button or text field) is under the pointer, before the move or after it; a tap at a point, or a hover, is refused when another window is on top there. A double-click is one gesture, as a person's is: once its first click goes, the second follows at once, whatever the first opened. Watch out for floating windows overlapping the target area. |
 | Keys | `press` and typing send keys only to the focused control in the app's key window; without `headed`, a window picked with `desktop.useWindow()` that is not the key window gets none. It supports named keys, letters, digits, and ``, . / ; ' [ ] \ - = ` `` (other characters like `!` or `é` are rejected), and blocks system shortcuts like `ControlOrMeta+q` (use `desktop.closeApp()` instead). A shortcut's letter is the one on the Mac's keyboard layout, so `ControlOrMeta+a` is Select All on AZERTY too. A shortcut with a digit or punctuation needs a layout that types it without Shift: on AZERTY, `ControlOrMeta+2` fails as unsupported. Without `headed`, a `ControlOrMeta` shortcut reaches only the app's menu bar: a menu item's shortcut works, but one that the focused control or the key window handles (Copy, Paste, Select All, a SwiftUI button's `.keyboardShortcut`) does nothing, and `press` still succeeds. Use `headed: true` for those. A locator's `press` needs a control that takes keyboard focus; for an app with none (like Calculator), use `desktop.press()`. |
 | Select | `selectOption` matches by option label, not index. A table row's label is all the text it shows, cell by cell, as its accessible name is; a label that two rows show is refused. On a pop-up button it checks that the button shows the chosen option. A disabled option waits within the action's timeout for the app to enable it, then fails with `ACTION_FAILED` naming the option, and the menu closes; of two options with one title, the select chooses an enabled one from the menu, and a pop-up that already shows the title is left as it is, since a closed pop-up shows no item to tell them apart. For editable combo boxes, use `fill()` instead; a combo box that takes no typed value is refused, so tap it and then the option. |
@@ -164,7 +165,7 @@ matched nothing, fails with `INVALID_ARGUMENT`.
 | Web content | Browser windows, Electron apps, and web views aren't supported. Use `@e2e-dev/web` for those. |
 | Workers | Limited to one worker per desktop target. If you run two desktop targets with `headed: true`, set `workers: 1` so they don't fight over the cursor and keyboard. |
 | Scrolling | `scrollTo(edge)` isn't supported and fails with `UNSUPPORTED_CAPABILITY`. Use `scrollUntilVisible` instead. |
-| State | `app.clearState()` and `app.back()` aren't supported yet. A `test.setup` session and `video: 'on'` are refused when tests are collected, since the engine saves no state and records no video. |
+| State | `app.clearState()` and `app.back()` aren't supported yet. A `test.setup` session, and a `video` set on the target or a test, are refused when tests are collected, since the engine saves no state and records no video. A run-wide `video` (the config root, `--video`) records none for a desktop target, and the run says so. |
 | Not supported | `getByPlaceholder`, `toBeInViewport`, `toBeEmpty`, `blur`, `longPress`, `dragTo`, `setInputFiles`, tap `modifiers`, and `selectOption({ index })` fail with a message that says so. |
 | Secrets | Password fields never expose their value and are painted black in screenshots. If a screenshot can't cover a password field, or the window is deeper than `maxDepth` or larger than a read takes, it fails instead of saving. |
 

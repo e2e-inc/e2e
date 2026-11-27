@@ -123,9 +123,10 @@ What the app logged, oldest first, with the step it happened in.
 An assertion that read one value the whole time has a wrong expectation, or
 the app never reached that state: look in the app log for a failed request.
 An assertion whose readings changed (`"2 remaining" x3 -> at 410ms "1
-remaining"`) raced the app. `screen: unchanged` after an action means the
-action had no visible effect. On web, a step's screen is the one an action
-left. On a device, it's the screen the step acted on.
+remaining"`) raced the app. On web, a step's screen is the one an action
+left, so `screen: unchanged` after an action means the action had no
+visible effect. On a device or a desktop app, it's the screen the step acted
+on, so an action's effect shows under the next step that reads the screen.
 
 The [`trace`](/reference/config#trace) mode sets which tests keep a page.
 `--trace` keeps one for every test of a run, passing ones included.
