@@ -599,9 +599,11 @@ type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumen
 ```
 
 - An object value is a string, a finite number below 2^53 in magnitude, a
-  boolean, or a list of strings. A name has no leading dash, whitespace, or
-  control characters, and nothing holds a NUL character. A value read from the
-  environment may be `undefined`: that entry is left out.
+  boolean, or a list of strings. A name has no leading dash and no control
+  characters. Spaces inside a name are fine, as in
+  `'NSSplitView Subview Frames Main'`; a space at either end and any other
+  whitespace are not. Nothing holds a NUL character. A
+  value read from the environment may be `undefined`: that entry is left out.
 - The table under
   [Launch arguments and permissions](/reference/mobile#launch-arguments-and-permissions)
   shows each value type on iOS and Android.
@@ -610,7 +612,7 @@ type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumen
 
 | Throws | When |
 | --- | --- |
-| `INVALID_CONFIG` | A list item that is not a string. An object with an empty name, a name with whitespace or a control character, a value of another kind, a number beyond 2^53 - 1 in magnitude, or a NUL character anywhere. The engine adds its own rules: see [the mobile reference](/reference/mobile#launch-arguments-and-permissions). |
+| `INVALID_CONFIG` | A list item that is not a string. An object with an empty name, a name with a control character, a space at either end, or whitespace other than a space, a value of another kind, a number beyond 2^53 - 1 in magnitude, or a NUL character anywhere. The engine adds its own rules: see [the mobile reference](/reference/mobile#launch-arguments-and-permissions). |
 
 #### `permissions`
 
