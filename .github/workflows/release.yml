@@ -76,8 +76,8 @@ jobs:
           node-version: 26
       - name: Build the driver
         run: |
-          node packages/desktop/scripts/build-native.ts --target aarch64-apple-darwin
-          node packages/desktop/scripts/build-native.ts --target x86_64-apple-darwin
+          node scripts/native/build-native.ts desktop --target aarch64-apple-darwin
+          node scripts/native/build-native.ts desktop --target x86_64-apple-darwin
       # Only an Intel Mac could load the x64 build; reading its architecture catches a wrong or cut-short build here.
       - name: Check each build's architecture
         working-directory: packages/desktop
@@ -130,7 +130,7 @@ jobs:
           # Outside the checkout: changesets/action commits every untracked file into the version pull request.
           path: ${{ runner.temp }}/desktop-native
       - name: Place the desktop driver
-        run: node packages/desktop/scripts/place-native.ts "$RUNNER_TEMP/desktop-native"
+        run: node scripts/native/place-native.ts desktop "$RUNNER_TEMP/desktop-native"
 
       # Opens or updates a release PR while changesets are pending; publishes
       # once that PR is merged and no changesets remain.
@@ -235,7 +235,7 @@ jobs:
           path: ${{ runner.temp }}/desktop-native
       # After the version step, so the stamp names the snapshot version.
       - name: Place the desktop driver
-        run: node packages/desktop/scripts/place-native.ts "$RUNNER_TEMP/desktop-native"
+        run: node scripts/native/place-native.ts desktop "$RUNNER_TEMP/desktop-native"
 
       - name: Publish to the nightly tag
         run: pnpm exec changeset publish --tag nightly --no-git-tag

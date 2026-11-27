@@ -34,7 +34,8 @@ descriptions and commit bodies; `git log` and `gh pr view` are the archive.
 
 `packages/` holds what publishes to npm; `crates/` holds every Rust crate,
 one Cargo workspace with one `Cargo.lock` and one `rust-toolchain.toml` at
-the root (sources only: a build places each addon in its npm package);
+the root (sources only: `scripts/native/`, which takes an addon from
+`scripts/native/addons.ts`, builds each addon into its npm package);
 `apps/` holds the private apps and suites that consume the built packages
 the way a user would.
 
@@ -1028,7 +1029,7 @@ trees, on both platforms, without a device.
   The canary build also builds the desktop driver into both platform
   packages (`build:desktop-native`), so it runs on a Mac with rustup. In
   `release.yml`, a macOS `native` job builds the driver, and the release
-  and nightly jobs place it into the platform packages (`place-native.ts`)
+  and nightly jobs place it into the platform packages (`scripts/native/place-native.ts`)
   before they publish.
 - The runner publishes as the unscoped `e2e` (entry points `e2e`, `e2e/agent`,
   `e2e/engine`, `e2e/runner`, `e2e/reporters`, `e2e/oauth/chatgpt`, `e2e/oauth/copilot`, `e2e/oauth/grok`, `e2e/oauth/opencode-console`; the bin is `e2e` too); engines, reporters, and integrations publish public

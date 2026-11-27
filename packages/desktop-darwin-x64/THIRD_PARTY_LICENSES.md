@@ -1,6 +1,6 @@
 # Third-party licenses
 
-The native driver in this package is built from these Rust crates, generated from `Cargo.lock` by `packages/desktop/scripts/native-licenses.ts`.
+The native addon in this package is built from these Rust crates, generated from `Cargo.lock` by `scripts/native/native-licenses.ts`.
 
 ## bitflags 2.13.2 (MIT OR Apache-2.0), https://github.com/bitflags/bitflags; cfg-if 1.0.5 (MIT OR Apache-2.0), https://github.com/rust-lang/cfg-if; core-foundation 0.10.1 (MIT OR Apache-2.0), https://github.com/servo/core-foundation-rs; core-foundation-sys 0.8.7 (MIT OR Apache-2.0), https://github.com/servo/core-foundation-rs; core-graphics 0.25.0 (MIT OR Apache-2.0), https://github.com/servo/core-foundation-rs; core-graphics-types 0.2.0 (MIT OR Apache-2.0), https://github.com/servo/core-foundation-rs
 

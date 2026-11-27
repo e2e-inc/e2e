@@ -1,5 +1,5 @@
 /**
- * Finds cargo for the native driver's scripts: a Homebrew rustup puts no
+ * Finds cargo for the native addon scripts: a Homebrew rustup puts no
  * `cargo` on `PATH` of its own, and the toolchain the workspace's
  * `rust-toolchain.toml` pins may not be installed yet.
  */
@@ -7,11 +7,9 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { ROOT } from './addons.ts';
 
-/** The repository root: the Cargo workspace, and the `rust-toolchain.toml` every crate builds with. */
-const WORKSPACE = path.join(import.meta.dirname, '..', '..', '..');
-
-/** How to run cargo for the native driver: the program, the arguments before cargo's own, and the environment. */
+/** How to run cargo for a crate: the program, the arguments before cargo's own, and the environment. */
 export interface Cargo {
   readonly file: string;
   readonly prefix: readonly string[];
@@ -32,9 +30,9 @@ export interface Cargo {
 export function cargo(directory: string): Cargo {
   if (spawnSync('rustup', ['--version'], { stdio: 'ignore' }).error !== undefined) {
     if (spawnSync('cargo', ['--version'], { cwd: directory, stdio: 'ignore' }).error === undefined) return { file: 'cargo', prefix: [], env: process.env };
-    throw new Error('the native driver needs Rust: install rustup (https://rustup.rs), which installs the toolchain rust-toolchain.toml pins');
+    throw new Error('a native addon needs Rust to build: install rustup (https://rustup.rs), which installs the toolchain rust-toolchain.toml pins');
   }
-  const channel = /^channel\s*=\s*"([^"]+)"/m.exec(readFileSync(path.join(WORKSPACE, 'rust-toolchain.toml'), 'utf8'))?.[1];
+  const channel = /^channel\s*=\s*"([^"]+)"/m.exec(readFileSync(path.join(ROOT, 'rust-toolchain.toml'), 'utf8'))?.[1];
   if (channel === undefined) throw new Error('rust-toolchain.toml names no channel');
   if (spawnSync('rustup', ['which', '--toolchain', channel, 'cargo'], { cwd: directory, stdio: 'ignore' }).status !== 0) {
     // With no toolchain named, rustup installs the one the workspace's `rust-toolchain.toml` pins, with its targets and

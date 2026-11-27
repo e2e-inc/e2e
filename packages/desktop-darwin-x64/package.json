@@ -38,6 +38,6 @@
     "THIRD_PARTY_LICENSES.md"
   ],
   "scripts": {
-    "prepublishOnly": "node ../desktop/scripts/check-native.ts"
+    "prepublishOnly": "node ../../scripts/native/check-native.ts desktop"
   }
 }

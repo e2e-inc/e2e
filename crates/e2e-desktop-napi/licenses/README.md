@@ -1,7 +1,7 @@
 # Vendored license texts
 
 Some crates the native driver links publish no license file of their own: their
-license sits at the root of the repository they come from. `scripts/native-licenses.ts`
+license sits at the root of the repository they come from. `scripts/native/native-licenses.ts`
 takes their notices from here, by the crate's repository, so the platform
 packages ship the copyright and permission notice the license requires.
 
