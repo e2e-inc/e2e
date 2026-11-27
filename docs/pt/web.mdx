@@ -24,9 +24,9 @@ funciona apenas em um host de loopback. Uma URL `file:` abre
 
 ### Deixe o runner iniciá-lo
 
-Adicione `app.command` e o runner inicia o servidor de desenvolvimento. Ele
-espera até `app.url` responder e para um servidor que ele iniciou quando a
-execução termina, falha ou é interrompida:
+Adicione `app.command` e o e2e inicia seu servidor de desenvolvimento, espera
+até `app.url` responder e encerra o servidor quando a execução termina (mesmo
+em falhas ou com Ctrl-C):
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -52,31 +52,31 @@ export default {
  ✓ target "web" command at http://localhost:3000/ ready 1.20s
 ```
 
-O comando roda sem shell: `executable` vem do `PATH` e `args` são passados
-como escritos. O processo filho recebe apenas `PATH`, `HOME`, as variáveis de
-diretório temporário, `inheritEnv` e `env`.
+O comando roda diretamente, sem shell (`executable` é resolvido a partir do
+`PATH`, e `args` são passados como estão). O processo filho recebe apenas
+`PATH`, `HOME`, as variáveis de diretório temporário, `inheritEnv` e `env`.
 
 | Opção | Finalidade |
 | --- | --- |
-| `reuseExisting: true` | Usa um servidor que já está rodando, como um que uma [sessão MCP](/mcp-server#run-tests-next-to-a-session) iniciou. Na CI, o e2e ignora essa opção, e a execução falha com `APP_ALREADY_RUNNING` quando um servidor já responde. |
-| `log` | Salva o stdout e o stderr do app em um arquivo relativo ao projeto. Um erro de inicialização, ou um encerramento inesperado durante `e2e run`, cita as linhas que qualquer processo acrescentou ao arquivo desde que o comando começou. Um log de até 40 linhas dentro de 8 KiB é citado inteiro; caso contrário, a citação mantém até 20 linhas de cada extremidade, com `[startup output omitted]` entre elas, e, para um log acima de 8 KiB, essas linhas vêm dos seus primeiros e últimos 4 KiB. Valores de `command.env` e `inheritEnv` com pelo menos quatro caracteres são ocultados da citação. O arquivo em si não é ocultado. |
-| `env` | Variáveis de ambiente para o app. |
+| `reuseExisting: true` | Reutiliza um servidor que já está rodando (por exemplo, um iniciado por uma [sessão MCP](/mcp-server#run-tests-next-to-a-session)). Ignorado na CI, onde um servidor que já está rodando faz a execução falhar. |
+| `log` | Salva o stdout e o stderr do app em um arquivo relativo ao projeto. Se o servidor não conseguir iniciar ou cair no meio da execução, o e2e imprime as linhas relevantes desse log (valores de `env` e `inheritEnv` com 4 ou mais caracteres são ocultados na citação). O arquivo de log em si não é ocultado. |
+| `env` | Variáveis de ambiente para o app, ou uma função que as retorna a partir dos [serviços](/services) da configuração. |
 | `inheritEnv` | Variáveis do host a repassar quando definidas, por nome ou prefixo: `['DATABASE_URL', 'STRIPE_*']`. `env` tem precedência sobre elas. |
 | `startupTimeout` | Quanto tempo esperar o app responder. Padrão: 60 segundos. |
-| `readyUrl` | Defina ao lado de `command`, não dentro dele, para verificar um endpoint de health check em vez de `app.url`. |
+| `readyUrl` | Defina ao lado de `command` (não dentro dele) para verificar um endpoint de health check em vez de `app.url`. |
 
-Veja a [referência do comando](/reference/config#command) para todas as opções.
+Veja a [referência do comando](/reference/config#command) para todas as opções e
+os detalhes do truncamento do log.
 
 <Note>
-O runner inicia apenas `app.command`. Inicie bancos de dados, mocks e outros
-serviços antes da execução, ou faça de `app.command` um script que os inicie e
-sirva o app. Uma API de serviços volta em uma versão futura.
+Para iniciar um banco de dados, um mock de API ou outra dependência antes do
+app, adicione essa dependência como um [serviço](/services).
 </Note>
 
 ### Deixe o runner escolher a porta
 
-Use a porta `0` para rodar vários checkouts sem conflito de porta. O runner
-escolhe uma porta livre e substitui `{port}` nos `args` e no `env` do comando:
+Use a porta `0` para rodar vários checkouts sem conflitos de porta. O e2e
+escolhe uma porta livre e substitui `{port}` em `args` e `env`:
 
 ```ts title="Target fragment"
 engine: web(),
@@ -115,26 +115,24 @@ app: {
 },
 ```
 
-O navegador adiciona `headers` apenas às requisições que começam na origem de
-`app.url`: seu esquema, host e porta. Uma requisição os mantém ao longo dos
-seus redirecionamentos, para qualquer origem. Para adicioná-los a outra
-origem, como um host de API atrás da mesma proteção, liste-a em
-`credentialOrigins`. Veja
-[credenciais de requisição](/reference/security#request-credentials). Para o
-ngrok, use `'ngrok-skip-browser-warning': '1'`.
-`app.identity` mantém a identidade do cache estável quando a URL do preview
-muda.
+O navegador envia `headers` apenas em requisições que começam na origem de
+`app.url`, e mantém esses cabeçalhos nos redirecionamentos para qualquer
+origem. Para incluir outra origem, como um host de API atrás da mesma
+proteção, liste-a em `credentialOrigins` (veja
+[credenciais de requisição](/reference/security#request-credentials)). Para o
+ngrok, use `'ngrok-skip-browser-warning': '1'`. Definir `app.identity` mantém
+as chaves do cache de replay estáveis quando as URLs de preview mudam.
 
 <Note>
 Definir `headers` desativa o cache HTTP do navegador e bloqueia service
 workers.
 </Note>
 
-Use `basicAuth` para autenticação HTTP básica. O navegador responde a um
-desafio `401` da origem de `app.url` e de cada origem em `credentialOrigins`.
-O WebKit responde a qualquer origem quando uma delas está em uma porta padrão,
-como uma URL `https://` sem porta, ou tem um host IPv6. Declare a senha em
-`secrets` e passe `secrets.get(name)`:
+Para autenticação HTTP básica, use `basicAuth`. Essa opção responde a um
+`401` vindo de `app.url` e de qualquer origem em `credentialOrigins` (no
+WebKit, de qualquer origem se uma dessas origens usar uma porta padrão ou um host
+IPv6). Declare a senha em `secrets` e passe `secrets.get(name)` para que o e2e
+mantenha a senha fora dos relatórios, dos logs e da entrada do modelo:
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -154,11 +152,8 @@ export default {
 } satisfies E2EConfig;
 ```
 
-A engine resolve o segredo quando cada tentativa começa, e o runner o mantém
-fora dos relatórios, dos logs e do que o agente lê. Um nome não declarado faz
-o carregamento da configuração falhar com `INVALID_CONFIG`. Uma senha em
-string simples também funciona, mas o e2e oculta apenas uma senha de
-`secrets.get`.
+Senhas em string simples também funcionam, mas apenas as senhas de
+`secrets.get()` são ocultadas.
 
 ## Viewports
 
@@ -250,22 +245,16 @@ uma renderização de desktop antes.
 ### O que o agente vê
 
 O agente recebe o tamanho atual do viewport a cada observação, então
-redimensione antes de `agent.act`. As capturas de tela cobrem o viewport.
-Elementos fora da tela ainda podem estar na árvore, um toque os rola até
-ficarem visíveis, e o agente pode rolar para carregar conteúdo sob demanda.
+redimensione antes de chamar `agent.act`. As capturas de tela cobrem o viewport
+visível, enquanto elementos fora da tela ainda podem aparecer na árvore de
+acessibilidade (toques rolam esses elementos automaticamente até ficarem
+visíveis, e o agente pode rolar para disparar o carregamento sob demanda).
 
-Uma frase com link, ênfase ou código chega inteira ao agente, e o link também
-é listado como um controle. O agente lê os primeiros 512 caracteres de cada
-bloco de texto. Em um bloco mais longo, o e2e também lista seus links e o texto
-enfatizado separadamente.
-
-O agente também vê, com seu estado de marcação, um checkbox ou radio que uma
-biblioteca de componentes reduz a tamanho zero sob o próprio rótulo, como faz o
-Element Plus. Um toque nele clica no rótulo. Quando esse rótulo é ou contém um
-link ou outro controle, o agente vê o texto do rótulo e esse controle, mas não
-o checkbox, já que um clique no rótulo poderia cair no link. Os localizadores
-ainda consideram esse controle oculto, como faz o Playwright, então verifique-o
-com `toBeChecked()`, não com `toBeVisible()`.
+Checkboxes e radios estilizados cujo input nativo fica visualmente oculto sob
+um rótulo continuam aparecendo para o agente (e tocar neles clica no rótulo), a
+menos que esse rótulo também envolva um link ou outro controle. Ao usar
+localizadores, verifique esses controles com `toBeChecked()` em vez de
+`toBeVisible()`.
 
 ### Restringir um teste a um tamanho
 
@@ -314,16 +303,13 @@ app usar a área de transferência, conceda-a no alvo:
 }
 ```
 
-- Toda página de toda tentativa mantém a permissão concedida, em qualquer
-  origem.
-- Um alvo web aceita apenas `'grant'`. `'deny'` e `'reset'` resultam em
-  `INVALID_CONFIG`: em vez disso, deixe a permissão de fora.
-- Os nomes são os do Playwright, e cada navegador concede seu próprio conjunto.
+- As permissões valem para toda página e toda origem daquele alvo.
+- Alvos web aceitam apenas `'grant'` (deixe a permissão de fora em vez de
+  passar `'deny'` ou `'reset'`).
+- Os nomes das permissões seguem a lista do Playwright e variam por navegador.
   Veja [`permissions`](/reference/config#permissions).
-- `permissions: 'all'` concede todos os nomes que o navegador do alvo concede.
-  Um Chrome mais antigo conectado por CDP que não conhece
-  `local-network-access`, `storage-access` ou `local-fonts` recebe o resto da
-  lista.
+- `permissions: 'all'` concede todas as permissões que o navegador do alvo
+  consegue conceder.
 
 ## Próximos passos
 
