@@ -205,7 +205,7 @@ describe('screen.scrollUntilVisible', () => {
       screen.getByRole('list', { name: 'Feed' }).scrollUntilVisible(screen.getByText('Accept'), { timeout: 30_000 }),
     ).rejects.toMatchObject({
       code: 'ACTION_FAILED',
-      message: 'operation timed out: getByRole("list", name: "Feed")',
+      message: expect.stringMatching(/^operation timed out: getByRole\("list", name: "Feed"\) \(swipe exceeded \d+ ms\)$/),
       cause: expect.objectContaining({ code: 'OPERATION_TIMEOUT' }),
     });
     expect(steps.all()).toEqual([

@@ -221,8 +221,8 @@ fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
             let then = match error {
                 // "No such attribute" is watched too: a SwiftUI alert's button answers it once its press closed the alert.
                 _ if error != ax::AX_ATTRIBUTE_UNSUPPORTED && (refuses(error) || error == ax::AX_INVALID_ELEMENT) => None,
-                // The app answers again or not: one read tells, and another would wait out the same stall.
-                ax::AX_CANNOT_COMPLETE => element.attribute("AXRole").err(),
+                // The app is busy in the action's handler (a synchronous save) or quit because of it.
+                ax::AX_CANNOT_COMPLETE => busy(element),
                 // A press that closes what holds its element (a dismissed alert) can leave it readable a moment more.
                 _ => {
                     let deadline = CURRENT.with(|current| current.borrow().as_ref().map(|(_, deadline)| *deadline));
@@ -241,6 +241,26 @@ fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
     };
     element.set_timeout(0.0);
     outcome
+}
+
+/// Watches an app that did not answer an action in time until it answers again, as `answered` reads the result: `None`
+/// once it answers, `AX_INVALID_ELEMENT` once its process is gone (the action quit the app, so it landed), and the
+/// stall itself when the action's deadline comes first. A handler that blocks the app for seconds is common (a
+/// synchronous save or load), and the action ran in it.
+fn busy(element: &Element) -> Option<AXError> {
+    let pid = element.pid();
+    let deadline = CURRENT.with(|current| current.borrow().as_ref().map(|(_, deadline)| *deadline));
+    let end = deadline.map_or(Instant::now(), |deadline| deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline));
+    loop {
+        if pid.is_some_and(|pid| !crate::process::alive(pid)) {
+            return Some(ax::AX_INVALID_ELEMENT);
+        }
+        let then = element.attribute("AXRole").err();
+        if then != Some(ax::AX_CANNOT_COMPLETE) || Instant::now() + POLL >= end || cancelled() {
+            return then;
+        }
+        sleep(POLL);
+    }
 }
 
 /// Errors with which the app refuses an action before taking it: no such action or attribute, no permission, a bad
@@ -383,24 +403,37 @@ fn reveal(element: &Element, deadline: Instant, what: &str) -> Outcome<bool> {
         Placement::Collapsed => return Err(Failure::refused(codes::ACTION_FAILED, "the element has no size on screen, so the user cannot reach it")),
         Placement::ScrolledOut => {}
     }
-    if !action_names(element, what)?.iter().any(|name| name == "AXScrollToVisible") {
+    // Whether the element shows. A list can replace a row's element as it scrolls the row in: the element is gone then,
+    // and no wait shows it.
+    let wait = || -> Outcome<bool> {
+        let mut gone = false;
+        let shown = until(deadline, || match placement(element) {
+            Ok(Placement::Shown) => true,
+            Err(ax::AX_INVALID_ELEMENT) => {
+                gone = true;
+                true
+            }
+            _ => false,
+        });
+        if gone {
+            return Err(Failure::unconfirmed(codes::STALE_REF, "the list replaced the element as it scrolled it into view"));
+        }
+        Ok(shown)
+    };
+    let own = action_names(element, what)?.iter().any(|name| name == "AXScrollToVisible");
+    if own {
+        perform(element, "AXScrollToVisible", "scroll into view")?;
+        if wait()? {
+            return Ok(true);
+        }
+    }
+    // An element with no scroll action of its own (a plain button), or one whose action left it out of view (a scroll
+    // area around its list): each scroll area around it moves its scroll bar until the element's frame is inside.
+    let moved = bring_into_view(element, what).map_err(|failure| if own { failure.delivered() } else { failure })?;
+    if !own && !moved {
         return Err(Failure::refused(codes::ACTION_FAILED, "the element is off screen and cannot be scrolled into view; scroll its list first"));
     }
-    perform(element, "AXScrollToVisible", "scroll into view")?;
-    // A list can replace a row's element as it scrolls the row in: the element is gone then, and no wait shows it.
-    let mut gone = false;
-    let shown = until(deadline, || match placement(element) {
-        Ok(Placement::Shown) => true,
-        Err(ax::AX_INVALID_ELEMENT) => {
-            gone = true;
-            true
-        }
-        _ => false,
-    });
-    if gone {
-        return Err(Failure::unconfirmed(codes::STALE_REF, "the list replaced the element as it scrolled it into view"));
-    }
-    if shown {
+    if wait()? {
         return Ok(true);
     }
     Err(Failure::unconfirmed(codes::ACTION_FAILED, "the element is still off screen after it was scrolled into view"))
@@ -494,7 +527,20 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
     match last {
         Ok(true) => Ok(()),
         Err(_) => Err(Failure::unconfirmed(codes::APP_UNRESPONSIVE, "focus: the app did not answer in time after the element was focused")),
-        Ok(false) => Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus")),
+        Ok(false) => {
+            // An app gives keyboard focus only within its key window: say so where that is why, as a press into the window would.
+            let key = element.pid().and_then(|pid| Element::application(pid).element("AXFocusedWindow"));
+            let home = element.element("AXWindow");
+            if let (Some(key), Some(home)) = (key, home)
+                && windows::holds_focus(&key, &home) == Ok(false)
+            {
+                return Err(Failure::unconfirmed(
+                    codes::ACTION_FAILED,
+                    "focus: the element's window is not the app's key window, so it cannot take keyboard focus; with desktop({ physicalInput: true }) the window comes forward first",
+                ));
+            }
+            Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus"))
+        }
     }
 }
 
@@ -515,6 +561,10 @@ pub fn act(reference: &str, action: Action, input_id: Option<u32>, deadline: Ins
 fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
     let entry = resolve(reference)?;
     let element = &entry.element;
+    // A hover presses nothing, and the pointer's own checks refuse a window over the point.
+    if !matches!(action, Action::Hover) {
+        unblocked(element, entry.pid)?;
+    }
     match action {
         Action::Click => click(&entry, deadline),
         // A press on a disabled control is acknowledged and ignored: each wait for it to be enabled, as a tap does. A
@@ -546,6 +596,53 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         Action::Scroll { direction, pages } => scroll(element, &direction, pages),
         Action::Type { text, physical } => type_text(&entry, &text, physical, deadline),
     }
+}
+
+/// Refuses input to an element a modal window holds out: a sheet open on its window that it is not in, or an app-modal
+/// window (an alert's or a panel's modal session) it is not in. A person cannot reach it, while AppKit takes an
+/// accessibility action there all the same (behind a sheet) or acknowledges it and drops it (behind an app-modal alert).
+fn unblocked(element: &Element, pid: i32) -> Outcome<()> {
+    let mut ancestors = Vec::new();
+    let mut next = element.element("AXParent");
+    while let Some(parent) = next {
+        if ancestors.len() >= crate::snapshot::MAX_ANCESTORS {
+            break;
+        }
+        next = parent.element("AXParent");
+        ancestors.push(parent);
+    }
+    let inside = |holder: &Element| holder == element || ancestors.contains(holder);
+    let named = |holder: &Element| holder.text("AXTitle").filter(|title| !title.trim().is_empty()).map(|title| format!(" ({title})")).unwrap_or_default();
+    if let Some(window) = ancestors.iter().find(|ancestor| ancestor.text("AXRole").as_deref() == Some("AXWindow")) {
+        // A read the app did not answer is no proof no sheet is open: the action waits for the next try.
+        let children = match window.elements("AXChildren", 4096) {
+            Ok(children) => children,
+            Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, "check for a sheet")),
+            Err(_) => Vec::new(),
+        };
+        for sheet in children.into_iter().filter(|child| child.text("AXRole").as_deref() == Some("AXSheet")) {
+            if !inside(&sheet) {
+                return Err(Failure::refused(
+                    codes::ACTION_FAILED,
+                    format!("a sheet{} is open over the element's window, so the user cannot reach it; finish the sheet first", named(&sheet)),
+                ));
+            }
+        }
+    }
+    for (window, _) in windows::ax_windows(&Element::application(pid))? {
+        let modal = match window.attribute("AXModal") {
+            Ok(value) => value.boolean() == Some(true),
+            Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, "check for a modal window")),
+            Err(_) => false,
+        };
+        if modal && !inside(&window) {
+            return Err(Failure::refused(
+                codes::ACTION_FAILED,
+                format!("a modal window{} is open, so the user cannot reach the element; finish it first", named(&window)),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Presses a key combo into a window of `pid`. Without physical input the
@@ -649,7 +746,19 @@ pub fn close_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Inst
 
 #[cfg(test)]
 mod tests {
-    use super::{press_to_state, step_to};
+    use super::{offset_to_show, press_to_state, step_to};
+
+    #[test]
+    fn moves_a_scroll_area_the_least_that_shows_an_element() {
+        // Below the view: its end comes to the view's end.
+        assert_eq!(offset_to_show(500.0, 520.0, 100.0, 300.0), 220.0);
+        // Above: its start comes to the view's start.
+        assert_eq!(offset_to_show(20.0, 40.0, 100.0, 300.0), -80.0);
+        // Longer than the view: its start shows.
+        assert_eq!(offset_to_show(400.0, 900.0, 100.0, 300.0), 300.0);
+        // Partly in view: nothing moves.
+        assert_eq!(offset_to_show(290.0, 310.0, 100.0, 300.0), 0.0);
+    }
     use crate::failure::Outcome;
     use std::cell::Cell;
     use std::time::{Duration, Instant};

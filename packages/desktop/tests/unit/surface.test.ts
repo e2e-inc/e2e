@@ -489,6 +489,11 @@ describe('DesktopSurface: the launch wait', () => {
     await expect(launched({ listWindows: [ok([])] }, { runHeaded: true, openTimeoutMs: 15_000 })).rejects.toThrow(/listed no window within 10 s/);
   }, 30_000);
 
+  it('says a launch listed no window when one of its window lists stalled, since a stalled list saw no window either', async () => {
+    const busy = failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer its window list in time', { retryable: true });
+    await expect(launched({ listWindows: [busy, ok([])] }, { runHeaded: true, openTimeoutMs: 15_000 })).rejects.toThrow(/listed no window within 10 s/);
+  }, 30_000);
+
   it('reads until the end of the launch wait, so a window that shows up late still opens', async () => {
     await launched({ listWindows: [{ ok: true, data: [], sleepMs: 9_100 }, windows(() => [{ id: 'w-mine', is_focused: true }])] }, { openTimeoutMs: 15_000, observe: false });
   }, 30_000);
@@ -1094,8 +1099,8 @@ describe('DesktopSurface: acting', () => {
     // The scroll changed the app: a click that then fails, even as a stale ref, is never retried as if nothing happened.
     const moved = await launched({ snapshot: [twins], act: [ok({}), failure('STALE_REF', 'not_delivered')] }, { observe: false });
     const stale = every((await moved.surface.observe(operation(), undefined)).root).filter((node) => node.name === 'Delete')[1];
-    // The message names the click once.
-    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false, message: expect.stringMatching(/^click: (?!click).* \(an earlier command of this step changed the app\)$/) });
+    // The message names the step a test wrote, once.
+    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false, message: expect.stringMatching(/^tap: (?!tap).* \(an earlier command of this step changed the app\)$/) });
     // A secondary tap goes to the driver alone, which checks the context menu live before it scrolls: the observed
     // actions may come from a read that stalled.
     const plain = await launched({ snapshot: [twins] }, { observe: false });
@@ -2209,7 +2214,14 @@ describe('DesktopSurface: doctor', () => {
       { id: 'desktop-driver', status: 'pass', message: 'desktop driver 0.0.0-test' },
       { id: 'accessibility', status: 'pass', message: expect.any(String) },
       { id: 'screen-recording', status: 'warn', message: expect.stringMatching(/Screen Recording/) },
+      { id: 'app-bundle-id', status: 'fail', message: 'no installed app has the name or bundle id "com.example.app"; install it, or fix app.bundleId' },
     ]);
+  });
+
+  it('finds the app a bundleId names as a launch would', async () => {
+    const surface = new DesktopSurface(resolveOptions({}), 'macos', () => fakeDriver());
+    const checks = await surface.doctor({ targetName: 'mac', projectRoot: process.cwd(), app: { bundleId: 'dev.e2e.spike.form' }, env: {}, headed: false, signal, log: () => undefined });
+    expect(checks.find((check) => check.id === 'app-bundle-id')).toEqual({ id: 'app-bundle-id', status: 'pass', message: 'dev.e2e.spike.form: /Applications/SpikeForm.app' });
   });
 
   it('fails doctor when the native driver cannot be loaded', async () => {

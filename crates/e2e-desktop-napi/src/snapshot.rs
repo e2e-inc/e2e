@@ -134,6 +134,8 @@ struct Walk {
     focus_unknown: bool,
     /// The window's own title-bar buttons, as it names them (`AXCloseButton`, ...); `None` when it names none.
     chrome: Option<Vec<Element>>,
+    /// The text in the title bar that shows the window's title, which the window's own name already carries.
+    title_text: Option<Element>,
     nodes: usize,
     complete: bool,
     /// Whether the deadline stopped the read.
@@ -158,6 +160,32 @@ fn missed(error: ax::AXError) -> bool {
 
 fn label(value: Option<String>) -> Option<String> {
     value.filter(|text| !text.trim().is_empty())
+}
+
+/// Whether a character is an invisible bidirectional mark: AppKit wraps numbers and paths in them (Calculator's
+/// history, a document's location), and a name that carries them matches no locator a test types.
+fn bidi_mark(character: char) -> bool {
+    matches!(character, '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+/// A text as a person reads it: without invisible bidirectional marks, and no text when nothing else is left.
+fn plain(text: Option<String>) -> Option<String> {
+    label(text.map(|text| if text.chars().any(bidi_mark) { text.chars().filter(|character| !bidi_mark(*character)).collect() } else { text }))
+}
+
+/// Whether an identifier is one AppKit made up rather than one a developer gave: a nib's object id (`_NS:61`) on any
+/// control, or, on a menu item, the selector of its action (`_popUpItemAction:`, `chose:`), the same for every item of
+/// a menu. Neither names the control: the first changes with the nib. Any other control keeps an id ending in `:`, which
+/// a developer may give.
+fn generated_identifier(identifier: &str, role: &str) -> bool {
+    identifier.starts_with("_NS:")
+        || (role == "menuitem"
+            && identifier.len() > 1
+            && identifier.ends_with(':')
+            && identifier
+                .split(':')
+                .filter(|part| !part.is_empty())
+                .all(|part| part.chars().all(|character| character.is_ascii_alphanumeric() || character == '_')))
 }
 
 /// What a node's attributes say, read in one request.
@@ -304,7 +332,7 @@ fn intersect(a: Rect, b: Rect) -> Rect {
 }
 
 /// The most ancestors `placement` walks up from an element to its window.
-const MAX_ANCESTORS: usize = 256;
+pub(crate) const MAX_ANCESTORS: usize = 256;
 
 /// Where an element is, as far as showing it goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -585,6 +613,7 @@ impl Walk {
                 }
             }
         };
+        // The text in the title bar is the window's title, which the window's own node carries as its name.
         // The window's own title-bar buttons are window chrome, never the app's controls: the window names them
         // (`chrome`), so a button of the app's content with the same subrole (a tab's close button) stays. A window that
         // names none falls back to the subrole.
@@ -592,12 +621,12 @@ impl Walk {
             Some(chrome) => chrome.contains(element),
             None => roles::window_control_name(read.subrole.as_deref()).is_some(),
         };
-        if !root && chrome {
+        if !root && (chrome || self.title_text.as_ref() == Some(element)) {
             return None;
         }
         let role = if root && read.role == "unknown" { "window" } else { read.role };
         let secure = read.subrole.as_deref() == Some("AXSecureTextField") || read.ax_role == "AXSecureTextField";
-        let (actions, scroll_axes) = self.actions(element, &read);
+        let (mut actions, scroll_axes) = self.actions(element, &read);
 
         // The name a control takes from its label element: a stall reading it leaves the name unknown, a hole in the read,
         // so a locator cannot take the control's absence by that name as proof.
@@ -618,13 +647,19 @@ impl Walk {
             .or_else(|| if roles::text(role) { label(text_value.clone()) } else { None })
             .or_else(|| if roles::takes_text(role) { read.placeholder.clone() } else { None });
         let description = read.description.clone().filter(|description| Some(description) != name.as_ref());
+        // A menu's separator is an item with no title that is never enabled: a line, no item a person can choose.
+        if role == "menuitem" && name.is_none() && read.enabled == Some(false) && element.count("AXChildren").is_ok_and(|count| count == 0) {
+            return None;
+        }
 
         let mut states = Vec::new();
-        // The app's focused element is the one source: a table's cells report the table's focus as their own.
+        // The app's focused element is the one source: a table's cells report the table's focus as their own. An app
+        // that names none (a panel another process hosts) leaves an element's own flag, never a row's or a cell's, of
+        // which every one in a focused list says it is.
         let focused = match &self.focused {
             Some(focused) => focused == element,
             None if self.focus_unknown => false,
-            None => read.focused == Some(true),
+            None => read.focused == Some(true) && !roles::named_by_content(role),
         };
         if focused {
             states.push("focused");
@@ -660,6 +695,9 @@ impl Walk {
             && outside(bounds, clip)
         {
             states.push("offscreen");
+            // A scroll area that holds it out of view can bring it back, by its scroll bar where the element takes no
+            // scroll action of its own (a plain button in a sidebar): it gets a ref the scroll goes through.
+            push(&mut actions, "ScrollTo");
         }
 
         // A table's row gets a ref whatever it offers: an NSTableView selects it through the table's AXSelectedRows,
@@ -681,13 +719,18 @@ impl Walk {
         let mut node = RawNode {
             ref_id,
             role,
-            name,
-            value: text_value,
-            description,
-            hint: read.help.clone(),
+            name: plain(name),
+            // What a field holds is the user's text, marks and all, as a fill put it there.
+            value: if roles::takes_text(role) { text_value } else { plain(text_value) },
+            description: plain(description),
+            hint: plain(read.help.clone()),
             level: if role == "heading" { read.heading_level } else { None },
-            placeholder: read.placeholder.clone(),
-            native_id: read.identifier.clone().map(|value| NativeId { kind: "ax_identifier", value }),
+            placeholder: plain(read.placeholder.clone()),
+            native_id: read
+                .identifier
+                .clone()
+                .filter(|identifier| !generated_identifier(identifier, role))
+                .map(|value| NativeId { kind: "ax_identifier", value }),
             states,
             available_actions: actions,
             scroll_axes,
@@ -803,6 +846,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         focused,
         focus_unknown,
         chrome: window_chrome(&window),
+        title_text: window.element("AXTitleUIElement"),
         nodes: 0,
         complete: !focus_unknown,
         timed_out: false,
@@ -847,7 +891,28 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
 
 #[cfg(test)]
 mod tests {
-    use super::{content_name, expanded, inner_clip, level_of, missed, outside, selected};
+    use super::{content_name, expanded, generated_identifier, inner_clip, level_of, missed, outside, plain, selected};
+
+    #[test]
+    fn drops_bidirectional_marks_from_a_name() {
+        assert_eq!(plain(Some("\u{200E}7\u{200E}+\u{200E}8 \u{200E}15".to_owned())).as_deref(), Some("7+8 15"));
+        assert_eq!(plain(Some("\u{2068}Documents\u{2069}".to_owned())).as_deref(), Some("Documents"));
+        assert_eq!(plain(Some("\u{200F}".to_owned())), None);
+        assert_eq!(plain(Some("שלום".to_owned())).as_deref(), Some("שלום"));
+    }
+
+    #[test]
+    fn tells_an_identifier_appkit_made_up_from_a_developers() {
+        assert!(generated_identifier("_NS:61", "button"));
+        for made_up in ["_popUpItemAction:", "chose:", "menuItemSelected:", "performClick:withEvent:"] {
+            assert!(generated_identifier(made_up, "menuitem"), "{made_up}");
+            // A developer may give any other control an id that ends in `:`.
+            assert!(!generated_identifier(made_up, "button"), "{made_up}");
+        }
+        for given in ["username", "sign-in.submit", "StandardInputView;value:15", "com.apple.settings.keyboard", "time: 12:00", ":"] {
+            assert!(!generated_identifier(given, "menuitem"), "{given}");
+        }
+    }
     use crate::ax;
     use crate::windows::Rect;
 

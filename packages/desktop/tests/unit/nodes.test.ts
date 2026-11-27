@@ -73,6 +73,17 @@ describe('projectSnapshot', () => {
     expect(heading(1)).toEqual([]);
   });
 
+  it("reads a tab's state as selected, not as a value of 1 or 0", () => {
+    const { root } = projectSnapshot(
+      { snapshot_id: 's', tree: { role: 'window', name: 'W', children: [{ role: 'tab', name: 'General', value: '1', states: ['selected'], ref_id: '@s:e1' }, { role: 'tab', name: 'Advanced', value: '0', ref_id: '@s:e2' }] } },
+      minter(),
+    );
+    expect(root.children?.map((tab) => ({ name: tab.name, value: tab.value, selected: tab.states?.selected }))).toEqual([
+      { name: 'General', value: undefined, selected: true },
+      { name: 'Advanced', value: undefined, selected: undefined },
+    ]);
+  });
+
   it('reports a secure field as a password field with no value', () => {
     const { root } = project('macos/appkit-form');
     const password = byTestId(root, 'password')!;

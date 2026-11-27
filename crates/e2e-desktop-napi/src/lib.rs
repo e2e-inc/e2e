@@ -89,6 +89,12 @@ pub async fn processes_carrying(token: String) -> Option<Vec<i32>> {
     spawn_blocking(move || process::carrying(&token)).await.ok().flatten()
 }
 
+/// The path of the installed app a bundle id or an app name names, as a launch would find it; `null` when none does.
+#[napi]
+pub fn installed_app(target: String) -> Option<String> {
+    launch::installed_path(&target)
+}
+
 /// Drops the refs of a process that quit.
 #[napi]
 pub fn forget_process(pid: i32) {

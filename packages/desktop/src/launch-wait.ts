@@ -9,6 +9,8 @@ export const LAUNCH_READY_MS = 10_000;
 
 /** The cause of a read of an app that quit since it launched. */
 export const QUIT = new Error('the app quit');
+/** The cause of a retryable read that failed listing the app's windows: it saw none, nor that there are none. */
+export const UNLISTED = new Error('the app did not list its windows in time');
 
 /** What the launch wait asks of the surface that launched the app. */
 export interface LaunchedApp {
@@ -70,7 +72,8 @@ export async function windowReadable(operation: OperationContext, launched: Laun
       // A window not readable yet, or one replaced while it was read, is what this wait looks at below; so is an app that quit.
       const stale = cause instanceof EngineError && cause.code === 'NODE_STALE' && cause.retryable;
       if (!(cause instanceof EngineError && (stale || cause.cause === QUIT))) throw cause;
-      if (stale) sawWindow = true;
+      // A window list the app did not answer in time saw no window: an app still starting up answers it so.
+      if (stale && cause.cause !== UNLISTED) sawWindow = true;
     }
     // A window whose root the app did not answer for is there but not readable yet, which is what this wait is for.
     if (screen !== undefined && !screen.rootUnread) return;

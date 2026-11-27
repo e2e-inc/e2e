@@ -26,6 +26,7 @@
  * the Accessibility API: no helper process sees it.
  */
 
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { EngineError } from '@e2e-dev/core/engine';
@@ -105,6 +106,8 @@ export interface DesktopDriver {
   processesCarrying(token: string): Promise<readonly number[] | null>;
   /** Drops the refs of a process that quit. */
   forgetProcess(pid: number): void;
+  /** The path of the installed app a bundle id or an app name names, as a launch finds it; null when none does. */
+  installedApp(target: string): string | null;
   launch(options: {
     path?: string;
     bundleId?: string;
@@ -155,9 +158,10 @@ const ownRequire = createRequire(import.meta.url);
 /**
  * Loads the driver built for this machine: a build in this package's
  * directory (`pnpm build:native` in a checkout), else the
- * platform package npm installed beside this one. Throws
- * `UNSUPPORTED_CAPABILITY` on a platform no driver is built for, and
- * `ENGINE_FAILURE` naming what is missing on one that has a driver.
+ * platform package npm installed beside this one, which must be of this
+ * package's version. Throws `UNSUPPORTED_CAPABILITY` on a platform no
+ * driver is built for, and `ENGINE_FAILURE` naming what is missing, or out
+ * of date, on one that has a driver.
  */
 export function loadNativeDriver(): DesktopDriver {
   const platform = `${process.platform}-${process.arch}`;
@@ -165,21 +169,68 @@ export function loadNativeDriver(): DesktopDriver {
   if (packageName === undefined) {
     throw new EngineError('UNSUPPORTED_CAPABILITY', `@e2e-dev/desktop has no native driver for ${process.platform} on ${process.arch}: it drives macOS apps only`, { retryable: false });
   }
+  const root = path.join(import.meta.dirname, '..');
+  // The crate's sources ship in no package: they are there only in a checkout (crates/ at the repository's root), which
+  // builds its own driver into this package's directory.
+  const workspace = path.join(root, '..', '..');
+  const crate = path.join(workspace, 'crates', 'e2e-desktop-napi');
+  const checkout = existsSync(path.join(crate, 'Cargo.toml'));
+  const build = path.join(root, `desktop.${platform}.node`);
   const failures: string[] = [];
   // A build in the package directory exists only in a checkout (the package ships `dist` alone), and is the one just built there:
   // a platform package placed by a canary build stays in the checkout, and must not hide it.
-  const builds: readonly [string, () => string][] = [
-    [path.join(import.meta.dirname, '..', `desktop.${platform}.node`), () => 'checkout build'],
-    [packageName, () => (ownRequire(`${packageName}/package.json`) as { version: string }).version],
-  ];
-  for (const [specifier, version] of builds) {
+  if (existsSync(build)) {
+    // An addon built before the sources last changed (a pull, a branch switch) would answer in its old shape, and fail
+    // in the middle of a test rather than here.
+    const changed = checkout ? newerSource(workspace, crate, statSync(build).mtimeMs) : undefined;
+    if (changed !== undefined) {
+      throw new EngineError('ENGINE_FAILURE', `the desktop engine's native driver ${build} is older than ${changed}; build it again with \`pnpm --filter @e2e-dev/desktop build:native\``, { retryable: false });
+    }
     try {
-      return { ...(ownRequire(specifier) as Omit<DesktopDriver, 'version'>), version: version() };
+      return { ...(ownRequire(build) as Omit<DesktopDriver, 'version'>), version: 'checkout build' };
     } catch (cause) {
-      failures.push(`${specifier}: ${(cause as Error).message.split('\n')[0] ?? ''}`);
+      failures.push(`${build}: ${(cause as Error).message.split('\n')[0] ?? ''}`);
     }
   }
-  throw new EngineError('ENGINE_FAILURE', `the desktop engine's native driver could not be loaded; install ${packageName}, which npm installs with @e2e-dev/desktop on this platform (${failures.join('; ')})`, { retryable: false });
+  if (checkout) {
+    throw new EngineError('ENGINE_FAILURE', `the desktop engine's native driver is not built in this checkout; build it with \`pnpm --filter @e2e-dev/desktop build:native\`${failures.length === 0 ? '' : ` (${failures.join('; ')})`}`, { retryable: false });
+  }
+  const own = (ownRequire('../package.json') as { version: string }).version;
+  let version: string | undefined;
+  try {
+    version = (ownRequire(`${packageName}/package.json`) as { version: string }).version;
+    // The engine and its driver change together, and npm installs the platform package at the engine's exact version:
+    // another one is a lockfile or an override that pinned it apart, whose driver may not answer what this engine asks.
+    if (version !== own) {
+      failures.push(`${packageName} is ${version}, but @e2e-dev/desktop is ${own}; install ${packageName}@${own}`);
+    } else {
+      return { ...(ownRequire(packageName) as Omit<DesktopDriver, 'version'>), version };
+    }
+  } catch (cause) {
+    failures.push(`${packageName}: ${(cause as Error).message.split('\n')[0] ?? ''}`);
+  }
+  throw new EngineError(
+    'ENGINE_FAILURE',
+    `the desktop engine's native driver could not be loaded; install ${packageName}@${own}, which npm installs with @e2e-dev/desktop on this platform unless optional dependencies are left out (--omit=optional) (${failures.join('; ')})`,
+    { retryable: false },
+  );
+}
+
+/**
+ * The first source of the driver changed after `since` (a modification time in ms), or `undefined`: the crate's
+ * manifest, build script, and sources, and the workspace's manifest, lock file, and toolchain.
+ */
+function newerSource(workspace: string, crate: string, since: number): string | undefined {
+  const files = [
+    ...['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml'].map((file) => path.join(workspace, file)),
+    ...['Cargo.toml', 'build.rs'].map((file) => path.join(crate, file)),
+    ...readdirSync(path.join(crate, 'src'), { recursive: true, encoding: 'utf8' }).map((file) => path.join(crate, 'src', file)),
+  ];
+  for (const file of files) {
+    const stats = existsSync(file) ? statSync(file) : undefined;
+    if (stats?.isFile() === true && stats.mtimeMs > since) return path.relative(workspace, file);
+  }
+  return undefined;
 }
 
 /** A failure the driver reported, before translation, for a caller that tries another way when nothing was sent. */
@@ -270,7 +321,8 @@ const REFUSED_CODES = new Set(['ACTION_FAILED', 'TIMEOUT']);
  */
 export function translate(cause: unknown, label: string, input: boolean): Error {
   if (!(cause instanceof DriverFailure)) return cause instanceof Error ? cause : new EngineError('ENGINE_FAILURE', `${label}: ${String(cause)}`, { retryable: false });
-  const text = `${label}: ${cause.message}`;
+  // The driver names the step that failed itself ("set value: ...", "focus: ..."): the label would only say it again.
+  const text = /^[a-z][a-z ]*: /.test(cause.message) ? cause.message : `${label}: ${cause.message}`;
   if (input && !cause.notDelivered) return new EngineError('ACTION_MAY_HAVE_COMMITTED', `${text} (the input may have reached the app)`, { retryable: false, cause });
   if (STALE_CODES.has(cause.code)) return new EngineError('NODE_STALE', text, { retryable: true, cause });
   // A read the driver says is safe to try again (the app was busy): read again, as a stale one.

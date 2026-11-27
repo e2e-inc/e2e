@@ -77,6 +77,11 @@ fn app_folders() -> Vec<String> {
     folders
 }
 
+/// The path of the installed app a bundle id or an app name names, as a launch finds it; `None` when none does.
+pub fn installed_path(target: &str) -> Option<String> {
+    installed(target)?.path().map(|path| path.to_string())
+}
+
 /// The bundle of an installed app: by bundle id first, then by name in the usual folders, in any case, then by name
 /// through LaunchServices.
 fn installed(target: &str) -> Option<Retained<NSURL>> {
@@ -193,7 +198,16 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
                 if let Some(mut pipe) = child.stderr.take() {
                     let _ = pipe.read_to_string(&mut stderr);
                 }
-                return Err(Failure::refused(codes::ACTION_FAILED, format!("open could not start {bundle}: {}", stderr.trim()))
+                // The engine starts a copy of its own (`open -n`), which an app that runs one copy at a time refuses
+                // while one runs: say that, not only what launchd answered.
+                let running = if before.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        ". A copy of {bundle_id} was already running: the engine always starts a copy of its own, which an app that runs only one copy at a time (such as Finder) refuses, so quit the running copy first, or test another app"
+                    )
+                };
+                return Err(Failure::refused(codes::ACTION_FAILED, format!("open could not start {bundle}: {}{running}", stderr.trim()))
                     .with_details(serde_json::json!({ "kind": "not_started" })));
             }
             Ok(None) if started.elapsed() >= request.timeout => {

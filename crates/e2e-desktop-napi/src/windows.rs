@@ -129,8 +129,13 @@ fn server_windows() -> Vec<ServerWindow> {
 
 /// The app's accessibility windows, front to back, each with its window server id when it has one.
 pub fn ax_windows(app: &Element) -> Outcome<Vec<(Element, Option<u32>)>> {
-    // Every window, however many a document app restored: one past a fixed cap would list but never read.
-    let count = app.count("AXWindows").unwrap_or(256).max(1);
+    // Every window, however many a document app restored: one past a fixed cap would list but never read. An app with
+    // no window counts zero, and a read of zero elements from index 0 is an illegal argument, not an empty list.
+    let count = match app.count("AXWindows") {
+        Ok(0) => return Ok(Vec::new()),
+        Ok(count) => count,
+        Err(_) => 256,
+    };
     match app.elements("AXWindows", count) {
         Ok(windows) => Ok(windows
             .into_iter()

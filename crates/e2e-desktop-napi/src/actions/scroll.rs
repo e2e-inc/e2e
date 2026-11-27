@@ -56,6 +56,19 @@ pub(super) fn enclosing_scroll_area(element: &Element, vertical: bool) -> Option
     None
 }
 
+/// How long a scroll area's content is along one axis: the span its contents cover. `AXContents` lists the document
+/// view, or, where AppKit leaves that view out, every control in it (a sidebar of buttons); with no `AXContents`, the
+/// children but the scroll bars. Zero when none has a frame.
+fn content_length(area: &Element, vertical: bool) -> f64 {
+    let listed = area.elements("AXContents", 4096).ok().filter(|contents| !contents.is_empty());
+    let contents = listed.unwrap_or_else(|| {
+        area.elements("AXChildren", 4096).unwrap_or_default().into_iter().filter(|child| child.text("AXRole").as_deref() != Some("AXScrollBar")).collect()
+    });
+    let spans = contents.iter().filter_map(Element::frame).map(|(x, y, width, height)| if vertical { (y, y + height) } else { (x, x + width) });
+    let (start, end) = spans.fold((f64::INFINITY, f64::NEG_INFINITY), |(start, end), (from, to)| (start.min(from), end.max(to)));
+    if end > start { end - start } else { 0.0 }
+}
+
 /// The accessibility action that scrolls an element a page in `direction`.
 fn page_action(direction: &str) -> &'static str {
     match direction {
@@ -90,12 +103,7 @@ pub(super) fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outco
         };
         let (_, _, width, height) = element.frame().unwrap_or((0.0, 0.0, 0.0, 0.0));
         let visible = if vertical { height } else { width };
-        let content = element
-            .element("AXContents")
-            .or_else(|| element.elements("AXChildren", 16).ok()?.into_iter().find(|child| child.text("AXRole").as_deref() != Some("AXScrollBar")))
-            .and_then(|contents| contents.frame())
-            .map(|(_, _, width, height)| if vertical { height } else { width })
-            .unwrap_or(0.0);
+        let content = content_length(element, vertical);
         let step = if content > visible && visible > 0.0 { pages * visible / (content - visible) } else { pages * 0.25 };
         if let Some(current) = current
             && settable(&bar, "AXValue", "scroll")?
@@ -113,4 +121,64 @@ pub(super) fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outco
         return repeat(element, page_action(direction), (pages.round() as usize).max(1));
     }
     Err(Failure::refused(codes::ACTION_FAILED, format!("nothing here scrolls {direction}")))
+}
+
+/// How far a scroll area must move along one axis to show the span `start..end` inside its view `view_start..view_end`:
+/// the least that brings the span in, its start first when it is longer than the view. Zero when any of it shows.
+pub(super) fn offset_to_show(start: f64, end: f64, view_start: f64, view_end: f64) -> f64 {
+    if end > view_start && start < view_end {
+        0.0
+    } else if start < view_start {
+        start - view_start
+    } else {
+        (end - view_end).min(start - view_start)
+    }
+}
+
+/// Moves the scroll bar of every scroll area around `element`, nearest first, so the element's frame comes inside each;
+/// `Ok(true)` when it moved one. An area whose bar takes no value moves nothing, and the element stays out of view.
+pub(super) fn bring_into_view(element: &Element, what: &str) -> Outcome<bool> {
+    let mut moved = false;
+    // Once one scroll bar moved, the app's content moved: no later failure can say nothing was sent.
+    scroll_areas_to(element, what, &mut moved).map_err(|failure| if moved { failure.delivered() } else { failure })?;
+    Ok(moved)
+}
+
+/// The walk `bring_into_view` makes, setting `moved` once a scroll bar took a new value.
+fn scroll_areas_to(element: &Element, what: &str, moved: &mut bool) -> Outcome<()> {
+    let mut next = element.element("AXParent");
+    for _ in 0..crate::snapshot::MAX_ANCESTORS {
+        let Some(area) = next else { break };
+        let role = area.text("AXRole");
+        if role.as_deref() == Some("AXWindow") {
+            break;
+        }
+        if role.as_deref() == Some("AXScrollArea") {
+            for vertical in [true, false] {
+                // Read again for each: the move of an inner area, or of the other axis, moved the element.
+                let (Some(frame), Some(view)) = (element.frame(), area.frame()) else { continue };
+                let span = |(x, y, width, height): (f64, f64, f64, f64)| if vertical { (y, y + height) } else { (x, x + width) };
+                let ((start, end), (view_start, view_end)) = (span(frame), span(view));
+                let offset = offset_to_show(start, end, view_start, view_end);
+                let Some(bar) = scroll_bar(&area, vertical) else { continue };
+                let room = content_length(&area, vertical) - (view_end - view_start);
+                if offset == 0.0 || room <= 0.0 {
+                    continue;
+                }
+                let current = match bar.attribute("AXValue") {
+                    Ok(Value::Number(number)) => number,
+                    Err(ax::AX_CANNOT_COMPLETE) => return Err(unread(ax::AX_CANNOT_COMPLETE, what)),
+                    _ => continue,
+                };
+                if !settable(&bar, "AXValue", what)? {
+                    continue;
+                }
+                go(what)?;
+                bar.set_number("AXValue", (current + offset / room).clamp(0.0, 1.0)).map_err(|error| write_failed(error, what))?;
+                *moved = true;
+            }
+        }
+        next = area.element("AXParent");
+    }
+    Ok(())
 }

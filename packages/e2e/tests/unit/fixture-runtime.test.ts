@@ -309,8 +309,8 @@ describe('explicit fixture operations', () => {
     const { fixtures } = runtime(engine);
     const gadget = (fixtures as unknown as { gadget: Record<'lost' | 'slow' | 'denied' | 'plain', () => Promise<void>> & { wait(pattern: string): Promise<void> } }).gadget;
     await expect(gadget.lost()).rejects.toMatchObject({ code: 'APP_NOT_OPEN', category: 'test', message: 'appstate requires an active session' });
-    await expect(gadget.slow()).rejects.toMatchObject({ code: 'ACTION_FAILED', message: 'operation timed out in gadget.slow' });
-    await expect(gadget.wait('foo.css')).rejects.toMatchObject({ code: 'ACTION_FAILED', message: 'operation timed out in gadget.wait "foo.css"' });
+    await expect(gadget.slow()).rejects.toMatchObject({ code: 'ACTION_FAILED', message: 'operation timed out in gadget.slow (appstate timed out)' });
+    await expect(gadget.wait('foo.css')).rejects.toMatchObject({ code: 'ACTION_FAILED', message: 'operation timed out in gadget.wait "foo.css" (wait timed out)' });
     await expect(gadget.denied()).rejects.toMatchObject({ code: 'POLICY_DENIED' });
     await expect(gadget.plain()).rejects.toThrow('plain failure');
   });
