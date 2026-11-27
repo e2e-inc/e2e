@@ -314,7 +314,8 @@ pub(crate) enum Placement {
 /// whatever its frames say. An element with no frame has no place to judge, and shows. `Err` when the app did not
 /// answer in time.
 pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
-    let frame = element.frame();
+    // Every frame is read so that a stall fails the placement: a frame the app did not answer is no proof it shows.
+    let frame = element.read_frame()?;
     if let Some((_, _, width, height)) = frame
         && (width <= 0.0 || height <= 0.0)
     {
@@ -348,7 +349,7 @@ pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
             }
         }
         if matches!(role.as_str(), "AXScrollArea" | "AXWindow")
-            && let Some((x, y, width, height)) = parent.frame()
+            && let Some((x, y, width, height)) = parent.read_frame()?
         {
             let frame = Rect { x, y, width, height };
             clip = Some(clip.map_or(frame, |clip| intersect(clip, frame)));

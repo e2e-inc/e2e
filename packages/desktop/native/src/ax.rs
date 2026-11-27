@@ -356,11 +356,21 @@ impl Element {
 
     /// The element's frame in screen points, top-left origin.
     pub fn frame(&self) -> Option<(f64, f64, f64, f64)> {
-        let values = self.attributes(&["AXPosition", "AXSize"]).ok()?;
-        match (&values[0], &values[1]) {
+        self.read_frame().ok().flatten()
+    }
+
+    /// `frame`, failing with `AX_CANNOT_COMPLETE` when the app did not answer in time: a stall is no proof the element
+    /// has no frame. Any other error reads as none.
+    pub fn read_frame(&self) -> Result<Option<(f64, f64, f64, f64)>, AXError> {
+        let values = match self.attributes(&["AXPosition", "AXSize"]) {
+            Ok(values) => values,
+            Err(AX_CANNOT_COMPLETE) => return Err(AX_CANNOT_COMPLETE),
+            Err(_) => return Ok(None),
+        };
+        Ok(match (&values[0], &values[1]) {
             (Some(Value::Point(x, y)), Some(Value::Size(width, height))) => Some((*x, *y, *width, *height)),
             _ => None,
-        }
+        })
     }
 
     pub fn settable(&self, name: &str) -> Result<bool, AXError> {
