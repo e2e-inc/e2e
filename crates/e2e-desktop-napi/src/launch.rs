@@ -17,6 +17,11 @@ use std::time::{Duration, Instant};
 /// The variable that carries a launch's token into the process it starts.
 pub const TOKEN_VARIABLE: &str = "E2E_DESKTOP_LAUNCH";
 
+/// The environment entry of a launch's token.
+pub fn token_marker(token: &str) -> String {
+    format!("{TOKEN_VARIABLE}={token}")
+}
+
 /// The argument that carries a launch's token into an app whose environment macOS hides: `-E2EDesktopLaunch=<token>`,
 /// one entry, so no app reads the token as a file or a URL to open.
 pub fn token_argument(token: &str) -> String {
@@ -166,7 +171,7 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     if !request.activate {
         command.arg("-g");
     }
-    command.arg("--env").arg(format!("{TOKEN_VARIABLE}={token}"));
+    command.arg("--env").arg(token_marker(&token));
     command.arg(&bundle).arg("--args").args(&request.arguments);
     if hides_environment(&bundle) {
         command.arg(token_argument(&token));
@@ -198,7 +203,7 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
         }
     }
 
-    let marker = format!("{TOKEN_VARIABLE}={token}");
+    let marker = token_marker(&token);
     let claim_until = (Instant::now() + request.claim).min(started + request.timeout);
     loop {
         let fresh: Vec<i32> = running_copies(&bundle_id).into_iter().filter(|pid| !before.contains(pid)).collect();

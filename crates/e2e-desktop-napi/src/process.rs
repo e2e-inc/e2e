@@ -93,8 +93,9 @@ pub fn carries(pid: i32, marker: &str) -> Option<bool> {
     environment(pid).map(|entries| entries.iter().any(|entry| entry == marker))
 }
 
-/// Every process of this user whose environment holds `marker`; `None` when the processes cannot be listed.
-pub fn carrying(marker: &str) -> Option<Vec<i32>> {
+/// Every process of this user that carries the launch `token`, in its environment or, where macOS hides that, in its
+/// arguments; `None` when the processes cannot be listed.
+pub fn carrying(token: &str) -> Option<Vec<i32>> {
     let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
     if count <= 0 {
         return None;
@@ -106,11 +107,11 @@ pub fn carrying(marker: &str) -> Option<Vec<i32>> {
     }
     pids.truncate(filled as usize);
     let own = std::process::id() as i32;
-    // A launch token also rides in the arguments of an app whose environment macOS hides.
-    let token = marker.strip_prefix(crate::launch::TOKEN_VARIABLE).and_then(|rest| rest.strip_prefix('='));
-    let holds = |pid: i32| match carries(pid, marker) {
+    let marker = crate::launch::token_marker(token);
+    let argument = crate::launch::token_argument(token);
+    let holds = |pid: i32| match carries(pid, &marker) {
         Some(carried) => carried,
-        None => token.is_some_and(|token| holds_argument(pid, &crate::launch::token_argument(token))),
+        None => holds_argument(pid, &argument),
     };
     Some(pids.into_iter().filter(|pid| *pid > 0 && *pid != own && holds(*pid)).collect())
 }
