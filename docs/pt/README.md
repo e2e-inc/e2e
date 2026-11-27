@@ -110,6 +110,16 @@ translation moves or goes with it in the same change.
 | pull request | pull request (keep in English, o pull request, PR) |
 | config, configuration | configuração |
 | screenshot | captura de tela |
+| match (a locator), exactly-one rule | correspondência, regra de correspondência única |
+| actionable, actionability | acionável, acionabilidade |
+| scroll (noun), scroll container | rolagem, contêiner de rolagem |
+| offset | deslocamento |
+| drag (noun) | arrasto |
+| modifier (a key) | modificador |
+| editing host | host de edição |
+| fold (reruns into a report) | incorporar, incorporação |
+| run header, summary rows | cabeçalho da execução, linhas de resumo |
+| trace page | página de trace |
 | semantic tree | árvore semântica |
 | flaky, flaky test | instável, teste instável |
 | harness | harness (keep in English, o harness) |
