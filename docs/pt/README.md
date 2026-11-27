@@ -168,6 +168,14 @@ translation moves or goes with it in the same change.
 | persona | persona (a persona) |
 | pin (an agent) | fixar (agentes fixados) |
 | custom executor | executor personalizado |
+| step executor | executor de passos |
+| test filter, decision filter | filtro de testes, filtro de decisão |
+| setup file | arquivo de preparação |
+| priority band | faixa de prioridade |
+| merge base | base de merge |
+| key window (macOS) | key window (keep in English, a key window) |
+| device farm | fazenda de dispositivos |
+| macOS settings and menu labels | the pt-BR macOS names (Ajustes do Sistema, Privacidade e Segurança) |
 | budget (steps, model calls, time) | orçamento |
 | seeded data | dados pré-carregados (pré-carregar) |
 | signed in, start signed in | autenticado, com o login feito |
