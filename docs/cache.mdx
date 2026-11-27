@@ -284,7 +284,9 @@ steps:
 - Review the YAML, but don't edit it. An edited recording reads as
   `invalid-entry`, and the test records nothing until the edit is undone.
   Meanwhile a run that evicts another of the test's recordings drops it
-  from the lock only, so it stops replaying.
+  from the lock only, so it stops replaying. Its block stays in the YAML,
+  and `npx e2e cache ls` names it: delete it too, and the test records
+  again once the edit is undone.
   A run rewrites the file when it records, so comments are lost. Moving
   steps around is fine. A run killed while it writes leaves the pair for the
   next `read-write` run, which finishes or drops that write before it reads.
