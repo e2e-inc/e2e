@@ -866,11 +866,16 @@ fn row_texts(element: &Element, depth: usize, texts: &mut Vec<String>) -> Result
     Ok(())
 }
 
+/// The pop-up button's menu, if it is already open.
+fn current_menu(button: &Element) -> Option<Element> {
+    button.elements("AXChildren", 4).unwrap_or_default().into_iter().find(|child| child.text("AXRole").as_deref() == Some("AXMenu"))
+}
+
 /// The open menu of a pop-up button, once it shows.
 fn open_menu(button: &Element, deadline: Instant) -> Option<Element> {
     let mut menu = None;
     until(deadline, || {
-        menu = button.elements("AXChildren", 4).unwrap_or_default().into_iter().find(|child| child.text("AXRole").as_deref() == Some("AXMenu"));
+        menu = current_menu(button);
         menu.is_some()
     });
     menu
@@ -968,11 +973,14 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
         if value_text(element).as_deref() == Some(label) {
             return Ok(());
         }
-        // A menu still closing (the last select's) would take the press.
-        until(deadline, || windows::open_menus(entry.pid) == 0);
-        perform(element, "AXPress", "open the list")?;
-        let Some(menu) = open_menu(element, deadline) else {
-            return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the list's menu did not open"));
+        // A menu the user or a tap already opened on this button is the list: a press would close it.
+        let menu = if let Some(menu) = current_menu(element) {
+            menu
+        } else {
+            // A menu still closing (the last select's) would take the press.
+            until(deadline, || windows::open_menus(entry.pid) == 0);
+            perform(element, "AXPress", "open the list")?;
+            open_menu(element, deadline).ok_or_else(|| Failure::unconfirmed(codes::ACTION_FAILED, "the list's menu did not open"))?
         };
         // Until the item is pressed nothing is chosen: a failure closes the menu again, and says when it stayed open,
         // since an open menu covers the window for the next action.
