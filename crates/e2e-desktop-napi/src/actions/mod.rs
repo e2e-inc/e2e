@@ -462,6 +462,10 @@ pub fn act(reference: &str, action: Action, input_id: Option<u32>, deadline: Ins
 fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
     let entry = resolve(reference)?;
     let element = &entry.element;
+    // A hover presses nothing, and the pointer's own checks refuse a window over the point.
+    if !matches!(action, Action::Hover) {
+        unblocked(element, entry.pid)?;
+    }
     match action {
         Action::Click => click(&entry, deadline),
         // A press on a disabled control is acknowledged and ignored: each wait for it to be enabled, as a tap does. A
@@ -493,6 +497,43 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
         Action::Scroll { direction, pages } => scroll(element, &direction, pages),
         Action::Type { text, physical } => type_text(&entry, &text, physical, deadline),
     }
+}
+
+/// Refuses input to an element a modal window holds out: a sheet open on its window that it is not in, or an app-modal
+/// window (an alert's or a panel's modal session) it is not in. A person cannot reach it, while AppKit takes an
+/// accessibility action there all the same (behind a sheet) or acknowledges it and drops it (behind an app-modal alert).
+fn unblocked(element: &Element, pid: i32) -> Outcome<()> {
+    let mut ancestors = Vec::new();
+    let mut next = element.element("AXParent");
+    while let Some(parent) = next {
+        if ancestors.len() >= crate::snapshot::MAX_ANCESTORS {
+            break;
+        }
+        next = parent.element("AXParent");
+        ancestors.push(parent);
+    }
+    let inside = |holder: &Element| holder == element || ancestors.contains(holder);
+    let named = |holder: &Element| holder.text("AXTitle").filter(|title| !title.trim().is_empty()).map(|title| format!(" ({title})")).unwrap_or_default();
+    if let Some(window) = ancestors.iter().find(|ancestor| ancestor.text("AXRole").as_deref() == Some("AXWindow")) {
+        let sheets = window.elements("AXChildren", 4096).unwrap_or_default().into_iter().filter(|child| child.text("AXRole").as_deref() == Some("AXSheet"));
+        for sheet in sheets {
+            if !inside(&sheet) {
+                return Err(Failure::refused(
+                    codes::ACTION_FAILED,
+                    format!("a sheet{} is open over the element's window, so the user cannot reach it; finish the sheet first", named(&sheet)),
+                ));
+            }
+        }
+    }
+    for (window, _) in windows::ax_windows(&Element::application(pid)).unwrap_or_default() {
+        if window.boolean("AXModal") == Some(true) && !inside(&window) {
+            return Err(Failure::refused(
+                codes::ACTION_FAILED,
+                format!("a modal window{} is open, so the user cannot reach the element; finish it first", named(&window)),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Presses a key combo into a window of `pid`. Without physical input the
