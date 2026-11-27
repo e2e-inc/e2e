@@ -110,6 +110,8 @@ describe('routeLocation', () => {
     expect(routeLocation('/invite/<secret:token>/accept')).toBe('/invite/<secret:token>/accept');
     // A marker beside other text may have taken punctuation with it: the location is its markers alone.
     expect(routeLocation('/invite/x<secret:token>y')).toBe('<secret:token>');
+    // A URL parser spells a marker percent-encoded.
+    expect(routeLocation('/%3Csecret:callback%3ESampleCallbackWord')).toBe('<secret:callback>');
     expect(routeLocation('/invite?code=<secret:token>')).toBe('/invite?code=:id');
     expect(routeLocation('https://idp.test/invite/<secret:token>')).toBe('https://idp.test/invite/<secret:token>');
   });

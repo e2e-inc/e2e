@@ -245,6 +245,8 @@ export function addressKey(location: string): string {
  * the live addresses before an entry is written (`cache/detours.ts`).
  */
 export function routeLocation(location: string): string {
+  // An address spelled through a URL parser holds a marker percent-encoded (`/%3Csecret:cb%3ESampleCode`).
+  location = location.replace(ENCODED_MARKER, (_encoded: string, name: string) => `<secret:${name}>`);
   if (!SECRET_MARKER.test(location)) return spelledLocation(location);
   // A marker that took part of an address's punctuation with it (`http://app.test<secret:cb>color=...`, a secret ending in `?`)
   // leaves no boundary to read the rest by: the location is stored as its markers alone.
@@ -252,6 +254,9 @@ export function routeLocation(location: string): string {
   // One between delimiters can still leave a value outside its query (`/<secret:cb>&state=...`): every named value reads `:id`.
   return spelledLocation(location.replace(NAMED_VALUE, (_named: string, query?: string, parameter?: string) => `${query ?? parameter}=${PARAM}`));
 }
+
+/** A secret's marker as a URL parser spells it, its angle brackets percent-encoded. */
+const ENCODED_MARKER = /%3Csecret:([A-Za-z0-9_.-]*)%3E/gi;
 
 /** Every secret marker in a text. */
 const SECRET_MARKERS = /<secret:[A-Za-z0-9_.-]*>/g;
