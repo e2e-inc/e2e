@@ -9,7 +9,7 @@
   ],
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter @e2e-dev/core run build && pnpm --filter e2e run build && pnpm --filter \"./packages/*\" --filter \"!@e2e-dev/core\" --filter \"!e2e\" run build",
+    "build": "pnpm --filter @e2e-dev/util run build:native && pnpm --filter @e2e-dev/util run build && pnpm --filter @e2e-dev/core run build && pnpm --filter e2e run build && pnpm --filter \"./packages/*\" --filter \"!@e2e-dev/util\" --filter \"!@e2e-dev/core\" --filter \"!e2e\" run build",
     "check": "pnpm run lint && pnpm run check:dead-code && pnpm run typecheck && pnpm run docs:check-errors && pnpm run check:peer-ranges && pnpm run check:changeset-bumps && pnpm run check:examples && pnpm run check:benchmark-coverage && pnpm run check:install-scripts && pnpm run plugins:check && pnpm run mcp-server:check && pnpm run docs:check",
     "check:dead-code": "fallow dead-code",
     "check:peer-ranges": "node scripts/check-peer-ranges.ts",
