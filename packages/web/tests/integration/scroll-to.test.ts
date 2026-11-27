@@ -230,6 +230,20 @@ describe('scrollTo out of budget', () => {
     expect((await offsets()).top).toBe(0);
   });
 
+  it('says the budget ran out, not stale, when the screen\'s pane left and the page stayed busy past the budget', async () => {
+    // The page does not scroll, so the screen scrolls the pane. The pane removes itself on its first scroll,
+    // then the page blocks past the budget right after that jump reads, so the next jump finds the pane gone too late.
+    await page.setContent(`<!doctype html><body style="margin: 0"><div id="pane" style="height: 100vh; overflow-y: auto">${ROWS}</div>
+      <script>
+        document.getElementById('pane').addEventListener('scroll', (event) => {
+          event.target.remove();
+          requestAnimationFrame(() => setTimeout(() => { const end = Date.now() + 1_000; while (Date.now() < end); }, 0));
+        }, { once: true });
+      </script></body>`);
+    const failure = await scroll('bottom', undefined, 800).catch((cause: unknown) => cause);
+    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT', message: 'the budget ran out after 1 jump, before a jump confirmed the bottom edge' });
+  });
+
   it('fails as stale when the located node is gone and the container left with it', async () => {
     await page.setContent(`<div id="pane" style="height: 300px; overflow-y: auto">${ROWS}</div>
       <script>
@@ -399,6 +413,31 @@ describe('scrollTo on a node', () => {
       expect(body.top, form).toBe(body.maxTop);
       expect((await offsets()).top, form).toBe(0);
     }
+  });
+
+  it.each(['html', 'body'])('scrolls the page, not the body, under %s { container-type: scroll-state }, which applies no containment', async (on) => {
+    const style = 'container-type: scroll-state';
+    const content = (form: string) => `<!doctype html><html style="height: 100%; ${on === 'html' ? style : ''}">`
+      + `<body style="margin: 0; height: 100%; overflow-y: auto; ${on === 'body' ? style : ''}"><p id="first">Row 0 ${form}</p>${ROWS}</body></html>`;
+    for (const form of ['node', 'screen'] as const) {
+      await page.setContent(content(form));
+      await scroll('bottom', form === 'node' ? '#first' : undefined);
+      const root = await offsets();
+      expect(root.maxTop, form).toBeGreaterThan(0);
+      expect(root.top, form).toBe(root.maxTop);
+    }
+  });
+
+  it('walks out of a shadow root to its host when the page replaced the global ShadowRoot', async () => {
+    await page.setContent(`<div id="pane" style="height: 300px; overflow-y: auto"><div id="host"></div>${ROWS}</div>${ROWS}
+      <script>
+        document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<p id="start">Start</p>';
+        window.ShadowRoot = function ShadowRoot() {};
+      </script>`);
+    await scroll('bottom', '#start');
+    const pane = await offsets('#pane');
+    expect(pane.top).toBe(pane.maxTop);
+    expect((await offsets()).top).toBe(0);
   });
 
   it('finishes for a node in a cross-origin iframe out of view, which renders no frames', async () => {

@@ -498,9 +498,11 @@ export function createEngineSession(options: EngineSessionOptions): TargetSessio
     },
     async swipe(direction, momentum, operation) {
       if (!actions.has('swipe')) unsupported('swipe gestures');
+      const swipe = { kind: 'swipe', direction, ...(momentum === undefined ? {} : { momentum }) } as const;
+      if (root !== undefined) return performRaw(root, swipe, operation);
       const startedMs = Date.now();
-      const target = root ?? (await session.observe(operation)).root;
-      await performRaw(target, { kind: 'swipe', direction, ...(momentum === undefined ? {} : { momentum }) }, leftSince(operation, startedMs));
+      const observed = (await session.observe(operation)).root;
+      await performRaw(observed, swipe, leftSince(operation, startedMs));
     },
     async rootRef(operation) {
       return root ?? (await session.observe(operation)).root;

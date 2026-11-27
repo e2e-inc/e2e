@@ -74,6 +74,8 @@ export async function scrollToEdge(page: Page, target: ActionTarget | undefined,
     for (;;) {
       if (container === undefined) {
         operation.signal.throwIfAborted();
+        // After a container left the page, a find with too little budget left could not be followed by a jump.
+        if (found && deadline.remaining() < MIN_JUMP_MS) throw outOfBudget();
         try {
           container = await findContainer(page, target, args, Math.max(1, deadline.remaining()));
         } catch (cause) {
@@ -130,8 +132,10 @@ function scrollContainer(start: Element, args: FindArgs): Element | null {
   const closedRoots = (globalThis as Record<symbol, unknown>)[Symbol.for(args.closedRootsKey)] as WeakMap<Element, ShadowRoot> | undefined;
   const overflowOf = (style: CSSStyleDeclaration): string => (vertical ? style.overflowY : style.overflowX);
   // Any containment stops the body's overflow from reaching the viewport:
-  // `contain`, and a container type, which applies it without showing in `contain`.
-  const contained = (style: CSSStyleDeclaration): boolean => style.contain !== 'none' || style.containerType !== 'normal';
+  // `contain`, and a size container type, which applies it without showing in
+  // `contain`. `scroll-state` applies none, and an older browser has no `containerType`.
+  const contained = (style: CSSStyleDeclaration): boolean =>
+    style.contain !== 'none' || /\b(size|inline-size)\b/.test(style.containerType ?? '');
 
   // The viewport takes the root element's overflow, or the body's when the
   // root's is visible on both axes and neither has containment; the body
