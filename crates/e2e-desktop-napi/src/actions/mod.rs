@@ -113,6 +113,16 @@ fn unread(error: AXError, what: &str) -> Failure {
     }
 }
 
+/// The element an attribute names, such as the app's focused element or key window. A read the app did not answer in
+/// time fails as a stall, which a retry may get past, never as focus that moved; any other failure reads as none.
+fn element_attribute(element: &Element, name: &str, what: &str) -> Outcome<Option<Element>> {
+    match element.attribute(name) {
+        Ok(value) => Ok(value.element().cloned()),
+        Err(ax::AX_CANNOT_COMPLETE) => Err(unread(ax::AX_CANNOT_COMPLETE, what)),
+        Err(_) => Ok(None),
+    }
+}
+
 /// Whether an attribute can be set. A stall fails, so a busy app does not read as one whose control takes no input;
 /// any other failure reads as not settable.
 fn settable(element: &Element, name: &str, what: &str) -> Outcome<bool> {
@@ -513,7 +523,7 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option
         // The control a locator's key is for must hold the app's focus, read after the window check: a sheet that opened
         // during it took the focus, and its default button would take the key.
         if let Some(entry) = &control
-            && Element::application(pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element)
+            && element_attribute(&Element::application(pid), "AXFocusedUIElement", "press")?.as_ref() != Some(&entry.element)
         {
             return Err(Failure::refused(codes::ACTION_FAILED, "the control lost keyboard focus before the key was sent, so nothing was sent"));
         }
@@ -538,7 +548,9 @@ fn frontmost(pid: i32) -> Outcome<bool> {
 /// Refuses unless `window` is the app's key window, or holds the focused sheet or alert: a key or text sent to the app
 /// goes to its key window, and would land in another one.
 fn key_window(pid: i32, window: &Element) -> Outcome<()> {
-    if Element::application(pid).element("AXFocusedWindow").is_some_and(|focused| windows::holds_focus(&focused, window)) {
+    if element_attribute(&Element::application(pid), "AXFocusedWindow", "read the app's key window")?
+        .is_some_and(|focused| windows::holds_focus(&focused, window))
+    {
         return Ok(());
     }
     Err(Failure::refused(codes::ACTION_FAILED, "the window is not the app's key window, so a key sent to the app would land elsewhere")
