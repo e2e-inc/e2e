@@ -17,8 +17,16 @@ use std::time::{Duration, Instant};
 /// The variable that carries a launch's token into the process it starts.
 pub const TOKEN_VARIABLE: &str = "E2E_DESKTOP_LAUNCH";
 
-/// The argument that carries a launch's token into an app whose environment macOS hides, followed by the token.
-pub const TOKEN_ARGUMENT: &str = "-E2EDesktopLaunch";
+/// The environment entry of a launch's token.
+pub fn token_marker(token: &str) -> String {
+    format!("{TOKEN_VARIABLE}={token}")
+}
+
+/// The argument that carries a launch's token into an app whose environment macOS hides: `-E2EDesktopLaunch=<token>`,
+/// one entry, so no app reads the token as a file or a URL to open.
+pub fn token_argument(token: &str) -> String {
+    format!("-E2EDesktopLaunch={token}")
+}
 
 /// What `launch` was asked to start.
 pub struct LaunchRequest {
@@ -120,8 +128,8 @@ fn hides_environment(bundle: &str) -> bool {
 /// Apple's App Store apps (Numbers, Pages, Xcode: signed by Apple Mac OS
 /// Application Signing, with no platform identifier), and builds signed with
 /// the `restrict` flag. Every Mac App Store app carries that signature, so
-/// each gets the token as arguments too, which the claim reads only when the
-/// environment is hidden.
+/// each gets the token as an argument too, which the claim reads only when
+/// the environment is hidden.
 fn hidden_by(signature: &str) -> bool {
     signature.lines().any(|line| {
         line.starts_with("Platform identifier=")
@@ -134,8 +142,8 @@ fn hidden_by(signature: &str) -> bool {
 /// environment given (LaunchServices hands the app the environment of the
 /// process that asks), and finds the process it started: the new copy whose
 /// environment carries the launch token. An app whose environment macOS
-/// hides also gets the token as its last arguments (`-E2EDesktopLaunch
-/// <token>`, a user default AppKit ignores), which stay readable. A copy
+/// hides also gets the token as its last argument
+/// (`-E2EDesktopLaunch=<token>`, which AppKit ignores), which stays readable. A copy
 /// with neither is never taken: it may be one the user opened meanwhile.
 pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     let started = request.asked;
@@ -163,10 +171,10 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
     if !request.activate {
         command.arg("-g");
     }
-    command.arg("--env").arg(format!("{TOKEN_VARIABLE}={token}"));
+    command.arg("--env").arg(token_marker(&token));
     command.arg(&bundle).arg("--args").args(&request.arguments);
     if hides_environment(&bundle) {
-        command.arg(TOKEN_ARGUMENT).arg(&token);
+        command.arg(token_argument(&token));
     }
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     // The lookup and `codesign` above can take a while: an app the caller gave up on is never started.
@@ -195,14 +203,14 @@ pub fn launch(request: LaunchRequest) -> Outcome<Launched> {
         }
     }
 
-    let marker = format!("{TOKEN_VARIABLE}={token}");
+    let marker = token_marker(&token);
     let claim_until = (Instant::now() + request.claim).min(started + request.timeout);
     loop {
         let fresh: Vec<i32> = running_copies(&bundle_id).into_iter().filter(|pid| !before.contains(pid)).collect();
         for pid in &fresh {
             let ours = match crate::process::carries(*pid, &marker) {
                 Some(carried) => carried,
-                None => crate::process::argument_pair(*pid, TOKEN_ARGUMENT, &token),
+                None => crate::process::holds_argument(*pid, &token_argument(&token)),
             };
             if ours {
                 return Ok(launched(*pid, &bundle, &bundle_id));
@@ -224,7 +232,12 @@ fn launched(pid: i32, bundle: &str, bundle_id: &str) -> Launched {
 
 #[cfg(test)]
 mod tests {
-    use super::hidden_by;
+    use super::{hidden_by, token_argument};
+
+    #[test]
+    fn spells_the_launch_token_as_one_argument() {
+        assert_eq!(token_argument("8ff2bdfb-142f"), "-E2EDesktopLaunch=8ff2bdfb-142f");
+    }
 
     #[test]
     fn tells_which_signatures_hide_the_environment() {

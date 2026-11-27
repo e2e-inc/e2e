@@ -4,7 +4,7 @@
  * `desktop.<method>` step bounded by the action timeout.
  */
 
-import type { EngineFixtureContext } from '@e2e-dev/core/engine';
+import type { EngineFixtureContext, FixtureTestLine } from '@e2e-dev/core/engine';
 import type { DesktopPlatform } from './options.ts';
 import type { DesktopSurface, DesktopWindow } from './surface.ts';
 
@@ -52,8 +52,27 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
   };
   return context.fixture('desktop', desktop, {
     windows: { kind: 'resource' },
-    useWindow: { kind: 'resource' },
+    // A window id holds only while the window stays open: a test line from `e2e mcp` finds the window by its title instead.
+    useWindow: { kind: 'resource', testLine: windowLine },
     press: { kind: 'resource', label: (key) => key },
     closeApp: { kind: 'resource' },
   });
+}
+
+/**
+ * How a test line names the window `useWindow` got: by its title, which holds
+ * on the next launch, where its id does not. When no window has that title
+ * on replay, the line passes `titled <title>` as the id, which `useWindow`
+ * refuses ("the app has no window titled Inbox"), rather than `undefined`,
+ * which would quietly go back to the focused window. A window with no title,
+ * or one named only by its id, keeps its arguments, with a note that they
+ * may not hold.
+ */
+function windowLine(window?: DesktopWindow | string): FixtureTestLine | undefined {
+  if (window === undefined) return undefined;
+  const title: unknown = typeof window === 'object' ? window.title : undefined;
+  if (typeof title === 'string' && title.trim() !== '') {
+    return { args: `(await desktop.windows()).find((window) => window.title === ${JSON.stringify(title)}) ?? ${JSON.stringify(`titled ${title}`)}` };
+  }
+  return { note: 'a window id holds only while the window stays open; on the next launch, pick the window from desktop.windows()' };
 }

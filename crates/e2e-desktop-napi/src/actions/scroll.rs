@@ -20,19 +20,28 @@ pub fn scroll_bar(element: &Element, vertical: bool) -> Option<Element> {
 /// Scrolls a scroll area by moving its scroll bar, `pages` of its visible size.
 pub(super) fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
     let vertical = matches!(direction, "up" | "down");
-    // A node that scrolls itself (a scroll bar of its own, or the page action for the direction) is the one moved; one
-    // with neither, a list or table, scrolls through the scroll area that holds it. The enclosing pane comes last, so a
-    // swipe on a nested list never moves the pane around it.
-    let own = scroll_bar(element, vertical).is_some() || action_names(element, "scroll")?.iter().any(|name| name == page_action(direction));
+    // A node that scrolls itself along the axis is the one moved; one that does not, a list or table, scrolls through the
+    // scroll area that holds it. The enclosing pane comes last, so a swipe on a nested list never moves the pane around it.
+    let (_, role) = role_of(element, "scroll")?;
+    let own = scrolls_itself(role, scroll_bar(element, vertical).is_some(), &action_names(element, "scroll")?, direction);
     let target = if own { None } else { enclosing_scroll_area(element, vertical) };
     scroll_by(target.as_ref().unwrap_or(element), direction, pages).map_err(|failure| {
-        // An element that takes none of the ways to scroll: say so, not which attribute it lacks.
+        // An element that takes none of the ways to scroll: say so, not which attribute it lacks. Like a window with
+        // nothing to scroll, it is not actionable, not a capability the engine lacks.
         if failure.code == codes::ACTION_NOT_SUPPORTED && failure.delivery == Delivery::NotDelivered {
-            Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("nothing here scrolls {direction}"))
+            Failure::refused(codes::ACTION_FAILED, format!("nothing here scrolls {direction}"))
         } else {
             failure
         }
     })
+}
+
+/// Whether a node scrolls itself along `direction`, by the rule the snapshot offers `Scroll` with: a scroll bar for the
+/// axis, or, for any role but a scroll area, the page action for the direction. SwiftUI gives every scroll area the page
+/// actions, also one whose content fits or that scrolls only along the other axis, and the action then moves nothing
+/// while it answers success.
+pub(super) fn scrolls_itself(role: &str, bar: bool, actions: &[String], direction: &str) -> bool {
+    bar || (role != "scrollarea" && actions.iter().any(|name| name == page_action(direction)))
 }
 
 /// The nearest scroll area above `element`, a few levels up, with a scroll bar for the axis.
@@ -99,9 +108,9 @@ pub(super) fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outco
         return repeat(&bar, if forward { "AXIncrement" } else { "AXDecrement" }, ((pages * LINES_PER_PAGE).round() as usize).max(1));
     }
     let names = action_names(element, "scroll")?;
-    let action = page_action(direction);
-    if names.iter().any(|name| name == action) {
-        return repeat(element, action, (pages.round() as usize).max(1));
+    let (_, role) = role_of(element, "scroll")?;
+    if scrolls_itself(role, false, &names, direction) {
+        return repeat(element, page_action(direction), (pages.round() as usize).max(1));
     }
-    Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("nothing here scrolls {direction}")))
+    Err(Failure::refused(codes::ACTION_FAILED, format!("nothing here scrolls {direction}")))
 }
