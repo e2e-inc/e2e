@@ -207,6 +207,19 @@ export class AttemptTimeout {
   }
 
   /**
+   * Whether the deadline has passed with the race still on, which times the
+   * race out now. A call the deadline capped runs out at the same instant as
+   * the race's timer, and the event loop may run the call's expiry first:
+   * the step recorder asks here when a step fails, so the step ends as the
+   * timeout cutting it, in either order.
+   */
+  expire(): boolean {
+    if (this.timer === undefined || this.stoppedMs !== undefined || this.budget.clock.remaining() > 0) return false;
+    this.timer.check();
+    return true;
+  }
+
+  /**
    * Races `work` against the budget's deadline, as read at each check.
    * `onTimeout` builds the error it rejects with. One race at a time.
    */
@@ -217,23 +230,27 @@ export class AttemptTimeout {
       clearTimeout(handle);
       handle = undefined;
     };
+    const end = (): void => {
+      stop();
+      this.ended = true;
+      if (this.timer === timer) this.timer = undefined;
+    };
     const check = (): void => {
       stop();
       if (this.stoppedMs !== undefined) return;
       const remaining = this.budget.clock.remaining();
-      if (remaining > 0) handle = setTimeout(check, remaining);
-      else fail(onTimeout());
+      if (remaining > 0) {
+        handle = setTimeout(check, remaining);
+        return;
+      }
+      end();
+      fail(onTimeout());
     };
     const timer = { stop, check };
     const settled = new Promise<T>((resolve, reject) => {
       fail = reject;
       work.then(resolve, reject);
     });
-    const end = (): void => {
-      stop();
-      this.ended = true;
-      if (this.timer === timer) this.timer = undefined;
-    };
     settled.then(end, end);
     this.timer = timer;
     check();

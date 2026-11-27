@@ -148,6 +148,7 @@ export class SuiteAttempt implements SuiteHookSession {
     // On the attempt's budget, so the device calls the code makes stop at the deadline `test.setTimeout` moved.
     const budget = attempt?.budget ?? new AttemptBudget(AbortSignal.any([host.interruptSignal, hookAbort.signal]), new Deadline(timeoutMs));
     const timeout = new AttemptTimeout(budget, timeoutMs);
+    if (attempt !== undefined) attempt.steps.pastDeadline = () => timeout.expire();
     const retryMessages: string[] = [];
     const hook: RunningSuiteHook = {
       name: running.name,
@@ -173,6 +174,7 @@ export class SuiteAttempt implements SuiteHookSession {
       }
       failure = { cause };
     }
+    if (attempt !== undefined) attempt.steps.pastDeadline = undefined;
     // A step the code started and did not await is failed at its call and
     // cancelled, as after a test body: left alone it would fail once this
     // attempt closed, as a stray rejection charged to whichever test ran then.

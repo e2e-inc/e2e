@@ -102,6 +102,16 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * Sleeps until `deadline` has passed. A wait whose last read an engine cut
+ * short has not run out yet: an engine ends a read ahead of its budget, and
+ * a timer can fire a millisecond early. A wait that failed then would fail
+ * before a test timeout that capped it, as its own failure.
+ */
+export async function sleepUntil(deadline: Deadline, signal?: AbortSignal): Promise<void> {
+  for (let left = deadline.remaining(); left > 0; left = deadline.remaining()) await sleep(left, signal);
+}
+
 /** Longest delay `setTimeout` honors; a longer one fires at once. */
 export const MAX_TIMER_MS = 2 ** 31 - 1;
 
@@ -235,8 +245,9 @@ export interface PollReadsOptions extends Omit<PollConditionOptions, 'evaluate'>
  * whole budget, and passes at the deadline on what it has seen, since a read
  * past the deadline has no budget left. A read the deadline cut off (an
  * `OPERATION_TIMEOUT` on a read that started with under one poll tick left)
- * after an earlier one completed saw nothing: the poll ends there. A negation
- * then passes if it has held long enough by the time the read is cut off: the
+ * after an earlier one completed saw nothing: the poll reads no more and
+ * fails once the deadline has passed. A negation then passes instead if it
+ * has held long enough by the time the read is cut off: the
  * read left less than one poll tick unseen, no more than the gap between any
  * two reads, so a short budget still passes at its deadline on what it saw.
  */
@@ -267,6 +278,7 @@ export async function pollReads(options: PollReadsOptions): Promise<void> {
     } catch (cause) {
       if (!sampled || !reads.cutOff(cause)) throw cause;
       if (negated && holds(Math.min(Date.now(), deadline.endsAt))) return;
+      await sleepUntil(deadline, options.signal);
       throw await options.onTimeout(cause);
     }
     if (!negated) {
