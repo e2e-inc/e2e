@@ -17,6 +17,7 @@ import { ensureFfmpeg } from '../../src/ffmpeg.ts';
 import { readWindow } from '../../src/locate.ts';
 import { resolveOptions } from '../../src/options.ts';
 import { Recorder } from '../../src/video.ts';
+import { DialogRouter } from '../../src/dialogs.ts';
 import { Windows } from '../../src/windows.ts';
 import { electronBinary } from './electron-binary.ts';
 
@@ -29,26 +30,29 @@ const apps: AppProcess[] = [];
 interface Launched {
   readonly app: AppProcess;
   readonly windows: Windows;
+  readonly dialogs: DialogRouter;
   readonly logs: string[];
   readonly directory: string;
   launch(timeoutMs?: number, signal?: AbortSignal): Promise<void>;
 }
 
 /** An app whose main script runs `body` once Electron is ready, with `electron`'s exports in scope. */
-function appWith(body: string, options: { readonly launchTimeout?: number; readonly args?: readonly string[]; readonly dialogs?: 'accept' | 'dismiss' } = {}): Launched {
+function appWith(body: string, launchArguments: readonly string[] = []): Launched {
   const directory = mkdtempSync(path.join(tmpdir(), 'e2e-electron-launch-'));
   directories.push(directory);
   writeFileSync(path.join(directory, 'main.js'), `const { app, BrowserWindow, WebContentsView } = require('electron');\n${body}\n`);
   writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name: 'launch-test', main: 'main.js' }));
   const windows = new Windows();
-  const app = new AppProcess(resolveOptions(options), windows);
+  const dialogs = new DialogRouter();
+  const app = new AppProcess(resolveOptions({}), windows, dialogs);
   apps.push(app);
   const logs: string[] = [];
   const attempt = { appLog: (entry: { readonly text: string }) => void logs.push(entry.text), navigation: () => undefined, environment: () => undefined } as unknown as EngineAttemptContext;
-  const setup: LaunchSetup = { executable: electronBinary(), projectRoot: directory, app: { appPath: '.' }, env: process.env, userDataDir: path.join(directory, 'data'), attempt };
+  const setup: LaunchSetup = { executable: electronBinary(), projectRoot: directory, app: { appPath: '.', launchArguments }, env: process.env, userDataDir: path.join(directory, 'data'), attempt };
   return {
     app,
     windows,
+    dialogs,
     logs,
     directory,
     launch: (timeoutMs = 20_000, signal = new AbortController().signal) => app.launch(setup, { signal, timeoutMs, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext),
@@ -150,9 +154,9 @@ describe('launch', () => {
   });
 
   it('says a window that loaded nothing is why no window opened, and leaves no process', async () => {
-    const { directory, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: false }));`, { launchTimeout: 1500 });
-    const failure = await launch().then(() => undefined, (error: unknown) => error);
-    expect(String(failure)).toMatch(/opened no window that loaded a page within 1500ms: 1 window has loaded nothing yet/);
+    const { directory, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: false }));`);
+    const failure = await launch(2000).then(() => undefined, (error: unknown) => error);
+    expect(String(failure)).toMatch(/opened no window that loaded a page within \d+ms: 1 window has loaded nothing yet/);
     expect(await gone(directory)).toBe(true);
   });
 
@@ -169,7 +173,7 @@ describe('launch', () => {
   it('says the binary could not be started', async () => {
     const launched = appWith(`app.quit();`);
     const windows = new Windows();
-    const app = new AppProcess(resolveOptions({}), windows);
+    const app = new AppProcess(resolveOptions({}), windows, new DialogRouter());
     const attempt = { appLog: () => undefined, navigation: () => undefined, environment: () => undefined } as unknown as EngineAttemptContext;
     const setup: LaunchSetup = { executable: path.join(launched.directory, 'no-such-binary'), projectRoot: launched.directory, app: { appPath: '.' }, env: process.env, userDataDir: path.join(launched.directory, 'data'), attempt };
     const failure = await app.launch(setup, { signal: new AbortController().signal, timeoutMs: 5000, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext).then(() => undefined, (error: unknown) => error);
@@ -218,25 +222,77 @@ describe('quit', () => {
   });
 });
 
+describe('windows', () => {
+  it('goes back to the window that opened the one that closed, not the one shown before it', async () => {
+    const { app, windows, launch } = appWith(`app.on('web-contents-created', (_event, contents) => contents.setWindowOpenHandler(() => ({ action: 'allow', overrideBrowserWindowOptions: { show: false } }))); app.whenReady().then(() => { ${LOADED}; });`);
+    await launch();
+    const [first] = windows.open();
+    await app.evaluate(({ BrowserWindow }) => void new BrowserWindow({ show: false }).loadURL('data:text/html,<title>Second</title>'), undefined);
+    await expect.poll(() => windows.open().length).toBe(2);
+    const second = windows.open()[1]!;
+    await first!.page.session.send('Runtime.evaluate', { expression: 'void window.open("data:text/html,<title>Popup</title>")', userGesture: true });
+    await expect.poll(() => windows.open().length).toBe(3);
+    const popup = windows.open()[2]!;
+    windows.activate(second);
+    windows.activate(popup);
+    await app.closeWindow(popup.page);
+    expect(windows.current()).toBe(first);
+    // A window the main process opened has no opener: the one shown before it is next.
+    windows.activate(second);
+    await app.closeWindow(second.page);
+    expect(windows.current()).toBe(first);
+  });
+
+  it('starts the app with the switches of app.launchArguments, Chromium\'s as well as its own', async () => {
+    const { app, launch } = appWith(`app.whenReady().then(() => { ${LOADED}; });`, ['--lang=de', '--no-update-check']);
+    await launch();
+    expect(await app.evaluate(({ app: main }) => [main.commandLine.getSwitchValue('lang'), process.argv.includes('--no-update-check')], undefined)).toEqual(['de', true]);
+  });
+});
+
 describe('dialogs', () => {
   const ASKING = `new BrowserWindow({ show: false }).loadURL('data:text/html,<title>Asking</title><script>setTimeout(() => { alert("Heads up"); document.title = String(confirm("Sure?")); }, 50)</script>')`;
 
   it('dismisses a dialog nothing answers, and holds it as the failure of the next step', async () => {
-    const { app, windows, logs, launch } = appWith(`app.whenReady().then(() => { ${ASKING}; });`);
+    const { windows, dialogs, launch } = appWith(`app.whenReady().then(() => { ${ASKING}; });`);
     await launch();
     await expect.poll(() => windows.require().page.title()).toBe('false');
-    expect(app.takeUnhandledDialog()).toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/^unhandled alert dialog: Heads up; answer every dialog with electron/) });
+    expect(dialogs.take()).toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/^unhandled alert dialog: Heads up; answer it with electron\.onDialog/) });
     // Once: the step after the one it failed goes on.
-    expect(app.takeUnhandledDialog()).toBeUndefined();
-    expect(logs.join('\n')).toMatch(/unhandled confirm dialog dismissed: Sure\?/);
+    expect(dialogs.take()).toBeUndefined();
   });
 
-  it('answers every dialog as the dialogs option says', async () => {
-    const { app, windows, logs, launch } = appWith(`app.whenReady().then(() => { ${ASKING}; });`, { dialogs: 'accept' });
+  it('answers every dialog as the newest handler says, until it is removed', async () => {
+    const { windows, dialogs, launch } = appWith(`app.whenReady().then(() => { ${ASKING}; });`);
+    dialogs.add('dismiss');
+    const seen: string[] = [];
+    const off = dialogs.add(async (dialog) => {
+      seen.push(`${dialog.type}: ${dialog.message}`);
+      await dialog.accept();
+    });
     await launch();
     await expect.poll(() => windows.require().page.title()).toBe('true');
-    expect(app.takeUnhandledDialog()).toBeUndefined();
-    expect(logs.join('\n')).toMatch(/confirm dialog "Sure\?" opened; accepting it per electron\(\{ dialogs: 'accept' \}\)/);
+    expect(seen).toEqual(['alert: Heads up', 'confirm: Sure?']);
+    expect(dialogs.take()).toBeUndefined();
+    off();
+    await windows.require().page.session.send('Runtime.evaluate', { expression: 'document.title = String(confirm("Again?"))' });
+    expect(await windows.require().page.title()).toBe('false');
+    expect(dialogs.take()).toBeUndefined();
+  });
+
+  it('dismisses a dialog its handler leaves open or throws on, and fails the next step', async () => {
+    const { windows, dialogs, launch } = appWith(`app.whenReady().then(() => { ${ASKING}; });`);
+    const off = dialogs.add(() => undefined);
+    await launch();
+    await expect.poll(() => windows.require().page.title()).toBe('false');
+    expect(dialogs.take()).toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/returned without calling accept or dismiss for alert dialog: Heads up/) });
+    off();
+    dialogs.add(() => {
+      throw new Error('boom');
+    });
+    await windows.require().page.session.send('Runtime.evaluate', { expression: 'document.title = String(confirm("Again?"))' });
+    expect(await windows.require().page.title()).toBe('false');
+    expect(dialogs.take()).toMatchObject({ code: 'ENGINE_FAILURE', message: 'dialog handler failed: boom' });
   });
 });
 
@@ -356,7 +412,7 @@ describe('pixels', () => {
   it('captures the part of the document the window shows, one image pixel per CSS pixel, on a dense display', async () => {
     const page = `<body style="margin:0"><div style="height:2000px;background:rgb(255,0,0)"></div><div style="height:2000px;background:rgb(0,128,0)"></div></body>`;
     // Shown where it can be without taking the screen: a window never shown draws no frame under xvfb, and a capture waits seconds for one.
-    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL('data:text/html,${page}'));`, { args: ['--force-device-scale-factor=2'] });
+    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL('data:text/html,${page}'));`, ['--force-device-scale-factor=2']);
     await launch();
     const window = windows.require();
     expect(await window.page.evaluate(() => devicePixelRatio)).toBe(2);

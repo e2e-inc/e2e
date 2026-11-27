@@ -35,6 +35,8 @@ export class PageTarget implements InputTarget {
     readonly targetId: string,
     readonly session: Session,
     url: string,
+    /** The window whose page opened this one with `window.open` or a link, when one did. */
+    readonly opener?: PageTarget,
   ) {
     this.address = url;
     this.keyboard = new Keyboard(this);

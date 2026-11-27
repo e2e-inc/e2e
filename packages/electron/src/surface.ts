@@ -42,13 +42,14 @@ import { AppProcess, DISCARD_CLOSE_MS, RESTART_CLOSE_MS, type AppDownload } from
 import { answerWithin, withBudget, type Budget } from './budget.ts';
 import { screenshotFile, screenshotName, withPixels } from './capture.ts';
 import { DevTools } from './devtools.ts';
+import { DialogRouter, type DialogHandler } from './dialogs.ts';
 import type { ElectronMainModule } from './fixtures.ts';
 import { closedWindow, invalidState, notActionable } from './errors.ts';
 import { ensureFfmpeg } from './ffmpeg.ts';
 import { outsideApp } from './file-bound.ts';
 import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
 import { locateIn, projectRead, readWindow, type ProjectionContext, type RawRead } from './locate.ts';
-import type { ResolvedElectronOptions } from './options.ts';
+import { checkLaunchArguments, type ResolvedElectronOptions } from './options.ts';
 import type { WindowMatcher } from './fixtures.ts';
 import { Recorder } from './video.ts';
 import { ROOT_ID, Windows, type AppWindow } from './windows.ts';
@@ -80,10 +81,11 @@ export class ElectronSurface {
   private recordings = 0;
   private readonly devtools = new DevTools();
   private readonly windowList = new Windows();
+  private readonly dialogs = new DialogRouter();
   private readonly app: AppProcess;
 
   constructor(private readonly options: ResolvedElectronOptions) {
-    this.app = new AppProcess(options, this.windowList);
+    this.app = new AppProcess(options, this.windowList, this.dialogs);
     this.windowList.onShown = (window) => this.recorder?.follow(window?.page);
   }
 
@@ -109,13 +111,14 @@ export class ElectronSurface {
     // Checked once here, so a wrong path is one error rather than every test's launch failing.
     const problem = info.app.appPath === undefined ? undefined : appPathProblem(info.projectRoot, info.app.appPath);
     if (problem !== undefined) throw new ConfigurationError('INVALID_CONFIG', problem);
+    checkLaunchArguments(info.app.launchArguments);
   }
 
   startAttempt(context: EngineAttemptContext): Promise<void> {
     this.attempt = context;
     this.artifactCounter = 0;
     this.recordings = 0;
-    this.app.takeUnhandledDialog();
+    this.dialogs.reset();
     // The app's data lives here for the whole attempt: `app.restart()` keeps it, `app.clearState()` empties it.
     this.userDataDir = mkdtempSync(path.join(tmpdir(), 'e2e-electron-'));
     return Promise.resolve();
@@ -133,7 +136,10 @@ export class ElectronSurface {
     this.uploadsDir = undefined;
     this.attempt = undefined;
     // A dialog the test's last step opened has no next step to fail: the attempt's end is it.
-    this.failOnDialog();
+    await answerWithin(this.dialogs.settled(), context.timeoutMs);
+    const unhandled = this.dialogs.take();
+    this.dialogs.reset();
+    if (unhandled !== undefined) throw unhandled;
   }
 
   async dispose(context: EngineCleanupContext): Promise<void> {
@@ -286,9 +292,9 @@ export class ElectronSurface {
     return outsideApp(window.page.url(), this.app.appDirectory);
   }
 
-  /** Fails the step that follows a dialog nothing answered; see the `dialogs` option. */
+  /** Fails the step that follows a dialog nothing answered, or whose handler failed. */
   private failOnDialog(): void {
-    const unhandled = this.app.takeUnhandledDialog();
+    const unhandled = this.dialogs.take();
     if (unhandled !== undefined) throw unhandled;
   }
 
@@ -413,9 +419,20 @@ export class ElectronSurface {
     return opened;
   }
 
-  /** A window's document title; empty when its page does not answer, as one whose renderer crashed does not. */
+  /**
+   * `window.title()`: the document's title, else the OS window's for a
+   * document with none, or one that does not answer as a crashed renderer's
+   * does not. Either is a title `electron.window({ title })` matches.
+   */
   async windowTitle(window: AppWindow, operation: OperationContext): Promise<string> {
-    return (await answerWithin(window.page.title(), Math.min(TITLE_MS, operation.timeoutMs))) ?? '';
+    const document = await answerWithin(window.page.title(), Math.min(TITLE_MS, operation.timeoutMs));
+    if (document !== undefined && document !== '') return document;
+    return (await this.app.windowTitle(window.page)) ?? '';
+  }
+
+  /** `electron.onDialog()`: answers the app's dialogs from now on, until what it returns is called. */
+  onDialog(handler: DialogHandler): () => void {
+    return this.dialogs.add(handler);
   }
 
   /** Runs a function in the app's main process. */

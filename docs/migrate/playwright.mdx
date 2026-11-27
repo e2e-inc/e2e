@@ -420,10 +420,11 @@ config by hand.
 
 | Playwright | e2e |
 | --- | --- |
-| `_electron.launch({ args })` in a fixture, `electronApp.firstWindow()` | `await app.open()` in `beforeEach`. Arguments the app reads go in the target's `app.launchArguments`, the same for every test |
+| `_electron.launch({ args })` in a fixture, `electronApp.firstWindow()` | `await app.open()` in `beforeEach`. Arguments the app reads, and Chromium switches, go in the target's `app.launchArguments`, the same for every test |
 | `electronApp.evaluate(fn, arg)` | `electron.evaluate(fn, arg)` |
 | `page.evaluate(fn)` in the renderer | `electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.executeJavaScript('…'))`. Pick the window by title: `getAllWindows()` is not in the order `electron.windows()` lists |
 | `electronApp.waitForEvent('window')` | `await electron.waitForWindow(() => screen.getByRole('button', 'Open').tap())`, which makes the new window active. For a window the app opens on its own, `await electron.window({ title: 'Settings' })` |
+| `page.on('dialog')` | `await electron.onDialog('accept')`, `'dismiss'`, or a handler |
 | `page.waitForEvent('close')` | `await expect.poll(() => window.isClosed()).toBe(true)` |
 | `expect(page).toHaveTitle(title)` | `await expect.poll(() => window.title()).toBe(title)` |
 | `page.getByRole`, `getByLabel`, `getByTestId`, `locator(css)` | `screen.getByRole`, `getByLabel`, `getByTestId`, and `electron.locator(css)`, which takes CSS only |

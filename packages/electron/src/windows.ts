@@ -39,7 +39,7 @@ export class Windows {
   private shownWindow: AppWindow | undefined;
   /** Told each time another window, or none, becomes the shown one. */
   onShown: ((window: AppWindow | undefined) => void) | undefined;
-  /** The windows shown before the current one, oldest first: closing the shown window goes back to the latest still open. */
+  /** The windows shown before the current one, oldest first: closing the shown window goes back to the latest still open, unless the window that opened it is. */
   private history: AppWindow[] = [];
   private nextSerial = 1;
   private readonly crashed = new Set<PageTarget>();
@@ -71,7 +71,7 @@ export class Windows {
   discard(page: PageTarget): void {
     const window = this.byPage.get(page);
     this.byPage.delete(page);
-    if (window !== undefined && this.shown === window) this.shown = this.fallback();
+    if (window !== undefined && this.shown === window) this.shown = this.fallback(window);
   }
 
   /** Marks a window whose renderer crashed, until it loads a page again. */
@@ -101,11 +101,12 @@ export class Windows {
     this.shown = window;
   }
 
-  /** The window shown before the current one that is still open, else the newest open window. */
-  private fallback(): AppWindow | undefined {
+  /** The window to show once `closed` is gone: the one that opened it, else the one shown before it that is still open, else the newest. */
+  private fallback(closed: AppWindow | undefined): AppWindow | undefined {
     const open = this.open();
-    this.history = this.history.filter((window) => open.includes(window));
-    return this.history.pop() ?? open.at(-1);
+    const opener = closed?.page.opener === undefined ? undefined : open.find((window) => window.page === closed.page.opener);
+    this.history = this.history.filter((window) => open.includes(window) && window !== opener);
+    return opener ?? this.history.pop() ?? open.at(-1);
   }
 
   /** Whether a page is registered as a window. */
@@ -125,12 +126,12 @@ export class Windows {
 
   /**
    * The window `screen` and the agent read: the one chosen, else the first the
-   * app opened. Once that one closes, the one shown before it that is still
-   * open, else the newest.
+   * app opened. Once that one closes, the window that opened it, else the
+   * one shown before it that is still open, else the newest.
    */
   current(): AppWindow | undefined {
     if (this.shown !== undefined && isOpen(this.shown)) return this.shown;
-    this.shown = this.fallback();
+    this.shown = this.fallback(this.shown);
     return this.shown;
   }
 

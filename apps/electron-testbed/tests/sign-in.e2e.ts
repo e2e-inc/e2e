@@ -261,8 +261,23 @@ test.describe('sign-in window', () => {
     await screen.getByRole('button', 'Ask').tap();
     // The app asked its user something and nothing answered: the next step says so, once.
     const unanswered = await expect(screen.getByTestId('ask-result')).toHaveText('confirm returned false').then(() => undefined, (error: unknown) => error);
-    expect(String((unanswered as { cause?: unknown } | undefined)?.cause ?? unanswered)).toMatch(/unhandled confirm dialog: Sure\?; answer every dialog with electron\(\{ dialogs: 'accept' \}\)/);
+    expect(String((unanswered as { cause?: unknown } | undefined)?.cause ?? unanswered)).toMatch(/unhandled confirm dialog: Sure\?; answer it with electron\.onDialog\('accept'\)/);
     await expect(screen.getByTestId('ask-result')).toHaveText('confirm returned false');
+  });
+
+  test('answers a dialog as electron.onDialog says, until the handler is removed', async ({ screen, electron }) => {
+    const off = await electron.onDialog('accept');
+    await screen.getByRole('button', 'Ask').tap();
+    await expect(screen.getByTestId('ask-result')).toHaveText('confirm returned true');
+    await off();
+    const seen: string[] = [];
+    await electron.onDialog(async (dialog) => {
+      seen.push(`${dialog.type}: ${dialog.message}`);
+      await dialog.dismiss();
+    });
+    await screen.getByRole('button', 'Ask').tap();
+    await expect(screen.getByTestId('ask-result')).toHaveText('confirm returned false');
+    expect(seen).toEqual(['confirm: Sure?']);
   });
 
   test('scrolls a list to an item below its edge', async ({ screen }) => {
@@ -371,6 +386,18 @@ test.describe('windows', () => {
     const none = await electron.waitForWindow(() => Promise.resolve(), { timeout: 500 }).then(() => undefined, (error: unknown) => error);
     expect(none).toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/no window opened within 500ms/) });
     expect(await electron.evaluate(() => (globalThis as unknown as { testbedState: { settingsOpened: number } }).testbedState.settingsOpened)).toBe(1);
+  });
+
+  test('gives a window with no document title the OS window\'s, which is a title it is found by', async ({ app, electron }) => {
+    await app.open();
+    await electron.evaluate(({ BrowserWindow }) => {
+      const untitled = new BrowserWindow({ show: false, title: 'Inspector' });
+      untitled.on('page-title-updated', (event) => event.preventDefault());
+      void untitled.loadURL('data:text/html,<h1>No title</h1>');
+    });
+    const untitled = await electron.window({ title: 'Inspector' });
+    expect(await untitled.title()).toBe('Inspector');
+    expect(await electron.windows()[0]?.title()).toBe('Sign In');
   });
 
   test('closes a window from its handle, and the one active before it is active again', async ({ app, screen, electron }) => {

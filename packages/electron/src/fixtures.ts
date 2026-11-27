@@ -5,6 +5,7 @@
  */
 
 import type { Locator } from '@e2e-dev/core/engine';
+import type { DialogHandler } from './dialogs.ts';
 
 /**
  * One window of the running app: a `BrowserWindow`, a `WebContentsView`, or a
@@ -12,7 +13,7 @@ import type { Locator } from '@e2e-dev/core/engine';
  * app runs.
  */
 export interface ElectronWindow {
-  /** The document's current title. */
+  /** The document's current title, or the OS window's when the document has none. */
   title(): Promise<string>;
   /** The page's current URL. */
   url(): Promise<string>;
@@ -22,7 +23,7 @@ export interface ElectronWindow {
   isClosed(): boolean;
   /** Makes this the active window. Rejects with `ACTION_FAILED` when it has closed. */
   activate(): Promise<void>;
-  /** Closes the window, past any `beforeunload` guard. When it was the active window, the one active before it is active again. */
+  /** Closes the window, past any `beforeunload` guard. When it was the active window, the window that opened it is active again, else the one active before it. */
   close(): Promise<void>;
 }
 
@@ -70,6 +71,13 @@ export interface Electron {
    * into the attempt's artifacts: `path` is relative to them.
    */
   waitForDownload(trigger: () => Promise<void>, options?: { readonly timeout?: number }): Promise<{ readonly path: string; readonly absolutePath: string; readonly suggestedFilename: string }>;
+  /**
+   * Answers the `alert` and `confirm` dialogs the app opens from now on:
+   * `'accept'`, `'dismiss'`, or a function that must call `accept` or
+   * `dismiss`. The newest handler wins. Resolves with what removes it. A
+   * dialog no handler takes is dismissed and fails the test's next step.
+   */
+  onDialog(handler: DialogHandler): Promise<() => Promise<void>>;
   /**
    * A locator for a CSS selector in the window `screen` reads, for an element
    * no role, label, text, or test id names. It matches in the window's

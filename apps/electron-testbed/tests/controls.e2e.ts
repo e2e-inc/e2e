@@ -208,11 +208,11 @@ test.describe('controls page', () => {
     await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer());
     const crashed = await failure(screen.getByRole('heading', 'Controls').waitFor({ timeout: 1000 }));
     expect(crashed).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('renderer crashed') });
-    // The crashed window is still one of the app's windows, with no title to give.
+    // The crashed window is still one of the app's windows; its document cannot answer, so its title is the OS window's.
     const [crashedWindow] = electron.windows();
     expect(electron.windows()).toHaveLength(1);
     expect(crashedWindow?.isActive()).toBe(true);
-    expect(await crashedWindow?.title()).toBe('');
+    expect(await crashedWindow?.title()).toBe('Controls');
     await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.reload());
     await expect(screen.getByRole('heading', 'Controls')).toBeVisible({ timeout: 5000 });
   });

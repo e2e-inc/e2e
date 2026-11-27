@@ -21,16 +21,8 @@ export interface ElectronOptions {
    * package installed in the project, which runs the target's `app.appPath`.
    */
   readonly executablePath?: string | undefined;
-  /**
-   * Command-line switches passed before the app path, for Electron or
-   * Chromium (`--disable-gpu`, `--lang=de`). The engine passes its own
-   * `--user-data-dir`, so every attempt starts with empty app data.
-   */
-  readonly args?: readonly string[] | undefined;
   /** Variables added to the app's environment, over the run's own. */
   readonly env?: Readonly<Record<string, string>> | undefined;
-  /** How long `app.open()` waits for the app's first window, in milliseconds. Default 30000. */
-  readonly launchTimeout?: number | undefined;
   /** The attribute `getByTestId` reads. Default `data-testid`. */
   readonly testIdAttribute?: string | undefined;
   /**
@@ -39,36 +31,22 @@ export interface ElectronOptions {
    * own steps never wait: `expect` polls their outcome. Default 100.
    */
   readonly settle?: number | false | undefined;
-  /**
-   * How every `alert` and `confirm` the app opens is answered: `'accept'`
-   * as clicking OK does, or `'dismiss'`. Electron has no `prompt`. Unset, a dialog is dismissed and fails the test's next step:
-   * the app asked its user something, and nothing answered.
-   */
-  readonly dialogs?: 'accept' | 'dismiss' | undefined;
 }
 
 const OPTION_KEYS = Object.keys({
   executablePath: true,
-  args: true,
   env: true,
-  launchTimeout: true,
   testIdAttribute: true,
   settle: true,
-  dialogs: true,
 } satisfies Record<keyof ElectronOptions, true>);
 
 /** The options with defaults applied, checked once at config load. */
 export interface ResolvedElectronOptions {
   readonly executablePath?: string;
-  readonly args: readonly string[];
   readonly env: Readonly<Record<string, string>>;
-  readonly launchTimeoutMs: number;
   readonly testIdAttribute: string;
   readonly settleMs: number;
-  readonly dialogs?: 'accept' | 'dismiss';
 }
-
-const DEFAULT_LAUNCH_TIMEOUT_MS = 30_000;
 
 /**
  * Why the engine refuses a launch argument it owns, or undefined: Chromium's
@@ -82,6 +60,13 @@ export function ownedArgument(argument: string): string | undefined {
   if (port !== null) return `must not set ${port[1]}: the engine opens the inspector and the DevTools pipe it drives the app through itself`;
   return undefined;
 }
+
+/** Checks the target's `app.launchArguments`: the app's own switches and Chromium's, none of the engine's. */
+export function checkLaunchArguments(launchArguments: readonly string[] | undefined): void {
+  const owned = launchArguments?.map(ownedArgument).find((reason) => reason !== undefined);
+  if (owned !== undefined) throw new ConfigurationError('INVALID_CONFIG', `app.launchArguments ${owned}`);
+}
+
 const DEFAULT_SETTLE_MS = 100;
 
 /**
@@ -97,18 +82,10 @@ export function resolveOptions(options: ElectronOptions | undefined): ResolvedEl
   const bag: ElectronOptions = options === undefined ? {} : options;
   if (typeof bag !== 'object' || bag === null || Array.isArray(bag)) throw new ConfigurationError('INVALID_CONFIG', 'electron() options must be an object');
   rejectUnknownKeys('electron() options', bag, OPTION_KEYS);
-  const { executablePath, args, env, launchTimeout, testIdAttribute, settle, dialogs } = bag;
-  if (dialogs !== undefined && dialogs !== 'accept' && dialogs !== 'dismiss') {
-    throw new ConfigurationError('INVALID_CONFIG', `electron({ dialogs }) must be "accept" or "dismiss", got ${JSON.stringify(dialogs)}`);
-  }
+  const { executablePath, env, testIdAttribute, settle } = bag;
   if (executablePath !== undefined && (typeof executablePath !== 'string' || executablePath === '')) {
     throw new ConfigurationError('INVALID_CONFIG', 'electron({ executablePath }) must be a path to an executable');
   }
-  if (args !== undefined && (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string'))) {
-    throw new ConfigurationError('INVALID_CONFIG', 'electron({ args }) must be an array of strings');
-  }
-  const owned = args?.map(ownedArgument).find((reason) => reason !== undefined);
-  if (owned !== undefined) throw new ConfigurationError('INVALID_CONFIG', `electron({ args }) ${owned}`);
   if (env !== undefined && (typeof env !== 'object' || env === null || Array.isArray(env) || Object.values(env).some((value) => typeof value !== 'string'))) {
     throw new ConfigurationError('INVALID_CONFIG', 'electron({ env }) must be an object of variable name to string value');
   }
@@ -120,9 +97,6 @@ export function resolveOptions(options: ElectronOptions | undefined): ResolvedEl
       `electron({ env }) must not set ${refused}: ${refused.toUpperCase() === 'NODE_OPTIONS' ? 'the engine starts the app with its own Node.js switches' : 'it starts the binary as plain Node.js, which opens no window'}`,
     );
   }
-  if (launchTimeout !== undefined && (!Number.isInteger(launchTimeout) || launchTimeout < 1)) {
-    throw new ConfigurationError('INVALID_CONFIG', 'electron({ launchTimeout }) must be a whole number of milliseconds, at least 1');
-  }
   if (testIdAttribute !== undefined && (typeof testIdAttribute !== 'string' || !ATTRIBUTE_NAME.test(testIdAttribute))) {
     throw new ConfigurationError('INVALID_CONFIG', `electron({ testIdAttribute }) must be an attribute name such as "data-testid", got ${JSON.stringify(testIdAttribute)}`);
   }
@@ -131,11 +105,8 @@ export function resolveOptions(options: ElectronOptions | undefined): ResolvedEl
   }
   return {
     ...(executablePath === undefined ? {} : { executablePath }),
-    args: args ?? [],
     env: env ?? {},
-    launchTimeoutMs: launchTimeout ?? DEFAULT_LAUNCH_TIMEOUT_MS,
     testIdAttribute: testIdAttribute ?? 'data-testid',
     settleMs: settle === false ? 0 : (settle ?? DEFAULT_SETTLE_MS),
-    ...(dialogs === undefined ? {} : { dialogs }),
   };
 }

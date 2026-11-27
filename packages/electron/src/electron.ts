@@ -50,6 +50,17 @@ export function createElectronFixture(surface: ElectronSurface, context: EngineF
       context.attachArtifact('download', file.path);
       return file;
     },
+    // Async so the harness records the registration as an `electron.onDialog` step.
+    async onDialog(handler) {
+      if (handler !== 'accept' && handler !== 'dismiss' && typeof handler !== 'function') {
+        throw new ConfigurationError('INVALID_ARGUMENT', "electron.onDialog() takes 'accept', 'dismiss', or a function that answers the dialog");
+      }
+      const off = surface.onDialog(handler);
+      return () => {
+        off();
+        return Promise.resolve();
+      };
+    },
     locator(selector) {
       if (typeof selector !== 'string' || selector.trim() === '') throw new ConfigurationError('INVALID_ARGUMENT', 'electron.locator() takes a CSS selector string');
       return context.locator({ kind: 'selector', selector });
@@ -60,6 +71,7 @@ export function createElectronFixture(surface: ElectronSurface, context: EngineF
     waitForWindow: { kind: 'resource', timeout: false },
     window: { kind: 'resource', timeout: (_which, options) => options?.timeout, label: (which) => JSON.stringify({ title: which.title?.toString(), url: which.url?.toString() }) },
     waitForDownload: { kind: 'resource', timeout: false },
+    onDialog: { kind: 'resource' },
   });
 }
 

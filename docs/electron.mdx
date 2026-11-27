@@ -34,8 +34,8 @@ your setup.
 ## Point at your app
 
 Set `app.appPath` to your app's directory or main script, relative to the
-project root. Extra flags in `app.launchArguments` are appended to every
-launch.
+project root. `app.launchArguments` holds the switches every launch gets:
+your app's own, and Electron's or Chromium's, such as `--lang=en-US`.
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -94,6 +94,7 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
 | `waitForWindow(trigger, { timeout }?)` | Runs `trigger`, waits for the window it opens, and makes that window active |
 | `window({ title, url }, { timeout }?)` | Waits for a window by title or URL and returns it, without making it active |
 | `waitForDownload(trigger, { timeout }?)` | Runs `trigger` and waits for the [download](#downloads) it starts |
+| `onDialog(handler)` | Answers the app's [`alert()` and `confirm()` dialogs](#handle-alert-and-confirm-dialogs) |
 | `locator(selector)` | Queries the current window by CSS selector |
 
 ## Work with several windows
@@ -101,8 +102,8 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
 Windows work like [tabs in a browser test](/reference/web#tabs). `screen` reads one
 active window, starting with the first that loads. A window the app opens
 doesn't become active on its own: `electron.waitForWindow()` runs the step
-that opens it and makes it active. When the active window closes, the one
-active before it is active again.
+that opens it and makes it active. When the active window closes, the window
+that opened it is active again, or else the one active before it.
 
 ```ts
 const settings = await electron.waitForWindow(() =>
@@ -124,8 +125,9 @@ const main = await electron.window({ title: 'My App' });
 await main.activate();
 ```
 
-`title` and `url` take an exact string or a `RegExp`, and `title` matches the
-document's title or the OS window's. The agent sees windows as tabs and
+`title` and `url` take an exact string or a `RegExp`. `title` matches the
+document's title or the OS window's, and `window.title()` returns the
+document's, or the OS window's when the document has none. The agent sees windows as tabs and
 switches between them on its own.
 
 ## Run code in the main process
@@ -152,13 +154,24 @@ values as `arg` (plain JSON only; secrets are refused) and return plain data.
 
 ## Handle alert and confirm dialogs
 
-By default, an unhandled `alert()` or `confirm()` is dismissed (`confirm()`
-returns `false`) and fails the test's next step. Set `dialogs` to answer
-every dialog automatically:
+`electron.onDialog()` answers the dialogs the app opens from then on, the
+same way [`browser.onDialog()`](/reference/web#ondialog) does on the web. Pass
+`'accept'`, `'dismiss'`, or a function, and call what it returns to stop:
 
-```ts title="e2e.config.ts"
-engine: electron({ dialogs: 'accept' }), // or 'dismiss'
+```ts
+const off = await electron.onDialog('accept');
+await screen.getByRole('button', 'Delete').tap();
+await off();
+
+await electron.onDialog(async (dialog) => {
+  expect(dialog.message).toBe('Discard changes?');
+  await dialog.dismiss();
+});
 ```
+
+A function handler must call `accept()` or `dismiss()`. A dialog no handler
+takes is dismissed (`confirm()` returns `false`) and fails the test's next
+step.
 
 ## Upload files
 
@@ -219,7 +232,7 @@ To test a packaged build, point `executablePath` at the binary (not the
   `expect`, and the agent still work, but `electron.evaluate()` fails and
   `electron.window({ title })` matches document titles only.
 - On macOS, an unsigned build that reads the keychain (`safeStorage`) can
-  hang on a system prompt. Pass `args: ['--use-mock-keychain']`.
+  hang on a system prompt. Add `--use-mock-keychain` to `app.launchArguments`.
 
 ## Run in CI on Linux
 
@@ -249,7 +262,7 @@ The engine adds `--no-sandbox` on Linux automatically.
 | Launch arguments | The engine adds `--inspect=0`, `--remote-debugging-pipe`, `--force-color-profile=srgb`, `--user-data-dir=...`, switches that keep a covered or hidden window drawing, and `--no-sandbox` on Linux. Strict argument parsers must allow them |
 | Parallel workers | Each test gets its own user-data directory, so tests run in parallel. If your app overrides `app.setPath('userData', ...)`, set `workers: 1` |
 | Clipboard | The app uses your OS clipboard, so a test's copy overwrites yours. Set `workers: 1` for clipboard tests |
-| Theme and locale | `prefers-color-scheme` follows `nativeTheme` and the OS. Chromium UI strings follow the OS locale; pass `args: ['--lang=en-US']` to pin English |
+| Theme and locale | `prefers-color-scheme` follows `nativeTheme` and the OS. Chromium UI strings follow the OS locale; add `--lang=en-US` to `app.launchArguments` to pin English |
 | Long press | Holds for 800 ms by default, compared to 500 ms on the web |
 | CSS selectors | `electron.locator()` searches the window document and open shadow roots one root at a time, and never enters frames |
 | Crashed renderers | A crashed window fails reads until you reload it with `electron.evaluate()` or restart the app |
@@ -295,12 +308,9 @@ The engine adds `--no-sandbox` on Linux automatically.
 | Option | Type | Default | What it sets |
 | --- | --- | --- | --- |
 | `executablePath` | `string` | project's `electron` | Binary to start, such as a [packaged app](#test-a-packaged-app) |
-| `args` | `string[]` | `[]` | Electron and Chromium switches before the app path (not `--user-data-dir`, `--inspect*`, or `--remote-debugging-*`) |
 | `env` | `Record<string, string>` | `{}` | Extra environment variables for the app (not `ELECTRON_RUN_AS_NODE` or `NODE_OPTIONS`); see [Security](#security) |
-| `launchTimeout` | `number` | `30000` | How long `app.open()` waits for a window to load, in milliseconds |
 | `testIdAttribute` | `string` | `'data-testid'` | Attribute `getByTestId` reads |
 | `settle` | `number \| false` | `100` | Wait time in milliseconds after an agent action before the next read (`false` skips it) |
-| `dialogs` | `'accept' \| 'dismiss'` | unset | Automatic answer for `alert()` and `confirm()`; see [Dialogs](#handle-alert-and-confirm-dialogs) |
 
 ## Next
 

@@ -32,7 +32,7 @@ export default {
 ```
 
 `app.appPath` is the app's directory or main script, and `app.launchArguments`
-go after it on every launch. For a packaged app, pass
+are the switches every launch gets, the app's own and Chromium's. For a packaged app, pass
 `electron({ executablePath })` and leave out `appPath`.
 
 ```ts title="tests/sign-in.e2e.ts"
@@ -58,8 +58,7 @@ test('signs in', async ({ app, screen }) => {
   screen, and topmost at its point.
 - **Windows.** The agent sees them as tabs. The `electron` fixture has
   `evaluate` (main process), `windows`, `waitForWindow`, `window`,
-  `waitForDownload`, and
-  `locator` (CSS).
+  `waitForDownload`, `onDialog`, and `locator` (CSS).
 - **Video.** The shown window's screencast, encoded to one `.webm` by ffmpeg,
   which the engine downloads on the first recording when the machine has none.
 - **Secrets.** Password fields report no value, and screenshots paint them

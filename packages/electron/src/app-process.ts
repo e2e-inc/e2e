@@ -10,6 +10,7 @@ import type { Protocol } from 'devtools-protocol';
 import { Deadline, EngineError, pollCondition, raceAbort, TestError, type EngineAppInfo, type EngineAttemptContext, type OperationContext } from '@e2e-dev/core/engine';
 import { answerWithin, Budget } from './budget.ts';
 import { consoleText } from './console-text.ts';
+import type { DialogRouter } from './dialogs.ts';
 import type { ElectronMainModule } from './fixtures.ts';
 import { closedWindow, invalidState, unsupported } from './errors.ts';
 import { appDirectory } from './file-bound.ts';
@@ -74,8 +75,8 @@ interface RunningApp {
 interface AppReport {
   log(entry: Parameters<EngineAttemptContext['appLog']>[0]): void;
   navigated(url: string): void;
-  /** A dialog nothing answered: the failure of the test's next step. */
-  dialog(unhandled: EngineError): void;
+  /** Whether this app is still the running one: a dialog of one that was replaced is no later attempt's to answer for. */
+  current(): boolean;
 }
 
 /** A download the app started: the name the server or the link gave it, where it is saved, and Electron's state for it. */
@@ -89,12 +90,12 @@ export class AppProcess {
   private app: RunningApp | undefined;
   private exit: string | undefined;
   private directory: string | undefined;
-  private dialog: EngineError | undefined;
   private queue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly options: ResolvedElectronOptions,
     private readonly windows: Windows,
+    private readonly dialogs: DialogRouter,
   ) {}
 
   /** Whether an app is running. */
@@ -105,13 +106,6 @@ export class AppProcess {
   /** The directory the running app's own pages are in, once it launched; see `appDirectory`. */
   get appDirectory(): string | undefined {
     return this.directory;
-  }
-
-  /** The dialog the app opened that nothing answered, once: undefined when there was none since the last call. */
-  takeUnhandledDialog(): EngineError | undefined {
-    const { dialog } = this;
-    this.dialog = undefined;
-    return dialog;
   }
 
   /** Why nothing can be read or run: the app quit on its own during the test, or was never opened. */
@@ -146,7 +140,7 @@ export class AppProcess {
   async launch(setup: LaunchSetup, operation: OperationContext): Promise<void> {
     // One budget for the whole launch, ending a little before the operation does so the launch reports why it failed
     // rather than the operation timing out; each phase gets what the ones before it left.
-    const timeout = Math.max(1, Math.min(new Budget(operation, 'app.open').waits.remaining(), this.options.launchTimeoutMs));
+    const timeout = Math.max(1, new Budget(operation, 'app.open').waits.remaining());
     const deadline = new Deadline(timeout);
     const left = (): number => Math.max(1, deadline.remaining());
     let app: RunningApp;
@@ -215,7 +209,7 @@ export class AppProcess {
   /** Starts the binary. Nothing is awaited: a binary that cannot start shows as a process that ended. */
   private start(setup: LaunchSetup): RunningApp {
     const { appPath, launchArguments } = setup.app;
-    const args = [`--user-data-dir=${setup.userDataDir}`, ...this.options.args, ...(appPath === undefined ? [] : [path.resolve(setup.projectRoot, appPath)]), ...(launchArguments ?? [])];
+    const args = [`--user-data-dir=${setup.userDataDir}`, ...(appPath === undefined ? [] : [path.resolve(setup.projectRoot, appPath)]), ...(launchArguments ?? [])];
     const process = new ElectronProcess({ executable: setup.executable, args, cwd: setup.projectRoot, env: launchEnv(setup.env, this.options.env) });
     let withoutMain: () => void = () => undefined;
     const none = new Promise<undefined>((resolve) => {
@@ -251,10 +245,7 @@ export class AppProcess {
       navigated: (url) => {
         if (current()) attempt.navigation(url);
       },
-      dialog: (unhandled) => {
-        // The first one is the one to report: the app's later dialogs follow from it.
-        if (current()) this.dialog ??= unhandled;
-      },
+      current,
     };
     /** The targets being attached right now; one that is destroyed meanwhile is taken out. */
     const attaching = new Set<string>();
@@ -271,7 +262,7 @@ export class AppProcess {
       }
       // A target that went away while it was being attached was never a window.
       if (!attaching.delete(info.targetId)) return;
-      const page = new PageTarget(info.targetId, app.process.browser.session(sessionId), info.url);
+      const page = new PageTarget(info.targetId, app.process.browser.session(sessionId), info.url, info.openerId === undefined ? undefined : app.pages.get(info.openerId));
       app.pages.set(info.targetId, page);
       // A window that has loaded nothing has no renderer and never answers: it becomes a window once it does.
       await this.follow(page, report);
@@ -315,22 +306,17 @@ export class AppProcess {
       log({ source: 'error', level: 'error', text: exceptionDetails.exception?.description?.split('\n')[0] ?? exceptionDetails.text });
     });
     // A beforeunload guard is accepted: dismissing it would keep the window open through the engine's own quit. Any
-    // other dialog is answered as the `dialogs` option says. With none, it is dismissed so the app goes on, and the
-    // test's next step fails: the app asked its user something and nothing answered.
-    session.on('Page.javascriptDialogOpening', (dialog) => {
-      const { dialogs } = this.options;
-      const { type, message } = dialog;
-      if (type === 'beforeunload') {
-        void session.send('Page.handleJavaScriptDialog', { accept: true }).catch(() => undefined);
+    // other dialog goes to the handler `electron.onDialog` registered.
+    session.on('Page.javascriptDialogOpening', ({ type, message }) => {
+      const answer = async (accept: boolean): Promise<void> => {
+        await session.send('Page.handleJavaScriptDialog', { accept });
+      };
+      if ((type !== 'alert' && type !== 'confirm') || !report.current()) {
+        void answer(type === 'beforeunload').catch(() => undefined);
         return;
       }
-      if (dialogs === undefined) {
-        log({ source: 'error', level: 'error', text: `unhandled ${type} dialog dismissed: ${message}` });
-        report.dialog(new EngineError('INVALID_STATE', `unhandled ${type} dialog: ${message}; answer every dialog with electron({ dialogs: 'accept' }) or electron({ dialogs: 'dismiss' })`, { retryable: false }));
-      } else {
-        log({ source: 'console', level: 'info', text: `${type} dialog ${JSON.stringify(message)} opened; ${dialogs === 'accept' ? 'accepting' : 'dismissing'} it per electron({ dialogs: '${dialogs}' })` });
-      }
-      void session.send('Page.handleJavaScriptDialog', { accept: dialogs === 'accept' }).catch(() => undefined);
+      log({ source: 'console', level: 'info', text: `${type} dialog opened: ${message}` });
+      this.dialogs.dispatch({ type, message, answer });
     });
     // A crashed renderer answers nothing, and reads say so until it reloads. The session lives on: the renderer the
     // reload starts answers on it, in a new document.
@@ -534,7 +520,7 @@ function noDisplayHint(output: string): string {
 
 /** An unsigned macOS build that reads the keychain waits on a prompt no test can answer. */
 function keychainHint(): string {
-  return process.platform === 'darwin' ? ' (an app that waits on a keychain prompt opens none: pass electron({ args: [\'--use-mock-keychain\'] }))' : '';
+  return process.platform === 'darwin' ? ' (an app that waits on a keychain prompt opens none: add \'--use-mock-keychain\' to app.launchArguments)' : '';
 }
 
 function describeExit({ code, signal }: ProcessExit): string {
