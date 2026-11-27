@@ -931,7 +931,11 @@ fn close_menu(pid: i32, menu: &Element) -> bool {
         || windows::open_menus(pid) == 0,
         || menu.perform("AXCancel").is_ok(),
         || {
-            let _ = input::parse_combo("escape").and_then(|combo| input::press(&combo, Route::Process(pid)));
+            // Escape goes to the process, which may have closed this menu and opened another: it is sent only while this
+            // menu is still there, and a menu left open then makes the failure delivered.
+            if menu.attribute("AXRole").is_ok() {
+                let _ = input::parse_combo("escape").and_then(|combo| input::press(&combo, Route::Process(pid)));
+            }
         },
     )
 }
