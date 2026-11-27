@@ -1,7 +1,7 @@
 /** Detours in a recorded flow: a screen left and come back to with nothing typed, chosen, or set on the way. */
 
 import { describe, expect, it } from 'vitest';
-import { describeDetour, findDetours, settledDetour } from '@e2e-dev/core/lib/cache/detours';
+import { describeDetour, findDetours, findDetoursAfterReplay, settledDetour } from '@e2e-dev/core/lib/cache/detours';
 import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { bound } from '@e2e-dev/core/lib/internal/text';
 import type { ActionTrace, RecordedAction } from '@e2e-dev/core/lib/cache/trace';
@@ -183,6 +183,23 @@ describe('findDetours by recorded locations', () => {
     const detours = findDetours(flow([tap('Help', '/settings'), scroll(), back(), tap('Privacy', '/settings')], { endPath: '/privacy' }));
     // Nothing known stood between the two visits to /settings, so nothing shows the flow left.
     expect(detours).toEqual([]);
+  });
+});
+
+describe('findDetoursAfterReplay', () => {
+  it('keeps the spans the entry found for the actions a replay ran, which their kept locations no longer show', () => {
+    // The replay ran a trip between two views without looking, so `back` carries the stored /?view=:id; then it handed off.
+    const trace = flow(
+      [tap('Privacy', '/?view=account', 'link'), back('/?view=:id'), tap('Save', '/?view=account'), tap('Help', '/?view=account', 'link'), back('/help')],
+      { endPath: '/?view=account' },
+    );
+    expect(findDetours(trace)).toEqual([{ from: 3, to: 5, at: '/?view=:id', via: '/help', evidence: 'locations' }]);
+    expect(findDetoursAfterReplay(trace, [{ from: 0, to: 2 }])).toEqual([
+      { from: 0, to: 2, at: '/?view=:id', via: '/?view=:id', evidence: 'locations' },
+      { from: 3, to: 5, at: '/?view=:id', via: '/help', evidence: 'locations' },
+    ]);
+    // A trip this run reads across a kept span is the entry's, as it found it.
+    expect(findDetoursAfterReplay(trace, [{ from: 2, to: 5 }])).toEqual([{ from: 2, to: 5, at: '/?view=:id', via: '/?view=:id', evidence: 'locations' }]);
   });
 });
 

@@ -15,7 +15,7 @@
 import { deltaEvidenced, deltaMismatch, describeDelta, type DeltaMismatch } from '../cache/anchors.ts';
 import type { AgentCacheContext, ClaimedKey } from '../cache/context.ts';
 import { decideTraceReplay, opensWithNavigate, type TraceReplayMissReason } from '../cache/decide.ts';
-import { describeDetour, findDetours, type TraceDetour } from '../cache/detours.ts';
+import { describeDetour, findDetours, findDetoursAfterReplay, type TraceDetour } from '../cache/detours.ts';
 import { routeLocation, sameRoute } from '../cache/route.ts';
 import { keyContextChanges, type CacheAgentIdentity } from '../cache/identity.ts';
 import { recordedProvenance, TraceRecorder } from '../cache/recorder.ts';
@@ -151,6 +151,8 @@ export class StepTraceSession {
   private info: StepCacheInfo | undefined;
   private recordedBy: RecordedModel | undefined;
   private prefix: ReplayedPrefix | undefined;
+  /** The spans of the entry a replay that handed off ran to their end: this step's recording keeps them. */
+  private replayedDetours: readonly Pick<TraceDetour, 'from' | 'to'>[] | undefined;
   private startPath: string | undefined;
   private startedMs = Date.now();
   /** When the replay handed the step to the executor, if it did. */
@@ -486,6 +488,8 @@ export class StepTraceSession {
     }
     // The replayed actions are this step's recording now; the ones it ran without looking keep where they were recorded.
     this.recorder?.keepLocations(trace.actions.slice(0, outcome.executed));
+    // So are the detours the entry found among them (`findDetoursAfterReplay`).
+    this.replayedDetours = trace.detours?.filter(({ to }) => to <= outcome.executed);
     this.handOff(outcome, stopReason, detail, this.detourOf(trace, outcome.executed));
     return undefined;
   }
@@ -671,8 +675,9 @@ export class StepTraceSession {
     // The detours are found here, on the addresses this run saw, and kept in
     // the entry: a stored location reads `:id` for each record id and query
     // value and a placeholder for each `unique()` value, so it no longer
-    // tells two records apart the way this run's did.
-    const detours = findDetours(trace);
+    // tells two records apart the way this run's did. After a hand-off, the
+    // replayed actions keep the spans their entry found.
+    const detours = this.replayedDetours === undefined ? findDetours(trace) : findDetoursAfterReplay(trace, this.replayedDetours);
     const located = trace.actions.some((action) => action.at !== undefined);
     const staged = located ? { ...templated, detours: detours.map(({ from, to }) => ({ from, to })) } : templated;
     // Settled with every value the process has learned by then, a closed session's included (`processSecrets`).

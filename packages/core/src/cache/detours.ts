@@ -134,16 +134,33 @@ export function findDetours(trace: DetourInput): TraceDetour[] {
 }
 
 /**
- * The spans the recording run kept, named by the locations as stored: the
- * screen the span started on, and the first other location it reached,
- * which is the first known place after the action that left, since
- * `byLocations` starts a span at the last action that stood home.
+ * The detours of a recording made again after a replay handed off: the
+ * spans the entry kept for the actions the replay ran, and the ones this
+ * run found elsewhere. An action the replay ran without looking carries the
+ * location its recording had (`TraceRecorder.keepLocations`), which reads
+ * `:id` for a record id and a query value, so comparing again would lose a
+ * trip between two records the entry had found.
  */
-function recorded(trace: DetourInput): TraceDetour[] {
+export function findDetoursAfterReplay(trace: DetourInput, replayed: readonly Pick<TraceDetour, 'from' | 'to'>[]): TraceDetour[] {
+  const found = findDetours(trace).filter((detour) => !replayed.some((span) => detour.from < span.to && span.from < detour.to));
+  // This run's places are live addresses: named as an entry spells them, as `byLocations` names its own.
+  return [...recorded({ ...trace, detours: replayed }, routeLocation), ...found].toSorted((a, b) => a.from - b.from);
+}
+
+/**
+ * The spans the recording run kept, named by the locations as stored (or
+ * as `spell` writes them): the screen the span started on, and the first
+ * other location it reached, which is the first known place after the
+ * action that left, since `byLocations` starts a span at the last action
+ * that stood home.
+ */
+function recorded(trace: DetourInput, spell: (place: string) => string = (place) => place): TraceDetour[] {
   const where = places(trace);
   return (trace.detours ?? []).map(({ from, to }) => {
-    const at = where[from];
-    const via = where.slice(from + 1, to).find((place) => place !== undefined);
+    const home = where[from];
+    const away = where.slice(from + 1, to).find((place) => place !== undefined);
+    const at = home === undefined ? undefined : spell(home);
+    const via = away === undefined ? undefined : spell(away);
     return { from, to, ...(at === undefined ? {} : { at }), ...(via === undefined ? {} : { via }), evidence: 'locations' as const };
   });
 }

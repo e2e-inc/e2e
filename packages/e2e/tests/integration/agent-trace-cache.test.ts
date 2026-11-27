@@ -1451,3 +1451,75 @@ test('marks the next story read', async ({ app, agent, screen }) => {
     ]);
   }, 240_000);
 });
+
+const VIEW_SUITE = `import { test, expect } from 'e2e';
+
+test('increments after a look at another view', async ({ app, agent, screen }) => {
+  await app.open('/?view=account');
+  await agent.act('increment the counter');
+  await expect(screen.getByRole('status')).toHaveText('1');
+});
+`;
+
+/** Opens the privacy view of the same page and goes back, then taps Increment; after a hand-off, only taps Increment. */
+function otherViewExecutor(appUrl: string, record: ExecutorRecord): StepExecutor {
+  return {
+    name: 'other-view-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      record.calls += 1;
+      if (context.replayedPrefix === undefined) {
+        await context.observe();
+        await context.actions.navigate(`${appUrl}/?view=privacy`);
+        await context.observe();
+        await context.actions.back();
+      }
+      const observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+      return { status: 'passed' as const, summary: 'the counter shows 1' };
+    },
+  };
+}
+
+describe('trace cache: a hand-off after a trip between two views of one page', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/views.e2e.ts': VIEW_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('keeps the trip the entry found, which the stored /?view=:id the replay ran on can no longer show', async () => {
+    const options = (record: ExecutorRecord) => ({
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: otherViewExecutor(app.url, record) } }, cache: 'read-write' as const },
+    });
+    const step = (outcome: RunOutcome) => resultByTitle(outcome, 'increments after a look at another view').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    const detour = 'actions 1-2 left /?view=:id for another /?view=:id and came back with nothing typed, chosen, or set';
+    const recorded = await runExisting(project, options({ calls: 0, prefixes: [] }));
+    expect(recorded.exitCode).toBe(0);
+    expect(step(recorded).cache).toMatchObject({ detour });
+    expect(readOnlyEntry(project).entry.payload.detours).toEqual([{ from: 0, to: 2 }]);
+    // Increment no longer finds its recorded target: the replay runs the trip, then the agent finishes.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      actions: payload.actions.map((action, index) => (index === 2 && action.name === 'tap' ? { ...action, target: { ...action.target, name: 'No Such Button' } } : action)),
+    }));
+    const handedOff: ExecutorRecord = { calls: 0, prefixes: [] };
+    const outcome = await runExisting(project, options(handedOff));
+    expect(outcome.exitCode).toBe(0);
+    expect(handedOff.calls).toBe(1);
+    expect(step(outcome).cache).toMatchObject({ mode: 'agent-concluded', replayedActions: 2, detour, write: 'saved' });
+    expect(readOnlyEntry(project).entry.payload.detours).toEqual([{ from: 0, to: 2 }]);
+    const replay: ExecutorRecord = { calls: 0, prefixes: [] };
+    const replayed = await runExisting(project, options(replay));
+    expect(replay.calls).toBe(0);
+    expect(step(replayed).cache).toMatchObject({ mode: 'self-finalized', detour });
+  }, 240_000);
+});
