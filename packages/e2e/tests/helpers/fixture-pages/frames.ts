@@ -16,7 +16,7 @@ export const FRAME_PAGES: Record<string, PageRenderer> = {
 <head><title>Nested frame host</title></head>
 <body>
   <h1>Nested frame host</h1>
-  <iframe id="outer" src="/frame" title="outer"></iframe>
+  <iframe id="outer" name="outer" src="/frame" title="outer"></iframe>
 </body>
 </html>`),
   '/child': constant(`<!doctype html>

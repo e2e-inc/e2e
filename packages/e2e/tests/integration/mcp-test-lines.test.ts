@@ -79,7 +79,8 @@ describe('e2e mcp test lines', { timeout: 120_000 }, () => {
       const screen = (await call('observe')).text;
       const tap = await call('tap', { target: nodeId(screen, /button "Frame button"/) });
       const line = tap.text.split('\n')[1]?.replace(/^Test line: /, '') ?? '';
-      expect(line).toMatch(/^await browser\.frameLocator\(.+?\)\.frameLocator\(.+?\)\.getByRole\("button", "Frame button"\)\.tap\(\);$/);
+      expect(line).toContain(`await browser.frameLocator(${JSON.stringify('[name="outer"]')}).frameLocator(`);
+      expect(line).toContain('.getByRole("button", "Frame button").tap(); // frame selected by position');
       expect((await call('test_lines')).text).toContain(line);
       await openFrame();
       const result = await call('run_code', { code: line });

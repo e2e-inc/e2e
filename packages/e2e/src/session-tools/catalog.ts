@@ -88,6 +88,8 @@ export interface CatalogOptions {
   readonly onRunCodeFailed?: ((code: string) => void) | undefined;
   /** The attempt's fixtures and what guards them, for `run_code`; without them the catalog has no `run_code`. */
   readonly runCode?: RunCodeSession | undefined;
+  /** Engine fixtures available to the recorded test when attached run_code exposes fewer. */
+  readonly testEngineFixtures?: readonly string[];
 }
 
 /** Builds the session's catalog from the step context and the target. */
@@ -100,7 +102,7 @@ export function createSessionCatalog(options: CatalogOptions): SessionCatalog {
     redact: options.redaction.redact,
     appBase: options.appBase,
     fills: options.fills,
-    engineFixtures: options.runCode?.engineFixtures,
+    engineFixtures: options.testEngineFixtures ?? options.runCode?.engineFixtures,
     testRan: options.testRan,
     attached: options.attached,
     hasAgent: options.hasAgent,

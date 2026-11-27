@@ -415,7 +415,9 @@ export class SessionTestLines {
     const found = await this.findLocator(listed, inFrame);
     if ('reason' in found) return found;
     const root = 'browser' + frames.map((selector) => `.frameLocator(${JSON.stringify(selector)})`).join('');
-    return { ...found, expression: inFrame(found.expression), code: root + found.code.slice('screen'.length) };
+    const scoped = { ...found, expression: inFrame(found.expression), code: root + found.code.slice('screen'.length) };
+    if (!frames.some((selector) => selector.includes(':nth-child('))) return scoped;
+    return { ...scoped, comment: [found.comment, 'frame selected by position; a named frame holds up better'].filter(Boolean).join('; ') };
   }
 
   private async findLocator(listed: Listed, scopeExpression: (expression: LocatorExpression) => LocatorExpression): Promise<Found> {

@@ -464,6 +464,7 @@ export class HeldTestTools {
       recorder: attachment.recorder,
       fills: sessionFills(config),
       attached: true,
+      testEngineFixtures: Object.keys(this.options.target.engine?.fixtures ?? {}),
       onActionFailed: (cause) => {
         const call = heldTestToolCallScope.getStore();
 

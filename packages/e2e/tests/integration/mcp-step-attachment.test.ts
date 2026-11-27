@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Report1Document } from '../../src/report/build.ts';
 import { AttachHello, AttachRequest, type AttachReply } from '../../src/run/step-attachment-wire.ts';
 import { parseLine, readSocketLines, stepAddress } from '../../src/run/step-socket.ts';
+import { startFixtureApp } from '../helpers/fixture-app.ts';
 import { printedPauseId } from '../helpers/pause-id.ts';
 import { contentsUnder, createProject, type FixtureProject } from '../helpers/run-project.ts';
 
@@ -21,6 +22,7 @@ const ENV = { ...process.env, CI: '', NO_COLOR: '1' };
 const STEP = 'await app.open("/after");';
 const PASSWORD = 'fixture-password';
 const CREDENTIAL_PASSWORD = 'fixture-credential-password';
+
 const CONFIG = `import { defineTool, getToolContext } from 'e2e/agent';
 import { z } from 'zod';
 import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
@@ -239,6 +241,27 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     expect(drafted.text).not.toMatch(/split these lines into tests/i);
     expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
     expect(await held.exited).toBe(0);
+  });
+
+  it('records a frame locator in a held web test without exposing browser to run_code', async () => {
+    const app = await startFixtureApp();
+    try {
+      const dir = project("await app.open('/frame'); await screen.pause();", `import { web } from '@e2e-dev/web';
+export default { targets: [{ name: 'web', engine: web(), app: { url: ${JSON.stringify(app.url)} } }] };`);
+      const held = await pause(dir);
+      const { client } = await mcp(dir);
+      await openSession(client, { attach: held.id });
+      const observed = await invoke(client, 'call', { tool: 'observe' });
+      const target = /#(n\d+) button "Frame button"/.exec(observed.text)?.[1];
+      expect(target, observed.text).toBeDefined();
+      const tapped = await invoke(client, 'call', { tool: 'tap', args: { target } });
+      expect(tapped.text).toContain('Test line: await browser.frameLocator(');
+      expect((await invoke(client, 'call', { tool: 'run_code', args: { code: 'await browser.frameLocator("iframe").getByRole("button").count();' } })).isError).toBe(true);
+      expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
+      expect(await held.exited).toBe(0);
+    } finally {
+      await app.close();
+    }
   });
 
   it('redacts a displayed secret from the screen, tool results, and errors', async () => {
