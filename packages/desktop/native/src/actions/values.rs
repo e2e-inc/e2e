@@ -300,11 +300,13 @@ pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Out
         return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the secure field did not take the whole text set"));
     }
     let expected = if numeric { finite(text).map(ax::format_number).unwrap_or_else(|_| text.to_owned()) } else { text.to_owned() };
-    if until(deadline, || value_text(element).as_deref() == Some(expected.as_str())) {
-        Ok(())
-    } else {
-        Err(Failure::unconfirmed(codes::ACTION_FAILED, "the value did not change to the text set"))
-    }
+    // An empty AppKit text field may answer no value at all, which reads as empty, as the projection reads it.
+    let shown = || match element.attribute("AXValue") {
+        Ok(value) => value.display().as_deref() == Some(expected.as_str()),
+        Err(ax::AX_NO_VALUE) if roles::takes_text(role) => expected.is_empty(),
+        Err(_) => false,
+    };
+    if until(deadline, shown) { Ok(()) } else { Err(Failure::unconfirmed(codes::ACTION_FAILED, "the value did not change to the text set")) }
 }
 
 /// Selects all the text of a field through accessibility. A select-all key (Cmd+A) sent to an app in the background
