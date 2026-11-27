@@ -978,6 +978,8 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
             // option must show it is the selected one.
             let selected = || row.boolean("AXSelected") == Some(true) || toggle_state(&row) == Some(1);
             if !selected() {
+                // A disabled option takes the press and ignores it.
+                enabled(&row, deadline, "select")?;
                 perform(&row, "AXPress", "choose the option")?;
                 if !until(deadline, selected) {
                     return Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("\"{label}\" did not become selected")));
