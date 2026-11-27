@@ -83,14 +83,7 @@ pub fn back(pid: i32, input_id: Option<u32>, deadline: Instant) -> Outcome<Press
         let Some(bar) = bar else {
             return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "the app has no menu bar, so it has no Back command to press"));
         };
-        let mut candidates = Vec::new();
-        let mut seen = 0;
-        for top in children(&bar, "read the app's menu bar")? {
-            let menu = top.text("AXTitle").unwrap_or_default();
-            for list in children(&top, "read a menu")? {
-                collect(&list, &menu, 1, deadline, &mut seen, &mut candidates)?;
-            }
-        }
+        let candidates = back_candidates(&bar, deadline)?;
         let (item, enabled) = match choose(&candidates) {
             Ok(item) => (item, true),
             Err(Some(item)) => (item, false),
@@ -143,8 +136,21 @@ fn revalidated(first: bool, window: Duration, poll: Duration, mut read: impl FnM
     Ok(first)
 }
 
+/// Every item of the menu bar's menus, and of their submenus down to `MAX_MENU_DEPTH`, that matches Back, in menu order.
+fn back_candidates<E: Accessible>(bar: &E, deadline: Instant) -> Outcome<Vec<Candidate<E>>> {
+    let mut candidates = Vec::new();
+    let mut seen = 0;
+    for top in children(bar, "read the app's menu bar")? {
+        let menu = top.text("AXTitle").unwrap_or_default();
+        for list in children(&top, "read a menu")? {
+            collect(&list, &menu, 1, deadline, &mut seen, &mut candidates)?;
+        }
+    }
+    Ok(candidates)
+}
+
 /// The items of one menu (`AXMenu`), and those of their submenus down to `MAX_MENU_DEPTH`, that match Back.
-fn collect(list: &Element, menu: &str, depth: usize, deadline: Instant, seen: &mut usize, found: &mut Vec<Candidate<Element>>) -> Outcome<()> {
+fn collect<E: Accessible>(list: &E, menu: &str, depth: usize, deadline: Instant, seen: &mut usize, found: &mut Vec<Candidate<E>>) -> Outcome<()> {
     for item in children(list, "read a menu")? {
         if Instant::now() >= deadline {
             return Err(Failure::timeout("reading the app's menu bar"));
@@ -178,7 +184,7 @@ fn collect(list: &Element, menu: &str, depth: usize, deadline: Instant, seen: &m
 
 /// An element's children. A stall or a gone element fails, so a busy app is not read as one with no Back; any other
 /// failure reads as none.
-fn children(element: &Element, what: &str) -> Outcome<Vec<Element>> {
+fn children<E: Accessible>(element: &E, what: &str) -> Outcome<Vec<E>> {
     match element.elements("AXChildren", MAX_ITEMS) {
         Ok(children) => Ok(children),
         Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT | ax::AX_API_DISABLED)) => Err(unread(error, what)),
@@ -188,9 +194,12 @@ fn children(element: &Element, what: &str) -> Outcome<Vec<Element>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BackMatch, Candidate, back_match, choose, revalidated};
+    use super::{BackMatch, Candidate, back_candidates, back_match, choose, revalidated};
+    use crate::ax::{self, Value};
     use crate::failure::{Failure, codes};
+    use crate::fake::Fake;
     use std::time::Duration;
+    use std::time::Instant;
 
     fn item(id: u32, found: BackMatch, enabled: bool) -> Candidate<u32> {
         Candidate { element: id, found, enabled, title: format!("item {id}"), menu: "Go".into() }
@@ -263,6 +272,45 @@ mod tests {
         let failed =
             revalidated(false, Duration::from_millis(500), Duration::from_millis(100), || Err(Failure::refused(codes::APP_UNRESPONSIVE, "busy")), |_| ());
         assert_eq!(failed.err().map(|failure| failure.code), Some(codes::APP_UNRESPONSIVE));
+    }
+
+    /// A menu item titled `title`, with an optional key equivalent, enabled or not.
+    fn menu_item(title: &str, key: Option<&str>, enabled: bool) -> Fake {
+        let item = Fake::new("AXMenuItem").title(title).with("AXEnabled", Value::Bool(enabled));
+        match key {
+            Some(key) => item.text("AXMenuItemCmdChar", key).with("AXMenuItemCmdModifiers", Value::Number(0.0)),
+            None => item,
+        }
+    }
+
+    /// A menu bar item titled `title` whose menu holds `items`.
+    fn top(title: &str, items: Vec<Fake>) -> Fake {
+        Fake::new("AXMenuBarItem").title(title).children(vec![Fake::new("AXMenu").children(items)])
+    }
+
+    #[test]
+    fn walks_the_menu_bar_and_its_submenus_for_back() {
+        // Edit binds Command-[ to Shift Left; History holds Back in a submenu.
+        let history = top(
+            "History",
+            vec![
+                menu_item("Show All History", None, true),
+                menu_item("Recent", None, true).children(vec![Fake::new("AXMenu").children(vec![menu_item("Back", None, true)])]),
+            ],
+        );
+        let bar = Fake::new("AXMenuBar").children(vec![top("Edit", vec![menu_item("Shift Left", Some("["), true)]), history]);
+        let found = back_candidates(&bar, Instant::now() + Duration::from_secs(60)).expect("a walk");
+        let summary: Vec<(&str, &str, BackMatch)> =
+            found.iter().map(|candidate| (candidate.menu.as_str(), candidate.title.as_str(), candidate.found)).collect();
+        assert_eq!(summary, [("Edit", "Shift Left", BackMatch::Shortcut), ("History", "Back", BackMatch::Title)]);
+        assert_eq!(choose(&found).ok().map(|chosen| chosen.title.as_str()), Some("Back"), "a title outranks the shortcut");
+    }
+
+    #[test]
+    fn fails_a_menu_bar_walk_the_app_did_not_answer() {
+        let busy = Fake::new("AXMenuBar").children(vec![top("Go", vec![menu_item("Back", None, true)]).failing("AXChildren", ax::AX_CANNOT_COMPLETE)]);
+        let failed = back_candidates(&busy, Instant::now() + Duration::from_secs(60)).err();
+        assert_eq!(failed.map(|failure| failure.code), Some(codes::APP_UNRESPONSIVE), "a busy app is not one with no Back");
     }
 
     #[test]
