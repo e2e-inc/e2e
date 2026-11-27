@@ -4,22 +4,45 @@
  * `electron.<method>` step bounded by the action timeout.
  */
 
-import { ConfigurationError, isSecret, stepTimeout, type EngineFixtureContext } from '@e2e-dev/core/engine';
-import type { Electron, ElectronMainModule } from './fixtures.ts';
+import { ConfigurationError, isSecret, stepTimeout, type EngineFixtureContext, type FixtureOperation } from '@e2e-dev/core/engine';
+import type { Electron, ElectronMainModule, ElectronWindow } from './fixtures.ts';
 import type { ElectronSurface } from './surface.ts';
+import type { AppWindow } from './windows.ts';
 
 export function createElectronFixture(surface: ElectronSurface, context: EngineFixtureContext): Electron {
+  /** One handle per window, so the same window is the same object for as long as the app runs. */
+  const handles = new WeakMap<AppWindow, ElectronWindow>();
+  const windowAction: FixtureOperation = { kind: 'resource' };
+  const handle = (window: AppWindow): ElectronWindow => {
+    const known = handles.get(window);
+    if (known !== undefined) return known;
+    const made = context.fixture<ElectronWindow>('window', {
+      title: () => surface.windowTitle(window, context.operation()),
+      url: () => Promise.resolve(window.page.url()),
+      isActive: () => surface.isActiveWindow(window),
+      isClosed: () => window.page.isClosed(),
+      activate: () => surface.activateWindow(window, context.operation()),
+      close: () => surface.closeWindow(window, context.operation()),
+    }, { title: windowAction, url: windowAction, activate: windowAction, close: windowAction });
+    handles.set(window, made);
+    return made;
+  };
   const electron: Electron = {
     async evaluate<R, A>(fn: (electron: ElectronMainModule, arg: A) => R | Promise<R>, arg?: A): Promise<R> {
       // A secret handle would reach the main process as its name and purpose, never its value: refused, as every JSON sink refuses one.
       if (holdsSecret(arg)) throw new ConfigurationError('POLICY_DENIED', 'electron.evaluate cannot take a secret as its argument: resolve the value in the test and pass a string, or keep it out of the main process');
       return await surface.evaluate(fn, arg as A, context.operation());
     },
-    async windows() {
-      return await surface.windows();
+    windows: () => surface.openWindows().map(handle),
+    async waitForWindow(trigger, options) {
+      if (typeof trigger !== 'function') throw new ConfigurationError('INVALID_ARGUMENT', 'electron.waitForWindow() takes the function that opens the window');
+      return handle(await surface.waitForWindow(trigger, context.operation(stepTimeout(options?.timeout, 'electron.waitForWindow'))));
     },
-    async useWindow(which, options) {
-      return await surface.useWindow(which, context.operation(stepTimeout(options?.timeout, 'electron.useWindow')));
+    async window(which, options) {
+      if (typeof which !== 'object' || which === null || (which.title === undefined && which.url === undefined)) {
+        throw new ConfigurationError('INVALID_ARGUMENT', 'electron.window() takes { title } or { url }; electron.windows() lists every window');
+      }
+      return handle(await surface.findWindow(which, context.operation(stepTimeout(options?.timeout, 'electron.window'))));
     },
     async waitForDownload(trigger, options) {
       if (typeof trigger !== 'function') throw new ConfigurationError('INVALID_ARGUMENT', 'electron.waitForDownload() takes the function that starts the download');
@@ -34,9 +57,9 @@ export function createElectronFixture(surface: ElectronSurface, context: EngineF
   };
   return context.fixture('electron', electron, {
     evaluate: { kind: 'resource' },
-    windows: { kind: 'resource' },
+    waitForWindow: { kind: 'resource', timeout: false },
+    window: { kind: 'resource', timeout: (_which, options) => options?.timeout, label: (which) => JSON.stringify({ title: which.title?.toString(), url: which.url?.toString() }) },
     waitForDownload: { kind: 'resource', timeout: false },
-    useWindow: { kind: 'resource', timeout: (_which, options) => options?.timeout, label: (which) => (typeof which === 'number' ? String(which) : JSON.stringify({ ...which, title: which.title?.toString(), url: which.url?.toString() })) },
   });
 }
 

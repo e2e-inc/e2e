@@ -3,10 +3,10 @@
  * `screen` and the agent read, and the node refs that name a node in one.
  */
 
-import { pollCondition, type NodeRef, type OperationContext } from '@e2e-dev/core/engine';
+import { pollCondition, TestError, type NodeRef, type OperationContext } from '@e2e-dev/core/engine';
 import { invalidState, notActionable, stale } from './errors.ts';
 import { answerWithin, Budget } from './budget.ts';
-import type { ElectronWindow, WindowMatcher } from './fixtures.ts';
+import type { WindowMatcher } from './fixtures.ts';
 import type { PageTarget } from './page.ts';
 
 /** How long a window gets to say its document's title. */
@@ -170,45 +170,51 @@ export class Windows {
     return window;
   }
 
-  /** The open windows as the fixture lists them, each beside its handle, so a window that closes while the titles are read cannot shift a match onto another. */
-  async list(windowTitle: WindowTitle): Promise<readonly { readonly window: AppWindow; readonly entry: ElectronWindow }[]> {
-    const shown = this.current();
+  /** Makes an open window the shown one. */
+  activate(window: AppWindow): void {
+    if (!this.open().includes(window)) throw new TestError('ACTION_FAILED', 'the window has closed');
+    this.showWindow(window);
+  }
+
+  /** The open windows with what a matcher reads of each, so a window that closes while the titles are read cannot shift a match onto another. */
+  private async describe(windowTitle: WindowTitle): Promise<readonly Described[]> {
     return await Promise.all(
-      this.open().map(async (window, index) => {
+      this.open().map(async (window) => {
         // A window whose renderer crashed, or is busy, never answers: it is listed without a title rather than not at all.
         const [title = '', own] = await Promise.all([answerWithin(window.page.title(), TITLE_MS), windowTitle(window.page)]);
-        return { window, entry: { index, title, ...(own === undefined || own === title ? {} : { windowTitle: own }), url: window.page.url(), shown: window === shown } };
+        return { window, title, ...(own === undefined || own === title ? {} : { windowTitle: own }), url: window.page.url() };
       }),
     );
   }
 
-  /** Shows the first open window `which` matches, waiting for it to open until a little before the operation's deadline. */
-  async use(which: WindowMatcher, windowTitle: WindowTitle, operation: OperationContext): Promise<ElectronWindow> {
-    let listed: Awaited<ReturnType<Windows['list']>> = [];
-    let shown: ElectronWindow | undefined;
-    const budget = new Budget(operation, 'electron.useWindow');
+  /** The first open window `which` matches, waiting for it to open until a little before the operation's deadline. It is not shown: the caller activates it. */
+  async find(which: WindowMatcher, windowTitle: WindowTitle, operation: OperationContext): Promise<AppWindow> {
+    let described: readonly Described[] = [];
+    let found: AppWindow | undefined;
+    const budget = new Budget(operation, 'electron.window');
     await pollCondition({
       deadline: budget.waits,
       signal: operation.signal,
       negated: false,
       evaluate: async () => {
-        listed = await this.list(windowTitle);
-        const found = listed.find(({ entry }) => matchesWindow(entry, which));
-        // A match that closed while the list was read is not shown; the next read looks again.
-        const index = found === undefined ? -1 : this.open().indexOf(found.window);
-        if (found === undefined || index === -1) return false;
-        // The titles took time to read: a caller that stopped waiting meanwhile gets no window switched under it.
-        budget.check();
-        this.showWindow(found.window);
-        await found.window.page.bringToFront().catch(() => undefined);
-        shown = { ...found.entry, index, shown: true };
-        return true;
+        described = await this.describe(windowTitle);
+        // A match that closed while the titles were read is no match; the next read looks again.
+        found = described.find((each) => matchesWindow(each, which) && this.open().includes(each.window))?.window;
+        return found !== undefined;
       },
-      onTimeout: () => notActionable(`no window matches ${describeMatcher(which)}; open: ${listed.map(({ entry }) => JSON.stringify(entry.title)).join(', ') || 'none'}`),
+      onTimeout: () => notActionable(`no window matches ${describeMatcher(which)}; open: ${described.map(({ title }) => JSON.stringify(title)).join(', ') || 'none'}`),
     });
-    if (shown === undefined) throw notActionable(`no window matches ${describeMatcher(which)}`);
-    return shown;
+    if (found === undefined) throw notActionable(`no window matches ${describeMatcher(which)}`);
+    return found;
   }
+}
+
+/** One open window as a matcher reads it. */
+interface Described {
+  readonly window: AppWindow;
+  readonly title: string;
+  readonly windowTitle?: string;
+  readonly url: string;
 }
 
 function windowCount(count: number): string {
@@ -220,14 +226,12 @@ function isOpen(window: AppWindow): boolean {
   return !window.page.isClosed() && !window.page.url().startsWith('devtools://');
 }
 
-function matchesWindow(window: ElectronWindow, which: WindowMatcher): boolean {
-  if (typeof which === 'number') return window.index === which;
+function matchesWindow(window: Described, which: WindowMatcher): boolean {
   const test = (pattern: string | RegExp | undefined, value: string): boolean =>
     pattern === undefined || (typeof pattern === 'string' ? value === pattern : new RegExp(pattern.source, pattern.flags).test(value));
   return (test(which.title, window.title) || (window.windowTitle !== undefined && test(which.title, window.windowTitle))) && test(which.url, window.url);
 }
 
 function describeMatcher(which: WindowMatcher): string {
-  if (typeof which === 'number') return `index ${which}`;
   return [which.title === undefined ? '' : `title ${String(which.title)}`, which.url === undefined ? '' : `url ${String(which.url)}`].filter(Boolean).join(' and ') || 'any window';
 }

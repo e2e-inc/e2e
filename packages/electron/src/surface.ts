@@ -49,7 +49,7 @@ import { outsideApp } from './file-bound.ts';
 import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
 import { locateIn, projectRead, readWindow, type ProjectionContext, type RawRead } from './locate.ts';
 import type { ResolvedElectronOptions } from './options.ts';
-import type { ElectronWindow, WindowMatcher } from './fixtures.ts';
+import type { WindowMatcher } from './fixtures.ts';
 import { Recorder } from './video.ts';
 import { ROOT_ID, Windows, type AppWindow } from './windows.ts';
 
@@ -58,6 +58,9 @@ const CRASH_RELOAD_WAIT_MS = 2_000;
 
 /** How long the read that hands the trace an action's screen may take. */
 const TRACE_READ_MS = 1_000;
+
+/** How long a window gets to say its document's title. */
+const TITLE_MS = 1_000;
 
 function crashed(): Error {
   return invalidState('the window\'s renderer crashed: reload it from the main process with electron.evaluate, or restart the app');
@@ -353,13 +356,66 @@ export class ElectronSurface {
 
   // --- what the fixture asks ---
 
-  async windows(): Promise<readonly ElectronWindow[]> {
-    return (await this.windowList.list((page) => this.app.windowTitle(page))).map(({ entry }) => entry);
+  /** The app's open windows, in the order they opened. */
+  openWindows(): readonly AppWindow[] {
+    return this.windowList.open();
   }
 
-  /** Makes the first open window `which` matches the one read and acted in, waiting for it to open until the operation's deadline. */
-  async useWindow(which: WindowMatcher, operation: OperationContext): Promise<ElectronWindow> {
-    return await this.windowList.use(which, (page) => this.app.windowTitle(page), operation);
+  isActiveWindow(window: AppWindow): boolean {
+    return this.windowList.isShownPage(window.page);
+  }
+
+  /** `window.activate()`: reads and acts in the window from now on. */
+  async activateWindow(window: AppWindow, operation: OperationContext): Promise<void> {
+    this.failOnDialog();
+    this.windowList.activate(window);
+    await withBudget(operation, 'activate window', () => window.page.bringToFront().catch(() => undefined));
+  }
+
+  /** `window.close()`: any window, the app's last one too. */
+  async closeWindow(window: AppWindow, operation: OperationContext): Promise<void> {
+    if (window.page.isClosed()) return;
+    await withBudget(operation, 'close window', (budget) => budget.send(() => this.app.closeWindow(window.page)));
+  }
+
+  /** `electron.window()`: the first open window `which` matches, waited for until the operation's deadline. */
+  async findWindow(which: WindowMatcher, operation: OperationContext): Promise<AppWindow> {
+    this.failOnDialog();
+    if (!this.app.running) throw this.app.notRunning();
+    return await this.windowList.find(which, (page) => this.app.windowTitle(page), operation);
+  }
+
+  /**
+   * `electron.waitForWindow()`: runs `trigger`, waits for a window that was
+   * not open before it, and makes that window the active one. The trigger is
+   * test code: its error is reported as it is.
+   */
+  async waitForWindow(trigger: () => Promise<void>, operation: OperationContext): Promise<AppWindow> {
+    this.failOnDialog();
+    if (!this.app.running) throw this.app.notRunning();
+    const before = new Set(this.windowList.open());
+    const started = Date.now();
+    await trigger();
+    const triggerMs = Date.now() - started;
+    let opened: AppWindow | undefined;
+    await pollCondition({
+      deadline: new Deadline(Math.max(1, operation.timeoutMs - triggerMs)),
+      signal: operation.signal,
+      negated: false,
+      evaluate: () => {
+        opened = this.windowList.open().find((window) => !before.has(window));
+        return Promise.resolve(opened !== undefined);
+      },
+      onTimeout: () => new TestError('ACTION_FAILED', `no window opened within ${operation.timeoutMs}ms; the trigger resolved after ${triggerMs}ms`),
+    });
+    if (opened === undefined) throw invalidState('the window was lost');
+    await this.activateWindow(opened, operation);
+    return opened;
+  }
+
+  /** A window's document title; empty when its page does not answer, as one whose renderer crashed does not. */
+  async windowTitle(window: AppWindow, operation: OperationContext): Promise<string> {
+    return (await answerWithin(window.page.title(), Math.min(TITLE_MS, operation.timeoutMs))) ?? '';
   }
 
   /** Runs a function in the app's main process. */

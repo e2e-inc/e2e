@@ -209,7 +209,10 @@ test.describe('controls page', () => {
     const crashed = await failure(screen.getByRole('heading', 'Controls').waitFor({ timeout: 1000 }));
     expect(crashed).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('renderer crashed') });
     // The crashed window is still one of the app's windows, with no title to give.
-    expect(await electron.windows()).toMatchObject([{ index: 0, title: '', shown: true }]);
+    const [crashedWindow] = electron.windows();
+    expect(electron.windows()).toHaveLength(1);
+    expect(crashedWindow?.isActive()).toBe(true);
+    expect(await crashedWindow?.title()).toBe('');
     await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.reload());
     await expect(screen.getByRole('heading', 'Controls')).toBeVisible({ timeout: 5000 });
   });
@@ -227,8 +230,7 @@ test.describe('controls page', () => {
 test.describe('a shown window that closes', () => {
   test('reads the window shown before it at once, though its close event comes later', async ({ app, screen, electron }) => {
     await app.open();
-    await screen.getByRole('button', 'Open settings').tap();
-    await electron.useWindow({ title: 'Settings' });
+    await electron.waitForWindow(() => screen.getByRole('button', 'Open settings').tap());
     await expect(screen.getByRole('switch', 'Dark mode')).toBeVisible();
     await electron.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows().find((window) => window.getTitle() === 'Settings')?.destroy();
@@ -241,7 +243,7 @@ test.describe('an app that quits on its own', () => {
   test('says so, rather than that it was never opened', async ({ app, screen, electron }) => {
     await app.open();
     await electron.evaluate(({ app: main }) => setTimeout(() => main.quit(), 50));
-    await expect.poll(async () => (await electron.windows()).length).toBe(0);
+    await expect.poll(() => electron.windows().length).toBe(0);
     expect(await failure(screen.getByRole('button', 'Sign in').tap({ timeout: 1000 }))).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('quit on its own') });
   });
 });

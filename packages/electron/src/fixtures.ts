@@ -6,21 +6,31 @@
 
 import type { Locator } from '@e2e-dev/core/engine';
 
-/** A window of the running app, as the `electron` fixture lists it. */
+/**
+ * One window of the running app: a `BrowserWindow`, a `WebContentsView`, or a
+ * `<webview>` guest. The same window is the same object for as long as the
+ * app runs.
+ */
 export interface ElectronWindow {
-  /** Its position among the open windows, in the order they opened: what `useWindow` and the agent's tab tools take. */
-  readonly index: number;
-  /** The document's title. */
-  readonly title: string;
-  /** The OS window's title (`BrowserWindow.getTitle()`), when it differs from the document's; a view has none of its own. */
-  readonly windowTitle?: string;
-  readonly url: string;
-  /** Whether `screen` and the agent read and act in this window. */
-  readonly shown: boolean;
+  /** The document's current title. */
+  title(): Promise<string>;
+  /** The page's current URL. */
+  url(): Promise<string>;
+  /** Whether this is the active window, the one `screen`, `expect`, and the agent act on. */
+  isActive(): boolean;
+  /** Whether the window has closed. */
+  isClosed(): boolean;
+  /** Makes this the active window. Rejects with `ACTION_FAILED` when it has closed. */
+  activate(): Promise<void>;
+  /** Closes the window, past any `beforeunload` guard. When it was the active window, the one active before it is active again. */
+  close(): Promise<void>;
 }
 
-/** Which window `useWindow` picks: a position, or the first whose title (the document's or the OS window's) or URL matches. */
-export type WindowMatcher = number | { readonly title?: string | RegExp; readonly url?: string | RegExp };
+/** Which window `electron.window` finds: the first whose title (the document's or the OS window's) and URL match, a string exactly or a RegExp. */
+export interface WindowMatcher {
+  readonly title?: string | RegExp;
+  readonly url?: string | RegExp;
+}
 
 /**
  * The main process's `electron` module, as a function passed to `evaluate`
@@ -40,15 +50,20 @@ export interface Electron {
   evaluate<R>(fn: (electron: ElectronMainModule) => R | Promise<R>): Promise<R>;
   /** Runs `fn` in the main process with `arg`, which a function that takes one must be given. */
   evaluate<R, A>(fn: (electron: ElectronMainModule, arg: A) => R | Promise<R>, arg: A): Promise<R>;
-  /** The app's open windows, in the order they opened, the one `screen` reads marked `shown`. */
-  windows(): Promise<readonly ElectronWindow[]>;
+  /** The app's open windows, in the order they opened. */
+  windows(): readonly ElectronWindow[];
   /**
-   * Reads and acts in another window from now on: the window at a position,
-   * or the first whose title or URL matches (a string exactly, or a RegExp).
-   * Waits for such a window to open, up to `timeout` milliseconds or else
-   * the action timeout.
+   * Runs a trigger and waits for the window it opens, then resolves with that
+   * window once it is the active one. Rejects with `ACTION_FAILED` when no
+   * window opens within `timeout` milliseconds, or else the action timeout.
    */
-  useWindow(which: WindowMatcher, options?: { readonly timeout?: number }): Promise<ElectronWindow>;
+  waitForWindow(trigger: () => Promise<void>, options?: { readonly timeout?: number }): Promise<ElectronWindow>;
+  /**
+   * The first open window whose title or URL matches, waiting for it to open
+   * up to `timeout` milliseconds or else the action timeout: for a window
+   * the app opens on its own. It does not become active; call `activate()`.
+   */
+  window(which: WindowMatcher, options?: { readonly timeout?: number }): Promise<ElectronWindow>;
   /**
    * Runs `trigger` and waits for the download it starts to finish, up to
    * `timeout` milliseconds or else the action timeout. The file is copied

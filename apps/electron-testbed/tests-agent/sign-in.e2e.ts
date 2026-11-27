@@ -13,6 +13,6 @@ test('the agent signs in on the Team plan', async ({ app, agent, screen }) => {
 test('the agent turns on dark mode in the settings window', async ({ app, agent, screen, electron }) => {
   await app.open();
   await agent.act('open the settings window and turn dark mode on');
-  await electron.useWindow({ title: 'Settings' });
+  await (await electron.window({ title: 'Settings' })).activate();
   await expect(screen.getByTestId('theme')).toHaveText('Theme: dark');
 });

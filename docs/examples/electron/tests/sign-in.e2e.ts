@@ -9,8 +9,7 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
   await screen.getByRole('button', 'Sign in').tap();
   await expect(screen.getByTestId('status')).toContainText('Signed in as ada');
 
-  await screen.getByRole('button', 'Open settings').tap();
-  await electron.useWindow({ title: 'Settings' });
+  await electron.waitForWindow(() => screen.getByRole('button', 'Open settings').tap());
   await expect(screen.getByRole('heading', 'Settings')).toBeVisible();
 
   const userData = await electron.evaluate(({ app: main }) => main.getPath('userData'));

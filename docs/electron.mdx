@@ -77,8 +77,7 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
   await screen.getByRole('button', 'Sign in').tap();
   await expect(screen.getByTestId('status')).toContainText('Signed in as ada');
 
-  await screen.getByRole('button', 'Open settings').tap();
-  await electron.useWindow({ title: 'Settings' });
+  await electron.waitForWindow(() => screen.getByRole('button', 'Open settings').tap());
   await expect(screen.getByRole('heading', 'Settings')).toBeVisible();
 
   const userData = await electron.evaluate(({ app: main }) => main.getPath('userData'));
@@ -91,32 +90,43 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
 | Method | What it does |
 | --- | --- |
 | `evaluate(fn, arg?)` | Runs `fn` in the main process with the `electron` module and returns its JSON-serializable result |
-| `windows()` | Lists open windows in open order (`index`, `title`, `windowTitle`, `url`, `shown`) |
-| `useWindow(which, { timeout }?)` | Switches `screen` to a window by index or `{ title, url }`, waiting for it to open |
+| `windows()` | The open windows, in the order they opened |
+| `waitForWindow(trigger, { timeout }?)` | Runs `trigger`, waits for the window it opens, and makes that window active |
+| `window({ title, url }, { timeout }?)` | Waits for a window by title or URL and returns it, without making it active |
 | `waitForDownload(trigger, { timeout }?)` | Runs `trigger` and waits for the [download](#downloads) it starts |
 | `locator(selector)` | Queries the current window by CSS selector |
 
 ## Work with several windows
 
-`screen` reads one window at a time, starting with the first window that
-loads. A new window doesn't take over automatically; switch to it with
-`electron.useWindow()`. If the active window closes, `screen` falls back to
-the window shown before it.
+Windows work like [tabs in a browser test](/reference/web#tabs). `screen` reads one
+active window, starting with the first that loads. A window the app opens
+doesn't become active on its own: `electron.waitForWindow()` runs the step
+that opens it and makes it active. When the active window closes, the one
+active before it is active again.
 
 ```ts
-await screen.getByRole('button', 'Open settings').tap();
-await electron.useWindow({ title: 'Settings' });
+const settings = await electron.waitForWindow(() =>
+  screen.getByRole('button', 'Open settings').tap(),
+);
 await expect(screen.getByRole('heading', 'Settings')).toBeVisible();
 
-const windows = await electron.windows();
-expect(windows.find((w) => w.shown)?.title).toBe('Settings');
-
-await electron.useWindow(0);
+const [main] = electron.windows();
+await main.activate();
+await settings.close();
 ```
 
-`useWindow` matches an index, or `{ title, url }` using an exact string or a
-`RegExp`. `title` checks both the document title and the OS window title. The
-agent sees windows as tabs and switches between them on its own.
+A window has `title()`, `url()`, `isActive()`, `isClosed()`, `activate()`, and
+`close()`. For a window the app opens by itself, such as the main window after
+a splash screen, find it with `electron.window()`:
+
+```ts
+const main = await electron.window({ title: 'My App' });
+await main.activate();
+```
+
+`title` and `url` take an exact string or a `RegExp`, and `title` matches the
+document's title or the OS window's. The agent sees windows as tabs and
+switches between them on its own.
 
 ## Run code in the main process
 
@@ -207,7 +217,7 @@ To test a packaged build, point `executablePath` at the binary (not the
 
 - If the build disables the `EnableNodeCliInspectArguments` fuse, `screen`,
   `expect`, and the agent still work, but `electron.evaluate()` fails and
-  `useWindow({ title })` matches document titles only.
+  `electron.window({ title })` matches document titles only.
 - On macOS, an unsigned build that reads the keychain (`safeStorage`) can
   hang on a system prompt. Pass `args: ['--use-mock-keychain']`.
 
@@ -274,7 +284,7 @@ The engine adds `--no-sandbox` on Linux automatically.
 
 ### Not supported yet
 
-- Content inside an `iframe` or `webview` (a `webview` guest is listed as a window, so `electron.useWindow()` reaches it)
+- Content inside an `iframe` or `webview` (a `webview` guest is listed as a window, so `electron.window()` reaches it)
 - Routes and cookies (use `session.defaultSession` in `electron.evaluate()` instead)
 - Session save and restore
 - A `keyboard` fixture to hold a key down

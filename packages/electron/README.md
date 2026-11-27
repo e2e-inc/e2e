@@ -57,7 +57,8 @@ test('signs in', async ({ app, screen }) => {
 - **Act.** Trusted mouse and keyboard input, once the node is enabled, on
   screen, and topmost at its point.
 - **Windows.** The agent sees them as tabs. The `electron` fixture has
-  `evaluate` (main process), `windows`, `useWindow`, `waitForDownload`, and
+  `evaluate` (main process), `windows`, `waitForWindow`, `window`,
+  `waitForDownload`, and
   `locator` (CSS).
 - **Video.** The shown window's screencast, encoded to one `.webm` by ffmpeg,
   which the engine downloads on the first recording when the machine has none.
@@ -78,7 +79,7 @@ Not supported yet:
 
 | What | Until then |
 | --- | --- |
-| Content inside an `iframe` or `webview` | A `webview` guest is listed as a window: `electron.useWindow()` |
+| Content inside an `iframe` or `webview` | A `webview` guest is listed as a window: `electron.window()` |
 | Routes and cookies | `session.defaultSession` in `electron.evaluate` |
 | Session save and restore | |
 

@@ -301,11 +301,11 @@ test.describe('an app that quits on its own', () => {
     await app.open();
     await screen.getByTestId('username').fill('ada');
     await electron.evaluate(({ app: main }) => setTimeout(() => main.quit(), 50));
-    await expect.poll(async () => (await electron.windows()).length).toBe(0);
+    await expect.poll(() => electron.windows().length).toBe(0);
     await app.restart();
     await expect(screen.getByTestId('status')).toHaveText('Not signed in');
     await electron.evaluate(({ app: main }) => setTimeout(() => main.quit(), 50));
-    await expect.poll(async () => (await electron.windows()).length).toBe(0);
+    await expect.poll(() => electron.windows().length).toBe(0);
   });
 });
 
@@ -340,8 +340,7 @@ test.describe('screenshots', () => {
   });
 
   test('withholds a screenshot of a window whose password field no mask reaches', async ({ app, screen, electron }) => {
-    await screen.getByRole('button', 'Open settings').tap();
-    await electron.useWindow({ title: 'Settings' });
+    await electron.waitForWindow(() => screen.getByRole('button', 'Open settings').tap());
     await expect(screen.getByRole('textbox', 'Vault key')).toHaveCount(1);
     const refused = await app.screenshot('vault').then(() => undefined, (error: unknown) => error);
     expect(refused).toMatchObject({ code: 'POLICY_DENIED' });
@@ -354,27 +353,40 @@ test.describe('screenshots', () => {
 test.describe('windows', () => {
   test('drives a second window the app opens', async ({ app, screen, electron }) => {
     await app.open();
-    await screen.getByRole('button', 'Open settings').tap();
-    const settings = await electron.useWindow({ title: 'Settings' });
-    expect(settings.index).toBe(1);
+    const settings = await electron.waitForWindow(() => screen.getByRole('button', 'Open settings').tap());
+    expect(await settings.title()).toBe('Settings');
+    expect(settings.isActive()).toBe(true);
     await screen.getByRole('switch', 'Dark mode').check();
     await expect(screen.getByTestId('theme')).toHaveText('Theme: dark');
-    const windows = await electron.windows();
-    expect(windows.map((window) => [window.title, window.shown])).toEqual([
-      ['Sign In', false],
-      ['Settings', true],
-    ]);
-    await electron.useWindow(0);
+    const [main, second] = electron.windows();
+    // The same window is the same object, however a test came by it.
+    expect(second).toBe(settings);
+    expect(await electron.window({ title: 'Settings' })).toBe(settings);
+    expect([await main!.title(), main!.isActive()]).toEqual(['Sign In', false]);
+    await main!.activate();
+    expect(settings.isActive()).toBe(false);
     await expect(screen.getByTestId('status')).toHaveText('Not signed in');
-    const missing = await electron.useWindow({ title: 'Preferences' }, { timeout: 1000 }).then(() => undefined, (error: unknown) => error);
+    const missing = await electron.window({ title: 'Preferences' }, { timeout: 1000 }).then(() => undefined, (error: unknown) => error);
     expect(String(missing)).toContain('no window matches title Preferences; open: "Sign In", "Settings"');
+    const none = await electron.waitForWindow(() => Promise.resolve(), { timeout: 500 }).then(() => undefined, (error: unknown) => error);
+    expect(none).toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/no window opened within 500ms/) });
     expect(await electron.evaluate(() => (globalThis as unknown as { testbedState: { settingsOpened: number } }).testbedState.settingsOpened)).toBe(1);
+  });
+
+  test('closes a window from its handle, and the one active before it is active again', async ({ app, screen, electron }) => {
+    await app.open();
+    const settings = await electron.waitForWindow(() => screen.getByRole('button', 'Open settings').tap());
+    await settings.close();
+    expect(settings.isClosed()).toBe(true);
+    expect(electron.windows()).toHaveLength(1);
+    expect(electron.windows()[0]?.isActive()).toBe(true);
+    await expect(screen.getByTestId('status')).toHaveText('Not signed in');
+    expect(await settings.activate().then(() => undefined, (error: unknown) => error)).toMatchObject({ code: 'ACTION_FAILED' });
   });
 
   test('types into a field inside a closed shadow root', async ({ app, screen, electron }) => {
     await app.open();
-    await screen.getByRole('button', 'Open settings').tap();
-    await electron.useWindow({ title: 'Settings' });
+    await electron.waitForWindow(() => screen.getByRole('button', 'Open settings').tap());
     const note = screen.getByRole('textbox', 'Vault note');
     await note.pressSequentially('kept');
     await expect(note).toHaveValue('kept');

@@ -35,7 +35,7 @@ export interface ElectronEngine extends EngineHandle<ElectronFixtures> {}
  * an empty user-data directory of its attempt's own; `app.restart()`
  * relaunches it on the same data, `app.clearState()` on empty data, and every
  * test ends with the app quit. Its windows are the tabs the agent and
- * `electron.useWindow()` switch between.
+ * a window's `activate()` switch between.
  */
 export function electron(options: ElectronOptions = {}): ElectronEngine {
   const resolved = resolveOptions(options);
