@@ -16,14 +16,17 @@ useFakeTime();
 
 const status: SemanticNode = { ref: { id: 'status', revision: '' }, role: 'text', text: 'Syncing', testId: 'status' };
 
-/** A screen whose reads answer `status` while `stale()` says no, and a retryable `NODE_STALE` while it says yes. */
-function screenWith(stale: () => boolean) {
+const RECREATED = 'the app re-created the element while it was read';
+
+/** A screen whose reads answer `status` while `stale()` says no, and a retryable `NODE_STALE` (`why`) while it says yes. */
+function screenWith(stale: () => boolean, why = RECREATED, measure?: () => { intersects: boolean; ratio?: number }) {
   return screenOver({
     locate: (expression) => {
-      if (stale()) throw new EngineError('NODE_STALE', 'the app re-created the element while it was read', { retryable: true });
+      if (stale()) throw new EngineError('NODE_STALE', why, { retryable: true });
       return resolveExpression(expression, [status]);
     },
     observe: () => snapshot([status]),
+    ...(measure === undefined ? {} : { viewportIntersection: () => measure() }),
     timeoutMs: 300,
   }).screen;
 }
@@ -35,8 +38,15 @@ describe('a read the screen changed under', () => {
     const locator = screenWith(() => true).getByTestId('status');
     expect(await failure(expectFixture(locator).toHaveText('Synced', { timeout: 50 }))).toMatchObject({
       code: 'ASSERTION_FAILED',
-      message: expect.stringContaining('observed: no read: the screen changed under every read until the deadline'),
+      message: expect.stringContaining(`observed: no read until the deadline: ${RECREATED}`),
     });
+  });
+
+  it("names the engine's reason a read failed, such as a locked screen, and keeps its error as the cause", async () => {
+    const locked = "the Mac's screen is locked, so no window can be read; unlock it";
+    const error = await failure(expectFixture(screenWith(() => true, locked).getByTestId('status')).toBeVisible({ timeout: 50 }));
+    expect(error).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining(`no read until the deadline: ${locked}`) });
+    expect((error as Error).cause).toMatchObject({ message: expect.stringContaining(locked) });
   });
 
   it('reports the last value it read when the reads went stale after it', async () => {
@@ -44,7 +54,7 @@ describe('a read the screen changed under', () => {
     const locator = screenWith(() => (reads += 1) > 1).getByTestId('status');
     const error = await failure(expectFixture(locator).toHaveText('Synced', { timeout: 50 }));
     expect(error).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('Syncing') });
-    expect((error as Error).message).toContain('then a screen that changed under every read until the deadline');
+    expect((error as Error).message).toContain(`then no read until the deadline: ${RECREATED}`);
     expect((error as Error).message).not.toContain('node became stale');
   });
 
@@ -66,7 +76,14 @@ describe('a read the screen changed under', () => {
     const locator = screenWith(() => true).getByTestId('status');
     expect(await failure(locator.waitFor({ state: 'detached', timeout: 50 }))).toMatchObject({
       code: 'LOCATOR_NOT_FOUND',
-      message: expect.stringContaining('did not become detached'),
+      message: expect.stringContaining(`did not become detached: getByTestId("status") (no read until the deadline: ${RECREATED})`),
     });
+  });
+
+  it('keeps the last measured sample of toBeInViewport when later reads go stale', async () => {
+    let reads = 0;
+    const locator = screenWith(() => (reads += 1) > 1, RECREATED, () => ({ intersects: false })).getByTestId('status');
+    const error = await failure(expectFixture(locator).toBeInViewport({ timeout: 50 }));
+    expect(error).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining(`outside the viewport, then no read until the deadline: ${RECREATED} (match count 1)`) });
   });
 });

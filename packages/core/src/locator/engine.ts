@@ -443,18 +443,19 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
    * stale until the window's deadline (an app that re-created its elements
    * under every read), or a ref superseded before it was read, is no node
    * with `stale` set (one match for the superseded ref, none for a resolve
-   * that never answered): the poll samples again, and its timeout is its
-   * own failure, never a gone node.
+   * that never answered) and the engine's failure as `cause`: the poll
+   * samples again, and its timeout is its own failure, never a gone node,
+   * whose reason is that cause's (`staleReason`).
    */
   async tryRead(
     expression: LocatorExpression,
     reads: ReadWindow,
     missingFrame: MissingFrame = 'wait',
-  ): Promise<{ node: SemanticNode | null; count: number; stale: boolean }> {
+  ): Promise<StaleableRead> {
     try {
       return await this.readOne(expression, reads, missingFrame);
     } catch (cause) {
-      if (isStaleRead(cause)) return { node: null, count: 0, stale: true };
+      if (isStaleRead(cause)) return { node: null, count: 0, stale: true, cause: staleCause(cause) };
       throw cause;
     }
   }
@@ -471,22 +472,23 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
   async readViewport(
     expression: LocatorExpression,
     reads: ReadWindow,
-  ): Promise<{ node: SemanticNode | null; count: number; stale: boolean; intersection?: ViewportIntersection }> {
+  ): Promise<StaleableRead & { intersection?: ViewportIntersection }> {
     if (!this.session.measuresViewport) {
       throw new ConfigurationError(
         'UNSUPPORTED_CAPABILITY',
         'toBeInViewport is not available on this target: its engine does not implement viewportIntersection',
       );
     }
-    const { node, count, stale } = await this.tryRead(expression, reads, 'empty');
-    if (node === null) return { node, count, stale };
+    const read = await this.tryRead(expression, reads, 'empty');
+    const { node, count, stale } = read;
+    if (stale || node === null) return read;
     try {
       const intersection = await reads.read((timeoutMs) =>
         this.session.viewportIntersection(node.ref, this.readOperation(timeoutMs)),
       );
       return { node, count, stale, intersection };
     } catch (cause) {
-      if (asEngineError(cause)?.code === 'NODE_STALE') return { node, count, stale: true };
+      if (asEngineError(cause)?.code === 'NODE_STALE') return { node, count, stale: true, cause };
       throw translateLocatorError(cause, expression);
     }
   }
@@ -510,15 +512,15 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
     expression: LocatorExpression,
     reads: ReadWindow,
     missingFrame: MissingFrame,
-  ): Promise<{ node: SemanticNode | null; count: number; stale: boolean }> {
-const ref = await this.singleOf(await this.resolveOnce(expression, reads, missingFrame), expression);
+  ): Promise<StaleableRead> {
+    const ref = await this.singleOf(await this.resolveOnce(expression, reads, missingFrame), expression);
     if (ref === null) return { node: null, count: 0, stale: false };
     try {
       const node = await reads.read((timeoutMs) => this.session.read(ref, this.readOperation(timeoutMs)));
       return { node, count: 1, stale: false };
     } catch (cause) {
       if (asEngineError(cause)?.code === 'NODE_STALE') {
-        return { node: null, count: 1, stale: true };
+        return { node: null, count: 1, stale: true, cause };
       }
       throw translateLocatorError(cause, expression);
     }
@@ -915,6 +917,35 @@ export function locatorDetails(expression: LocatorExpression, waitedMs?: number)
  */
 function lateAction(kind: string, target: string): TestError {
   return new TestError('ACTION_FAILED', `operation timed out before the ${kind} was sent: ${target}`);
+}
+
+/** One read of a polling surface: the node, how many matched, and, for a read the screen changed under, the engine's failure. */
+export interface StaleableRead {
+  readonly node: SemanticNode | null;
+  readonly count: number;
+  readonly stale: boolean;
+  /** The engine's `NODE_STALE` that made the read `stale`: why it could not read (`staleReason`). */
+  readonly cause?: unknown;
+}
+
+/**
+ * The engine's own `NODE_STALE` in a stale read's failure, bare or under the
+ * locator failure a resolve translated it into; else the failure itself.
+ */
+export function staleCause(cause: unknown): unknown {
+  if (asEngineError(cause)?.code === 'NODE_STALE') return cause;
+  const inner = isE2EError(cause) ? cause.cause : undefined;
+  return asEngineError(inner)?.code === 'NODE_STALE' ? inner : cause;
+}
+
+/**
+ * Why a stale read could not read, from the engine's own `NODE_STALE`: "the
+ * Mac's screen is locked", or an app that re-created its elements. Undefined
+ * when the failure is no such error.
+ */
+export function staleReason(cause: unknown): string | undefined {
+  const engineError = asEngineError(staleCause(cause));
+  return engineError?.code === 'NODE_STALE' ? engineError.message : undefined;
 }
 
 /**

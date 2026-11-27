@@ -105,7 +105,7 @@ describe('toBeInViewport', () => {
     }).getByTestId('target');
     expect(await failure(expectFixture(stale).not.toBeInViewport({ timeout: 50 }))).toMatchObject({
       code: 'ASSERTION_FAILED',
-      message: expect.stringContaining('observed: a node that went stale before it was measured'),
+      message: expect.stringContaining('observed: no read until the deadline: navigation changed'),
     });
   });
 
