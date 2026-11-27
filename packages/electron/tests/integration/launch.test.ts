@@ -428,6 +428,19 @@ describe('pixels', () => {
     expect(existsSync(path.join(directory, 'screenshots', 'left.png'))).toBe(false);
   });
 
+  it('writes no screenshot when the window loaded another document while it was captured', async () => {
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,<title>Loaded</title>'));`);
+    await launch();
+    const window = windows.require();
+    // In the app at both checks, with another document loaded in between, as two navigations would leave it.
+    const refused = await screenshotFile(new DevTools(), window, directory, 'swapped.png', () => {
+      setTimeout(() => window.page.documentChanged(), 0);
+      return undefined;
+    }).then(() => undefined, (error: unknown) => error);
+    expect(refused).toMatchObject({ code: 'POLICY_DENIED', message: expect.stringMatching(/loaded another document/) });
+    expect(existsSync(path.join(directory, 'screenshots', 'swapped.png'))).toBe(false);
+  });
+
   it('gives each of two captures taken at once its own masks', async () => {
     const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,<body style="margin:0"><iframe style="border:0;width:300px;height:200px" srcdoc="<body style=margin:0;background:red>"></iframe></body>'));`);
     await launch();
