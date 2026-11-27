@@ -98,6 +98,26 @@ export function findRegisteredMcpFiles(cwd: string): string[] {
 }
 
 /**
+ * How a client starts the server from the project with e2e installed: through
+ * the project's own package manager. `npx` exits before the handshake in a
+ * project whose `devEngines` pins another manager, and finds no binary in a
+ * Yarn Plug'n'Play install; a Bun project may have no Node.js for it at all.
+ */
+function mcpLaunch(manager: PackageManager): { readonly command: string; readonly args: readonly string[] } {
+  switch (manager) {
+    case 'npm':
+      return { command: 'npx', args: ['e2e', 'mcp'] };
+    case 'pnpm':
+      return { command: 'pnpm', args: ['exec', 'e2e', 'mcp'] };
+    case 'yarn':
+      // Yarn 1 prints a banner to stdout, the protocol's stream, unless told to stay silent; `run --silent` is the form Yarn 2 and later take too.
+      return { command: 'yarn', args: ['run', '--silent', 'e2e', 'mcp'] };
+    case 'bun':
+      return { command: 'bunx', args: ['e2e', 'mcp'] };
+  }
+}
+
+/**
  * Plans the writes for the given files. A file without the entry gets it
  * merged in; one whose entry already matches needs nothing and is left out.
  * Extra settings on the e2e entry, other servers, other keys, and the file's
@@ -105,8 +125,7 @@ export function findRegisteredMcpFiles(cwd: string): string[] {
  * it is returned among `links` for the caller to report and skip.
  */
 export function planMcpRegistration(cwd: string, files: readonly string[], manager: PackageManager): McpPlan {
-  // How clients start the server from the project with e2e installed; a Bun project may have no Node.js, so no npx.
-  const launch = { command: manager === 'bun' ? 'bunx' : 'npx', args: ['e2e', 'mcp'] };
+  const launch = mcpLaunch(manager);
   const registrations: McpRegistration[] = [];
   const links: McpLink[] = [];
   for (const file of files) {

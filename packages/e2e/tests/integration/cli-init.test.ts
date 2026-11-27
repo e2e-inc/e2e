@@ -56,9 +56,12 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+// A project with no lockfile takes the manager that ran init, which is pnpm for this suite; these projects are npm's.
+const NPM_ENV = { ...process.env, npm_config_user_agent: 'npm/11.0.0 node/v24.0.0' };
+
 describe('initializing standalone projects', () => {
   it('starts the installed MCP server from the generated Codex config with an empty npm cache offline', async () => {
-    await execFileAsync(process.execPath, [CLI, 'init', '--yes', '--mcp', '.codex/config.toml'], { cwd: dir });
+    await execFileAsync(process.execPath, [CLI, 'init', '--yes', '--mcp', '.codex/config.toml'], { cwd: dir, env: NPM_ENV });
     linkPackages('e2e');
     // Linking the package alone does not create the executable shim an install provides.
     const bin = path.join(dir, 'node_modules', '.bin');
@@ -93,7 +96,7 @@ describe('initializing standalone projects', () => {
       clientSetting: true,
     }, null, 4) + '\n';
     writeFileSync(path.join(dir, '.mcp.json'), original);
-    await execFileAsync(process.execPath, [CLI, 'init', '--yes'], { cwd: dir });
+    await execFileAsync(process.execPath, [CLI, 'init', '--yes'], { cwd: dir, env: NPM_ENV });
     expect(readFileSync(path.join(dir, '.mcp.json'), 'utf8')).toBe(original);
   });
 
