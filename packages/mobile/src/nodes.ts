@@ -790,9 +790,14 @@ function keyboardSide(
  * not their own. When the page holds the focus and none of its elements
  * does, XCTest reports every element of the page as focused, siblings
  * included; once a field takes the keyboard, that field is the only one.
- * Real focus is on one node, so a web view with more than one focused
- * element below it has no focused element. The web view nodes themselves are
- * not counted: Android marks the host focused beside the field it holds.
+ *
+ * This is a stopgap heuristic, not the root cause: agent-device merges the
+ * AX server's `hasFocus` and `hasKeyboardFocus` into one `focused` flag, so
+ * the two cannot be told apart here. It assumes real focus is on one node, so
+ * a web view with more than one focused element below it has none. A page
+ * with a single echoed element still reads focused. The proper fix reports
+ * keyboard focus separately in agent-device. The web view nodes themselves
+ * are not counted: Android marks the host focused beside the field it holds.
  */
 function pageFocusEchoes(
   raw: readonly RawNode[],
