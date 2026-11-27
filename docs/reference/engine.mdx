@@ -1551,6 +1551,12 @@ export type EngineAppDeclaration = EngineAppInfo & {
 export interface EngineAppCheckInfo {
   /** The target declaring the app, for the message of a refusal. */
   readonly targetName: string;
+  /**
+   * The app's `url` names a file on the runner's disk, as the harness reads
+   * the URL. Only an engine that declares `fileApps` is handed one. Refuse
+   * here what cannot read that disk, such as a browser on another machine.
+   */
+  readonly fileApp?: boolean;
 }
 
 /** A permission's state when the app launches: held, refused, or not asked for yet, so the OS asks again. */
