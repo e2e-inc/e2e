@@ -150,6 +150,13 @@ export interface DesktopDriver {
    */
   pointer(x: number, y: number, kind: string, inputId?: number, timeoutMs?: number, target?: PointerTarget): Promise<Envelope<unknown>>;
   screenshot(options: { windowId: string; path: string; timeoutMs: number }): Promise<Envelope<{ readonly scale_factor?: number }>>;
+  /**
+   * Starts recording one window into an MPEG-4 file through ScreenCaptureKit: the recording follows the window as it
+   * moves and shows nothing that covers it. Refused (`ACTION_NOT_SUPPORTED`) before macOS 15.
+   */
+  startVideo(options: { windowId: string; path: string; timeoutMs: number }): Promise<Envelope<{ readonly id: number; readonly width: number; readonly height: number }>>;
+  /** Stops a recording and waits, within `timeoutMs`, for its file to be finished. */
+  stopVideo(id: number, timeoutMs: number): Promise<Envelope<{ readonly bytes: number }>>;
 }
 
 /** The npm package that ships the driver built for each platform. */

@@ -59,3 +59,10 @@ export async function launched(scenario: Scenario | FakeDriver = {}, options: Op
   await made.surface.restart(operation());
   return made;
 }
+
+/** Starts an attempt whose artifacts go to a new directory, which it answers. */
+export async function attempt(surface: DesktopSurface): Promise<string> {
+  const artifactsDir = scratch('artifacts-');
+  await surface.startAttempt({ attemptId: 'a', artifactsDir, resolveSecret: async () => '', signal, appLog: () => undefined, navigation: () => undefined, environment: () => undefined });
+  return artifactsDir;
+}

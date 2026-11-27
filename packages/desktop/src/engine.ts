@@ -93,6 +93,9 @@ export function desktop(options: DesktopOptions = {}): DesktopEngine<'macos', 'a
     },
     artifacts: {
       screenshot: (label, operation) => surface.screenshot(label, operation),
+      // The window the engine reads, through ScreenCaptureKit, one file per window; macOS 15 or later.
+      startVideo: (operation) => surface.startVideo(operation),
+      stopVideo: (operation) => surface.stopVideo(operation),
     },
     fixtures: {
       desktop: (context) => createDesktopFixture(surface, context),

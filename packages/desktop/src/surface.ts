@@ -36,6 +36,7 @@ import {
   type PointerAction,
   type SelectOption,
   type SemanticNode,
+  type VideoSegment,
   type ViewportPoint,
 } from '@e2e-dev/core/engine';
 import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
@@ -48,6 +49,7 @@ import { ROOT_ID, projectSnapshot, type NodeBinding, type ProjectedScreen, type 
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
 import { AppState, installedApp, nativeStateHost, type OwnedBuild, type StateHost } from './state.ts';
+import { WindowVideo } from './video.ts';
 
 /** How long a quit waits for a launch whose outcome was unknown to report the process it started. */
 const PENDING_SETTLE_MS = 3_000;
@@ -317,6 +319,7 @@ export class DesktopSurface {
    * engine keeps the process as its own, so `dispose` tries again.
    */
   async endAttempt(context: EngineCleanupContext): Promise<void> {
+    await this.video.abandon({ ...context, runId: '', attemptId: '', origin: 'test' });
     this.attempt = undefined;
     this.forget();
     await this.quit(context.signal, context.timeoutMs);
@@ -380,7 +383,9 @@ export class DesktopSurface {
   async restart(context: OperationContext): Promise<void> {
     // The budget counts from the call, so time spent waiting for another launch or quit is part of it.
     const operation = withDeadline(context);
+    await this.video.follow(undefined, operation);
     await this.serially(() => this.launchFresh(operation));
+    await this.followVideo(operation);
   }
 
   /** `restart` once no other launch or quit of this surface is running. */
@@ -532,6 +537,7 @@ export class DesktopSurface {
 
   /** `desktop.closeApp()`: the app quit, as at the end of every test. */
   async closeApp(signal: AbortSignal, timeoutMs: number): Promise<void> {
+    await this.video.follow(undefined, { signal, timeoutMs, runId: '', attemptId: '', origin: 'test' });
     await this.quit(signal, timeoutMs);
   }
 
@@ -854,6 +860,7 @@ export class DesktopSurface {
       return undefined;
     }) : undefined;
     this.pointWindow = pointIn(screen);
+    await this.video.follow(this.pointWindow?.id, operation);
     // Pixels withheld for their secure fields still report the regions masked, none, so the harness reads masking it could not prove (MASKING_UNPROVEN), not a missing screenshot.
     return {
       ...this.snapshotOf(screen),
@@ -901,6 +908,7 @@ export class DesktopSurface {
     }
     const matches = resolveExpression(expression, [screen.root]);
     this.pointWindow = pointIn(screen);
+    await this.video.follow(this.pointWindow?.id, operation);
     this.remember(matches.flatMap((match) => screen.bindings.get(match.ref.id) ?? []));
     return matches;
   }
@@ -1305,6 +1313,32 @@ export class DesktopSurface {
     await this.settle(operation);
   }
 
+  // --- video ---
+
+  private readonly video = new WindowVideo(() => this.requireDriver());
+
+  /** Records the window the engine reads from now on; see `video.ts`. Before the app has a window, its first one starts it. */
+  async startVideo(context: OperationContext): Promise<void> {
+    const attempt = this.attempt;
+    if (attempt === undefined) throw invalidState('startVideo outside an attempt');
+    const operation = withDeadline(context);
+    const window = await this.ownWindow(operation).catch(() => undefined);
+    await this.video.begin(attempt.artifactsDir, window?.id, operation);
+  }
+
+  /** Stops the video and answers one file per window the attempt showed, in order. */
+  async stopVideo(context: OperationContext): Promise<readonly VideoSegment[]> {
+    if (this.attempt === undefined) throw invalidState('stopVideo outside an attempt');
+    return await this.video.end(withDeadline(context));
+  }
+
+  /** Moves the video to the window a fresh launch shows. */
+  private async followVideo(operation: OperationContext): Promise<void> {
+    if (!this.video.recording) return;
+    const window = await this.ownWindow(operation).catch(() => undefined);
+    await this.video.follow(window?.id, operation);
+  }
+
   // --- saved state ---
 
   private appState: AppState | undefined;
@@ -1328,12 +1362,14 @@ export class DesktopSurface {
   async reset(context: OperationContext): Promise<void> {
     const operation = withDeadline(context);
     const { build, state } = await this.ownedBuild('app.clearState()', operation.signal);
+    await this.video.follow(undefined, operation);
     await this.serially(async () => {
       // Quit first: a running app would write its defaults back from memory.
       await this.quitNow(operation.signal, operation.timeoutMs, false);
       await state.reset(build.bundleId, operation.signal);
       await this.launchFresh(operation);
     });
+    await this.followVideo(operation);
   }
 
   /** Saves a `test.setup` session: the build's defaults domain. */

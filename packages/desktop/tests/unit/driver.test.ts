@@ -112,6 +112,8 @@ const NATIVE_FUNCTIONS = [
   'closeWindow',
   'pointer',
   'screenshot',
+  'startVideo',
+  'stopVideo',
 ] as const satisfies readonly Exclude<keyof DesktopDriver, 'version'>[];
 type Missing = Exclude<Exclude<keyof DesktopDriver, 'version'>, (typeof NATIVE_FUNCTIONS)[number]>;
 const everyFunction: [Missing] extends [never] ? true : Missing = true;

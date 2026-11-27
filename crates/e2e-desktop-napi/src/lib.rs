@@ -19,6 +19,7 @@ mod refs;
 mod roles;
 mod snapshot;
 mod system;
+mod video;
 mod windows;
 
 mod process;
@@ -376,4 +377,27 @@ pub async fn screenshot(options: ScreenshotOptions) -> Value {
         Ok(serde_json::json!({ "scale_factor": scale }))
     })
     .await
+}
+
+#[napi(object)]
+pub struct VideoStartOptions {
+    pub window_id: String,
+    /// The MPEG-4 file to write.
+    pub path: String,
+    pub timeout_ms: f64,
+}
+
+/// Starts recording one window into an MPEG-4 file through ScreenCaptureKit; answers the recording's id and the frame
+/// size. The recording follows the window wherever it moves, and records nothing that covers it.
+#[napi(ts_return_type = "Promise<NativeEnvelope<{ id: number; width: number; height: number }>>")]
+pub async fn start_video(options: VideoStartOptions) -> Value {
+    let deadline = deadline(options.timeout_ms);
+    blocking(move || data(video::start(window_id(&options.window_id)?, &options.path, deadline)?)).await
+}
+
+/// Stops a recording and waits, within `timeoutMs`, for its file to be finished; answers the file's size.
+#[napi(ts_return_type = "Promise<NativeEnvelope<{ bytes: number }>>")]
+pub async fn stop_video(id: u32, timeout_ms: f64) -> Value {
+    let deadline = deadline(timeout_ms);
+    blocking(move || data(video::stop(id, deadline)?)).await
 }
