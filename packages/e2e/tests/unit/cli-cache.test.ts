@@ -225,6 +225,7 @@ describe('e2e cache clear', () => {
     writeFileSync(path.join(directory, 'a-torn.yml'), '# Replay recording of one e2e test. Review it\nsteps: [ torn', 'utf8');
     writeFileSync(path.join(directory, `${'c'.repeat(64)}.json`), 'torn', 'utf8');
     writeFileSync(path.join(directory, 'a-torn.yml.0123456789abcdef.tmp'), '{}', 'utf8');
+    writeFileSync(path.join(directory, '.a-torn.pending.0123456789abcdef.tmp'), '{}', 'utf8');
     writeFileSync(path.join(directory, '.a-torn.writing'), 'c'.repeat(32), 'utf8');
     writeFileSync(path.join(directory, '.a-torn.writing.takeover'), 'c'.repeat(32), 'utf8');
     // A writer that died between creating its lock and writing the token in it.

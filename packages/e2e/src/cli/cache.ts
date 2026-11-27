@@ -68,8 +68,8 @@ interface CacheContents {
 
 /** An entry file of the store before recordings were kept per test: the key digest. */
 const LEGACY_ENTRY_FILE = /^[a-f0-9]{64}\.json$/u;
-/** A crashed writer's leftover, a store file for cleanup purposes: an atomic write's temporary file. */
-const TEMPORARY_FILE = /^(?:[a-z0-9-]+(?:\.yml|\.lock\.json)|[a-f0-9]{64}\.json)\.[a-f0-9]{16}\.tmp$/u;
+/** A crashed writer's leftover, a store file for cleanup purposes: an atomic write's temporary file, of a pair's file or of its pending record. */
+const TEMPORARY_FILE = /^(?:[a-z0-9-]+(?:\.yml|\.lock\.json)|\.[a-z0-9-]+\.pending|[a-f0-9]{64}\.json)\.[a-f0-9]{16}\.tmp$/u;
 /**
  * The lock a writer holds while it rewrites a test's files, or the one a
  * waiter holds while it takes over a stale lock: it holds only its holder's
