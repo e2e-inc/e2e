@@ -569,6 +569,20 @@ fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
     }
     // A box a scroll area holds out of view is pressed all the same through accessibility, out of the user's reach.
     let scrolled = if shown != Some(target) { reveal(element, deadline, what)? } else { false };
+    if scrolled {
+        // The list moved: the app may have set the box as it came into view, and a press now could undo that.
+        shown = after_scroll(true, read())?;
+        match shown {
+            Some(state) if state == target => return Ok(()),
+            Some(_) => {}
+            None => {
+                return Err(Failure::unconfirmed(
+                    codes::ACTION_FAILED,
+                    format!("the {role}'s state could not be read once it was scrolled into view, so it was not pressed"),
+                ));
+            }
+        }
+    }
     let reached = after_scroll(
         scrolled,
         press_to_state(
