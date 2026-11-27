@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Deadline, type OperationContext } from '@e2e-dev/core/engine';
 import { waitReady } from '../../src/actionability.ts';
 import { DevTools } from '../../src/devtools.ts';
+import { placeMasks, removeMasks } from '../../src/in-page/masks.ts';
 import { activeUnder, queryAll, type NodeOps } from '../../src/in-page/node-ops.ts';
 import type { AppWindow } from '../../src/windows.ts';
 import { openTestWindow, type TestWindow } from './test-window.ts';
@@ -339,5 +340,17 @@ describe('waitReady', () => {
     expect(await selects('#background')).toBe('ready');
     await window.inPage(() => (globalThis as unknown as { openClosedModal: () => void }).openClosedModal());
     expect(await selects('#background')).toMatchObject({ message: expect.stringMatching(INERT) });
+  });
+});
+
+describe('masks', () => {
+  it('leaves an animation the app paused paused, and plays an endless one again after the capture', async () => {
+    await window.setContent(`<div id="paused"></div><div id="running"></div><script>
+      for (const id of ['paused', 'running']) document.getElementById(id).animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000, iterations: Infinity });
+      document.getElementById('paused').getAnimations()[0].pause();
+    </script>`);
+    await window.page.evaluate(placeMasks, 'input[type=password i]');
+    await window.page.evaluate(removeMasks, 'input[type=password i]');
+    expect(await window.inPage(() => ['paused', 'running'].map((id) => document.getElementById(id)!.getAnimations()[0]?.playState))).toEqual(['paused', 'running']);
   });
 });
