@@ -314,8 +314,10 @@ steps:
   or secret values. A secret fill stores only the secret's name. A title
   that spells a secret the run learns only mid-test is filed redacted, so
   that test records again on every run, and an agent or target name that
-  spells one reads as `invalid-entry`: keep secret values out of titles and
-  names.
+  spells one reads as `invalid-entry`. So does an agent context that spells
+  one: a step repeated on both sides of the fill that resolves it keeps one
+  recording of the two. Keep secret values out of titles, names, and
+  agent context.
 
 <Warning>
 Non-secret typed values are stored verbatim. Review cache diffs before
