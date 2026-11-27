@@ -983,11 +983,13 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
     // A disabled pop-up ignores the press that would open its list.
     enabled(element, deadline, "select")?;
     if ax_role == "AXPopUpButton" {
-        if value_text(element).as_deref() == Some(label) {
+        // A menu the user or a tap already opened on this button is the list: a press would close it. With it open, the
+        // option shown is chosen from it too, so the menu does not stay open over the window.
+        let already_open = current_menu(element);
+        if already_open.is_none() && value_text(element).as_deref() == Some(label) {
             return Ok(());
         }
-        // A menu the user or a tap already opened on this button is the list: a press would close it.
-        let menu = if let Some(menu) = current_menu(element) {
+        let menu = if let Some(menu) = already_open {
             menu
         } else {
             // A menu still closing (the last select's) would take the press.
