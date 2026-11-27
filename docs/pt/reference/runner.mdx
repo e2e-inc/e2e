@@ -462,8 +462,9 @@ const session = await host.openSession({
 - `onStep` recebe o `StepProgress` ao vivo, o mesmo fluxo que os reporters
   recebem. O callback não pode bloquear nem lançar. O campo `phase` de cada
   evento é `start`, `event`, `activity`, `replay` ou `end`. Um evento `end`
-  traz `status`, `durationMs`, `modelCalls` e um `error` já com a ocultação
-  aplicada quando o passo falhou.
+  traz `status`, `durationMs`, `modelCalls`, o `cache` do cache de replay em um
+  passo de `agent.act` e um `error` já com a ocultação aplicada quando o passo
+  falhou.
 - `timeout`, `agent` e `onStep` pertencem à sessão, não a `openHost`.
 
 | Lança | Quando |
