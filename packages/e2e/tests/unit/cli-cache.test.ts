@@ -257,13 +257,16 @@ describe('e2e cache clear', () => {
     writeFileSync(path.join(directory, '.index.writing'), 'pid 42\n', 'utf8');
     // Named like the store's pending pair record, but not one.
     writeFileSync(path.join(directory, '.index.pending'), 'queued\n', 'utf8');
+    // Shaped like a writer's temporary file, under a stem no test's name can take.
+    writeFileSync(path.join(directory, 'deployment--prod.yml.0123456789abcdef.tmp'), 'stage: prod\n', 'utf8');
     const old = new Date(Date.now() - 60_000);
     utimesSync(path.join(directory, '.index.pending'), old, old);
+    utimesSync(path.join(directory, 'deployment--prod.yml.0123456789abcdef.tmp'), old, old);
     await invoke('cache', 'clear');
     expect(written(stderrSpy)).toContain('notes.md');
     expect(written(stderrSpy)).toContain('ci.yml');
     expect(written(stderrSpy)).toContain('.index.pending');
-    expect(readdirSync(directory).toSorted()).toEqual(['.index.pending', '.index.writing', 'artifacts.lock.json', 'ci.yml', 'notes.md', 'tool.lock.json']);
+    expect(readdirSync(directory).toSorted()).toEqual(['.index.pending', '.index.writing', 'artifacts.lock.json', 'ci.yml', 'deployment--prod.yml.0123456789abcdef.tmp', 'notes.md', 'tool.lock.json']);
   });
 
   it('leaves a YAML another tool wrote over a recording, and deletes the lock beside it', async () => {

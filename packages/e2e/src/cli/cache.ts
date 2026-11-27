@@ -17,6 +17,7 @@ import path from 'node:path';
 import type { Command } from 'commander';
 import picocolors from 'picocolors';
 import { isLockToken, withFileLock } from '@e2e-dev/core/lib/cache/file-lock';
+import { RECORDING_NAME } from '@e2e-dev/core/lib/cache/recording-name';
 import { FileCacheStore, LOCK_EXTENSION, MAX_CACHE_WIRE_BYTES, RECORDING_EXTENSION } from '@e2e-dev/core/lib/cache/store';
 import { discoverConfig, loadConfigModule, missingConfigError } from '../config/load.ts';
 import { resolveConfig } from '../config/resolve-run.ts';
@@ -70,22 +71,26 @@ interface CacheContents {
 
 /** An entry file of the store before recordings were kept per test: the key digest. */
 const LEGACY_ENTRY_FILE = /^[a-f0-9]{64}\.json$/u;
+/** A name `recordingName` gives a test before any `--<hash>` suffix: lowercase words joined by single dashes. */
+const STEM = '[a-z0-9]+(?:-[a-z0-9]+)*';
+/** A name a pair's files take, suffix included (`RECORDING_NAME`). */
+const NAME = RECORDING_NAME.source.slice(1, -1);
 /** A crashed writer's leftover, a store file for cleanup purposes: an atomic write's temporary file, of a pair's file or of its pending record. */
-const TEMPORARY_FILE = /^(?:[a-z0-9-]+(?:\.yml|\.lock\.json)|\.[a-z0-9-]+\.pending|[a-f0-9]{64}\.json)\.[a-f0-9]{16}\.tmp$/u;
+const TEMPORARY_FILE = new RegExp(`^(?:${NAME}(?:\\.yml|\\.lock\\.json)|\\.${STEM}\\.pending|[a-f0-9]{64}\\.json)\\.[a-f0-9]{16}\\.tmp$`, 'u');
 /**
  * The lock a writer holds while it rewrites a test's files, or the one a
  * waiter holds while it takes over a stale lock: it holds only its holder's
  * token (`isLockToken`), so a file of that name holding anything else is
  * another tool's.
  */
-const LOCK_FILE = /^\.[a-z0-9-]+\.writing(?:\.takeover)?$/u;
+const LOCK_FILE = new RegExp(`^\\.${STEM}\\.writing(?:\\.takeover)?$`, 'u');
 /**
  * The record a writer leaves beside a pair just before its two renames, so
  * the next writer can finish a pair a crash cut in half: a JSON object
  * naming the pair, its YAML's digest, and the lock to publish. A file of
  * that name holding anything else is another tool's.
  */
-const PENDING_FILE = /^\.[a-z0-9-]+\.pending$/u;
+const PENDING_FILE = new RegExp(`^\\.${STEM}\\.pending$`, 'u');
 
 /**
  * Age past which a store lock or temporary file was left by a writer that
