@@ -15,7 +15,7 @@
  * deciding who has the bare name, so it carries the suffix from the start.
  */
 
-import { sha256Hex } from '../internal/ids.ts';
+import { sha256Hex, STANDALONE_TEST_ID_PREFIX } from '../internal/ids.ts';
 
 /** Longest a name runs before it is cut at a word boundary. */
 const MAX_NAME_CHARS = 80;
@@ -62,6 +62,8 @@ const SETUP_PREFIX = 'setup::';
  * `file`-less text, in `titles` alone.
  */
 export function readTestId(testId: string): { readonly file?: string; readonly titles: readonly string[]; readonly setup: boolean } {
+  // A createAgent cache key is whatever text its caller chose, `::` and `%` included.
+  if (testId.startsWith(STANDALONE_TEST_ID_PREFIX)) return { titles: [testId], setup: false };
   const setup = testId.startsWith(SETUP_PREFIX);
   const parts = (setup ? testId.slice(SETUP_PREFIX.length) : testId).split('::');
   if (parts.length < 2) return { titles: [testId], setup: false };

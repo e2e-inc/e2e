@@ -319,6 +319,17 @@ describe('FileCacheStore', () => {
     expect(replayed?.actions[0]).toMatchObject({ value: 'acme-456', summary: 'type "acme-456" into textbox "Customer"' });
   });
 
+  it('reads a createAgent cache key as written, whatever it spells', async () => {
+    const { directory, store } = await makeStore();
+    const standalone = step('web', { testId: 'core:checkout::confirm%20order' });
+    await store.write(KEY, payload('web', { recordedFor: standalone }));
+    const name = (await readdir(directory)).find((file) => file.endsWith('.yml'));
+    const yaml = await readFile(path.join(directory, name!), 'utf8');
+    expect(yaml).toContain('\ntest: core:checkout::confirm%20order\n');
+    expect(yaml).not.toContain('\nfile:');
+    expect((await store.read(KEY, standalone)).status).toBe('hit');
+  });
+
   it("names a setup test's file and titles, not its id's prefix", async () => {
     const { directory, store } = await makeStore();
     const setup = step('web', { testId: 'setup::tests/auth.setup.ts::signs%20in' });

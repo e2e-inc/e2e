@@ -51,6 +51,14 @@ export function titlePathKey(titlePath: readonly string[]): string {
   return titlePath.join('\u0000');
 }
 
+/** What a `createAgent` recording's test ID starts with; the rest is the agent's cache key, not a file and titles. */
+export const STANDALONE_TEST_ID_PREFIX = 'core:';
+
+/** Builds the test ID a `createAgent` recording is kept under: `core:<cacheKey>`, the key as given. */
+export function standaloneTestId(cacheKey: string): string {
+  return `${STANDALONE_TEST_ID_PREFIX}${cacheKey}`;
+}
+
 /** Builds a setup-test ID: `setup::<test-id>`. */
 export function setupTestId(relativeFile: string, titlePath: readonly string[]): string {
   return `setup::${testId(relativeFile, titlePath)}`;
