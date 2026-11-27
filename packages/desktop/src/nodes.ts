@@ -38,6 +38,12 @@ export interface RawNode {
   /** How many children the element has, when the read stopped at the depth limit and listed none of them. */
   readonly children_count?: number;
   readonly children?: readonly RawNode[];
+  /**
+   * On a `folded` node: how many consecutive rows of its list, table, or outline it stands for, rows a scroll area
+   * holds wholly out of view, which the driver did not read. A fold is no cut: the same rows fold the same way
+   * until the list scrolls.
+   */
+  readonly folded?: number;
 }
 
 /** The `data` of a driver `snapshot`. */
@@ -271,6 +277,7 @@ export function projectSnapshot(
   // `hiddenAbove`: an ancestor is hidden, a wrapper left out included, so nothing under it is on screen; the resolver reads each node's own state only. `scrolled` when a scroll area is all that hides it, which a scroll into view of the node can undo, else `other`.
   // `prior`: the id the node held before, which a cut gave it a fresh one in place of; look-alikes under it are reported against that id, which their identities are kept under.
   const project = (node: RawNode, id: string, stable: boolean, likeness: string, hiddenAbove: false | 'scrolled' | 'other', prior: string | undefined): SemanticNode => {
+    if (node.folded !== undefined && node.folded > 0) return fold(node.folded, id, likeness);
     const rawStates = new Set(node.states ?? []);
     const role = ROLE_MAP[node.role] ?? (node.role === 'unknown' ? undefined : node.role);
     const secure = rawStates.has('secure');
@@ -364,8 +371,8 @@ export function projectSnapshot(
     // look-alike that still matches has no identity: if the first of two
     // "Delete" buttons goes, the second must not take over its id, so each
     // look-alike gets a new id every snapshot.
-    // A node whose children the read cut off lists only some of them: one that looks unique may have a twin the read did not reach, so none takes an id.
-    const cut = childrenCut(node) || wrapperCut;
+    // A node whose children the read cut off lists only some of them: one that looks unique may have a twin the read did not reach, so none takes an id. So does a list with folded rows, whose names were not read.
+    const cut = childrenCut(node) || wrapperCut || kept.some((child) => (child.folded ?? 0) > 0);
     const children = kept.map((child) => {
       const seen = plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
       const identity = cut ? undefined : seen;
@@ -392,6 +399,16 @@ export function projectSnapshot(
       ...(rect === undefined ? {} : { rect }),
       ...(children.length === 0 ? {} : { children }),
     };
+  };
+
+  /**
+   * The node a run of folded rows becomes: a hidden line that says how many rows the list holds out of view, so a
+   * reader knows to scroll. It has no role or ref, and nothing acts on it; it never stands for the rows themselves.
+   */
+  const fold = (count: number, id: string, likeness: string): SemanticNode => {
+    const states = { hidden: true };
+    bindings.set(id, { id, states, actions: [], ...(raw.window === undefined ? {} : { windowId: raw.window.id }), stable: false, likeness, interactive });
+    return { ref: { id, revision: '' }, text: `${count} ${count === 1 ? 'row' : 'rows'} out of view`, states };
   };
 
   const root = project(raw.tree, ROOT_ID, true, '', false, ROOT_ID);

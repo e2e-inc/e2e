@@ -82,6 +82,39 @@ pub struct RawNode {
     children_count: Option<usize>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     children: Vec<RawNode>,
+    /// On a `folded` node only, which stands in for rows of a list, table, or outline that a scroll area holds wholly out
+    /// of view: how many consecutive rows it stands for. Their frames were read, and nothing else of them.
+    #[serde(skip_serializing_if = "is_zero")]
+    folded: usize,
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
+}
+
+impl RawNode {
+    /// The node that stands in for one row folded out of view.
+    fn folded() -> Self {
+        RawNode {
+            ref_id: None,
+            role: "folded",
+            name: None,
+            value: None,
+            description: None,
+            hint: None,
+            level: None,
+            placeholder: None,
+            native_id: None,
+            states: Vec::new(),
+            available_actions: Vec::new(),
+            scroll_axes: Vec::new(),
+            bounds: None,
+            subtree_truncated: false,
+            children_count: None,
+            children: Vec::new(),
+            folded: 1,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -170,6 +203,9 @@ struct Walk<E> {
     /// toolbar `Menu` lists its open menu both as the button's child and as the button's sibling, and the two are one
     /// element, so its items would match a locator twice.
     seen: HashSet<E>,
+    /// The focused element and every element above it: a row that holds the focus is never folded, so the field being
+    /// typed into stays in the tree when its list scrolls.
+    focus_path: HashSet<E>,
 }
 
 /// Whether a failed read leaves a hole: the app did not answer in time (it stalled), so an element that is there was
@@ -564,7 +600,9 @@ impl<E: Accessible> Walk<E> {
 
     /// Reads one node and the levels under it. `None` for a node an interactive read leaves out, or one that is gone.
     /// `clip` is the part of the screen the node can show in: the window, cut by every scroll area above it.
-    fn node(&mut self, element: &E, level: usize, root: bool, clip: Option<Rect>) -> Option<RawNode> {
+    /// `rows` says the element is a child of a list, table, or outline: a row, which is folded when it lies wholly out of
+    /// `clip`.
+    fn node(&mut self, element: &E, level: usize, root: bool, clip: Option<Rect>, rows: bool) -> Option<RawNode> {
         if self.nodes >= MAX_NODES {
             self.truncated = true;
             return None;
@@ -622,6 +660,17 @@ impl<E: Accessible> Walk<E> {
             return None;
         }
         let role = if root && read.role == "unknown" { "window" } else { read.role };
+        // A row a scroll area holds wholly out of view is folded: one request read its frame, and nothing else of it is
+        // read. A 200-row list costs what its visible rows cost, and a locator or an agent reads those rows, as a
+        // virtualized list on a phone shows them. A scroll brings a folded row into view, where it is read whole.
+        if rows
+            && role != "scrollbar"
+            && let (Some(bounds), Some(clip)) = (read.bounds, clip)
+            && outside(bounds, clip)
+            && !self.focus_path.contains(element)
+        {
+            return Some(RawNode::folded());
+        }
         let secure = read.subrole.as_deref() == Some("AXSecureTextField") || read.ax_role == "AXSecureTextField";
         let (actions, scroll_axes) = self.actions(element, &read);
 
@@ -721,6 +770,7 @@ impl<E: Accessible> Walk<E> {
             subtree_truncated: false,
             children_count: None,
             children: Vec::new(),
+            folded: 0,
         };
 
         let inner = inner_clip(role, read.bounds, clip);
@@ -764,8 +814,12 @@ impl<E: Accessible> Walk<E> {
                     node.subtree_truncated = true;
                     break;
                 }
-                if let Some(child) = self.node(child, level + 1, false, inner) {
-                    node.children.push(child);
+                if let Some(child) = self.node(child, level + 1, false, inner, roles::large(role)) {
+                    // Consecutive folded rows are one node, which counts them.
+                    match node.children.last_mut() {
+                        Some(last) if last.folded > 0 && child.folded > 0 => last.folded += child.folded,
+                        _ => node.children.push(child),
+                    }
                 }
             }
             if self.lost > lost {
@@ -807,6 +861,19 @@ fn window_chrome<E: Accessible>(window: &E) -> Option<Vec<E>> {
     (!buttons.is_empty()).then_some(buttons)
 }
 
+/// `element` and every element above it, up to `window` or as far as the app answers.
+fn ancestors<E: Accessible>(element: &E, window: &E) -> HashSet<E> {
+    let mut path = HashSet::new();
+    let mut next = Some(element.clone());
+    while let Some(element) = next {
+        if path.len() >= MAX_ANCESTORS || &element == window || !path.insert(element.clone()) {
+            break;
+        }
+        next = element.element("AXParent");
+    }
+    path
+}
+
 /// Reads one window's tree: `app` is its app, which names the focused element. `Err` when the window does not answer
 /// (closed, its app hung, or no permission), or closed while it was read.
 fn read_tree<E: Accessible>(window: &E, app: &E, settings: Settings) -> Outcome<Tree<E>> {
@@ -816,6 +883,7 @@ fn read_tree<E: Accessible>(window: &E, app: &E, settings: Settings) -> Outcome<
         _ => (None, false),
     };
     let window_bounds = window.frame().map(|(x, y, width, height)| Rect { x, y, width, height });
+    let focus_path = focused.as_ref().map(|focused| ancestors(focused, window)).unwrap_or_default();
     let mut walk = Walk {
         snapshot: settings.snapshot.clone(),
         max_depth: settings.max_depth.max(1),
@@ -833,6 +901,7 @@ fn read_tree<E: Accessible>(window: &E, app: &E, settings: Settings) -> Outcome<
         refs: Vec::new(),
         content: Vec::new(),
         seen: HashSet::new(),
+        focus_path,
     };
     // The window must answer: one that does not is gone, or its app is.
     match window.attribute("AXRole") {
@@ -845,7 +914,7 @@ fn read_tree<E: Accessible>(window: &E, app: &E, settings: Settings) -> Outcome<
         Err(_) => {}
     }
     let tree = walk
-        .node(window, 1, true, window_bounds)
+        .node(window, 1, true, window_bounds, false)
         .ok_or_else(|| Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {} could not be read", settings.window)))?;
     Ok(Tree { tree, complete: walk.complete, timed_out: walk.timed_out, root_unread: walk.root_unread, truncated: walk.truncated, refs: walk.refs })
 }
@@ -1203,6 +1272,54 @@ mod tests {
             let sort = named(&tree, "Sort");
             assert_eq!(sort.children.first().map(|menu| menu.role), Some("menu"), "the menu stays under its button");
             assert!(tree.complete);
+        }
+
+        /// A row of a list at `y`, 20 points tall, whose box reads only when the walk reads inside the row.
+        fn row(title: &str, y: f64) -> Fake {
+            Fake::new("AXRow").frame(0.0, y, 300.0, 20.0).children(vec![Fake::new("AXCheckBox").title(title).frame(4.0, y, 200.0, 20.0).actions(&["AXPress"])])
+        }
+
+        /// A list of `rows` in a scroll area that shows y 100 to 200 of the window.
+        fn scrolled(rows: Vec<Fake>) -> Fake {
+            window(vec![Fake::new("AXScrollArea").frame(0.0, 100.0, 300.0, 100.0).children(vec![Fake::new("AXOutline").description("Tasks").children(rows)])])
+        }
+
+        #[test]
+        fn folds_the_rows_a_scroll_area_holds_out_of_view_into_one_node_per_run() {
+            // Rows 0 to 19, 20 points apart: rows 5 to 9 show; 4 and 10 only touch the edges, so they are out of view
+            // with the rest. A folded row's children stall, so reading inside one would leave a hole.
+            let rows: Vec<Fake> = (0..20)
+                .map(|index| {
+                    let row = row(&format!("Task {index}"), f64::from(index) * 20.0 + 0.0);
+                    if !(5..=9).contains(&index) { row.failing("AXChildren", ax::AX_CANNOT_COMPLETE) } else { row }
+                })
+                .collect();
+            let tree = whole(&scrolled(rows));
+            assert!(tree.complete, "nothing inside a folded row was read");
+            let list = named(&tree, "Tasks");
+            let folded: Vec<usize> = list.children.iter().map(|child| child.folded).collect();
+            assert_eq!(folded, [5, 0, 0, 0, 0, 0, 10], "rows 0-4 and 10-19 fold, 5-9 are read");
+            assert!(list.children.iter().filter(|child| child.folded > 0).all(|child| child.role == "folded" && child.ref_id.is_none()));
+            assert!(has(&tree, "Task 5") && has(&tree, "Task 9") && !has(&tree, "Task 4") && !has(&tree, "Task 10"));
+            assert!(!list.subtree_truncated);
+        }
+
+        #[test]
+        fn folds_no_row_that_holds_the_focus_and_nothing_outside_a_list() {
+            let field = Fake::new("AXTextField").description("Note").frame(4.0, 400.0, 200.0, 20.0).with("AXFocused", Value::Bool(true));
+            let editing = Fake::new("AXRow").frame(0.0, 400.0, 300.0, 20.0).children(vec![field.clone()]);
+            let app = Fake::default().with("AXFocusedUIElement", Value::Element(field));
+            let tree = read(&scrolled(vec![row("Task 0", 100.0), editing]), &app, 30, false, Instant::now() + Duration::from_secs(60)).expect("a tree");
+            assert!(named(&tree, "Note").states.contains(&"focused"), "the row being typed into is read whole");
+
+            // A pane's child out of view is read as offscreen: only a list's rows fold.
+            let pane = Fake::new("AXGroup").description("Pane").children(vec![button("Far").frame(0.0, 900.0, 80.0, 20.0)]);
+            let tree = whole(&window(vec![Fake::new("AXScrollArea").frame(0.0, 0.0, 300.0, 100.0).children(vec![pane])]));
+            assert!(named(&tree, "Far").states.contains(&"offscreen"));
+            // A list's scroll bar never folds.
+            let bar = Fake::new("AXScrollBar").frame(0.0, 900.0, 10.0, 100.0);
+            let tree = whole(&scrolled(vec![row("Task 0", 100.0), bar]));
+            assert!(nodes(&tree.tree).iter().any(|node| node.role == "scrollbar"));
         }
 
         #[test]
