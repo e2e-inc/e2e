@@ -265,8 +265,10 @@ expect(file.suggestedFilename).toBe('report.csv');
 ```
 
 Downloads never land in your own Downloads folder: the app saves them inside
-the test's user-data directory. A second file with a name already taken there
-gets a number, as `note (1).txt`.
+the test's user-data directory. A name a file there had at launch, or another
+download took, gets a number, as `note (1).txt`; a file the app writes there
+itself is not counted. A download that starts before the app's first window
+loads goes where the app would save it.
 
 ## Record video
 
