@@ -1,6 +1,7 @@
 #!/bin/sh
-# Builds the sign-in form into build/SignInForm.app with the Swift compiler
-# from the Xcode command line tools; no Xcode project.
+# Builds the sign-in form into build/SignInForm.app, and the SwiftUI app into
+# build/TaskBoard.app, with the Swift compiler from the Xcode command line
+# tools; no Xcode project.
 set -eu
 cd "$(dirname "$0")/.."
 app=build/SignInForm.app
@@ -17,6 +18,27 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key><string>SignInForm</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+</dict>
+</plist>
+PLIST
+codesign --force --sign - "$app"
+echo "built $app"
+
+app=build/TaskBoard.app
+rm -rf "$app"
+mkdir -p "$app/Contents/MacOS"
+swiftc -O -parse-as-library -o "$app/Contents/MacOS/TaskBoard" app/macos-swiftui/TaskBoard.swift
+cat > "$app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>dev.e2e.desktop-testbed.taskboard</string>
+  <key>CFBundleName</key><string>TaskBoard</string>
+  <key>CFBundleExecutable</key><string>TaskBoard</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
 </dict>
 </plist>
 PLIST
