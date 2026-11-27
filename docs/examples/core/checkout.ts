@@ -4,9 +4,7 @@ import { web } from '@e2e-dev/web/engine';
 import { gateway } from 'ai';
 import { z } from 'zod';
 
-await using shop = await launch(web(), {
-  app: { url: 'https://shop.example.com' },
-});
+await using shop = await launch(web(), { app: { url: 'https://shop.example.com' } });
 await using session = await shop.newSession();
 await session.app.open('/products/A-1001');
 
@@ -15,16 +13,13 @@ const agent = createAgent(session, {
   cache: { dir: '.shop-bot/cache' },
 });
 
-await agent.act(
-  'Add the item to the cart and apply the coupon with the largest discount',
-  { cacheKey: 'cart-best-coupon' },
-);
+await agent.act('Add the item to the cart and apply the coupon with the largest discount', {
+  cacheKey: 'cart-best-coupon',
+});
 // A check after the step lets the cache keep its recording.
 await session.screen.getByRole('button', /pay now/i).waitFor();
 
-const order = await agent.extract('the order total', {
-  schema: z.object({ total: z.number() }),
-});
+const order = await agent.extract('the order total', { schema: z.object({ total: z.number() }) });
 if (order.total <= 39_000) {
   try {
     await session.screen.getByRole('button', /pay now/i).tap();
@@ -35,7 +30,5 @@ if (order.total <= 39_000) {
     throw error;
   }
 } else {
-  console.log(
-    `the total, ${order.total}, is over the limit: the order stays unpaid`,
-  );
+  console.log(`the total, ${order.total}, is over the limit: the order stays unpaid`);
 }

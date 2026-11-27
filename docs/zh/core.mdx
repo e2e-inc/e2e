@@ -46,17 +46,12 @@ bun add @e2e-dev/core @e2e-dev/web
 import { launch } from '@e2e-dev/core';
 import { web } from '@e2e-dev/web/engine';
 
-await using shop = await launch(web(), {
-  app: { url: 'https://shop.example.com' },
-});
+await using shop = await launch(web(), { app: { url: 'https://shop.example.com' } });
 
 for (const sku of ['A-1001', 'B-2040']) {
   await using session = await shop.newSession();
   await session.app.open(`/products/${sku}`);
-  const soldOut = session.screen.getByText('Sold out', {
-    exact: false,
-    visible: true,
-  });
+  const soldOut = session.screen.getByText('Sold out', { exact: false, visible: true });
   if (await soldOut.isVisible()) continue;
   const price = await session.screen.getByTestId('sale-price').textContent();
   console.log(sku, price);
@@ -158,11 +153,8 @@ import { isE2EError } from '@e2e-dev/core';
 try {
   await session.screen.getByRole('button', 'Add to cart').tap();
 } catch (error) {
-  if (isE2EError(error) && error.code === 'LOCATOR_NOT_FOUND') {
-    console.log('not on sale');
-  } else {
-    throw error;
-  }
+  if (isE2EError(error) && error.code === 'LOCATOR_NOT_FOUND') console.log('not on sale');
+  else throw error;
 }
 ```
 
@@ -188,9 +180,7 @@ import { web } from '@e2e-dev/web/engine';
 import { gateway } from 'ai';
 import { z } from 'zod';
 
-await using shop = await launch(web(), {
-  app: { url: 'https://shop.example.com' },
-});
+await using shop = await launch(web(), { app: { url: 'https://shop.example.com' } });
 await using session = await shop.newSession();
 await session.app.open('/products/A-1001');
 
@@ -199,16 +189,13 @@ const agent = createAgent(session, {
   cache: { dir: '.shop-bot/cache' },
 });
 
-await agent.act(
-  'Add the item to the cart and apply the coupon with the largest discount',
-  { cacheKey: 'cart-best-coupon' },
-);
+await agent.act('Add the item to the cart and apply the coupon with the largest discount', {
+  cacheKey: 'cart-best-coupon',
+});
 // A check after the step lets the cache keep its recording.
 await session.screen.getByRole('button', /pay now/i).waitFor();
 
-const order = await agent.extract('the order total', {
-  schema: z.object({ total: z.number() }),
-});
+const order = await agent.extract('the order total', { schema: z.object({ total: z.number() }) });
 if (order.total <= 39_000) {
   try {
     await session.screen.getByRole('button', /pay now/i).tap();
@@ -219,9 +206,7 @@ if (order.total <= 39_000) {
     throw error;
   }
 } else {
-  console.log(
-    `the total, ${order.total}, is over the limit: the order stays unpaid`,
-  );
+  console.log(`the total, ${order.total}, is over the limit: the order stays unpaid`);
 }
 ```
 
