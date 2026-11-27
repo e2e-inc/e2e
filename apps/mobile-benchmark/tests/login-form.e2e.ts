@@ -52,4 +52,25 @@ test.describe('login form', () => {
     await screen.getByTestId('logout-button').tap();
     await expect(screen.getByTestId('login-button')).toBeVisible();
   });
+
+  // An iOS simulator's simctl capture is portrait whatever the orientation,
+  // and the engine does not read which way the image is turned, so the
+  // password field's mask has no place on a landscape screenshot: it is
+  // withheld. Once the engine masks a turned image in place, this test
+  // changes with it.
+  test('withholds a landscape screenshot of the password field', { platforms: ['ios'] }, async ({ app, device, screen }) => {
+    await device.setOrientation('landscape-left');
+    try {
+      await expect.poll(async () => {
+        const viewport = await device.viewport();
+        return viewport.width > viewport.height;
+      }).toBe(true);
+      await expect(screen.getByTestId('password-input')).toBeVisible();
+      const refused = await app.screenshot('landscape').then(() => undefined, (error: unknown) => error);
+      expect(refused).toHaveProperty('code', 'POLICY_DENIED');
+    } finally {
+      await device.setOrientation('portrait');
+    }
+    await expect(screen.getByTestId('login-button')).toBeVisible();
+  });
 });
