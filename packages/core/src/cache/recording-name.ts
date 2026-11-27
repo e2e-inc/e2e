@@ -51,26 +51,43 @@ function decode(part: string): string {
   }
 }
 
+/** What a setup test's id puts before the id a test of its file and titles would have (`setupTestId`). */
+const SETUP_PREFIX = 'setup::';
+
+/**
+ * A test id read back into its file and decoded titles (`collect/`'s
+ * `<file>::<title>::...`), and whether it is a setup test's. An id with no
+ * titles, such as a `createAgent` recording's `core:<cacheKey>`, is all
+ * `file`-less text, in `titles` alone.
+ */
+export function readTestId(testId: string): { readonly file?: string; readonly titles: readonly string[]; readonly setup: boolean } {
+  const setup = testId.startsWith(SETUP_PREFIX);
+  const parts = (setup ? testId.slice(SETUP_PREFIX.length) : testId).split('::');
+  if (parts.length < 2) return { titles: [testId], setup: false };
+  const [file, ...titles] = parts;
+  return { file: file!, titles: titles.map(decode), setup };
+}
+
 /**
  * The name of a test's recordings, from its test id
  * (`tests/checkout.e2e.ts::buys%20a%20mug` is `checkout-buys-a-mug`). A
  * first title that only repeats the file's stem
- * (`control-inventory.e2e.ts::control inventory::...`) is left out.
+ * (`control-inventory.e2e.ts::control inventory::...`) is left out, and a
+ * setup test's name ends in `setup`.
  */
 export function recordingName(testId: string): string {
-  const parts = testId.split('::');
+  const { file, titles, setup } = readTestId(testId);
   let words: string[];
   let partial = false;
-  if (parts.length < 2) {
+  if (file === undefined) {
     words = [kebab(testId)];
     partial = dropsWords(testId);
   } else {
-    const [file, ...titles] = parts;
-    const base = file!.split('/').pop() ?? '';
+    const base = file.split('/').pop() ?? '';
     const stem = kebab(base.split('.')[0] ?? '');
-    const named = titles.map((title) => kebab(decode(title)));
-    partial = [base, ...titles.map(decode)].some(dropsWords);
-    words = [stem, ...(named[0] === stem ? named.slice(1) : named)];
+    const named = titles.map(kebab);
+    partial = [base, ...titles].some(dropsWords);
+    words = [stem, ...(named[0] === stem ? named.slice(1) : named), ...(setup ? ['setup'] : [])];
   }
   let name = words.filter((word) => word !== '').join('-');
   if (name.length > MAX_NAME_CHARS) {

@@ -30,6 +30,7 @@ import { summarizeRecordedAction } from '../agent/actions.ts';
 import type { JsonValue } from '../types.ts';
 import { canonicalJson, sha256Hex } from '../internal/ids.ts';
 import { instructionDigest, paramsDigest } from './identity.ts';
+import { readTestId } from './recording-name.ts';
 import {
   DESCRIPTOR_FIELDS,
   isNodeAction,
@@ -72,9 +73,6 @@ const DERIVED_GAP_SUMMARY = 'tool type (run-time value)';
 
 /** Prefix of a project-tool gap's summary, as `TraceRecorder.recordGap` writes it; the rest is the tool's name. */
 const TOOL_GAP_PREFIX = 'tool ';
-
-/** Separator between a test id's path and its titles (`collect/`), and between the titles. */
-const TEST_ID_SEPARATOR = '::';
 
 /** One recording as the store holds it: its key, when it was recorded, and the trace. */
 export interface StoredRecording {
@@ -126,19 +124,11 @@ export function stepIdentity(step: TraceProvenance | undefined): string | undefi
   return JSON.stringify([step.instructionDigest, step.paramsDigest, step.callIndex, step.agent, step.identityDigest ?? null]);
 }
 
-/** A test id as the YAML header names it: its file, and its titles joined the way a report joins them. */
+/** A test id as the YAML header names it: its file, and its titles joined the way a report joins them, a setup test's marked so. */
 export function describeTestId(testId: string): { readonly test: string; readonly file?: string } {
-  const parts = testId.split(TEST_ID_SEPARATOR);
-  if (parts.length < 2) return { test: testId };
-  const decode = (part: string): string => {
-    try {
-      return decodeURIComponent(part);
-    } catch {
-      return part;
-    }
-  };
-  const [file, ...titles] = parts;
-  return { test: titles.map(decode).join(' › '), file: file! };
+  const { file, titles, setup } = readTestId(testId);
+  if (file === undefined) return { test: testId };
+  return { test: `${titles.join(' › ')}${setup ? ' (setup)' : ''}`, file };
 }
 
 // ---------------------------------------------------------------------------
