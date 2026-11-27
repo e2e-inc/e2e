@@ -17,12 +17,10 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
     if !physical {
         key_window(entry.pid, &window)?;
     }
-    // Focus this call moved into the field reached the app (its handlers may have run); focus it already had did not.
-    let moved = entry.element.boolean("AXFocused") != Some(true);
-    focus(&entry.element, deadline)?;
-    let after_focus = |failure: Failure| if moved { failure.delivered() } else { failure };
+    // The app owns focus: typing goes into the field that holds it, which the engine read, and never moves focus back
+    // to it (a delete's handler, or a window coming forward, may have moved it on).
     let route = if physical {
-        raise(entry.pid, &window).map_err(after_focus)?;
+        raise(entry.pid, &window)?;
         Route::Physical
     } else {
         Route::Process(entry.pid)
@@ -33,12 +31,12 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
     // after it shows as a change at the first key, and one it opened before fails that check.
     let typing_in = Element::application(entry.pid).element("AXFocusedWindow");
     if typing_in.as_ref().is_some_and(|start| !windows::holds_focus(start, &window)) {
-        return Err(after_focus(Failure::refused(codes::ACTION_FAILED, "another window took the keyboard before typing began, so nothing was typed")));
+        return Err(Failure::refused(codes::ACTION_FAILED, "another window took the keyboard before typing began, so nothing was typed"));
     }
-    // Focusing the field can run a handler that opens a sheet or another window, and coming forward can too: the keys
+    // Coming forward can run a handler that opens a sheet or another window, and the app can move focus on: the keys
     // would then go there. The field itself must hold the app's focus before the first key.
     if Element::application(entry.pid).element("AXFocusedUIElement").as_ref() != Some(&entry.element) {
-        return Err(after_focus(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed")));
+        return Err(Failure::refused(codes::ACTION_FAILED, "the field lost keyboard focus before typing began, so nothing was typed"));
     }
     // What an element holds, in characters, as the app answers it: a change says the app took the key sent last.
     let length = |element: &Element| match element.attribute("AXNumberOfCharacters") {
@@ -97,10 +95,8 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
             Err(Failure::refused(codes::ACTION_FAILED, "typing stopped: the field's window lost the keyboard to another window or app"))
         }
     };
-    CURRENT
-        .with(|current| match current.borrow().as_ref() {
-            Some((run, _)) => input::type_text(text, route, run, deadline, &still),
-            None => Err(Failure::refused(codes::INTERNAL, "type ran outside an action")),
-        })
-        .map_err(after_focus)
+    CURRENT.with(|current| match current.borrow().as_ref() {
+        Some((run, _)) => input::type_text(text, route, run, deadline, &still),
+        None => Err(Failure::refused(codes::INTERNAL, "type ran outside an action")),
+    })
 }
