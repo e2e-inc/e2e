@@ -181,7 +181,9 @@ Write every test so a failing title names what broke.
     and iOS simulators, reset with `app.clearState()` (plus
     `device.clearKeychain()` on iOS simulator when sign-in uses keychain; on a
     physical iPhone, `app.clearState()` is simulator-only, so reinstall with
-    `device.installApp(path, { reinstall: true })`).
+    `device.installApp(path, { reinstall: true })`). If the device provider
+    supplies a remote agent-device daemon, an absolute path can name a build
+    on that daemon.
   - **Fixture-owned server data:** create shared server records with a
     run-unique `randomUUID()` name in a `test.extend` fixture, capture the
     returned id from a 2xx response before asserting the exact status, and
