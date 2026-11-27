@@ -171,8 +171,10 @@ call {tool: "tap", args: {target: "n42"}, session: "<id>"}
 #### `close_session`
 
 Saves a recording still running, ends the attempt, and disposes the engine.
-It stops the app processes the session started once no other session uses
-them. Use it on an attachment to detach and leave the test held.
+It stops app processes and services when the session is their last user,
+with app processes stopping before services. The session frees its slot
+when its own cleanup finishes, even while another app is still stopping.
+Use it on an attachment to detach and leave the test held.
 
 ```txt
 close_session {session: "<id>"}
@@ -484,7 +486,8 @@ passes `foldTools(...)` gets `fold` for a foldable device.
 The server ships with `e2e`. `e2e init` offers to register it in
 `.mcp.json` (Claude Code), `.cursor/mcp.json` (Cursor), and
 `.codex/config.toml` (Codex). Install dependencies and start the MCP client
-in the project directory so `npx` (`bunx` in a Bun project) uses the installed e2e version. By hand:
+in the project directory so the command uses the installed e2e version. Init
+writes your package manager's command; see [MCP server](/mcp-server#set-it-up). By hand:
 
 <CodeGroup>
 ```bash npm
