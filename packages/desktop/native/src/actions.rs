@@ -536,11 +536,8 @@ fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
         enabled(element, deadline, what)?;
         shown = read()?;
     }
-    if shown != Some(target) {
-        // A box a scroll area holds out of view is pressed all the same through accessibility, out of the user's reach.
-        reveal(element, deadline, what)?;
-    }
-    // A box whose state cannot be read may already show the one asked for: a press would turn it the other way.
+    // A box whose state cannot be read may already show the one asked for: a press would turn it the other way. Both
+    // refusals come before the scroll below, as a refusal says nothing reached the app.
     if shown.is_none() {
         return Err(Failure::refused(
             codes::ACTION_NOT_SUPPORTED,
@@ -549,6 +546,10 @@ fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
     }
     if clears_only_by_another(role, wanted, shown) {
         return Err(Failure::refused(codes::ACTION_FAILED, "a selected radio button is cleared only by selecting another one; nothing was pressed"));
+    }
+    if shown != Some(target) {
+        // A box a scroll area holds out of view is pressed all the same through accessibility, out of the user's reach.
+        reveal(element, deadline, what)?;
     }
     let reached = press_to_state(
         target,
