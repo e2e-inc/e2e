@@ -244,8 +244,8 @@ separate digit boxes are a gap from the first character.
 ## What a recording holds
 
 Each test's recordings are one YAML file under `.e2e/cache/`, named for the
-test, beside a generated `<test>.lock.json` that holds the cache keys and
-digests. Don't review or edit the lock. Each step sits under its
+test (`tests/admin/login.e2e.ts`'s `signs in` is `admin-login-signs-in.yml`),
+beside a generated `<test>.lock.json` that holds the cache keys and digests. Don't review or edit the lock. Each step sits under its
 instruction, then under each target it was recorded on:
 
 ```yaml title=".e2e/cache/login-form-signs-in.yml"

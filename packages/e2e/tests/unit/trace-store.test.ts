@@ -372,6 +372,14 @@ describe('FileCacheStore', () => {
     }
   });
 
+  it('names tests of same-named files in different folders apart', async () => {
+    const { directory, store } = await makeStore();
+    for (const [index, folder] of ['admin', 'shop'].entries()) {
+      await store.write(String(index).repeat(64), payload('web', { recordedFor: step('web', { testId: `tests/${folder}/login.e2e.ts::signs%20in` }) }));
+    }
+    expect((await readdir(directory)).filter((name) => name.endsWith('.yml')).toSorted()).toEqual(['admin-login-signs-in.yml', 'shop-login-signs-in.yml']);
+  });
+
   it('writes a test whose name carries its hash under the lock that clearing and evicting take', async () => {
     const { directory, store } = await makeStore();
     const testId = 'tests/login.e2e.ts::%E3%83%AD%E3%82%B0%E3%82%A4%E3%83%B3';
