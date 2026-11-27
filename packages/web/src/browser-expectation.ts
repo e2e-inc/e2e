@@ -1,7 +1,8 @@
 /**
  * The `expect(browser)` matchers: URL and title polling, and the locator
  * matchers (`toHaveClass`, `toHaveCSS`, `toHaveJSProperty`) that sample the
- * one node a locator matches through `context.withNode`.
+ * one node a locator matches through `context.withNode`. `browser.waitForURL`
+ * runs the same poll.
  */
 
 import { isDeepStrictEqual } from 'node:util';
@@ -28,6 +29,7 @@ import {
 import type { BrowserExpectation } from './browser.ts';
 import { pageFunctionSource, type EvaluationResult } from './evaluation.ts';
 import { isTestErrorCode } from './support.ts';
+import { describeExpectedUrl, urlPattern } from './url-glob.ts';
 
 /** What the matchers read the page through. */
 export interface ExpectationDeps {
@@ -53,20 +55,6 @@ export interface ExpectationDeps {
 }
 
 /**
- * The expected URL as `toHaveURL` compares it: a string resolved against the
- * base, the way `urlMatches` resolves it, so it reads beside the absolute
- * observed URL. A string that does not parse, and a RegExp, print as written.
- */
-function describeExpectedUrl(expected: string | RegExp, baseHref: string): string {
-  if (typeof expected !== 'string') return String(expected);
-  try {
-    return new URL(expected, baseHref).href;
-  } catch {
-    return expected;
-  }
-}
-
-/**
  * One read of a browser matcher poll: whether the condition holds
  * (undefined: not evaluable yet), and what was seen.
  */
@@ -79,6 +67,57 @@ interface BrowserSample {
 const NO_NODE: BrowserSample = { matches: undefined, observed: 'no node' };
 
 /**
+ * Polls one browser condition against the assertion budget and fails with the
+ * last read when it times out: the loop behind `expect(browser)` and
+ * `browser.waitForURL`. `api` names the call to its timeout, and `name`
+ * heads the failure (`expect.not.toHaveURL`, `browser.waitForURL`). Every
+ * read runs through the poll's `reads.read`, bounded by its deadline and
+ * timed, so a read the deadline cuts off fails the poll with the last read it
+ * saw.
+ */
+async function pollBrowser(
+  deps: ExpectationDeps,
+  call: { readonly api: string; readonly name: string; readonly negated: boolean },
+  label: string,
+  read: (reads: PollReads) => Promise<BrowserSample>,
+  timeout: number | undefined,
+): Promise<void> {
+  const deadline = deps.deadlineFor(timeout, call.api);
+  // pollCondition calls onTimeout only after a read completed, so a sample is always there.
+  let last: BrowserSample | undefined;
+  await pollCondition({
+    deadline,
+    signal: deps.context.signal,
+    negated: call.negated,
+    evaluate: async (reads) => {
+      last = await read(reads);
+      return last.matches;
+    },
+    onTimeout: (cause) =>
+      new TestError(
+        'ASSERTION_FAILED',
+        `${call.name} failed\nexpected: ${call.negated ? 'not ' : ''}${label}\nobserved: ${last?.observed ?? 'nothing'}`,
+        cause === undefined ? undefined : { cause },
+      ),
+  });
+}
+
+/**
+ * `browser.waitForURL`: the poll `expect(browser).toHaveURL` runs, except
+ * that a string is a URL glob (`url-glob.ts`), printed resolved against the
+ * base URL when the wait fails. Playwright's `toHaveURL` never reads a glob,
+ * so the matcher keeps its exact comparison.
+ */
+export function waitForUrl(deps: ExpectationDeps, expected: string | RegExp, timeout: number | undefined): Promise<void> {
+  const { matches, label } = urlPattern(toTextPattern(expected), () => deps.baseHref());
+  const call = { api: 'browser.waitForURL', name: 'browser.waitForURL', negated: false };
+  return pollBrowser(deps, call, `URL ${label}`, async (reads) => {
+    const url = await reads.read((timeoutMs) => deps.currentUrl(timeoutMs));
+    return { matches: matches(url), observed: `URL ${url}` };
+  }, timeout);
+}
+
+/**
  * `expect(browser)` matchers: URL, title, class, CSS, and DOM property
  * polling against the assertion budget. Every read runs through the poll's
  * `reads.read`, bounded by its deadline and timed, so a page that stops
@@ -88,33 +127,12 @@ const NO_NODE: BrowserSample = { matches: undefined, observed: 'no node' };
 export function createBrowserExpectation(deps: ExpectationDeps, negated = false): BrowserExpectation {
   /** A matcher as its messages name it: `expect.toHaveCSS`, `expect.not.toHaveCSS`. */
   const qualified = (api: string): string => `expect.${negated ? 'not.' : ''}${api}`;
-  const poll = async (
+  const poll = (
     api: string,
     label: string,
     read: (reads: PollReads) => Promise<BrowserSample>,
     timeout: number | undefined,
-  ): Promise<void> => {
-    const deadline = deps.deadlineFor(timeout, api);
-    // pollCondition calls onTimeout only after a read completed, so a sample is always there.
-    let last: BrowserSample | undefined;
-    await pollCondition({
-      deadline,
-      signal: deps.context.signal,
-      negated,
-      evaluate: async (reads) => {
-        last = await read(reads);
-        return last.matches;
-      },
-      onTimeout: (cause) => {
-        const expected = `${negated ? 'not ' : ''}${label}`;
-        return new TestError(
-          'ASSERTION_FAILED',
-          `${qualified(api)} failed\nexpected: ${expected}\nobserved: ${last?.observed ?? 'nothing'}`,
-          cause === undefined ? undefined : { cause },
-        );
-      },
-    });
-  };
+  ): Promise<void> => pollBrowser(deps, { api, name: qualified(api), negated }, label, read, timeout);
   const validate = (api: string, options: object | undefined, keys: readonly string[] = ['timeout']): void =>
     rejectUnknownOptions(qualified(api), options, keys);
   /** The name a matcher's string argument is, refused unless it is a nonempty string. */

@@ -57,9 +57,9 @@ web({ viewport: { width: 390, height: 844 }, locale: 'de-DE' });
 | [`colorScheme`](#media-emulation) | `'light' \| 'dark' \| 'no-preference'` | ブラウザ自身の値 |
 | [`reducedMotion`](#media-emulation) | `'reduce' \| 'no-preference'` | ブラウザ自身の値 |
 | [`initScripts`](#init-scripts) | `WebInitScript[]` | - |
+| [`webmcp`](#webmcp) | `boolean` | `false` |
 
 - `web()` ターゲットには `app.url` が必須です。デバイス用のキー（`bundleId`、`appPath`、`launchArguments`）は拒否します。`app.permissions` は、ブラウザが許可できる権限名に対する `'grant'` だけを受け付けます。[`permissions`](/reference/config#permissions) を参照してください。
-- `app.url` を持つターゲットは `browser` ターゲットなので、`requires: ['browser']` で Web ターゲットを選択できます。
 - JSDoc を含む完全な宣言は、型セクションの [`WebOptions`](#weboptions) にあります。
 
 | エラー | 発生条件 |
@@ -367,7 +367,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 - `target="_blank"` のリンクや `window.open` からアプリが開くタブは、バックグラウンドで開きます。`waitForPopup` または `activate` で別のタブをアクティブにするまで、現在のタブは変わりません。[タブ](#tabs)を参照してください。
 - `locator` と `frameLocator` を除くすべての `browser` 呼び出しは、`browser.<method>` ステップとして記録します。この 2 つはページに触れずにロケーターを作り、それを使うアクションやアサーションがステップになります。
 - 相対 URL はターゲットの `app.url` を基準に解決します。なければ `APP_URL_REQUIRED` です。
-- ほかのプラットフォームでも動くスイートでは、`requires: ['browser']` を宣言してください。
+- ほかのプラットフォームでも動くスイートでは、`platforms: ['web']` を宣言してください。
 - `expect(browser)` は、エンジンが付ける `BrowserExpectation` を返します。`toHaveURL`、`toHaveTitle`、`toHaveClass`、`toHaveCSS`、`toHaveJSProperty` を使えます。[browser のマッチャー](/reference/expect#browser-matchers)を参照してください。
 
 | メンバー | 戻り値 |
@@ -401,6 +401,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 | [`waitForDownloads`](#waitfordownloads) | `Promise<{ path, absolutePath, … }[]>` |
 | [`keyboard`](#keyboard) | `{ press, down, up, type }` |
 | [`mouse`](#mouse) | `{ move, wheel, down, up }` |
+| [`webmcp`](#webmcp) | `{ tools, callTool }` |
 
 各メンバーの時間上限は[設定](/reference/config)で決まります。
 
@@ -408,7 +409,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 - `waitForURL`: [`assertionTimeout`](/reference/config#assertiontimeout)。
 - それ以外: [`actionTimeout`](/reference/config#actiontimeout)。`locator` と `frameLocator` はページに触れず、時間上限を使いません。
 
-`goto`、`reload`、`back`、`forward`、`waitForResponse`、`waitForPopup`、`waitForDownload`、`waitForDownloads` は、`{ timeout }` で上書きできます。ただし、テストの期限（`afterEach` 内では `cleanupTimeout`）が上限で、`0` はその期限まで待ちます。`url`、`title`、`evaluate`、`evaluateOn`、`addInitScript`、`route`、`unroute`、`unrouteAll`、`cookies`、`setCookies`、`clearCookies`、`setViewport`、`emulateMedia`、`onDialog`、`newTab`、`BrowserTab` のメソッド、`keyboard.*`、`mouse.*` に上書きオプションはありません。
+`goto`、`reload`、`back`、`forward`、`waitForResponse`、`waitForPopup`、`waitForDownload`、`waitForDownloads` は、`{ timeout }` で上書きできます。ただし、テストの期限（`afterEach` 内では `cleanupTimeout`）が上限で、`0` はその期限まで待ちます。`url`、`title`、`evaluate`、`evaluateOn`、`addInitScript`、`route`、`unroute`、`unrouteAll`、`cookies`、`setCookies`、`clearCookies`、`setViewport`、`emulateMedia`、`onDialog`、`newTab`、`BrowserTab` のメソッド、`keyboard.*`、`mouse.*`、`webmcp.*` に上書きオプションはありません。
 
 #### `goto`
 
@@ -453,16 +454,19 @@ const title = await browser.title();
 現在の URL が一致するまで待ちます。開始から 0、20、50 ms、その後は 100 ms ごとに URL を読みます。`expect(browser).toHaveURL` と同じポーリングです。
 
 ```ts
+await browser.waitForURL('**/checkout');
 await browser.waitForURL(/\/orders\/\d+$/, { timeout: 15_000 });
 ```
 
-- 相対文字列はベース URL を基準に解決し、正規化後に完全一致で比較します。
+- 文字列はグロブで、Playwright が URL グロブを読むのと同じように読みます。`*` は 1 つのパスセグメントの中で、`**` は `/` をまたいで一致し、`{a,b}` はどちらか一方に一致し、`\` は次の文字をエスケープします。`?` はリテラルなので、クエリ文字列は書いたとおりに読み、ワイルドカードのない文字列はその URL に完全一致します。グロブは `*` や `about:` などのスキームで始まる場合を除いてベース URL を基準に解決し、解決したグロブのスキームとホストは大文字と小文字を区別しません。グロブ中の ASCII 以外の文字や空白は、ブラウザーがエンコードした URL と一致します。空文字列はどの URL にも一致します。
+- Playwright と同じく、`expect(browser).toHaveURL` は `*` と `{` を文字どおりに読みます。[`route`](#route)、`unroute`、`waitForResponse` はこの待機と同じグロブを読みます。
 - `RegExp` は URL 全体に適用します。
 
 | エラー | 発生条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | パターンが文字列や `RegExp` ではない場合（述語関数など）、または Playwright の `waitUntil` など、`timeout` 以外のオプションがある場合。 |
+| `INVALID_ARGUMENT` | パターンが文字列や `RegExp` ではない場合（述語関数など）、グロブの `{` が入れ子になっているか、`{` または `}` の対応が取れていない場合、または Playwright の `waitUntil` など、`timeout` 以外のオプションがある場合。 |
 | `ASSERTION_FAILED` | タイムアウトまでに URL が一致しなかった場合。 |
+| `APP_URL_REQUIRED` | `app.url` のないターゲットで相対パターンを使った場合。 |
 
 #### `locator`
 
@@ -584,7 +588,7 @@ await browser.route({ method: 'POST', url: '**/api/orders' }, async (route) => {
 
 `route.fetch()` は、ルートの処理方法を決定せずに、本来の送信先からの `{ url, status, headers, body(), text(), json() }` を返します。対象オリジンが設定済みヘッダーの送信対象なら、そのヘッダーを使います。アクションのタイムアウトが適用されます。ページ遷移のルールを超える可能性があるため、リダイレクトには従いません。
 
-- パターンは文字列または `RegExp` で、どちらも URL 全体と照合します。文字列の `*` はパスの 1 セグメント内、`**` は `/` をまたいで一致し、`?` は任意の 1 文字、`\` は次の文字をエスケープします。`unroute` と `waitForResponse` も同じパターンを使います。
+- パターンは文字列または `RegExp` で、[`waitForURL`](#waitforurl) と同じように読みます。文字列は Playwright の文法のグロブ（`?` はリテラル、`{a,b}` はどちらか一方）で、ベース URL を基準に解決するため、ワイルドカードのないものは完全な URL です。`unroute` と `waitForResponse` も同じパターンを使います。
 - `{ method, url }` を渡すと、HTTP メソッドも 1 つに絞り込めます。`method` は大文字と小文字を区別せず、`url` は上記の文字列または `RegExp` の構文を使い、`unroute` と `waitForResponse` も同じ形式を受け付けます。
 - メソッドが一致しないルートは、それより前に登録したルート、次にネットワークへ処理を渡します。URL が一致しなかった場合と同じ扱いです。
 - メソッドパターンはそのメソッドだけに一致します。`GET` のルートは `HEAD` に応答しません。
@@ -598,7 +602,8 @@ await browser.route({ method: 'POST', url: '**/api/orders' }, async (route) => {
 
 | エラー | 発生条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | パターンが文字列、`RegExp`、`{ method, url }` のいずれでもない場合。`{ method, url }` パターンにキーの不足または余分なキーがある場合、`method` が HTTP メソッドでない場合、`url` が文字列でも `RegExp` でもない場合。また、処理の決定で受け付けないオプション（Playwright の `abort(errorCode)`、`bodyy` のような誤記したキー）がある場合は、リクエストを中断して次のステップを失敗させます。 |
+| `INVALID_ARGUMENT` | パターンが文字列、`RegExp`、`{ method, url }` のいずれでもない場合。 グロブの `{` が入れ子になっているか、`{` または `}` の対応が取れていない場合。`{ method, url }` パターンにキーの不足または余分なキーがある場合、`method` が HTTP メソッドでない場合、`url` が文字列でも `RegExp` でもない場合。また、処理の決定で受け付けないオプション（Playwright の `abort(errorCode)`、`bodyy` のような誤記したキー）がある場合は、リクエストを中断して次のステップを失敗させます。 |
+| `APP_URL_REQUIRED` | `app.url` のないターゲットで相対パターンを使った場合。 |
 | `ACTION_FAILED` | ハンドラーが処理を 2 回決定したか、決定しなかった場合。 |
 | `POLICY_DENIED` | `continue` の URL が禁止スキームを使う場合。 |
 | `CLEANUP_TIMEOUT` | ハンドラーがクリーンアップの時間を超えた場合。試行を失敗させます。 |
@@ -711,7 +716,8 @@ expect((await created).status).toBe(201);
 
 | エラー | 発生条件 |
 | --- | --- |
-| `INVALID_ARGUMENT` | パターンが文字列、`RegExp`、`{ method, url }` のいずれでもない場合。`{ method, url }` パターンにキーの不足または余分なキーがある場合、`method` が HTTP メソッドでない場合、`url` が文字列でも `RegExp` でもない場合。 |
+| `INVALID_ARGUMENT` | パターンが文字列、`RegExp`、`{ method, url }` のいずれでもない場合。 グロブの `{` が入れ子になっているか、`{` または `}` の対応が取れていない場合。`{ method, url }` パターンにキーの不足または余分なキーがある場合、`method` が HTTP メソッドでない場合、`url` が文字列でも `RegExp` でもない場合。 |
+| `APP_URL_REQUIRED` | `app.url` のないターゲットで相対パターンを使った場合。 |
 | `ACTION_FAILED` | 期限内に一致するレスポンスがなかった場合。`body()`、`text()`、`json()` では、期限時点でも本文の受信が続いている場合や、ブラウザが本文を読めなかった場合も、空文字列の代わりにこのエラーになります。後者には、宣言された `Content-Length` に達する前の接続リセット、ページが中断したリクエスト、ブラウザが本文を保持しないリダイレクトが含まれます。 |
 
 ```ts
@@ -934,6 +940,61 @@ await browser.mouse.up();
 
 `wheel` を含む各メソッドの説明は [`Browser`](#browser-interface) にあります。
 
+#### WebMCP
+
+[WebMCP](https://github.com/webmachinelearning/webmcp) は、ページが `document.modelContext`（Firefox では `navigator.modelContext`）にツールを登録するための実験的なブラウザ API です。`browser.webmcp` は、アクティブなタブのページが登録したツールを一覧し、モデルを介さずにテストコードから呼び出します。
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [{ engine: web({ webmcp: true }), app: { url: 'http://localhost:3000' } }],
+} satisfies E2EConfig;
+```
+
+```ts
+const tools = await browser.webmcp.tools();
+expect(tools.map((tool) => tool.name)).toContain('add');
+
+const result = await browser.webmcp.callTool('add', { a: 2, b: 40 });
+expect(result).toEqual({ content: [{ type: 'text', text: '42' }] });
+```
+
+- `web({ webmcp: true })` は、Chromium を `--enable-features=WebMCP` 付きで、Firefox を `dom.modelcontext` の設定付きで起動します。有効にすると、ほとんどのブラウザにまだない API がすべてのページに見えるため、デフォルトでは無効です。WebKit は WebMCP に対応していません。このオプションはエンジンが起動するブラウザ専用です。[`connect`](#connect) やプロバイダー経由のブラウザは、その引数を付けて自分で起動してください。
+- ページはセキュアコンテキスト（`https:` または `localhost`）である必要があります。そうでなければ `document.modelContext` がなく、どちらの呼び出しも `UNSUPPORTED_CAPABILITY` で失敗します。エンジンはページ自体に問い合わせるため、`connect` やプロバイダー経由のブラウザが WebMCP なしで起動されている場合も同じように失敗します。
+- `tools()` は、現在登録されているツールを返します。各ツールには `name`、`description` と、ページが指定した場合は `inputSchema`、`annotations` が含まれます。何も登録していないページでは空のリストになります。順序はブラウザ依存で、Chromium と Firefox で異なります。
+- `callTool(name, input)` は、ツールの `execute` が解決した値で解決します。通常は `content` 配列を持つオブジェクトです。`input` は JSON オブジェクトで、省略するか `null` を渡すと、ツールには空のオブジェクトが渡されます。`isError: true` の結果はそのまま返り、何も返さないツールでは `null` になります。結果は JSON なので、ツールが `undefined` のままにしたプロパティは含まれません。Chromium は結果を JSON テキストとして渡すため、`'42'` のような JSON の文字列で解決するツールの結果は、パースされた値になります。
+- ページを別の URL に遷移させるツールは、応答する前に呼び出しを終わらせます。呼び出しは新しいページの読み込み後に `ACTION_FAILED` で失敗し、ツールが実行された可能性があることをメッセージで伝えます。時間切れの時点でまだ実行中のツールも同じように失敗します。
+- どちらもアクティブなタブのメインフレームが対象で、その中のフレームは対象外です。
+- 名前、説明、スキーマ、結果はページ由来なので、信頼できない入力として扱ってください。
+
+```ts
+/** A tool a page registered through WebMCP, as the page describes it. */
+export interface WebMcpTool {
+  readonly name: string;
+  readonly description: string;
+  /** JSON Schema of the tool's input, when the page gave one. */
+  readonly inputSchema?: JsonValue;
+  /** Hints the page gives about the tool. */
+  readonly annotations?: {
+    /** The tool changes no state. */
+    readonly readOnly?: boolean;
+    /** The tool's output may carry third-party content. */
+    readonly untrustedContent?: boolean;
+    /** The tool takes a consequential action, such as placing an order. */
+    readonly consequential?: boolean;
+  };
+}
+```
+
+| エラー | 発生条件 |
+| --- | --- |
+| `UNSUPPORTED_CAPABILITY` | ページに WebMCP がない場合。ブラウザが WebMCP なしで動作しているか、ページがセキュアコンテキストではありません。どちらであるかと対処方法はメッセージに記載されます。 |
+| `ACTION_FAILED` | `callTool`: その名前のツールをページが登録していない場合（登録済みのツールがメッセージに列挙されます）、ツールが例外を投げた場合、またはページの遷移や時間切れによってツールが応答する前に呼び出しが終わった場合。 |
+| `INVALID_ARGUMENT` | `callTool`: `name` が空でない文字列でない場合、`input` が JSON オブジェクトでない場合、またはツールが実行され、JSON で表せない値（`Date`、`BigInt`、`NaN`）で解決した場合。 |
+| `INVALID_CONFIG` | `connect`、ブラウザプロバイダー、または WebKit と `web({ webmcp: true })` を併用した場合。 |
+
 ## ブラウザのインストール
 
 パッケージは `playwright-core` を完全一致のバージョンに固定しているため、エンジンは常に検証済みの Playwright で動きます。アプリ自身が Playwright に依存する場合は、別のコピーを保持します。バージョンが一致するときだけ、ブラウザのキャッシュを共有します。
@@ -1095,6 +1156,8 @@ export interface WebOptions {
   readonly reducedMotion?: WebMedia['reducedMotion'];
   /** Scripts every document runs before the page's own. See [Init scripts](#init-scripts). */
   readonly initScripts?: readonly WebInitScript[];
+  /** Launches Chromium or Firefox with WebMCP, for `browser.webmcp`. See [WebMCP](#webmcp). */
+  readonly webmcp?: boolean;
 }
 ```
 
@@ -1247,6 +1310,13 @@ export interface Browser extends Expectable<BrowserExpectation> {
     down(): Promise<void>;
     /** Releases the primary pointer button. */
     up(): Promise<void>;
+  };
+  /** The tools the active tab's page registers through WebMCP. See [WebMCP](#webmcp). */
+  readonly webmcp: {
+    /** Returns the tools the page has registered now. */
+    tools(): Promise<readonly WebMcpTool[]>;
+    /** Calls one tool and resolves with what its `execute` resolved to. */
+    callTool(name: string, input?: { readonly [key: string]: JsonValue } | null): Promise<JsonValue>;
   };
 }
 ```

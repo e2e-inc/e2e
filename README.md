@@ -30,10 +30,25 @@ test('a member upgrades to Pro', async ({ app, agent, screen }) => {
 });
 ```
 
-An agent step that a later assertion verifies records its actions, and the
-next run replays them with no model calls until the app changes. Tests
-without agent steps need no model. Bring your own subscription, API key, or
-local model.
+Bring your own subscription, API key, or local model.
+
+## A release gate in CI
+
+A suite that gates a release must give the same result every time it runs
+on a commit. e2e can run that suite with no model call:
+
+- Your coding agent writes tests with exact locators and assertions. They
+  need no model and no key. On the web, they run in Chromium, Firefox, and
+  WebKit through Playwright.
+- An `agent.act` step that a later assertion verifies records its actions.
+  Commit the recordings in `.e2e/cache/` and CI replays them with no model
+  call. With `npx e2e run --strict-cache`, a recording that no longer
+  matches the app fails the step, and no model takes over. A step that was
+  never recorded, or whose recording has a gap, still runs live.
+- `expect(locator)` calls no model. With the built-in agent, `agent.assert`,
+  `agent.waitFor`, and `agent.extract` call the model on every run.
+
+See [Caching](https://e2e.com/docs/cache) for what replays and when.
 
 ## Quick start
 
@@ -79,7 +94,8 @@ every tool.
 | [`@e2e-dev/core`](https://e2e.com/docs/core) | Drives a browser or a device from your own program, with an optional agent and no test runner. `e2e` is built on it. |
 | [`@e2e-dev/web`](https://www.npmjs.com/package/@e2e-dev/web) | Browser engine: Chromium, Firefox, and WebKit through Playwright. |
 | [`@e2e-dev/mobile`](https://www.npmjs.com/package/@e2e-dev/mobile) | iOS and Android engine: simulators and emulators through agent-device. |
-| [`@e2e-dev/desktop`](https://www.npmjs.com/package/@e2e-dev/desktop) | Desktop engine, a prototype: native apps on macOS through agent-desktop. |
+| [`@e2e-dev/desktop`](https://www.npmjs.com/package/@e2e-dev/desktop) | Desktop engine, a prototype: native apps on macOS through its own Rust accessibility driver. |
+| [`@e2e-dev/electron`](https://e2e.com/docs/electron) | Electron engine: an Electron app's windows through Chromium's accessibility tree. |
 | [`@e2e-dev/decision`](https://e2e.com/docs/decision-models) | Decision-model executors for bounded semantic actions and assertions, and `decisionFilter()`, which leaves out the tests a pull request is unlikely to affect. |
 | [`@e2e-dev/acp`](https://e2e.com/docs/subscriptions#use-your-coding-agent) | Runs agent steps on your own coding agent (Claude Code or Codex) over the Agent Client Protocol. |
 
@@ -97,7 +113,7 @@ every tool.
 | [`@e2e-dev/e2b`](https://www.npmjs.com/package/@e2e-dev/e2b) | E2B sandboxes: Android 16 for the mobile engine, and Chromium for the web engine. |
 | [`@e2e-dev/browserstack`](https://www.npmjs.com/package/@e2e-dev/browserstack) | BrowserStack App Automate real Android and iOS devices for the mobile engine. |
 | [`@e2e-dev/limrun`](https://www.npmjs.com/package/@e2e-dev/limrun) | Limrun hosted iOS simulators and Android emulators for mobile tests. |
-| [`@e2e-dev/revyl`](https://www.npmjs.com/package/@e2e-dev/revyl) | Revyl hosted iOS simulators and Android emulators for the mobile engine. |
+| [`@e2e-dev/revyl`](https://www.npmjs.com/package/@e2e-dev/revyl) | Revyl hosted iOS simulators and Android emulators for the mobile engine, and Chrome for the web engine. |
 | [`@e2e-dev/eas`](https://www.npmjs.com/package/@e2e-dev/eas) | Expo Simulators hosted iOS simulators and Android emulators for the mobile engine. |
 | [`@e2e-dev/github`](https://www.npmjs.com/package/@e2e-dev/github) | Reporter that posts results as a pull request comment. |
 | [`@e2e-dev/html-reporter`](https://www.npmjs.com/package/@e2e-dev/html-reporter) | Reporter that writes the run as one HTML page, with steps, screenshots, and video. |

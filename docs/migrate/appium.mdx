@@ -48,8 +48,9 @@ For a migration that spans several sessions, the [`migrate-to-e2e` skill](/codin
 | `appium:deviceName`, `appium:udid` | `mobile({ device: 'iPhone 17' })`: a name, a simulator UDID, or an `emulator-5554` serial. A phone goes by its name |
 | `appium:app` | `app: { appPath }`. Install the build yourself, see [Point at your app](/mobile#point-at-your-app) |
 | `appium:bundleId`, `appium:appPackage` | `app: { bundleId }`, the app `app.open()` launches |
-| `appium:processArguments`, `appium:optionalIntentArguments` | `app.launchArguments`, a list of strings |
+| `appium:processArguments`, `appium:optionalIntentArguments` | `app.launchArguments`, a list of strings or an object of argument name to value |
 | `appium:permissions` | `app.permissions: { camera: 'grant' }`. Each [`DevicePermission`](/reference/mobile#device-fixture) name takes `grant`, `deny`, or `reset` |
+| `appium:autoGrantPermissions` (Android) | `app.permissions: 'all'`, which grants every runtime permission the app declares |
 | `appium:noReset` | `true` is the default, so nothing clears the app's data. For `false`, call `app.clearState()` at the start of the test |
 | `appium:fullReset` | `device.installApp(path, { reinstall: true })` |
 | `appium:newCommandTimeout`, WebDriverAgent timeouts | Not needed. Actions use `actionTimeout`, assertions `assertionTimeout`, and tests `timeout` |
@@ -158,7 +159,7 @@ await agent.act('sign in as {username}', { params: { username: ada.username, pas
 ## Map each command
 
 Calls on `device` run only on a device. A suite that also runs on the web
-declares `requires: ['device']` on those tests.
+declares `platforms: ['ios', 'android']` on those tests.
 
 <AccordionGroup>
 <Accordion title="Elements and gestures">
@@ -172,12 +173,19 @@ declares `requires: ['device']` on those tests.
 | `driver.keys('Enter')`, `pressKeyCode(66)` | `.press('Enter')` on the field |
 | `.getText()`, `.getValue()`, `.getAttribute('value')` | `.textContent()`, `.inputValue()` |
 | `.isDisplayed()`, `.isEnabled()`, `.getAttribute('checked')` | `.isVisible()`, `.isEnabled()`, `.isChecked()` |
+| `.getAttribute('label')` | `.getAttribute('label')`. [`getAttribute`](/reference/screen#getattribute) lists what each attribute reads |
+| `.getAttribute('resource-id')`, iOS `.getAttribute('name')` | `.getAttribute('resource-id')`. An iOS element with no identifier has none; read `label`. On an iOS device cloud, `resource-id` and `label` can each return the other's value |
+| Android `.getAttribute('name')`, `.getAttribute('text')` | `.textContent()`. On a node with only a content description, it reads the description |
+| `.getAttribute('class')`, iOS `.getAttribute('type')`, `.getTagName()` | `.getAttribute('class')`. On iOS it drops the `XCUIElementType` prefix: `Button`, not `XCUIElementTypeButton` |
+| `.getAttribute('content-desc')` | `.getAttribute('content-desc')`, Android only |
+| `.getAttribute('hint')` | `.getAttribute('placeholder')` |
 | `.isExisting()` | `(await locator.count()) > 0` |
 | `.getLocation()`, `.getSize()` | `.boundingBox()` |
 | `.waitForDisplayed({ timeout })` | `await expect(locator).toBeVisible({ timeout })`, or `locator.waitFor()` |
 | `.waitForDisplayed({ reverse: true })` | `await expect(locator).toBeHidden()` |
 | `mobile: swipeGesture`, `mobile: swipe`, `driver.swipe({ direction: 'up' })` | `locator.swipe({ direction: 'down' })` or `screen.swipe(...)`. e2e names the content's direction, not the finger's |
 | `mobile: scrollGesture`, `mobile: scroll` to an element, `.scrollIntoView()` | `screen.scrollUntilVisible(locator)` |
+| `UiScrollable` `scrollToEnd()`, `scrollToBeginning()` | `list.scrollTo('bottom')`, `list.scrollTo('top')` |
 | `.dragAndDrop(target)`, a drag that ends on an element | `locator.dragTo(target)` |
 | A `performActions` swipe between two points | `screen.swipe({ from: { x, y }, to: { x, y } })` |
 | A tap at coordinates | `screen.tapAt({ x, y })`; inside an element, `.tap({ position: { x, y } })` |
@@ -196,6 +204,8 @@ declares `requires: ['device']` on those tests.
 | `driver.background(seconds)` | `device.home()`, then `device.openApp(id)` |
 | `driver.url('myapp://x')`, `mobile: deepLink` | `device.openLink('myapp://x')` |
 | `driver.back()`, `driver.hideKeyboard()`, `pressKeyCode` for Home | `app.back()`, `device.dismissKeyboard()`, `device.home()` |
+| `mobile: pressButton` with `volumeUp` or `volumeDown`, `pressKeyCode` for power or volume | [`device.pressButton('volume-up')`](/reference/mobile#pressbutton), `'volume-down'`, `'power'`; not on an iOS simulator |
+| `driver.lock()`, `driver.unlock()`, `mobile: lock`, `mobile: unlock` | [`device.lock()`](/reference/mobile#lock), [`device.unlock()`](/reference/mobile#unlock); Android 11 or newer, or an iOS simulator. For `lock(seconds)`, wait between the two |
 | `driver.isKeyboardShown()` | `device.isKeyboardShown()`. It reads the screen as it is now: after an action that opens or closes the keyboard, poll it with `expect.poll` |
 | `driver.getPageSource()` | `screen.tree()`, or `screen.debug()` to print it |
 | `driver.getWindowSize()` | [`device.viewport()`](/reference/mobile#viewport), `{ width, height }` in CSS pixels |
@@ -295,12 +305,12 @@ is not a step, so it skips the report and secret redaction.
 
 | Appium | Use today |
 | --- | --- |
-| `appium:autoGrantPermissions`, Android permissions off the list, iOS location `always` | List each permission in `app.permissions`, or run `adb shell pm grant` before the run. For iOS location `always`, tap the prompt's button |
+| Android permissions off the list, iOS location `always` | `app.permissions: 'all'` grants every runtime permission an Android app declares, and location `always` on an iOS simulator. Or run `adb shell pm grant` before the run, and on a physical iPhone tap the prompt's button |
 | Device settings and alerts on a `browserstack()` or `testmu()` device | Tap the prompt as UI. Run those tests on a local device |
 | `bstack:options.local`, `lt:options.tunnel` | Point the app at a backend the hosted device can reach |
 | `appium:appActivity`, `appWaitActivity`, `startActivity()` | `device.openLink(url)`, or `client.apps.open` through [`unstable_raw`](/reference/mobile#unstable_raw) |
 | `appium:processArguments.env` | Pass a launch argument and read it in the app |
-| `appium:language`, `appium:locale` on a local device | On iOS, `app.launchArguments: ['-AppleLanguages', '(fr)', '-AppleLocale', 'fr_FR']`, see [Run the app in another language](/mobile#run-the-app-in-another-language). On Android, set the device language before the run |
+| `appium:language`, `appium:locale` on a local device | On iOS, `app.launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`, see [Run the app in another language](/mobile#run-the-app-in-another-language). On Android, set the device language before the run |
 | `appium:disableWindowAnimation`, `reduceMotion` | On Android, `client.settings.update` through [`unstable_raw`](/reference/mobile#unstable_raw) |
 
 </Accordion>
@@ -308,10 +318,9 @@ is not a step, so it skips the report and secret redaction.
 
 | Appium | Use today |
 | --- | --- |
-| `.getAttribute()` for a label, id, or class, `.isSelected()`, `.getTagName()` | `toHaveAccessibleName` for a label, `toBeSelected` for the selected state. No read for an id, class, or tag name |
+| `.isSelected()` | `toBeSelected` for the selected state |
 | `pressKeyCode(code)`, `driver.keys('Backspace')` | `.press()` takes `Enter`, `Space`, or one character. Use `.clear()` and `.fill()` |
 | `driver.getWindowRect()`, `mobile: deviceInfo` | `device.viewport()` returns size only. Window position and full device information have no equivalent |
-| `UiScrollable` `scrollToEnd()`, `scrollToBeginning()` | Loop `locator.swipe({ direction: 'down' })` until `allTextContents()` stops changing; `'up'` for the beginning |
 | `mobile: selectPickerWheelValue`, date and time pickers, slider values | Swipe the wheel and read `.inputValue()`, or use an `agent.act` goal |
 | `mobile: pinchOpenGesture`, `mobile: pinch`, `mobile: dragGesture` to coordinates, `mobile: dragFromToForDuration` | `client.interactions.pinch` or `.drag` through [`unstable_raw`](/reference/mobile#unstable_raw) |
 
@@ -322,7 +331,6 @@ is not a step, so it skips the report and secret redaction.
 | --- | --- |
 | `driver.getLogs('logcat')`, `'syslog'`, `'crashlog'` | Run `adb logcat` or `xcrun simctl spawn <udid> log stream` from a hook |
 | `driver.queryAppState(id)` | Partial: `device.isAppInstalled(id)` for installed, `device.foregroundApp()` for the app in front. Running in the background has no equivalent |
-| `driver.lock()`, `unlock()`, power and volume buttons | `client.command.hardwareButton` through [`unstable_raw`](/reference/mobile#unstable_raw) |
 | `driver.openNotifications()`, `mobile: pushNotification` | `screen.swipe({ from, to })` from the top edge; `xcrun simctl push` from Node |
 | `driver.pushFile()`, `pullFile()`, `pullFolder()` | `adb push`, `adb pull`, or `xcrun simctl addmedia` from Node; local devices only |
 | `driver.getAlertText()` | `screen.getByRole('alert').textContent()` on iOS, `getByText` on Android |
@@ -338,7 +346,7 @@ is not a step, so it skips the report and secret redaction.
 | `appium:autoAcceptAlerts`, `appium:autoDismissAlerts` | Set `app.permissions`, or call `device.alert('accept')` |
 | Webview contexts: `getContexts()`, `switchContext()`, CSS selectors, `execute(js)` | Query the webview's accessibility nodes with `getByText` and `getByRole` |
 | Mobile web: `browserName: 'Safari'` or `'Chrome'` | A `web()` target at a [phone viewport](/web#viewports), layout only |
-| `appium:unlockType`, `unlockKey` | Keep the device unlocked |
+| `appium:unlockType`, `unlockKey` | Keep the device unlocked. `device.unlock()` enters no PIN or passcode |
 | `driver.getPageSource()` as XML | No XML export. `screen.tree()` returns the tree as text, and `client.capture.snapshot()` through [`unstable_raw`](/reference/mobile#unstable_raw) returns its nodes. Keep XML consumers in Appium |
 | `performActions()` with several fingers or waypoints | Single gestures, or `client.interactions.gesture` through [`unstable_raw`](/reference/mobile#unstable_raw) |
 | `mobile: shell`, `getPerformanceData()` | Run `adb` or `simctl` from Node with `device.unstable_raw.deviceId`; local devices only |

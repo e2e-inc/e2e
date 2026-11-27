@@ -8,8 +8,10 @@ import { describe, expect, it } from 'vitest';
 import { EngineError, defineEngine } from '@e2e-dev/core/engine';
 import { web, surfaceOf } from '../../src/index.ts';
 
-it('declares support for blur on web', () => {
+it('declares support for blur, multiTap, and scrollTo on web', () => {
   expect(web().actions).toContain('blur');
+  expect(web().actions).toContain('multiTap');
+  expect(web().actions).toContain('scrollTo');
 });
 
 describe('surfaceOf', () => {
@@ -30,6 +32,8 @@ describe('surfaceOf', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(EngineError);
         expect((error as EngineError).code).toBe('INVALID_STATE');
+        // The handle of a second web() is the usual cause inside a test, so the message names it.
+        expect((error as EngineError).message).toContain('use the handle the target runs on');
       }
     }
   });

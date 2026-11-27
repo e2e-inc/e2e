@@ -92,8 +92,7 @@ const vanishing = content(`<html><p id="gone" class="a" style="color: blue">Gone
 
 /**
  * A page whose `#late` appears 600 ms after load as class `pending` and
- * becomes `error` 700 ms later: past the negation grace from load, inside it
- * from the node's arrival.
+ * becomes `error` 700 ms later.
  */
 const lateThenError = content(`<html><body><script>
   setTimeout(() => {
@@ -167,7 +166,7 @@ const page = content(`<html>
   </script>
 </html>`);
 
-test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
+test.describe('browser.evaluateOn', { platforms: ['web'] }, () => {
   test('reads the element the locator matches, not the first one a selector finds', async ({ browser, screen }) => {
     await browser.goto(page);
     const main = screen.getByRole('navigation', { name: 'Main' });
@@ -263,7 +262,7 @@ test.describe('browser.evaluateOn', { requires: ['browser'] }, () => {
   });
 });
 
-test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
+test.describe('expect(browser).toHaveCSS', { platforms: ['web'] }, () => {
   test('compares the raw value, whitespace included, as Playwright does', async ({ browser, screen }) => {
     await browser.goto(page);
     const main = screen.getByRole('navigation', { name: 'Main' });
@@ -321,8 +320,9 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
     expect(error).toHaveProperty('message', expect.stringContaining('observed: no node'));
   });
 
-  test('fails a negation when the page stops answering', async ({ browser }) => {
+  test('fails a negation when the page stops answering before its first read', async ({ browser }) => {
     await browser.goto(frozen);
+    await new Promise((resolve) => setTimeout(resolve, 400));
     const error = await failure(() =>
       expect(browser).not.toHaveCSS(browser.locator('#frozen'), 'color', 'red', { timeout: 1000 }),
     );
@@ -336,7 +336,7 @@ test.describe('expect(browser).toHaveCSS', { requires: ['browser'] }, () => {
   });
 });
 
-test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () => {
+test.describe('expect(browser).toHaveJSProperty', { platforms: ['web'] }, () => {
   test('reads again when the frame it reads is replaced during its read', async ({ browser }) => {
     await browser.goto(replacing);
     await expect(browser).toHaveJSProperty(browser.frameLocator('#f').locator('#r'), 'state', 'done');
@@ -472,8 +472,9 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
     expect(error).toHaveProperty('code', 'ACTION_FAILED');
   });
 
-  test('fails a negation when the page stops answering', async ({ browser }) => {
+  test('fails a negation when the page stops answering before its first read', async ({ browser }) => {
     await browser.goto(frozen);
+    await new Promise((resolve) => setTimeout(resolve, 400));
     const error = await failure(() =>
       expect(browser).not.toHaveJSProperty(browser.locator('#frozen'), 'id', 'other', { timeout: 1000 }),
     );
@@ -509,7 +510,7 @@ test.describe('expect(browser).toHaveJSProperty', { requires: ['browser'] }, () 
   });
 });
 
-test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () => {
+test.describe('expect(browser) locator matchers', { platforms: ['web'] }, () => {
   test('fail observing no node when the node leaves after a read', async ({ browser }) => {
     await browser.goto(vanishing);
     const gone = browser.locator('#gone');
@@ -523,14 +524,14 @@ test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () 
     }
   });
 
-  test('fail a negation that holds only until the node arrives and matches', async ({ browser }) => {
+  test('pass a negation on the first read after the node arrives, not while it is missing', async ({ browser }) => {
     for (const call of [
       () => expect(browser).not.toHaveClass(browser.locator('#late'), 'error', { timeout: 2500 }),
       () => expect(browser).not.toHaveJSProperty(browser.locator('#late'), 'className', 'error', { timeout: 2500 }),
     ]) {
+      // The node arrives as `pending` and turns `error` later: the negation passes on that first read.
       await browser.goto(lateThenError);
-      const error = await failure(call);
-      expect(error).toHaveProperty('code', 'ASSERTION_FAILED');
+      await call();
     }
   });
 
@@ -646,7 +647,7 @@ test.describe('expect(browser) locator matchers', { requires: ['browser'] }, () 
   });
 });
 
-test.describe('a locator from an earlier attempt', { serial: true, requires: ['browser'] }, () => {
+test.describe('a locator from an earlier attempt', { serial: true, platforms: ['web'] }, () => {
   let earlier: Locator | undefined;
   let missing: Locator | undefined;
 

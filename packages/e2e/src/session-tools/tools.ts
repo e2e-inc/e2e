@@ -19,10 +19,12 @@ import type { JSONSchema7, Tool, ToolExecutionOptions, ToolSet } from 'ai';
 import type { z } from 'zod';
 import { loadAiSdk, loadAiSdkIfInstalled, loadedAiSdk } from '@e2e-dev/core/lib/agent/ai-sdk';
 import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
+import type { ExecutorObservation } from '@e2e-dev/core/lib/agent/executor';
 import { isFailedResult } from '@e2e-dev/core/lib/agent/loop-guards';
+import type { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
 import { codedMessage, ConfigurationError, errorMessage, InfrastructureError } from '@e2e-dev/core/lib/internal/errors';
 import { describeIssue } from '@e2e-dev/core/lib/internal/standard-schema';
-import { processSecrets } from '@e2e-dev/core/lib/run/secrecy';
+import { redactError } from '@e2e-dev/core/lib/run/secrecy';
 import type { StandardSchemaV1 } from '@e2e-dev/core/lib/types';
 
 /** One MCP content part this server emits. */
@@ -89,6 +91,16 @@ export function redactResult(result: McpToolResult, redact: (text: string) => st
   };
 }
 
+/**
+ * What a session's opening says of its first screen: which one it is, that
+ * later results are changes against it, and the tool that shows it.
+ */
+export function firstScreenLine(screen: Pick<ScreenPresenter, 'unlisted'>, observation: ExecutorObservation): string {
+  const named = `Screen: ${screen.unlisted(observation)}`;
+  if (observation.treeUnavailable === true) return `${named}; call {tool: "screenshot"} shows it.`;
+  return `${named}, not listed. Action results report changes against it; call {tool: "observe"} lists its nodes.`;
+}
+
 /** How much of a description the catalog shows per tool: its first sentence, bounded. */
 const CATALOG_SENTENCE_MAX = 160;
 
@@ -137,11 +149,15 @@ export function catalogLine(
   readOnly: boolean,
   redact: (text: string) => string = (text) => text,
 ): string {
+  return `- ${redact(toolSignature(name, tool))}: ${firstSentence(redact(toolDescription(name, tool)))}${readOnly ? ' [read-only]' : ''}`;
+}
+
+/** A tool's name and argument names, `?` marking an optional one: `tap {target, modifiers?}`. */
+export function toolSignature(name: string, tool: ToolSet[string]): string {
   const schema = toolJsonSchema(tool);
   const required = new Set(schema.required ?? []);
   const args = Object.keys(schema.properties ?? {}).map((key) => (required.has(key) ? key : `${key}?`));
-  const signature = args.length === 0 ? name : `${name} {${args.join(', ')}}`;
-  return `- ${redact(signature)}: ${firstSentence(redact(toolDescription(name, tool)))}${readOnly ? ' [read-only]' : ''}`;
+  return args.length === 0 ? name : `${name} {${args.join(', ')}}`;
 }
 
 /** Explains why a name cannot be called on this target. */
@@ -327,7 +343,8 @@ export function redacting(spec: McpToolSpec): McpToolSpec {
       } catch (cause) {
         result = errorResult(cause);
       }
-      return redactResult(result, (text) => processSecrets.redact(text));
+      // redactError also reads the environment again: a config that failed may have loaded a key into it.
+      return redactResult(result, redactError);
     },
   };
 }

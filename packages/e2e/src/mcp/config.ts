@@ -2,8 +2,7 @@
 
 import path from 'node:path';
 import { discoverConfig, loadConfigModule, missingConfigError } from '../config/load.ts';
-import { type ResolvedConfig } from '@e2e-dev/core/lib/config/resolve';
-import { resolveConfig } from '../config/resolve-run.ts';
+import { resolveConfig, type ResolvedRunConfig } from '../config/resolve-run.ts';
 import { ConfigurationError } from '@e2e-dev/core/lib/internal/errors';
 import type { TargetApp } from '@e2e-dev/core/lib/types';
 import { loadEngine, type EngineLookup, type FactoryRef } from './default-engine.ts';
@@ -15,7 +14,7 @@ export interface ProjectOptions {
 }
 
 /** A config loaded from a file: what sessions on a project share. A session opened with `engine` has none. */
-export type LoadedConfig = ResolvedConfig & { readonly configPath: string };
+export type LoadedConfig = ResolvedRunConfig & { readonly configPath: string };
 
 /** The absolute path of a project's config, found without evaluating it. */
 export function locateProjectConfig(options: ProjectOptions): string {
@@ -31,8 +30,12 @@ export function locateProjectConfig(options: ProjectOptions): string {
 
 /** What `open_session` names to open a session where the project has no config file: the engine's factory call, and the app. */
 export interface EngineSession extends FactoryRef {
-  /** The target's app: the URL it opens, or the installed app or build a device launches. */
-  readonly app?: Pick<TargetApp, 'url' | 'bundleId' | 'appPath'> | undefined;
+  /**
+   * The target's app, as the call wrote it: any key of a config target's
+   * `app`. Unchecked here: `resolveConfig` checks it field by field, as it
+   * does a config file's.
+   */
+  readonly app?: Readonly<Record<string, unknown>> | undefined;
 }
 
 /**
@@ -44,17 +47,17 @@ export interface EngineSession extends FactoryRef {
 export async function loadEngineConfig(
   options: ProjectOptions & { readonly env: NodeJS.ProcessEnv } & Pick<EngineLookup, 'enginesDir'>,
   session: EngineSession,
-): Promise<ResolvedConfig> {
+): Promise<ResolvedRunConfig> {
   const { configPath } = discoverConfig(options.cwd, options.configPath);
   if (configPath !== undefined) {
     throw new ConfigurationError(
       'INVALID_ARGUMENT',
-      `open_session: engine opens a session where there is no config file, and ${configPath} exists; leave engine out to open one of its targets`,
+      `open_session: engine opens a session where there is no config file, and ${configPath} exists; leave engine out to open one of its targets, and pass path to open on one page of its app`,
     );
   }
   const engine = await loadEngine(session, { cwd: options.cwd, enginesDir: options.enginesDir });
   return resolveConfig(
-    { targets: [{ engine, ...(session.app === undefined ? {} : { app: session.app }) }] },
+    { targets: [{ engine, ...(session.app === undefined ? {} : { app: session.app as TargetApp }) }] },
     { projectRoot: path.resolve(options.cwd), env: options.env },
   );
 }

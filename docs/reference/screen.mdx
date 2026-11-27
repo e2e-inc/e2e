@@ -68,13 +68,18 @@ screen.getByRole('heading', /welcome/i, { level: 1 });
 The accessible name goes second, a string or a `RegExp`, with the other
 options after it. The object form, `{ name: 'Save' }`, is the same query.
 The options are [`RoleOptions`](#types).
+For visible content inside an unlabelled list item or status, filter by
+text, for example `screen.getByRole('listitem').filter({ hasText: 'Invoice 42' })`.
 
 <Note>
 A role query never matches a node hidden from the accessibility tree: one
 that does not render, or one under `aria-hidden`. On the other query kinds,
 `visible: true` keeps only nodes that render, the same check `toBeVisible()`
 makes, so an `aria-hidden` node that still paints counts as visible. See
-[Hidden duplicates](#hidden-duplicates).
+[Hidden duplicates](#hidden-duplicates). On a device or a desktop app a role
+query skips every node the engine marks hidden, which can include one
+scrolled out of view: see [mobile](/reference/mobile#visibility) and
+[desktop](/desktop#what-differs-from-the-web) for what each marks.
 </Note>
 
 ##### `img` alias
@@ -388,6 +393,7 @@ await screen.getByRole('row').nth(2).getByRole('checkbox').check();
 | [`screen.doubleTapAt`](#screen-doubletapat) | `Promise<void>` |
 | [`screen.swipe`](#screen-swipe) | `Promise<void>` |
 | [`screen.scrollUntilVisible`](#screen-scrolluntilvisible) | `Promise<void>` |
+| [`screen.scrollTo`](#screen-scrollto) | `Promise<void>` |
 
 `tapAt`, `doubleTapAt`, and `swipe` act on the viewport.
 
@@ -542,6 +548,65 @@ await screen.getByTestId('feed').scrollUntilVisible(row);
 | `INVALID_ARGUMENT` | An option it does not take. |
 | `LOCATOR_NOT_FOUND` | The deadline expires first, a swipe it cut short included. |
 
+#### `screen.scrollTo`
+
+Scrolls to an edge of the page or a list, as far as it goes. Use it for
+Cypress `cy.scrollTo('bottom')`, Detox `scrollTo('bottom')`, or Appium
+`scrollToEnd()`.
+
+```ts
+/**
+ * Scrolls a container to an edge, as far as it goes: on `screen` the
+ * screen's main scrolling content, else the content under its center; on
+ * a locator the node, or its nearest ancestor that scrolls along that axis
+ * (on a device, whatever scrolls under a drag inside the node's box, so
+ * locate the list, not a row). Resolves at once when it is there already or
+ * nothing scrolls. `timeout` bounds the whole scroll.
+ */
+scrollTo(edge: ScrollEdge, options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.scrollTo('bottom');
+await expect(screen.getByRole('contentinfo')).toBeInViewport();
+
+await screen.getByTestId('feed').scrollTo('top', { timeout: 60_000 });
+```
+
+`edge` is `'top'`, `'bottom'`, `'left'`, or `'right'`. To scroll a list
+inside the page, call it on the list: [`scrollTo`](#scrollto).
+
+- On the web, `screen` scrolls the page. When the page itself does not
+  scroll, as in an app shell, it scrolls the scroll container under the
+  viewport's center; an iframe there is not entered, so call it on a locator
+  inside the frame. It sets the offset with the page's own scroll API, so
+  `scroll-behavior: smooth` is skipped and no wheel event fires.
+- On a device, it drags toward the edge from the middle of the container
+  (the screen on `screen`), up to three drags at a time, until a drag moves
+  nothing. A spinner does not count as movement. A list of 45 screens takes
+  about 22 s on an Android emulator and 50 s on an iOS simulator, so give a
+  very long list a longer `timeout`.
+- Content that grows when the end is reached is followed: the web jumps
+  again until a jump moves nothing, a device drags again while the list
+  changes. Neither waits for a slow load. To reach a row a feed loads, use
+  [`scrollUntilVisible`](#screen-scrolluntilvisible).
+- On a device, a drag that lands on something that does not scroll moves
+  nothing, so it reads as the edge.
+- On a device, the last drag runs past the edge, so `scrollTo('top')` on a
+  list with pull-to-refresh refreshes it. Content that changes on its own
+  inside the container, such as a timer or an auto-advancing carousel, reads
+  as movement and keeps it dragging until the timeout: call `scrollTo` on
+  the list, not the screen.
+- The timeout is [`config.actionTimeout`](/reference/config#actiontimeout).
+- A frame's screen (`browser.frameLocator()`) refuses it. Call it on a
+  locator inside the frame.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | An edge it does not know, an option other than `timeout`, or a frame's screen. |
+| `ACTION_FAILED` | The edge was not reached before the timeout: `scrollTo('bottom') did not reach the edge within 30000ms (the content was still moving after 24 drags when the budget ran out)`. The parentheses hold the engine's reason. |
+| `UNSUPPORTED_CAPABILITY` | The engine does not list `scrollTo` in its actions, as the desktop engine does not. |
+
 ### Screen reads
 
 | Method | Returns |
@@ -664,6 +729,7 @@ await screen.pause();
 | [`dragTo`](#dragto) | `Promise<void>` |
 | [`scrollIntoView`](#scrollintoview) | `Promise<void>` |
 | [`swipe`](#swipe) | `Promise<void>` |
+| [`scrollTo`](#scrollto) | `Promise<void>` |
 
 Each action resolves one node, waits for actionability, and performs one
 operation. The timeout is
@@ -683,7 +749,7 @@ action takes only the options its signature names.
 #### `tap`
 
 ```ts
-/** Taps exactly one matching actionable node; with `position`, taps that point of its box once it is in view, with no other actionability check. */
+/** Taps exactly one matching actionable node, `count` times in a row; with `position`, taps that point of its box once it is in view, with no other actionability check. */
 tap(options?: TapOptions): Promise<void>;
 /** Alias of tap. */
 click(options?: TapOptions): Promise<void>;
@@ -693,10 +759,17 @@ click(options?: TapOptions): Promise<void>;
 await screen.getByRole('button', 'Save').tap({ timeout: 10_000 });
 await screen.getByRole('image', 'Seat map').tap({ position: { x: 120, y: 48 } });
 await row.click({ modifiers: ['Shift'] });
+await screen.getByText('Shipping address').tap({ count: 3 });
 ```
 
 The options are [`TapOptions`](#types):
 
+- `count`: how many taps in a row, a positive safe integer, default 1. In a
+  browser the clicks arrive as one multi-click, so a triple click selects a
+  paragraph. On a device they are `count` presses at the `doubleTap` cadence.
+  `count: 2` is the same action as [`doubleTap()`](#doubletap). Three or more
+  need an engine that lists the `multiTap` action; the browser and mobile
+  engines both do.
 - `modifiers`: the browser engine holds them.
 - `position`: an offset from the node's top-left corner, inside its border,
   in CSS pixels. The engine scrolls the node into view when it lists
@@ -706,8 +779,9 @@ The options are [`TapOptions`](#types):
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | An unknown or repeated modifier, or `modifiers` beside `position`. |
+| `INVALID_ARGUMENT` | An unknown or repeated modifier, `modifiers` beside `position`, a `count` that is not a positive safe integer, or a `count` above 1 beside `position`. |
 | `UNSUPPORTED_CAPABILITY` | `modifiers` on an engine that does not declare `tapModifiers`, the mobile engine among them; thrown before it acts. |
+| `UNSUPPORTED_CAPABILITY` | A `count` of 3 or more on an engine without the `multiTap` action, or above the engine's limit (200 on the mobile engine); thrown before it acts. |
 | `UNSUPPORTED_CAPABILITY` | `position` on an engine without the `tap` pointer action. |
 | `ACTION_FAILED` | `position` on a node the browser engine cannot bring into view; its scroll waits for visibility. Other engines fail as they report it. |
 | `LOCATOR_NOT_FOUND` | `position` on a node that resolves but never shows a visible box within the timeout. |
@@ -840,9 +914,15 @@ await screen.getByRole('textbox', 'Notes').press('ControlOrMeta+a');
 A key is zero or more modifiers and one key, joined with `+`, as the
 [key grammar](/reference/engine#keys) lists them. `Shift++` presses `+`.
 
+On the web engine, a character that is not on a US keyboard (`é`, `中`) is
+pressed in Chromium only. The page gets the same `keydown`, `input`, and
+`keyup` as for any key, with an empty `code` and a `keyCode` of 0. Enter it
+with [`fill`](#fill) or [`pressSequentially`](#presssequentially) in Firefox and
+WebKit.
+
 | Throws | When |
 | --- | --- |
-| `UNSUPPORTED_CAPABILITY` | A key the platform lacks. |
+| `UNSUPPORTED_CAPABILITY` | A key the platform lacks. On the web engine, a character that is not on a US keyboard, in Firefox or WebKit. |
 
 #### `check`
 
@@ -993,6 +1073,21 @@ It takes `{ direction, momentum? }` as [`screen.swipe`](#screen-swipe)
 defines them, plus `timeout`, which `screen.swipe` refuses. It has no
 `{ from, to }` form.
 
+#### `scrollTo`
+
+```ts
+/** Scrolls this node, or its nearest ancestor that scrolls along the edge's axis, to an edge. */
+scrollTo(edge: ScrollEdge, options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByTestId('feed').scrollTo('bottom');
+await screen.getByRole('list', 'Photos').scrollTo('right');
+```
+
+On a device it drags inside the node's box, so locate the list itself, not
+a row. The rest is as [`screen.scrollTo`](#screen-scrollto) describes.
+
 ### Locator reads
 
 | Method | Returns |
@@ -1006,6 +1101,7 @@ defines them, plus `timeout`, which `screen.swipe` refuses. It has no
 | [`isDisabled`](#isdisabled) | `Promise<boolean>` |
 | [`isChecked`](#ischecked) | `Promise<boolean>` |
 | [`boundingBox`](#boundingbox) | `Promise<{ x, y, width, height } \| null>` |
+| [`screenshot`](#screenshot) | `Promise<string>` |
 | [`count`](#count) | `Promise<number>` |
 | [`all`](#all) | `Promise<Locator[]>` |
 | [`allTextContents`](#alltextcontents) | `Promise<string[]>` |
@@ -1017,7 +1113,8 @@ Reads follow the [Match rules](#match-rules). `count`, `all`, and
 On a secure field, `textContent`, `inputValue`, `getAttribute`, and
 `allTextContents` throw `POLICY_DENIED`, as the matching
 [`expect` matchers](/reference/expect#secure-fields) do. `isEnabled`,
-`isDisabled`, `isChecked`, and `boundingBox` are allowed there.
+`isDisabled`, `isChecked`, and `boundingBox` are allowed there, and
+`screenshot` masks the field.
 
 #### `textContent`
 
@@ -1053,6 +1150,10 @@ On a checkbox or radio, `inputValue()` and `toHaveValue` read its value
 attribute, `on` when it has none, whatever its checked state. `isChecked()`
 reads the state.
 
+`inputValue()` reads a range widget as
+[`toHaveValue`](/reference/expect#tohavevalue) does. Playwright's
+`inputValue()` throws on an ARIA widget.
+
 | Throws | When |
 | --- | --- |
 | `ACTION_FAILED` | A node with no value, such as a heading or a button. A field with no value reads `""`. |
@@ -1067,6 +1168,37 @@ getAttribute(name: string): Promise<string | null>;
 ```ts
 const href = await screen.getByRole('link', 'Docs').getAttribute('href');
 ```
+
+On a device, a node carries up to five attributes:
+
+- `label`: the accessibility label. On iOS, that is the device's own label, so
+  an empty field whose placeholder was folded out keeps its full label. On
+  Android, it is the content description, or the node's text when there is no
+  description. An empty Android field showing only its hint has no `label`, and
+  neither does an empty Android field whose content description equals its hint.
+- `resource-id`: the node's test id, which is the Android resource id or the
+  iOS accessibility identifier (what Appium reads as `name`).
+- `class`: the Android class name, or the iOS element type without the
+  `XCUIElementType` prefix, such as `TextField` (what Appium reads as `type`).
+- `content-desc`: Android only. Missing when the content description equals the
+  visible text or hint, because agent-device reports it only when it differs.
+- `placeholder`: present when the platform reports a hint or placeholder.
+
+On an iOS device cloud that serves an Appium page source, agent-device falls
+back to Appium's `name` for both values. `name` is the identifier, or the label
+when an element has no identifier. So `resource-id` and `label` can each return
+the other's value there: an element with a test id and no label reads its test
+id as `label`. For the text a field holds, use `inputValue()`.
+
+On macOS (`@e2e-dev/desktop`), a node carries `label` (a control's
+accessible name, up to 1,000 characters; text has none, since `textContent`
+reads it), `identifier`
+(the developer's accessibility identifier, also its test id), `description`
+(left out when it is the accessible name, which `label` reads, as an AppKit
+field's description often is), `placeholder`, and `hint` (its help text), each
+when the app reports it. On a
+password field, `getAttribute` throws `POLICY_DENIED`, as it does on every
+engine.
 
 #### `isVisible`
 
@@ -1168,6 +1300,41 @@ Android). It is `null` for a node that lays out no box
 (`display: none` on it or an ancestor). A `visibility: hidden` node keeps
 its box.
 
+#### `screenshot`
+
+```ts
+/**
+ * Captures a redacted screenshot of the one match and returns its absolute
+ * path. The match is scrolled into view first; one larger than the viewport
+ * keeps the part inside it.
+ */
+screenshot(label?: string): Promise<string>;
+```
+
+```ts
+const card = await screen.getByTestId('order-summary').screenshot('summary');
+```
+
+- The file is what [`app.screenshot`](/reference/app#screenshot) saves, cut
+  to the match's box: an attempt artifact under `screenshots/`, with the
+  same masking and the same pixel density.
+- `label` joins the step's name and the file name.
+- It waits until the match is visible, and its box and the viewport hold
+  still across the capture. A match the page moves out of the viewport is
+  scrolled back.
+- The engine's screenshot has to be a PNG of the viewport, as the web,
+  mobile, and desktop engines' are.
+- The `list` reporter names the file in its `Screenshots` row.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | A `label` that is not a string. |
+| `LOCATOR_NOT_FOUND` | No visible match within the action timeout, one that kept moving, or one outside the viewport on an engine that cannot scroll to it. |
+| `LOCATOR_AMBIGUOUS` | More than one match. |
+| `ACTION_FAILED`, `ENGINE_FAILURE` | The scroll or the capture failed or timed out, as on a web match that never stops animating. |
+| `UNSUPPORTED_CAPABILITY` | The engine takes no screenshots, or writes one that is not a PNG. |
+| `POLICY_DENIED` | On iOS and Android, a secure field on screen has no bounds to mask. |
+
 #### `count`
 
 ```ts
@@ -1184,7 +1351,7 @@ document.
 
 #### `all`
 
-Resolves the query one time, so a loop can act on each row.
+Resolves the query once, so a loop can act on each row.
 
 ```ts
 /** One `nth(i)` locator per current match, without auto-waiting; empty when nothing matches. */
@@ -1462,6 +1629,14 @@ export interface TapOptions extends ClickOptions {
    * a box, which needs the engine's `tap` pointer action.
    */
   position?: Point;
+  /**
+   * How many taps in a row, a positive safe integer, default 1. `2` is the
+   * same as `doubleTap()`; 3 or more needs an engine that declares the
+   * `multiTap` action, `UNSUPPORTED_CAPABILITY` otherwise. A count above the
+   * engine's own limit (200 on the mobile engine) is also
+   * `UNSUPPORTED_CAPABILITY`. A count above 1 is not combined with `position`.
+   */
+  count?: number;
 }
 
 /** One option of a select: its label (a bare string too), its `value` attribute, or its zero-based index. */
@@ -1473,6 +1648,9 @@ export type SelectOption =
 
 /** A swipe or scroll direction. */
 export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
+
+/** An edge of a scroll container, which `scrollTo` scrolls to. */
+export type ScrollEdge = 'top' | 'bottom' | 'left' | 'right';
 
 /** Fling strength of a swipe; defined under screen.swipe. */
 export type Momentum = 'none' | 'slow' | 'fast';

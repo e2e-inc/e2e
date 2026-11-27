@@ -67,6 +67,19 @@ export const kiosk = createFakeEngine({
 });
 `;
 
+// A device engine package, as a session opened with `engine` loads one: it
+// writes the app its `init` received beside its entry.
+const KIOSK_ENGINE = `import { writeFileSync } from 'node:fs';
+import { createFakeEngine } from ${JSON.stringify(new URL('../helpers/fake-engine.ts', import.meta.url).href)};
+
+export default () =>
+  createFakeEngine({
+    device: true,
+    platform: 'kiosk',
+    onInit: (info) => writeFileSync(new URL('./init.json', import.meta.url), JSON.stringify(info.app)),
+  }).engine;
+`;
+
 // A third config: two targets, one a custom engine with fewer verbs, and
 // project tools scoped by platform.
 const CUSTOM_CONFIG = `import type { E2EConfig } from 'e2e';
@@ -145,7 +158,13 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
   };
 
   const catalogLines = (text: string): string[] => text.split('\n').filter((line) => line.startsWith('- '));
-  const catalogNames = (text: string): string[] => catalogLines(text).map((line) => /^- (\S+?)(?: \{|:)/.exec(line)![1]!);
+  /** Every tool a catalog text names: one line each, and the single actions the opening text lists on one line. */
+  const catalogNames = (text: string): string[] =>
+    catalogLines(text).flatMap((line) =>
+      line.startsWith('- Single actions')
+        ? line.slice(line.indexOf(': ') + 2, -1).split('; ').map((signature) => signature.split(' ')[0]!)
+        : [/^- (\S+?)(?: \{|:)/.exec(line)![1]!],
+    );
 
   beforeAll(async () => {
     app = await startFixtureApp();
@@ -184,7 +203,7 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
     expect(callTool.inputSchema).toMatchObject({ type: 'object', required: ['tool'] });
     expect(tools.find((tool) => tool.name === 'tools')?.annotations).toMatchObject({ readOnlyHint: true });
     expect(tools.find((tool) => tool.name === 'open_session')?.inputSchema).toMatchObject({ properties: { target: {}, config: {}, headed: { type: 'boolean' } } });
-    expect(client.getInstructions()).toContain('call {tool, args} runs any catalog tool');
+    expect(client.getInstructions()).toContain('call {tool, args} runs one of those tools');
     expect(client.getInstructions()).toContain('Several sessions can be open at once');
     expect(client.getInstructions()).toContain('Before you write or edit a test, read the writing-tests guide: the resource e2e://guide/writing-tests, or npx e2e guide writing-tests in a shell.');
 
@@ -211,7 +230,6 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
     for (const [name, args, key] of [
       ['open_session', { headless: true }, 'headless'],
       ['tools', { all: true }, 'all'],
-      ['call', { tool: 'observe', verbose: true }, 'verbose'],
       ['close_session', { force: true }, 'force'],
     ] as const) {
       const refused = await invoke(name, args);
@@ -231,7 +249,7 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
     expect(opened.text).toContain('Credentials: "admin" (username "admin", password secret "admin.password")');
     expect(opened.text).toContain('Tools (run one with call {tool, args}; tools {tool} shows a tool\'s arguments):');
     expect(opened.text).toContain('Before you write or edit a test, read the writing-tests guide: the resource e2e://guide/writing-tests, or npx e2e guide writing-tests in a shell.');
-    expect(catalogNames(opened.text)).toEqual([
+    expect(catalogNames(opened.text).toSorted()).toEqual([
       'observe',
       'tap',
       'double_tap',
@@ -264,17 +282,20 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
       'test_lines',
       'start_recording',
       'stop_recording',
-    ]);
-    expect(opened.text).toMatch(/^- tap \{target, modifiers\?\}: Tap or click one node: the gesture for a button, link, menu item, tab, checkbox, row, or field\.$/m);
+    ].toSorted());
     expect(opened.text).toMatch(/^- locate \{role\?, name\?, text\?, label\?, placeholder\?, testId\?, exact\?\}: .* \[read-only\]$/m);
-    expect(opened.text).toMatch(/Current screen \(revision b\d+, path \/, \d+ nodes\):/);
-    expect(opened.text).toContain('button "Increment"');
+    // The opening names the screen; observe lists it.
+    expect(opened.text).toMatch(/\n\nScreen: revision b\d+, path \/, \d+ nodes, not listed\..*$/);
+    expect(opened.text).not.toContain('button "Increment"');
     const sessionId = /^Session (\S+) open/.exec(opened.text)![1]!;
 
     const listed = await invoke('tools');
     expect(listed.isError, listed.text).toBe(false);
     expect(listed.text).toContain(`Session ${sessionId} on target "web": 32 tools.`);
-    expect(catalogLines(listed.text)).toEqual(catalogLines(opened.text));
+    expect(catalogNames(listed.text).toSorted()).toEqual(catalogNames(opened.text).toSorted());
+    expect(opened.text).toMatch(/\n- Single actions, each on a node id \(target\) or a point of the latest screenshot \(x, y\); tools lists what each does: tap \{target, modifiers\?\}; double_tap /);
+    expect(opened.text).not.toContain('- tap {');
+    expect(listed.text).toMatch(/^- tap \{target, modifiers\?\}: Tap or click one node: the gesture for a button, link, menu item, tab, checkbox, row, or field\.$/m);
     const detail = await invoke('tools', { tool: 'type_secret' });
     expect(detail.text).toContain('"admin.password" (password)');
     expect(detail.text).toContain('Arguments (JSON Schema):');
@@ -312,6 +333,13 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
     const decorated = await call('tap', { target: nodeId(after.text, /button "Increment"/), force: true });
     expect(decorated.isError).toBe(true);
     expect(decorated.text).toBe('INVALID_ARGUMENT: call tap: Unrecognized key: "force"; tools {tool: "tap"} shows its arguments');
+    // The arguments may sit beside the tool's name, under the same checks.
+    const beside = await invoke('call', { tool: 'locate', role: 'button', name: 'Increment' });
+    expect(beside.isError, beside.text).toBe(false);
+    const besideUnknown = await invoke('call', { tool: 'observe', verbose: true });
+    expect(besideUnknown.text).toBe('INVALID_ARGUMENT: call observe: Unrecognized key: "verbose"; tools {tool: "observe"} shows its arguments');
+    const both = await invoke('call', { tool: 'locate', args: { role: 'button' }, name: 'Increment' });
+    expect(both.text).toBe("INVALID_ARGUMENT: call locate: pass the tool's arguments in args or beside tool, not both (name)");
     const nameless = await call('teleport');
     expect(nameless.isError).toBe(true);
     expect(nameless.text).toContain('UNKNOWN_TOOL');
@@ -373,7 +401,7 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
     expect(second.isError, second.text).toBe(false);
     const secondId = /^Session (\S+) open/.exec(second.text)![1]!;
     expect(secondId).not.toBe(sessionId);
-    expect(second.text).toContain(`Pass session "${secondId}" to every tools, call, and close_session; with several sessions open, a call without it fails.`);
+    expect(second.text).toContain(`Pass session "${secondId}" to tools, call, and close_session.`);
     const unnamed = await call('observe');
     expect(unnamed.isError).toBe(true);
     expect(unnamed.text).toMatch(new RegExp(`^SESSION_REQUIRED: 2 sessions are open; pass session to name one: ${sessionId} on "web", ${secondId} on "web"`));
@@ -416,7 +444,22 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
 
     const reopened = await invoke('open_session', { target: 'web', config: 'e2e.config.ts' });
     expect(reopened.isError, reopened.text).toBe(false);
-    expect(reopened.text).toContain('button "Increment"');
+    expect(reopened.text).toMatch(/\n\nScreen: revision b\d+, path \/, \d+ nodes, not listed\..*$/);
+    const closed = await invoke('close_session');
+    expect(closed.isError, closed.text).toBe(false);
+  });
+
+  it('opens on a path of the app, and writes that opening as the first test line', async () => {
+    const both = await invoke('open_session', { path: '/echo', test: 'tests/a.e2e.ts' });
+    expect(both.isError).toBe(true);
+    expect(both.text).toContain('INVALID_ARGUMENT: open_session: test leaves the session on the screen where the test stopped');
+
+    const opened = await invoke('open_session', { path: '/echo' });
+    expect(opened.isError, opened.text).toBe(false);
+    expect(opened.text).toMatch(/\n\nScreen: revision b\d+, path \/echo, \d+ nodes, not listed\..*$/);
+    expect((await call('observe')).text).toContain('textbox "Token"');
+    const drafted = await call('test_lines');
+    expect(drafted.text.split('\n').filter((line) => line.startsWith('await '))).toEqual(['await app.open("/echo");']);
     const closed = await invoke('close_session');
     expect(closed.isError, closed.text).toBe(false);
   });
@@ -487,10 +530,13 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
   });
 
   it('catalogs and runs the project tools of a custom engine target, with only the verbs it declares', async () => {
+    const pathed = await invoke('open_session', { config: 'custom.config.ts', target: 'kiosk', path: '/menu' });
+    expect(pathed.isError).toBe(true);
+    expect(pathed.text).toContain('INVALID_ARGUMENT: open_session: path opens a page');
     const opened = await invoke('open_session', { config: 'custom.config.ts', target: 'kiosk' });
     expect(opened.isError, opened.text).toBe(false);
     expect(opened.text).toContain('platform kiosk, engine fake');
-    expect(opened.text).toContain('button "Start order"');
+    expect((await call('observe')).text).toContain('button "Start order"');
     expect(opened.text).toContain('- seed_data {tenant}: Seed a tenant with demo data.');
     expect(opened.text).toContain('- count_nodes: Count the nodes on screen. [read-only]');
     const names = catalogNames(opened.text);
@@ -578,16 +624,70 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
       const opened = await open({ engine: '@e2e-dev/web', app: { url: app.url } });
       expect(opened.isError, opened.text).toBe(false);
       expect(opened.text).toMatch(/^Session \S+ open on target "web" \(platform web, engine web [^)]+\), headless; no config file: one target on @e2e-dev\/web, every other setting at its default\./);
-      expect(opened.text).toContain('button "Increment"');
+      expect(opened.text).toMatch(/\n\nScreen: revision b\d+, path \/, \d+ nodes, not listed\..*$/);
       const closed = (await other.callTool({ name: 'close_session', arguments: {} })) as { isError?: boolean };
       expect(closed.isError).not.toBe(true);
 
       const dual = await open({ engine: 'dual-engine', app: { url: app.url } });
       expect(dual.isError, dual.text).toBe(false);
       expect(dual.text).toMatch(/^Session \S+ open on target "web" \(platform web, engine web [^)]+\), headless; no config file: one target on dual-engine, every other setting at its default\./);
-      expect(dual.text).toContain('button "Increment"');
+      expect(dual.text).toMatch(/\n\nScreen: revision b\d+, path \/, \d+ nodes, not listed\..*$/);
       const closedDual = (await other.callTool({ name: 'close_session', arguments: {} })) as { isError?: boolean };
       expect(closedDual.isError).not.toBe(true);
+    } finally {
+      await other.close();
+      bare.cleanup();
+    }
+  });
+
+  it('hands the app of a session opened with no config to the config\'s own checks, whatever its keys', async () => {
+    const bare = createProject({
+      'node_modules/kiosk-engine/package.json': JSON.stringify({ name: 'kiosk-engine', version: '0.0.0', type: 'module', exports: './index.js' }),
+      'node_modules/kiosk-engine/index.js': KIOSK_ENGINE,
+    });
+    const other = new Client({ name: 'e2e-mcp-launch-arguments-test', version: '0.0.0' });
+    await other.connect(new StdioClientTransport({ command: process.execPath, args: [CLI, 'mcp'], cwd: bare.dir, env: { ...(process.env as Record<string, string>), CI: '' }, stderr: 'ignore' }));
+    const open = async (args: Record<string, unknown>): Promise<{ text: string; isError: boolean }> => {
+      const result = (await other.callTool({ name: 'open_session', arguments: args }, { timeout: 110_000 })) as { content: { text?: string }[]; isError?: boolean };
+      return { text: result.content.map((part) => part.text ?? '').join('\n'), isError: result.isError === true };
+    };
+    const received = (): unknown => JSON.parse(readFileSync(path.join(bare.dir, 'node_modules/kiosk-engine/init.json'), 'utf8'));
+    try {
+      const device = await open({
+        engine: 'kiosk-engine',
+        app: { bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'], permissions: { camera: 'grant' } },
+      });
+      expect(device.isError, device.text).toBe(false);
+      expect(received()).toMatchObject({ bundleId: 'com.example.greeter', launchArguments: ['--profile', 'a b'], permissions: { camera: 'grant' } });
+      const closed = (await other.callTool({ name: 'close_session', arguments: {} })) as { isError?: boolean };
+      expect(closed.isError).not.toBe(true);
+
+      const dashed = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', launchArguments: { '-profile': 'a' } } });
+      expect(dashed.isError).toBe(true);
+      expect(dashed.text).toContain('app.launchArguments argument name "-profile" starts with a dash');
+
+      // The schema names no key but the three it describes: a typo and a bad value are the config's to refuse.
+      const typo = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', launchArgument: ['-e2e'] } });
+      expect(typo.isError).toBe(true);
+      expect(typo.text).toContain('INVALID_CONFIG');
+      expect(typo.text).toContain('unknown key "launchArgument"');
+      expect(typo.text).toContain('launchArguments');
+      const denied = await open({ engine: 'kiosk-engine', app: { bundleId: 'com.example.greeter', permissions: { camera: 'yes' } } });
+      expect(denied.isError).toBe(true);
+      expect(denied.text).toContain('app.permissions.camera must be grant, deny, or reset');
+
+      const list = await open({ engine: '@e2e-dev/web', app: { url: app.url, launchArguments: ['-e2e', 'YES'] } });
+      expect(list.isError).toBe(true);
+      expect(list.text).toContain('INVALID_CONFIG');
+      expect(list.text).toContain('declares app.launchArguments, which describes an installed device app');
+      const named = await open({ engine: '@e2e-dev/web', app: { url: app.url, launchArguments: { e2e: true, tags: ['a'] } } });
+      expect(named.isError).toBe(true);
+      expect(named.text).toContain('INVALID_CONFIG');
+      expect(named.text).toContain('app.launchArguments is an object, and engine "web" takes only a list of strings');
+      const nested = await open({ engine: '@e2e-dev/web', app: { url: app.url, launchArguments: { e2e: { on: true } } } });
+      expect(nested.isError).toBe(true);
+      expect(nested.text).toContain('INVALID_CONFIG');
+      expect(nested.text).toContain('app.launchArguments');
     } finally {
       await other.close();
       bare.cleanup();

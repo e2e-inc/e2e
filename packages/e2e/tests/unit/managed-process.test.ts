@@ -7,7 +7,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InfrastructureError } from '@e2e-dev/core/lib/internal/errors';
 import { ManagedProcess, stopsSettled } from '@e2e-dev/core/lib/run/managed-process';
-import type { CommandConfig } from '@e2e-dev/core/lib/types';
+import type { SpawnedCommand } from '@e2e-dev/core/lib/config/command';
 import { freePort } from '../helpers/free-port.ts';
 
 describe('ManagedProcess', () => {
@@ -127,6 +127,57 @@ describe('ManagedProcess', () => {
     await settling;
     expect(settled).toBe(true);
   }, 20_000);
+
+  it.skipIf(process.platform === 'win32')('waits for an in-flight stop when stop is called a second time concurrently', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-mp-stop-race-'));
+    const stoppingFile = path.join(dir, 'stopping');
+    const releaseFile = path.join(dir, 'release');
+    const stoppedFile = path.join(dir, 'stopped');
+    const port = await freePort();
+    const app = new ManagedProcess(
+      'app.command',
+      {
+        executable: process.execPath,
+        args: ['-e', `
+          const fs = require('node:fs');
+          process.on('SIGTERM', () => {
+            fs.writeFileSync(${JSON.stringify(stoppingFile)}, '1');
+            const timer = setInterval(() => {
+              if (!fs.existsSync(${JSON.stringify(releaseFile)})) return;
+              clearInterval(timer);
+              fs.writeFileSync(${JSON.stringify(stoppedFile)}, '1');
+              process.exit(0);
+            }, 10);
+          });
+          require('node:http').createServer((_request, response) => response.end()).listen(${port}, '127.0.0.1');
+        `],
+        startupTimeout: 10_000,
+        shutdownTimeout: 10_000,
+      },
+      dir,
+      { readyUrl: `http://127.0.0.1:${port}/` },
+    );
+    try {
+      await app.start(new AbortController().signal);
+      const firstStop = app.stop();
+      await expect.poll(() => fs.existsSync(stoppingFile), { timeout: 5_000 }).toBe(true);
+      let secondReturned = false;
+      const secondStop = app.stop().then(() => {
+        secondReturned = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(secondReturned).toBe(false);
+      expect(fs.existsSync(stoppedFile)).toBe(false);
+      fs.writeFileSync(releaseFile, '1');
+      await Promise.all([firstStop, secondStop]);
+      expect(secondReturned).toBe(true);
+      expect(fs.existsSync(stoppedFile)).toBe(true);
+    } finally {
+      fs.writeFileSync(releaseFile, '1');
+      await app.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
 });
 
 /** Prints one line to stdout and one to stderr, then exits with `exitCode`. */
@@ -215,7 +266,7 @@ describe('ManagedProcess stall diagnostics', () => {
   });
   const log = path.join('out', 'services.log');
   /** A budget of one second on a fake clock: the test lets the child print, then moves the clock past it. */
-  const stalled = (script: string, extra: Partial<CommandConfig> = {}): CommandConfig => ({
+  const stalled = (script: string, extra: Partial<SpawnedCommand> = {}): SpawnedCommand => ({
     executable: process.execPath,
     args: ['-e', script],
     startupTimeout: 1_000,
@@ -701,7 +752,7 @@ describe('ManagedProcess env', () => {
   });
 
   /** Runs a command that writes its own environment to `env.json` in the project root, and reads it back. */
-  const envOf = async (extra: Partial<CommandConfig>, runEnv?: NodeJS.ProcessEnv): Promise<Record<string, string>> => {
+  const envOf = async (extra: Partial<SpawnedCommand>, runEnv?: NodeJS.ProcessEnv): Promise<Record<string, string>> => {
     await new ManagedProcess(
       'app.command',
       { executable: process.execPath, args: ['-e', `require('node:fs').writeFileSync('env.json', JSON.stringify(process.env))`], cwd: dir, ...extra },

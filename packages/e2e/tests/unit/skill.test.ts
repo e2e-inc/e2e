@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { readGuide, readSkillFiles, skillTopics } from '../../src/cli/skill.ts';
+import { readGuide, readSkillFiles, SHIPPED_SKILL_FILES, skillTopics } from '../../src/cli/skill.ts';
 
 const packageJson = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
   files: string[];
@@ -16,6 +16,25 @@ describe('the bundled agent skill', () => {
     const description = /^description: (.+)$/m.exec(skill?.content ?? '')?.[1] ?? '';
     expect(description.length).toBeLessThanOrEqual(1024);
     expect(description).not.toContain(': ');
+  });
+
+  it('lists every file it ships among the files the skill has ever shipped, which init and upgrade may remove once retired', () => {
+    // Removing a file from the skill keeps its line in SHIPPED_SKILL_FILES, so copies drop it on the next init or upgrade.
+    expect(SHIPPED_SKILL_FILES).toEqual(expect.arrayContaining(readSkillFiles().map((file) => file.relative)));
+    // Append-only: a line dropped from the list leaves that file in every project's copy for good.
+    const shippedBy0_25 = [
+      'SKILL.md',
+      'references/agent.md',
+      'references/bug-bash.md',
+      'references/debugging.md',
+      'references/explore.md',
+      'references/mcp.md',
+      'references/running.md',
+      'references/setup.md',
+      'references/writing-tests.md',
+    ];
+    expect(SHIPPED_SKILL_FILES).toEqual(expect.arrayContaining(shippedBy0_25));
+    expect(new Set(SHIPPED_SKILL_FILES).size).toBe(SHIPPED_SKILL_FILES.length);
   });
 
   it('offers one topic per reference file and lists every topic in SKILL.md', () => {
@@ -99,9 +118,10 @@ function sectionHeadings(markdown: string): string[] {
 function markdownFiles(root: URL, dir: string): string[] {
   return readdirSync(new URL(dir, root), { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
-    // `docs/ja/`, `docs/zh/`, `docs/cs/`, `docs/es/`, `docs/pt/`, `docs/hi/`, `docs/fr/`, and `docs/pl/`
-    // translate the docs; the wording these tests hold is the English pages'.
-    if (entry.isDirectory()) return ['node_modules', 'ja', 'zh', 'cs', 'es', 'pt', 'hi', 'fr', 'pl'].includes(entry.name) ? [] : markdownFiles(root, `${path}/`);
+    // `docs/ja/`, `docs/zh/`, `docs/cs/`, `docs/es/`, `docs/pt/`, `docs/hi/`,
+    // `docs/fr/`, `docs/pl/`, and `docs/id/` translate the docs; the wording
+    // these tests hold is the English pages'.
+    if (entry.isDirectory()) return ['node_modules', 'ja', 'zh', 'cs', 'es', 'pt', 'hi', 'fr', 'pl', 'id'].includes(entry.name) ? [] : markdownFiles(root, `${path}/`);
     return /\.mdx?$/.test(entry.name) ? [path] : [];
   });
 }

@@ -7,9 +7,11 @@
 
 import type { ToolSet } from 'ai';
 import { describe, expect, it } from 'vitest';
-import type { ExecutorActions, ExecutorNode, ExecutorObservation, ExecutorObserveOptions, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
+import type { ExecutorActions, ExecutorNode, ExecutorObservation, ExecutorObserveOptions, ExecutorVerb, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
 import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
-import { createGrammarTools } from '@e2e-dev/core/lib/agent/primitives';
+import { imagePointToViewport } from '@e2e-dev/core/lib/agent/point-tap';
+import { createGrammarTools, grammarTools } from '@e2e-dev/core/lib/agent/primitives';
+import { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
 import type { LocatorExpression, NodeRef, SemanticNode } from '@e2e-dev/core/lib/engine/surface';
 import { TestError } from '@e2e-dev/core/lib/internal/errors';
 import { describeExpression } from '@e2e-dev/core/lib/locator/expression';
@@ -39,6 +41,7 @@ const listed = (node: Fake): ExecutorNode => ({
   ...(node.name === undefined ? {} : { name: node.name }),
   ...(node.text === undefined ? {} : { text: node.text }),
   ...(node.placeholder === undefined ? {} : { attributes: { placeholder: node.placeholder } }),
+  ...(node.testId === undefined ? {} : { testId: node.testId }),
   rect: { x: 0, y: node.y, width: 100, height: 20 },
   ...(node.children === undefined ? {} : { children: node.children.map(listed) }),
 });
@@ -61,6 +64,8 @@ interface Harness {
   readonly context: StepExecutorContext;
   /** Runs one tool through the session's `call` path and returns its text. */
   run(tool: string, args: Record<string, unknown>): Promise<string>;
+  /** Replaces what observe lists from the next observation on, as an engine that numbers every screen afresh does. */
+  show(screen: readonly Fake[]): void;
 }
 
 /**
@@ -73,9 +78,16 @@ async function harness(options: {
   readonly actions?: Partial<ExecutorActions>;
   readonly tree?: boolean;
   readonly testRan?: string;
+  readonly attached?: boolean;
+  readonly hasAgent?: boolean;
+  /** The verbs the target declares; the whole grammar by default. */
+  readonly verbs?: readonly ExecutorVerb[];
 }): Promise<Harness> {
-  const root: Fake = { id: 'root', role: 'document', name: 'Page', y: 0, children: options.screen };
-  const base = fakeExecutorContext({ secrets: [{ name: 'admin.password', purpose: 'password' }, { name: 'apiKey', purpose: 'generic-secret' }] }).context;
+  let root: Fake = { id: 'root', role: 'document', name: 'Page', y: 0, children: options.screen };
+  const base = fakeExecutorContext({
+    secrets: [{ name: 'admin.password', purpose: 'password' }, { name: 'apiKey', purpose: 'generic-secret' }],
+    ...(options.verbs === undefined ? {} : { verbs: options.verbs }),
+  }).context;
   const ok = async (): Promise<void> => undefined;
   const actions: ExecutorActions = {
     ...base.actions,
@@ -90,6 +102,8 @@ async function harness(options: {
     truncated: false,
     viewport: { width: 800, height: 600 },
     ...(asked.tree === true && options.tree !== false ? { tree: listed(root) } : {}),
+    // A screenshot at twice the CSS pixels, as on a high-density display.
+    ...(asked.pixels === true ? { pixels: { data: new Uint8Array([1, 2, 3]), mediaType: 'image/png' as const, width: 1600, height: 1200, scale: 2, maskedRegionCount: 0 } } : {}),
   });
   const context: StepExecutorContext = { ...base, actions, observe };
   const nodes = new Map<string, Fake>();
@@ -101,6 +115,7 @@ async function harness(options: {
   // A match may be a node observe never listed: one the live screen has since grown.
   for (const node of Object.values(options.matches).flat()) index(node);
   let resolves = 0;
+  const presenter = new ScreenPresenter();
   const lines = new SessionTestLines({
     query: locateQuery,
     resolve: async (expression: LocatorExpression): Promise<readonly NodeRef[]> => {
@@ -109,12 +124,18 @@ async function harness(options: {
     },
     read: async (ref) => read(nodes.get(ref.id)!),
     redact: (text) => text.replaceAll('sk-live-0000', '<secret:apiKey>'),
+    pointOf: (x, y) => {
+      const shot = presenter.latestScreenshot;
+      return shot === undefined ? undefined : imagePointToViewport({ x, y }, shot.pixels, shot.viewport);
+    },
     appBase: { href: 'http://127.0.0.1:4100/', origin: 'http://127.0.0.1:4100' },
     fills: { credentials: [{ name: 'admin', username: 'ada@example.test', password: 'admin.password' }], secrets: ['apiKey'] },
     testRan: options.testRan,
+    attached: options.attached,
+    hasAgent: options.hasAgent,
   });
   const watched = lines.watch(context);
-  const tools: ToolSet = { ...lines.wrap(createGrammarTools(watched)), test_lines: lines.tool() };
+  const tools: ToolSet = { ...lines.wrap(grammarTools(watched, { screen: presenter })), test_lines: lines.tool() };
   await watched.observe();
   return {
     tools,
@@ -124,6 +145,10 @@ async function harness(options: {
     run: async (tool, args) => {
       const result = await invokeTool(tool, tools[tool]!, args, extra);
       return result.content.map((part) => (part.type === 'text' ? part.text : '')).join('\n');
+    },
+    show: (screen) => {
+      root = { ...root, children: screen };
+      for (const node of screen) index(node);
     },
   };
 }
@@ -161,12 +186,12 @@ describe('navigationLine', () => {
 });
 
 describe('SessionTestLines', () => {
-  it('answers every grammar action but the point tools, so a new verb needs a line or a reason', async () => {
+  it('answers every grammar action that acts, the point tools among them, so a new verb needs a line or a reason', async () => {
     const context = { ...fakeExecutorContext().context, observe: async () => ({ revision: 'r', text: '', truncated: false, viewport: { width: 1, height: 1 } }) };
     const tools = createGrammarTools(context);
     expect(new Set(Object.keys(tools))).toEqual(GRAMMAR_TOOL_NAMES);
     const wrapped = new SessionTestLines({ query: locateQuery, resolve: async () => [], read: async () => ({ ref: { id: 'x', revision: 'x' } }), redact: (text) => text }).wrap(tools);
-    expect(Object.keys(tools).filter((name) => wrapped[name] === tools[name]).toSorted()).toEqual(['drag_at', 'hover_at', 'observe', 'press_at', 'screenshot', 'select_at', 'tap_at', 'type_at']);
+    expect(Object.keys(tools).filter((name) => wrapped[name] === tools[name]).toSorted()).toEqual(['observe', 'screenshot']);
   });
 
   const save: Fake = { id: 'n2', role: 'button', name: 'Save', y: 40 };
@@ -192,6 +217,35 @@ describe('SessionTestLines', () => {
     const star: Fake = { id: 'n4', role: 'button', testId: 'star', y: 80 };
     const session = await harness({ screen: [save, star], matches: { 'getByRole("button")': [save, star], 'getByTestId("star")': [star] } });
     expect(noteOf(await session.run('tap', { target: 'n4' }))).toBe('Test line: await screen.getByTestId("star").tap();');
+  });
+
+  it('finds a control nothing names by its role: alone, under its row, or by position', async () => {
+    const quantity: Fake = { id: 'n40', role: 'spinbutton', y: 80 };
+    const only = await harness({ screen: [quantity, save], matches: { 'getByRole("spinbutton")': [quantity] } });
+    expect(noteOf(await only.run('type', { target: 'n40', value: '10' }))).toBe(
+      'Test line: await screen.getByRole("spinbutton").fill("10"); // the only spinbutton on the screen, found by its role alone; a name or test id holds up better',
+    );
+
+    const other: Fake = { id: 'n41', role: 'spinbutton', y: 120 };
+    const rows: Fake[] = [
+      { id: 'n42', role: 'row', y: 80, children: [{ id: 'n43', text: 'Boxes', y: 80 }, quantity] },
+      { id: 'n44', role: 'row', y: 120, children: [{ id: 'n45', text: 'Crates', y: 120 }, other] },
+    ];
+    const scoped = await harness({
+      screen: rows,
+      matches: { 'getByRole("spinbutton")': [quantity, other], 'getByRole("row").filter({ hasText: "Crates" }) >> getByRole("spinbutton")': [other] },
+    });
+    expect(noteOf(await scoped.run('type', { target: 'n41', value: '3' }))).toBe(
+      'Test line: await screen.getByRole("row").filter({ hasText: "Crates" }).getByRole("spinbutton").fill("3");',
+    );
+
+    const placed = await harness({ screen: [quantity, other], matches: { 'getByRole("spinbutton")': [quantity, other] } });
+    expect(noteOf(await placed.run('type', { target: 'n41', value: '3' }))).toBe(
+      'Test line: await screen.getByRole("spinbutton").nth(1).fill("3"); // 2 of 2 matches, by position; a unique name or test id holds up better',
+    );
+    // A node with no role getByRole takes still has nothing to find it by.
+    const bare = await harness({ screen: [{ id: 'n46', y: 200 }], matches: {} });
+    expect(noteOf(await bare.run('tap', { target: 'n46' }))).toBe('No test line: the node has no name, text, placeholder, or test id to find it by.');
   });
 
   it('never prints a locator whose one match is another node', async () => {
@@ -405,8 +459,101 @@ describe('SessionTestLines', () => {
     expect(noteOf(await session.run('tap', { target: 'n2' }))).toBe('No test line: #n2 is not on the newest screen.');
   });
 
+  it('finds an id an earlier screen listed on the newest one, as the step does for the action', async () => {
+    const renumbered: Fake = { id: 'n9', role: 'button', name: 'Save', y: 40 };
+    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [renumbered] } });
+    session.show([renumbered]);
+    await session.context.observe();
+    expect(noteOf(await session.run('tap', { target: 'n2' }))).toBe('Test line: await screen.getByRole("button", "Save").tap();');
+    // Two nodes that read like it: the step finds neither, and neither does the line.
+    session.show([renumbered, { id: 'n10', role: 'button', name: 'Save', y: 80 }]);
+    await session.context.observe();
+    expect(noteOf(await session.run('tap', { target: 'n2' }))).toBe('No test line: #n2 is not on the newest screen.');
+  });
+
+  it('re-finds an earlier id by the test id the action goes by, so the line names the node the action touched', async () => {
+    // Two Delete buttons told apart by test id, renumbered and swapped on the next screen.
+    const first: Fake = { id: 'n3', role: 'button', name: 'Delete', testId: 'delete-1', y: 40 };
+    const second: Fake = { id: 'n4', role: 'button', name: 'Delete', testId: 'delete-2', y: 80 };
+    const moved1: Fake = { id: 'n14', role: 'button', name: 'Delete', testId: 'delete-1', y: 80 };
+    const moved2: Fake = { id: 'n13', role: 'button', name: 'Delete', testId: 'delete-2', y: 40 };
+    const session = await harness({ screen: [first, second], matches: { 'getByRole("button", name: "Delete")': [moved2, moved1], 'getByTestId("delete-1")': [moved1] } });
+    session.show([moved2, moved1]);
+    await session.context.observe();
+    expect(noteOf(await session.run('tap', { target: 'n3' }))).toBe('Test line: await screen.getByTestId("delete-1").tap();');
+
+    // Two nameless rows told apart by test id, whose text swapped: the text does not decide.
+    const rowA: Fake = { id: 'n5', role: 'row', text: 'Paid', testId: 'row-a', y: 120 };
+    const rowB: Fake = { id: 'n6', role: 'row', text: 'Due', testId: 'row-b', y: 160 };
+    const nowA: Fake = { ...rowA, id: 'n15', text: 'Due' };
+    const nowB: Fake = { ...rowB, id: 'n16', text: 'Paid' };
+    const rows = await harness({ screen: [rowA, rowB], matches: { 'getByRole("row")': [nowA, nowB], 'getByText("Due")': [nowA], 'getByTestId("row-a")': [nowA] } });
+    rows.show([nowA, nowB]);
+    await rows.context.observe();
+    // The row the action touched shows "Due" now; the one showing "Paid" is the other row.
+    expect(noteOf(await rows.run('tap', { target: 'n5' }))).toBe('Test line: await screen.getByText("Due").tap();');
+  });
+
+  describe('point tools', () => {
+    const notes: Fake = { id: 'n20', role: 'textbox', name: 'Notes', y: 100 };
+    const plan: Fake = { id: 'n21', role: 'combobox', name: 'Plan', y: 140 };
+    /** What the step's hit test finds at each CSS point: Save over y 40 to 60, Notes over 100 to 120, Plan over 140 to 160. */
+    const hitTest: ExecutorActions['hitTest'] = async (point) => {
+      const control = [save, notes, plan].find((node) => point.y >= node.y && point.y <= node.y + 20);
+      return { point, ...(control === undefined ? {} : { control: { id: control.id } }), summary: control === undefined ? 'nothing the screen lists is there' : `#${control.id}` };
+    };
+    const tapAt: ExecutorActions['tapAt'] = async (point) => ({ point, summary: `Tapped the point (${String(point.x)}, ${String(point.y)}).` });
+    const hoverAt: ExecutorActions['hoverAt'] = async (point) => ({ point, summary: `Hovered over the point (${String(point.x)}, ${String(point.y)}).` });
+    const dragAt: ExecutorActions['dragAt'] = async (from, to) => ({ from, to, summary: 'Dragged.' });
+    const pointActions = { hitTest, tapAt, hoverAt, dragAt };
+    const matches = { 'getByRole("button", name: "Save")': [save], 'getByRole("textbox", name: "Notes")': [notes], 'getByRole("combobox", name: "Plan")': [plan] };
+    // Every verb but the bare-point ones: the point tools act on the listed control under the point by id.
+    const byId = (Object.keys(fakeExecutorContext().context.actions) as ExecutorVerb[]).filter((verb) => verb !== 'tapAt' && verb !== 'hoverAt' && verb !== 'dragAt');
+
+    it('prints nothing for a point tool before the first screenshot, which does not act', async () => {
+      const session = await harness({ screen: [save], matches, actions: pointActions });
+      expect(await session.run('tap_at', { x: 20, y: 100 })).toMatch(/^No screenshot has been taken/);
+      expect(await session.run('test_lines', {})).toMatch(/^No test lines yet\./);
+    });
+
+    it('writes a bare tap as screen.tapAt in CSS pixels, where the engine takes the bare point', async () => {
+      const session = await harness({ screen: [save], matches, actions: pointActions });
+      await session.run('screenshot', {});
+      expect(noteOf(await session.run('tap_at', { x: 20, y: 102 }))).toBe(
+        'Test line: await screen.tapAt({ x: 10, y: 51 }); // a bare point holds only while the layout does; tap a listed node by id for a locator line',
+      );
+      expect(noteOf(await session.run('hover_at', { x: 20, y: 101 }))).toMatch(/^No test line: a hover at a bare point has no screen call/);
+      expect(noteOf(await session.run('drag_at', { x: 20, y: 101, to_x: 20, to_y: 220 }))).toMatch(/^No test line: a drag between bare points has no screen call/);
+    });
+
+    it("writes the listed control's locator where the step acts on it by id", async () => {
+      const session = await harness({ screen: [save, notes, plan], matches, actions: pointActions, verbs: byId });
+      await session.run('screenshot', {});
+      expect(noteOf(await session.run('tap_at', { x: 20, y: 100 }))).toBe('Test line: await screen.getByRole("button", "Save").tap();');
+      expect(noteOf(await session.run('hover_at', { x: 20, y: 100 }))).toBe('Test line: await screen.getByRole("button", "Save").hover();');
+      expect(noteOf(await session.run('type_at', { x: 20, y: 220, value: 'ada@example.test' }))).toBe(
+        'Test line: await screen.getByRole("textbox", "Notes").fill(credentials.user("admin").username);',
+      );
+      expect(noteOf(await session.run('press_at', { x: 20, y: 220, key: 'Enter' }))).toBe('Test line: await screen.getByRole("textbox", "Notes").press("Enter");');
+      expect(noteOf(await session.run('select_at', { x: 20, y: 300, value: 'Pro' }))).toBe('Test line: await screen.getByRole("combobox", "Plan").selectOption("Pro");');
+      expect(noteOf(await session.run('drag_at', { x: 20, y: 100, to_x: 20, to_y: 300 }))).toBe(
+        'Test line: await screen.getByRole("button", "Save").dragTo(screen.getByRole("combobox", "Plan"));',
+      );
+    });
+
+    it('says why a point on nothing listed has no line, and the draft keeps the step as a comment', async () => {
+      const session = await harness({ screen: [save], matches, actions: pointActions, verbs: byId });
+      await session.run('screenshot', {});
+      expect(noteOf(await session.run('press_at', { x: 20, y: 500, key: 'Enter' }))).toBe(
+        'No test line: no listed control is at the point: it was tapped to focus what is there and the keys went through the keyboard, which no locator line repeats.',
+      );
+      const draft = await session.run('test_lines', {});
+      expect(draft).toContain('\n// press_at: no test line: no listed control is at the point: it was tapped');
+    });
+  });
+
   it('records the opening of the app as app.open() and drafts the lines in order', async () => {
-    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] } });
+    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] }, hasAgent: true });
     session.lines.opened();
     await session.run('tap', { target: 'n2' });
     await session.run('scroll', { direction: 'down' });
@@ -418,9 +565,38 @@ describe('SessionTestLines', () => {
         'await screen.getByRole("button", "Save").tap();',
         '// scroll: no test line: a test action brings its node into view itself, and a row deep in a windowed list takes screen.scrollUntilVisible(locator)',
         '',
-        'Paste it into a test body, async ({ app, screen }) => { ... }, and add an expect after each step that should change the screen.',
+        'Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ app, screen }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice. Prefer agent.act for user flows, with agent among the test fixtures (keep screen lines for low-level mechanics under test or a sign-in setup). Give the agent the steps for one test goal, and split into calls when a later step needs a known screen state, risks maxSteps or maxModelCalls budgets, or needs a middle step boundary. Wait for the intermediate screen state before continuing. See topic writing-tests, Structure.',
       ].join('\n'),
     );
+    expect(session.tools.test_lines?.description).toContain('Split the draft into tests, one behavior each');
+    expect(session.tools.test_lines?.description).not.toContain('continue the existing test');
+    expect(session.tools.test_lines?.description).not.toContain('pause point');
+  });
+
+  it('drafts the lines while attached to a held test for its pause point', async () => {
+    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] }, attached: true });
+    await session.run('tap', { target: 'n2' });
+    expect(session.lines.draft()).toBe(
+      [
+        "Test lines from this session's actions while the test was held, in order (1 lines):",
+        '',
+        'await screen.getByRole("button", "Save").tap();',
+        '',
+        "Put them in the held test at the pause point. Keep the test's checks together at its end, with one that checks its outcome. See topic writing-tests, Structure.",
+      ].join('\n'),
+    );
+    expect(session.tools.test_lines?.description).toContain('Use these lines at the pause point of the held test');
+    expect(session.tools.test_lines?.description).not.toMatch(/split the draft into tests/i);
+    expect(session.tools.test_lines?.description).not.toContain('continue the existing test');
+  });
+
+  it('omits agent.act advice from the draft when no model or executor is configured', async () => {
+    const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] }, hasAgent: false });
+    session.lines.opened();
+    await session.run('tap', { target: 'n2' });
+    const draft = session.lines.draft();
+    expect(draft).toContain('Split these lines into tests, one behavior each');
+    expect(draft).not.toContain('agent.act');
   });
 
   it('prints no line for a resize, naming the size to set with the engine fixture', async () => {
@@ -438,15 +614,17 @@ describe('SessionTestLines', () => {
         '',
         'await screen.getByRole("button", "Save").tap();',
         '',
-        'Put them in that test where it stopped, in place of the line that failed or after its last line, and add an expect after each step that should change the screen.',
+        "Put them in that test where it stopped, in place of the line that failed or after its last step. Keep the test's checks together at its end, with one that checks its outcome. See topic writing-tests, Structure.",
       ].join('\n'),
     );
+    expect(session.tools.test_lines?.description).toContain('Use these lines to continue the existing test');
+    expect(session.tools.test_lines?.description).not.toMatch(/split the draft into tests/i);
   });
 
-  it('drafts the statements run_code passed among the action lines, each awaited and ended', async () => {
+  it('drafts the lines run_code passed among the action lines', async () => {
     const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] } });
     session.lines.opened();
-    session.lines.ran(["await screen.getByLabel('Email').fill(credentials.user('admin').password);", "expect(screen.getByRole('status')).toHaveText('Saved')"]);
+    session.lines.ran(["await screen.getByLabel('Email').fill(credentials.user('admin').password);", "await expect(screen.getByRole('status')).toHaveText('Saved');"]);
     await session.run('tap', { target: 'n2' });
     const draft = session.lines.draft();
     expect(draft.split('\n').slice(0, 6)).toEqual([
@@ -458,6 +636,29 @@ describe('SessionTestLines', () => {
       'await screen.getByRole("button", "Save").tap();',
     ]);
     expect(draft).toContain("Import credentials from 'e2e'.");
+  });
+
+  it("asks the draft's test body for an engine fixture a line only passes along", () => {
+    const drafted = (line: string): string => {
+      const lines = new SessionTestLines({ query: locateQuery, resolve: async () => [], read: async () => ({ ref: { id: 'x', revision: 'x' } }), redact: (text) => text, engineFixtures: ['browser'] });
+      lines.ran([line]);
+      return /async \(\{ ([^}]*) \}\)/.exec(lines.draft())?.[1] ?? '';
+    };
+    expect(drafted('await expect(browser).toHaveURL(/done/);')).toBe('app, screen, browser');
+    expect(drafted('await screen.getByRole("row").dragTo(browser.locator("#bin"));')).toBe('app, screen, browser');
+    // The word in a string, or as another object's member, is not the fixture.
+    expect(drafted("await screen.getByText('browser, then').tap();")).toBe('app, screen');
+    expect(drafted('await app.browser.open();')).toBe('app, screen');
+  });
+
+  it("asks the draft's test body for services, whether a line starts from them or only passes them along", () => {
+    const drafted = (line: string): string => {
+      const lines = new SessionTestLines({ query: locateQuery, resolve: async () => [], read: async () => ({ ref: { id: 'x', revision: 'x' } }), redact: (text) => text, engineFixtures: ['browser'] });
+      lines.ran([line]);
+      return /async \(\{ ([^}]*) \}\)/.exec(lines.draft())?.[1] ?? '';
+    };
+    expect(drafted('await services["my-mail"].createInbox();')).toBe('app, screen, services');
+    expect(drafted('await browser.setViewport(services.layout.size);')).toBe('app, screen, browser, services');
   });
 
   it('hands the caller the observation it asked for, tree or not, and keeps the context live', async () => {

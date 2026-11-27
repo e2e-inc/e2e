@@ -1,7 +1,8 @@
 import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
+import { content } from './helpers.ts';
 
-test.describe('browser fixture', { requires: ['browser'], tags: ['browser'] }, () => {
+test.describe('browser fixture', { platforms: ['web'], tags: ['browser'] }, () => {
   test.beforeEach(async ({ app }) => {
     await app.open('/browser');
   });
@@ -19,6 +20,23 @@ test.describe('browser fixture', { requires: ['browser'], tags: ['browser'] }, (
     await expect(browser).toHaveURL('/browser');
     await browser.forward();
     await expect(browser).toHaveURL(/about$/);
+  });
+
+  test('a negated matcher passes on the first read that sees the negation', async ({ screen, browser }) => {
+    // Each save hides the banner and renames the page for 900 ms, then puts both back.
+    await browser.goto(
+      content(`<title>Idle</title>
+<button onclick="setTimeout(() => { banner.hidden = true; document.title = 'Saving'; }, 200); setTimeout(() => { banner.hidden = false; document.title = 'Idle'; }, 1100)">Save</button>
+<p id="banner" role="status">All changes saved</p>`),
+    );
+    const banner = screen.getByRole('status');
+    await screen.getByRole('button', 'Save').tap();
+    await expect(banner).not.toBeVisible();
+    await expect(banner).toBeVisible();
+
+    await screen.getByRole('button', 'Save').tap();
+    await expect(browser).not.toHaveTitle('Idle');
+    await expect(browser).toHaveTitle('Idle');
   });
 
   test('reload runs the page again', async ({ screen, browser }) => {
@@ -50,9 +68,70 @@ test.describe('browser fixture', { requires: ['browser'], tags: ['browser'] }, (
     const theme = (await browser.cookies()).find((cookie) => cookie.name === 'theme');
     expect(theme?.value).toBe('dark');
   });
+
+  test('cookies(url) returns only the cookies a request to the URL carries', async ({ app, browser }) => {
+    const { hostname } = new URL(app.baseUrl);
+    await browser.setCookies([
+      { name: 'everywhere', value: '1', url: app.baseUrl },
+      { name: 'scoped', value: '1', domain: hostname, path: '/browser' },
+      { name: 'elsewhere', value: '1', domain: 'other.example', path: '/' },
+      { name: 'encrypted', value: '1', domain: 'shop.example', path: '/', secure: true },
+      { name: 'shared', value: '1', domain: '.shop.example', path: '/' },
+    ]);
+    const names = async (urls?: string | string[]) => (await browser.cookies(urls)).map((cookie) => cookie.name).toSorted();
+
+    expect(await names(app.baseUrl)).toEqual(['everywhere']);
+    expect(await names('/browser')).toEqual(['everywhere', 'scoped']);
+    expect(await names('/browsers')).toEqual(['everywhere']);
+    expect(await names('http://shop.example/')).toEqual(['shared']);
+    expect(await names('https://shop.example/')).toEqual(['encrypted', 'shared']);
+    expect(await names('http://api.shop.example/')).toEqual(['shared']);
+    expect(await names(['http://other.example/', '/browser'])).toEqual(['elsewhere', 'everywhere', 'scoped']);
+    expect(await names()).toEqual(['elsewhere', 'encrypted', 'everywhere', 'scoped', 'shared']);
+  });
 });
 
-test('emulated media reaches the page\'s own @media rules, from the first paint on', { requires: ['browser'], tags: ['browser'] }, async ({ app, screen, browser }) => {
+test('the browser names its engine and reports a version before any page opens', { platforms: ['web'], tags: ['browser'] }, async ({ browser }) => {
+  expect(['chromium', 'firefox', 'webkit']).toContain(browser.name);
+  expect(browser.version).toMatch(/^\d+(\.\d+)*$/);
+});
+
+test('a test skips on the browsers it does not cover', { platforms: ['web'], tags: ['browser'] }, async ({ browser }) => {
+  test.skip(browser.name !== 'chromium', 'covers Chromium only');
+  expect(browser.name).toBe('chromium');
+});
+
+// A serial group's members share one session, each under an attempt id of its own.
+test.describe('browser identity in a serial group', { serial: true, platforms: ['web'], tags: ['browser'] }, () => {
+  let first = '';
+
+  test('the first member reads the identity', ({ browser }) => {
+    expect(['chromium', 'firefox', 'webkit']).toContain(browser.name);
+    first = browser.version;
+  });
+
+  test('the second member reads the same browser', ({ browser }) => {
+    expect(browser.version).toBe(first);
+  });
+});
+
+test('offline fails the page\'s requests and navigations until the test goes back online', { platforms: ['web'], tags: ['browser'] }, async ({ app, screen, browser }) => {
+  await app.open('/browser');
+  await expect(screen.getByLabel('Network')).toHaveText('online');
+  await browser.setNetwork('offline');
+  await expect(screen.getByLabel('Network')).toHaveText('offline');
+  await screen.getByRole('button', 'Ping').tap();
+  await expect(screen.getByLabel('Ping')).toHaveText('no answer');
+  const failure = await browser.reload().then(() => undefined, (error: unknown) => error);
+  expect(failure).toMatchObject({ code: 'ACTION_FAILED' });
+  await browser.setNetwork('online');
+  await app.open('/browser');
+  await expect(screen.getByLabel('Network')).toHaveText('online');
+  await screen.getByRole('button', 'Ping').tap();
+  await expect(screen.getByLabel('Ping')).toHaveText('answered');
+});
+
+test('emulated media reaches the page\'s own @media rules, from the first paint on', { platforms: ['web'], tags: ['browser'] }, async ({ app, screen, browser }) => {
   await browser.emulateMedia({ colorScheme: 'dark' });
   await app.open('/browser');
   await expect(screen.getByLabel('Media')).toHaveText('dark, full motion');

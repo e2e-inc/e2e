@@ -2,6 +2,8 @@ node_modules/
 dist/
 .env.local
 *.tsbuildinfo
+# Cargo's build output for the crates/ workspace.
+/target/
 # Run output of every package: `**/` reaches them, a pattern with a slash in the middle stays at this directory.
 **/.e2e/results/
 **/.e2e/sessions/
@@ -10,6 +12,7 @@ dist/
 **/.e2e/ai-trace.json
 **/.e2e/timings.json
 **/.e2e/junit.xml
+**/.e2e/ctrf.json
 **/.e2e/summary.md
 **/.e2e/logs/
 **/.e2e/videos/

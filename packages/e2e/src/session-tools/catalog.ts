@@ -4,9 +4,9 @@
  * honors, `screenshot` (which also saves a file when given a path) and the
  * point tools (`tap_at`, `hover_at`, `drag_at`, `type_at`, `press_at`,
  * `select_at`) among it, `locate` tries a semantic
- * locator the way a test would, `run_code` runs whole test statements on
+ * locator the way a test would, `run_code` runs JavaScript whose test lines run on
  * the session's fixtures, `test_lines` returns the test line every action
- * printed (`test-lines.ts`) and the statements `run_code` passed,
+ * printed (`test-lines.ts`), the point tools' among them, and the lines `run_code` passed,
  * `start_recording` and `stop_recording` follow when the engine records video,
  * and the project's own tools come last. The config load refuses a project
  * tool named like a built-in; should one reach here anyway, the built-in
@@ -21,6 +21,7 @@ import { z } from 'zod';
 import { projectTools } from '@e2e-dev/core/lib/agent/default-agent';
 import type { ExecutorNode, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
 import { projectTree, redactNode, type NodeRedaction } from '@e2e-dev/core/lib/agent/observation';
+import { imagePointToViewport } from '@e2e-dev/core/lib/agent/point-tap';
 import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
 import { grammarTools } from '@e2e-dev/core/lib/agent/primitives';
 import type { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
@@ -77,9 +78,15 @@ export interface CatalogOptions {
   readonly fills?: TestLineFills | undefined;
   /** The test the session ran first, as `file:line`, which its test lines carry on from. */
   readonly testRan?: string | undefined;
+  /** Whether the session is attached to a held running test (`screen.pause()` or `--step`). */
+  readonly attached?: boolean | undefined;
+  /** Whether the session's agent has a model or custom executor configured. */
+  readonly hasAgent?: boolean | undefined;
   readonly warn: (message: string) => void;
   /** Told the cause of every grammar action that failed into a result. */
   readonly onActionFailed?: ((cause: unknown) => void) | undefined;
+  /** Told the code a `run_code` call failed with: its result is rendered text, which carries no code of its own. */
+  readonly onRunCodeFailed?: ((code: string) => void) | undefined;
   /** The attempt's fixtures and what guards them, for `run_code`; without them the catalog has no `run_code`. */
   readonly runCode?: RunCodeSession | undefined;
 }
@@ -92,9 +99,17 @@ export function createSessionCatalog(options: CatalogOptions): SessionCatalog {
     resolve: (expression) => locator.resolveNow(expression),
     read: (ref) => options.session.read(ref, locator.operation()),
     redact: options.redaction.redact,
+    // The point tools read their points off the screenshot the presenter last sent.
+    pointOf: (x, y) => {
+      const shot = screen.latestScreenshot;
+      return shot === undefined ? undefined : imagePointToViewport({ x, y }, shot.pixels, shot.viewport);
+    },
     appBase: options.appBase,
     fills: options.fills,
+    engineFixtures: options.runCode?.engineFixtures,
     testRan: options.testRan,
+    attached: options.attached,
+    hasAgent: options.hasAgent,
   });
   const context = lines.watch(options.context);
   // The grammar's own observe reports a diff for the model loop; the
@@ -109,7 +124,7 @@ export function createSessionCatalog(options: CatalogOptions): SessionCatalog {
     observe: fullObserveTool(context, screen),
     ...lines.wrap(verbs),
     locate: locateTool(locator, options.session, options.redaction),
-    ...(options.runCode === undefined ? {} : { run_code: runCodeTool({ ...options.runCode, context, screen, record: (passed) => lines.ran(passed) }) }),
+    ...(options.runCode === undefined ? {} : { run_code: runCodeTool({ ...options.runCode, context, screen, record: (passed) => lines.ran(passed), onFailed: options.onRunCodeFailed }) }),
     test_lines: lines.tool(),
     ...recording,
   };
@@ -163,14 +178,14 @@ async function saveScreenshot(
 
 /**
  * The session's `observe`: the whole screen, every time. Action results
- * report what changed since the screen the agent last received, as they do
+ * report what changed since the last screen, as they do
  * for the testing agent; a coding agent that asks to look wants everything,
  * and the presenter takes that screen as the new baseline for later changes.
  */
 function fullObserveTool(context: Pick<StepExecutorContext, 'observe'>, screen: Pick<ScreenPresenter, 'initial'>): ToolSet[string] {
   return {
     description:
-      'Look at the whole current screen: every node with its id, role, name, and state. Action results report only what changed since the screen you last received; call this to see everything again or after waiting for something in progress.',
+      'Look at the whole current screen: every node with its id, role, name, and state. Action results report only what changed since the last screen; call this to list everything, or after waiting for something in progress.',
     inputSchema: z.object({}).strict(),
     execute: async () => screen.initial(await context.observe()),
   };
@@ -180,7 +195,7 @@ function fullObserveTool(context: Pick<StepExecutorContext, 'observe'>, screen: 
 function locateTool(locator: CatalogOptions['locator'], session: Pick<TargetSession, 'read'>, redaction: NodeRedaction): ToolSet[string] {
   return {
     description:
-      'Try a semantic locator against the live screen before writing it into a test: screen.getByRole(role, name), getByText, getByLabel, getByPlaceholder, or getByTestId. Returns how many nodes match and which, plus the test code to use. Exactly one of role, text, label, placeholder, or testId; name narrows a role query. Matching is exact unless exact is false.',
+      'Try a semantic locator against the live screen before writing it into a test. It runs screen.getByRole(role, name), getByText, getByLabel, getByPlaceholder, or getByTestId, and returns how many nodes match and which, plus the test code to use. Exactly one of role, text, label, placeholder, or testId; name narrows a role query. Matching is exact unless exact is false.',
     inputSchema: z.object({
       role: z.string().min(1).optional().describe('ARIA role, e.g. "button", "textbox", "link"'),
       name: z.string().min(1).optional().describe('Accessible name, with role'),
@@ -273,7 +288,9 @@ export function describeLocate(query: LocateQuery, count: number, nodes: readonl
 /**
  * A located node by what names it, from the projection `observe` hands an
  * executor: name, text, and value have passed the secret ledger and a secure
- * node carries no value. Located refs are not observation ids, so none is shown.
+ * node carries no value. Located refs are not observation ids, so none is shown,
+ * and neither is `empty`, a state engines add to a located node for
+ * `toBeEmpty` alone, which an observation never carries.
  */
 function describeNode(node: ExecutorNode): string {
   const parts = [node.role ?? 'node'];
@@ -281,7 +298,7 @@ function describeNode(node: ExecutorNode): string {
   if (node.text !== undefined && node.text !== '' && node.text !== node.name) parts.push(`text ${JSON.stringify(node.text)}`);
   if (node.value !== undefined) parts.push(`value ${JSON.stringify(node.value)}`);
   const states = Object.entries(node.states ?? {})
-    .filter(([, value]) => value === true)
+    .filter(([key, value]) => value === true && key !== 'empty')
     .map(([key]) => key);
   if (states.length > 0) parts.push(`[${states.join(', ')}]`);
   return parts.join(' ');

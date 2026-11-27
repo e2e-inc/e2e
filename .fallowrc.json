@@ -17,12 +17,20 @@
     "apps/desktop-testbed/e2e.config.ts",
     "apps/desktop-testbed/e2e.*.config.ts",
     "apps/desktop-testbed/tests*/**/*.ts",
+    "apps/electron-testbed/e2e.config.ts",
+    "apps/electron-testbed/e2e.*.config.ts",
+    "apps/electron-testbed/tests*/**/*.ts",
+    "apps/electron-testbed/app/*.{cjs,js}",
     "packages/e2e/tests/types/sdk-types.ts",
     "packages/web/tests/types/connection.ts",
     "packages/web/tests/types/init-scripts.ts",
     "packages/web/tests/types/keyboard.ts",
     "packages/web/tests/types/media.ts",
+    "packages/web/tests/types/network.ts",
+    "packages/web/tests/types/browser-info.ts",
+    "packages/web/tests/types/clock.ts",
     "packages/web/tests/types/routes.ts",
+    "packages/web/tests/types/webmcp.ts",
     "packages/web/tests/types/clear-cookies.ts",
     "packages/web/tests/types/downloads.ts",
     "packages/web/tests/types/app.ts",
@@ -30,14 +38,15 @@
     "packages/web/tests/types/engine.ts",
     "packages/mobile/tests/types/options.ts",
     "packages/mobile/tests/types/engine.ts",
+    "packages/desktop/tests/types/engine.ts",
     "packages/browser-run/tests/types/options.ts",
     "packages/moli/tests/types/options.ts",
     "packages/decision/tests/types/options.ts",
     "packages/acp/tests/fixtures/scripted-agent.ts",
-    "packages/desktop/tests/helpers/fake-agent-desktop.mjs",
     "packages/acp/tests/live/*.ts",
     "packages/e2e/tests/live/*.ts",
-    "packages/e2e/src/config/register.ts"
+    "packages/e2e/src/config/register.ts",
+    "scripts/microbench/child.mjs"
   ],
   "ignorePatterns": [
     "docs/**",
@@ -48,6 +57,8 @@
     "packages/e2e/tests/tmp-projects/**"
   ],
   "ignoreDependencies": [
+    "@e2e-dev/desktop-darwin-arm64",
+    "@e2e-dev/desktop-darwin-x64",
     "e2e",
     "@e2e-dev/web",
     "@openrouter/ai-sdk-provider",
@@ -55,7 +66,7 @@
     "@expo/repack-app",
     "@oxc-project/runtime"
   ],
-  "ignoreBinaries": ["eas"],
+  "ignoreBinaries": ["eas", "vhs", "valgrind", "lsappinfo"],
   "ignoreExports": [
     {
       "file": "packages/core/src/types.ts",

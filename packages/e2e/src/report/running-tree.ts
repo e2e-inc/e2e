@@ -7,7 +7,7 @@
  */
 
 import { bounded, F_POINTER, fitColumns, formatTime, terminalColumns, terminalRows, withActor, type Colors } from './format.ts';
-import type { CurrentStep, FileGroup, PausedTest, RunningTest, SetupInFlight } from './list-model.ts';
+import { currentStep, type CurrentStep, type FileGroup, type PausedTest, type RunningTest, type SetupInFlight } from './list-model.ts';
 import { eventLine, heldStepRows, quotedLabel, stepLine } from './list-steps.ts';
 import { REPAINT_INTERVAL_MS, WIDTH_MARGIN } from './live-window.ts';
 
@@ -126,7 +126,7 @@ export class RunningTree {
     const capacity = Math.max(0, terminalRows() - summary.length - CHROME_ROWS - footer.length);
     let budget = capacity;
     const columns = terminalColumns() - WIDTH_MARGIN;
-    const promptRows = paused?.prompt.steps.length ?? 0;
+    const promptRows = paused?.event.steps.length ?? 0;
     const perTest = Math.max(
       0,
       Math.floor((budget - promptRows - active.size - running.length) / Math.max(1, running.length)),
@@ -159,7 +159,7 @@ export class RunningTree {
         if (held === undefined) {
           lines.push(`${pc.bold(pc.yellow(`   ${glyph} `))}${test.title} ${this.clock(now - test.startedMs)}`);
         } else {
-          const { attachId } = held.prompt.steps[0].step;
+          const { attachId } = held.event;
           const id = `(${attachId})`;
           const prefix = `   ${glyph} `;
           const titleWidth = columns - prefix.length - id.length - 1;
@@ -192,10 +192,10 @@ export class RunningTree {
    */
   private detailRows(test: RunningTest, maxEvents: number, budget: number, now: number, held: PausedTest | undefined): string[] {
     const maxWidth = terminalColumns() - WIDTH_MARGIN - DETAIL_INDENT.length;
-    const prompt = held === undefined ? [] : heldStepRows(this.pc, held.prompt, maxWidth).slice(0, budget);
+    const prompt = held === undefined ? [] : heldStepRows(this.pc, held.event, maxWidth).slice(0, budget);
     const current = [...this.stepRows(test, maxEvents, budget - prompt.length, now), ...prompt];
     const room = budget - current.length;
-    const rendered = (test.ran ?? test.steps).map((step) => stepLine(this.pc, step, { maxWidth }));
+    const rendered = (test.ran ?? test.steps).map((step) => stepLine(this.pc, step, { maxWidth, depth: step.groups.length }));
     let finished: string[] = [];
     if (room > 0) {
       const folded = rendered.length - room + 1;
@@ -212,7 +212,7 @@ export class RunningTree {
    */
   private stepRows(test: RunningTest, maxEvents: number, budget: number, now: number): string[] {
     const { pc } = this;
-    const { current } = test;
+    const current = currentStep(test);
     if (current === undefined) return [];
     const rows = [pc.dim(`${F_DOWN_RIGHT} ${withActor(current.actor, current.api)} ${quotedLabel(current.label)}`)];
     if (current.kind !== 'agent') return rows.slice(0, budget);

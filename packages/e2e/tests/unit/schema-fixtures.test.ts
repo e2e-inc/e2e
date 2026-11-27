@@ -33,7 +33,16 @@ describe.each(schemas)('%s schema', (name) => {
   it('rejects the invalid fixture', () => {
     expect(validate(readJson('fixtures', `${name}.invalid.json`))).toBe(false);
     if (name === 'report-v1') {
-      expect(validate.errors).toEqual(expect.arrayContaining([expect.objectContaining({ instancePath: '/run/durationMs', keyword: 'minimum' })]));
+      expect(validate.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ instancePath: '/run/durationMs', keyword: 'minimum' }),
+          expect.objectContaining({ instancePath: '/run/shard/index', keyword: 'minimum' }),
+          expect.objectContaining({ instancePath: '/run/merge/shardDurationMs', keyword: 'minimum' }),
+          expect.objectContaining({ instancePath: '/run/merge/shards/0/index', keyword: 'minimum' }),
+          expect.objectContaining({ instancePath: '/run/results/0/skip/otherShard', keyword: 'const' }),
+          expect.objectContaining({ keyword: 'minimum', instancePath: expect.stringMatching(/\/steps\/\d+\/parent$/) }),
+        ]),
+      );
     }
   });
 
@@ -47,8 +56,25 @@ describe.each(schemas)('%s schema', (name) => {
     });
 
     it('rejects the duplicate payload action specifically', () => {
-      expect(validate(readJson('fixtures', 'engine-manifest-v1.invalid.json'))).toBe(false);
+      expect(validate({
+        name: 'web', version: '0.1.0', spiVersion: 1,
+        methods: ['engine/observe', 'engine/perform'],
+        actions: ['setInputFiles', 'setInputFilePayloads', 'setInputFilePayloads'],
+      })).toBe(false);
       expect(validate.errors).toEqual([expect.objectContaining({ instancePath: '/actions', keyword: 'uniqueItems' })]);
+    });
+
+    it('rejects the invalid fixture for viewportIntersection without engine/observe, a non-boolean fileApps, and an unknown action kind', () => {
+      expect(validate(readJson('fixtures', 'engine-manifest-v1.invalid.json'))).toBe(false);
+      expect(validate.errors).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ instancePath: '/methods', keyword: 'contains' }),
+          expect.objectContaining({ instancePath: '/fileApps', keyword: 'type' }),
+          expect.objectContaining({ instancePath: '/actions/1', keyword: 'enum' }),
+        ]),
+      );
+      // `scrollTo`, the newest kind, is in the enum; only the made-up kind beside it fails.
+      expect(validate.errors?.some((error) => error.instancePath === '/actions/0')).toBe(false);
     });
 
     it('rejects a method listed twice', () => {
@@ -247,6 +273,35 @@ describe.each(schemas)('%s schema', (name) => {
       expect(validate(report)).toBe(false);
     });
 
+    it('takes todo as a skip cause only on a plain test result with no attempts', () => {
+      const report = readJson('fixtures', 'report-v1.valid.json') as {
+        run: { results: Record<string, unknown>[] };
+      };
+      const results = report.run.results;
+      const todo = results.find((result) => (result['skip'] as { cause?: string } | undefined)?.cause === 'todo')!;
+      expect(todo).toMatchObject({ kind: 'test', status: 'skipped', attempts: [], skip: { cause: 'todo', reason: 'todo' } });
+      expect(validate(report)).toBe(true);
+      const invalid = (change: Record<string, unknown>) => {
+        const changed = structuredClone(report);
+        Object.assign(changed.run.results[results.indexOf(todo)]!, change);
+        return !validate(changed);
+      };
+      expect(invalid({ skip: { cause: 'todo', reason: 'later' } })).toBe(true);
+      expect(invalid({ skip: { cause: 'todo', reason: 'todo', filter: 'areas' } })).toBe(true);
+      expect(invalid({ kind: 'setup' })).toBe(true);
+      expect(invalid({ serialGroupId: 'group-1' })).toBe(true);
+      expect(invalid({ attempts: [(results[1]!['attempts'] as unknown[])[0]] })).toBe(true);
+      expect(invalid({ selected: false, skip: { cause: 'todo', reason: 'todo', otherShard: true } })).toBe(false);
+    });
+
+    it('rejects todo as the skip cause of an attempt', () => {
+      const report = readJson('fixtures', 'report-v1.valid.json') as {
+        run: { results: { attempts: { skip?: { cause: string } }[] }[] };
+      };
+      report.run.results[1]!.attempts[0]!.skip!.cause = 'todo';
+      expect(validate(report)).toBe(false);
+    });
+
     it('rejects a fixme skip that names a filter, which only a filtered skip does', () => {
       const report = readJson('fixtures', 'report-v1.invalid.json') as {
         run: { results: { skip?: Record<string, unknown> }[] };
@@ -377,6 +432,28 @@ describe.each(schemas)('%s schema', (name) => {
       delete cache.reason;
       delete (cache as { derived?: string }).derived;
       expect(validate(report)).toBe(false);
+    });
+
+    it('validates run.merge provenance and rejects empty or malformed shards', () => {
+      const report = readJson('fixtures', 'report-v1.valid.json') as {
+        run: { merge?: Record<string, unknown> };
+      };
+      expect(report.run.merge).toBeDefined();
+      expect(validate(report)).toBe(true);
+      const valid = structuredClone(report.run.merge!);
+      for (const bad of [
+        { shardDurationMs: -1, shards: valid['shards'] },
+        { shardDurationMs: 100, shards: [] },
+        { shardDurationMs: 100, shards: valid['shards'], extra: true },
+        { shardDurationMs: 100, shards: [{ ...(valid['shards'] as Record<string, unknown>[])[0], index: 0 }] },
+        { shardDurationMs: 100, shards: [{ ...(valid['shards'] as Record<string, unknown>[])[0], exitCode: 5 }] },
+        { shardDurationMs: 100, shards: [{ ...(valid['shards'] as Record<string, unknown>[])[0], configDigest: 'bad' }] },
+      ]) {
+        report.run.merge = bad;
+        expect(validate(report)).toBe(false);
+      }
+      delete report.run.merge;
+      expect(validate(report)).toBe(true);
     });
   }
 });

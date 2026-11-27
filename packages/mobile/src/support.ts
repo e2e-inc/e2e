@@ -1,6 +1,6 @@
 /** Shared helpers for the agent-device engine: error constructors, filenames, PNG headers, gestures, the screen location and size. */
 
-import type { CaptureScreenshotResult, PressOptions } from 'agent-device';
+import type { AppDeployResult, CaptureScreenshotResult, PressOptions } from 'agent-device';
 import { EngineError, withTimeout, type Momentum, type ScrollDirection, type ViewportSize } from '@e2e-dev/core/engine';
 import type { AgentDeviceClient } from './options.ts';
 
@@ -140,18 +140,6 @@ export function sanitizeFilename(name: string): string {
   return name.replaceAll(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'artifact';
 }
 
-const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
-
-/** Reads the dimensions out of a PNG's IHDR chunk; undefined for anything else. */
-export function readPngSize(data: Uint8Array): { width: number; height: number } | undefined {
-  if (data.byteLength < 24) return undefined;
-  for (const [offset, byte] of PNG_SIGNATURE.entries()) {
-    if (data[offset] !== byte) return undefined;
-  }
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  return { width: view.getUint32(16), height: view.getUint32(20) };
-}
-
 /**
  * The finger gesture that scrolls one rect's content in `direction`. Scrolling
  * down reveals what is below, so the finger travels up; the travel is a share
@@ -218,4 +206,29 @@ export function logicalScreenSize(
         : undefined;
   if (logical === undefined || logical.width <= 0 || logical.height <= 0) return undefined;
   return logical;
+}
+
+/**
+ * The install fields this engine reads off agent-device's response. Its
+ * `app` is left out: it echoes the `app` passed in, else the identity, else
+ * the build's path, so it cannot tell an id from a file.
+ */
+export type InstallIdentity = Pick<AppDeployResult, 'appId' | 'bundleId' | 'package'>;
+
+/**
+ * The app an install of `build` opens by: the identity agent-device reported,
+ * else the `app` it was installed as. Fails when neither names one, saying
+ * to name it with `namedBy`.
+ */
+export function installedIdentity(result: InstallIdentity, app: string | undefined, build: string, namedBy: string): { app: string; bundleId?: string } {
+  const identity = result.bundleId ?? result.package ?? result.appId;
+  const opensBy = identity ?? app;
+  if (opensBy === undefined) {
+    throw new EngineError(
+      'ENGINE_FAILURE',
+      `installed ${build}, but agent-device reported no bundle id or package for it, so nothing can open it: name the app with ${namedBy}`,
+      { retryable: false },
+    );
+  }
+  return { app: opensBy, ...(identity === undefined ? {} : { bundleId: identity }) };
 }

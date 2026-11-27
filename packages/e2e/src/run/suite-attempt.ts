@@ -43,6 +43,8 @@ export interface SuiteAttemptHost {
   readonly artifactsRoot: string;
   readonly interruptSignal: AbortSignal;
   readonly debug: DebugTrace;
+  /** Started service values exposed by the `services` fixture. */
+  readonly services: Readonly<Record<string, unknown>>;
   readonly workerFixtures: WorkerFixturePool;
   launchSession(plan: SessionPlan, attemptId: string, artifactsDir: string, signal: AbortSignal): Promise<TargetSession>;
   closeSession(session: TargetSession, close: SessionClose, record: ClosingRecord, sink: ArtifactSink, secondaryErrors: SerializedError[]): Promise<void>;
@@ -141,7 +143,7 @@ export class SuiteAttempt implements SuiteHookSession {
     const { host, config } = this.context;
     const acquired = await this.acquire(usesEngine);
     const attempt = isOpen(acquired) ? acquired : undefined;
-    const builtIns = isOpen(acquired) ? acquired.builtIns : attemptlessBuiltIns(host.target, unavailable(acquired, label, host.target.engine?.name ?? 'none'));
+    const builtIns = isOpen(acquired) ? acquired.builtIns : attemptlessBuiltIns(host.target, host.services, unavailable(acquired, label, host.target.engine?.name ?? 'none'));
     const hookAbort = attempt?.budget.enter(host.interruptSignal, timeoutMs) ?? new AbortController();
     // On the attempt's budget, so the device calls the code makes stop at the deadline `test.setTimeout` moved.
     const budget = attempt?.budget ?? new AttemptBudget(AbortSignal.any([host.interruptSignal, hookAbort.signal]), new Deadline(timeoutMs));
@@ -153,7 +155,7 @@ export class SuiteAttempt implements SuiteHookSession {
       assertionTimeout: config.assertionTimeout,
       toPass: config.toPass,
       recordSecondaryError: (error) => { retryMessages.push(error.message); },
-      ...(running.settable ? { setTimeout: (ms: number) => timeout.set(ms) } : {}),
+      ...(running.settable ? { setTimeout: (update) => (timeout.set(update(timeout.timeoutMs)) ? 'set' : 'ended') } : {}),
     };
     const leave = host.workerFixtures.enter(builtIns);
     const owns = (owner: string): void => {
@@ -248,6 +250,7 @@ export class SuiteAttempt implements SuiteHookSession {
       saveSession: undefined,
       debug: host.debug,
       models,
+      services: host.services,
     });
     return {
       builtIns: attemptBuiltIns(fixtures),
@@ -255,6 +258,7 @@ export class SuiteAttempt implements SuiteHookSession {
       steps,
       close: async () => {
         attemptEnd.abort();
+        budget.end();
         if (shared === undefined) {
           const errors: SerializedError[] = [];
           await host.closeSession(launched, { attemptId, video: undefined }, { status: 'passed', cleanup: 'complete' }, artifacts.sink, errors);

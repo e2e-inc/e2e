@@ -23,6 +23,40 @@
       "arch": "arm64",
       "runtime": "node-26.4.0"
     },
+    "shard": {
+      "index": 2,
+      "total": 3
+    },
+    "merge": {
+      "shardDurationMs": 1800,
+      "shards": [
+        {
+          "index": 1,
+          "id": "018f0f5c-7b2a-7abc-8abc-0123456789a1",
+          "status": "passed",
+          "exitCode": 0,
+          "configDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+          "changes": {
+            "base": "0123456789abcdef0123456789abcdef01234567",
+            "files": 1
+          },
+          "filters": [
+            {
+              "name": "areas",
+              "candidates": 2,
+              "excluded": 1
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "id": "018f0f5c-7b2a-7abc-8abc-0123456789a2",
+          "status": "failed",
+          "exitCode": 1,
+          "configDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ]
+    },
     "targets": [
       {
         "id": "web",
@@ -72,6 +106,7 @@
         "status": "failed",
         "attempts": [
           {
+            "shard": 2,
             "id": "018f0f5c-7b2a-7abc-8abc-0123456789ac",
             "index": 0,
             "cutRetry": false,
@@ -122,6 +157,7 @@
     ],
     "results": [
       {
+        "shard": 2,
         "id": "4bbfd0a6dbf44ac1018dd6ca1a6243d742b24607aa735b28d57541e1128507d3",
         "testId": "tests/example.e2e.ts::opens%20app",
         "kind": "test",
@@ -149,6 +185,7 @@
         },
         "attempts": [
           {
+            "shard": 2,
             "id": "018f0f5c-7b2a-7abc-8abc-1123456789ab",
             "index": 0,
             "status": "passed",
@@ -286,6 +323,41 @@
                   "message": "semantic capture timed out",
                   "retryable": false
                 }
+              },
+              {
+                "id": "018f0f5c-7b2a-7abc-8abc-0123456789ab:2",
+                "index": 2,
+                "kind": "step",
+                "api": "test.step",
+                "label": "Check out",
+                "source": {
+                  "file": "tests/example.e2e.ts",
+                  "line": 3,
+                  "column": 1
+                },
+                "status": "passed",
+                "startedAt": "2026-07-24T12:00:01.000Z",
+                "durationMs": 12,
+                "events": [],
+                "artifacts": []
+              },
+              {
+                "id": "018f0f5c-7b2a-7abc-8abc-0123456789ab:3",
+                "index": 3,
+                "kind": "locator",
+                "api": "locator.tap",
+                "label": "getByRole(\"button\", name: \"Pay\")",
+                "parent": 2,
+                "source": {
+                  "file": "tests/example.e2e.ts",
+                  "line": 3,
+                  "column": 1
+                },
+                "status": "passed",
+                "startedAt": "2026-07-24T12:00:01.000Z",
+                "durationMs": 10,
+                "events": [],
+                "artifacts": []
               }
             ],
             "artifacts": [
@@ -528,6 +600,61 @@
           "reason": "the diff reaches none of its tags",
           "filter": "areas"
         }
+      },
+      {
+        "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "testId": "tests/example.e2e.ts::exports%20a%20report",
+        "kind": "test",
+        "tags": [],
+        "declarationIndex": 4,
+        "titlePath": [
+          "exports a report"
+        ],
+        "file": "tests/example.e2e.ts",
+        "source": {
+          "file": "tests/example.e2e.ts",
+          "line": 20,
+          "column": 1
+        },
+        "targetId": "web",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "selected": false,
+        "status": "skipped",
+        "attempts": [],
+        "skip": {
+          "cause": "filtered",
+          "reason": "outside the shard",
+          "otherShard": true
+        }
+      },
+      {
+        "id": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "testId": "tests/example.e2e.ts::todo%20coverage",
+        "kind": "test",
+        "tags": [],
+        "declarationIndex": 5,
+        "titlePath": [
+          "todo coverage"
+        ],
+        "file": "tests/example.e2e.ts",
+        "source": {
+          "file": "tests/example.e2e.ts",
+          "line": 25,
+          "column": 1
+        },
+        "targetId": "web",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "selected": true,
+        "status": "skipped",
+        "attempts": [],
+        "skip": {
+          "cause": "todo",
+          "reason": "todo"
+        }
       }
     ],
     "errors": [
@@ -546,14 +673,14 @@
       }
     ],
     "summary": {
-      "discovered": 4,
-      "selected": 3,
+      "discovered": 6,
+      "selected": 4,
       "executed": 3,
       "passed": 1,
       "failed": 1,
       "interrupted": 0,
       "flaky": 0,
-      "skipped": 1
+      "skipped": 2
     },
     "limits": {
       "maxAgentContextBytes": 16384,

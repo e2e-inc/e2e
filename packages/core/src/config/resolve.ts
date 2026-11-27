@@ -13,7 +13,7 @@ import { isStepExecutor } from '../agent/executor.ts';
 import { compileGlob, compileGlobList, literalPrefix } from '../internal/globs.ts';
 import { isPlainObject, rejectUnknownKeys } from '../internal/options.ts';
 import { isRecord } from './command.ts';
-import { boundedInt, checkIntervals, DEFAULT_PASS_OPTIONS, describeValue, timerMs } from './validate.ts';
+import { boundedInt, checkIntervals, DEFAULT_PASS_OPTIONS, describeValue, optionalBoolean, timerMs } from './validate.ts';
 import type { ArtifactStore, ArtifactsConfig, CacheMode, ModelInstance, PassOptions, SecretProvider, SecretPurpose, RecordingMode, CacheStore, ProjectConfig } from '../types.ts';
 import { isModelInstance, resolveAgentConfig, runLimits, type ResolvedAgentConfig, type ResolvedLimits } from './agent.ts';
 import { bindTargets, digestTargets, resolveTargets, TARGET_NAME_PATTERN, type PortAssignments, type ResolvedTarget } from './targets.ts';
@@ -120,6 +120,8 @@ export interface CacheStrictSource {
 export interface CliOverrides {
   retries?: number;
   workers?: number;
+  /** `--fully-parallel`: every target runs the tests of one file in parallel, over the config's and every target's `fullyParallel`. */
+  fullyParallel?: boolean;
   /** `--action-timeout <ms>`: the budget of every engine operation, over the config's `actionTimeout`. */
   actionTimeout?: number;
   /** `--assertion-timeout <ms>`: the default `expect` deadline, over the config's `assertionTimeout`. */
@@ -156,6 +158,7 @@ const TOP_LEVEL_KEYS = new Set([
   'failOnSkippedFailure',
   'maxDuration',
   'workers',
+  'fullyParallel',
   'artifacts',
   'output',
   'trace',
@@ -163,6 +166,7 @@ const TOP_LEVEL_KEYS = new Set([
   'reporters',
   'agents',
   'filters',
+  'services',
   'cache',
   'credentials',
   'secrets',
@@ -179,7 +183,7 @@ const REMOVED_TOP_LEVEL_KEYS: ReadonlyMap<string, string> = new Map([
   ['specVersion', 'delete it; the runner version is the format version'],
   [
     'limits',
-    'set maxInputTokens on each agent (it was limits.maxModelTokensPerCall); the runner fixes maxAgentContextBytes, maxLedgerBytes, and maxEventsPerStep',
+    'set maxInputTokens (it was limits.maxModelTokensPerCall) and maxContextBytes (it was limits.maxAgentContextBytes) on each agent; the runner fixes maxLedgerBytes and maxEventsPerStep',
   ],
 ]);
 
@@ -245,10 +249,16 @@ export function resolveProjectConfig(
   }
 
   const recordings = runRecordings(raw, cli);
-  const targets = resolveTargets(raw.targets, options.projectRoot, (target, where) => ({
-    trace: targetRecording(recordings.trace, target.trace, `${where} trace`, 'trace'),
-    video: targetRecording(recordings.video, target.video, `${where} video`, 'video'),
-  }));
+  const fullyParallel = optionalBoolean(raw.fullyParallel, 'fullyParallel');
+  const targets = resolveTargets(raw.targets, options.projectRoot, (target, where) => {
+    // Read before the flag is consulted, so a broken value fails with or without it.
+    const own = optionalBoolean(target.fullyParallel, `${where} fullyParallel`);
+    return {
+      trace: targetRecording(recordings.trace, target.trace, `${where} trace`, 'trace'),
+      video: targetRecording(recordings.video, target.video, `${where} video`, 'video'),
+      fullyParallel: cli.fullyParallel ?? own ?? fullyParallel ?? false,
+    };
+  });
   const tests = normalizeTests(raw.tests, options.projectRoot);
 
   const timeout = timerMs(raw.timeout, 'timeout') ?? 120_000;
@@ -785,59 +795,89 @@ function resolveProjectId(explicit: string | undefined, projectRoot: string): st
   return `unportable-${sha256Hex(projectRoot).slice(0, 32)}`;
 }
 
+type SecretConfig = Pick<ProjectConfig, 'credentials' | 'secrets'>;
+type ResolvedSecrets = Pick<ResolvedConfig, 'credentials' | 'secrets' | 'allSecrets'>;
+
+function resolveSecrets(raw: SecretConfig, env: NodeJS.ProcessEnv): ResolvedSecrets {
+  const { values, missing, invalid } = collectSecrets(raw, env);
+  const problem = missing[0] ?? invalid;
+  if (problem !== undefined) throw problem.cause;
+  return values;
+}
+
+/** Publisher jobs can redact each available value, including passwords without usernames. */
+export function resolveAvailableSecrets(raw: SecretConfig, env: NodeJS.ProcessEnv): ResolvedSecrets['allSecrets'] {
+  const { values, invalid } = collectSecrets(raw, env);
+  if (invalid !== undefined) throw invalid.cause;
+  return values.allSecrets;
+}
+
 /**
- * Credentials and secrets are separate namespaces, resolved side by side,
- * and joined once into `allSecrets`, the map `typeSecret`, the ledger, and
- * the trace key on: a credential's password joins as `<credential>.password`.
- * A credential and a secret may share a name; only a secret named exactly
- * like a password handle collides.
+ * Credentials and secrets have separate namespaces. A credential password
+ * also appears under its named handle in allSecrets for redaction.
  */
-function resolveSecrets(
-  raw: ProjectConfig,
-  env: NodeJS.ProcessEnv,
-): Pick<ResolvedConfig, 'credentials' | 'secrets' | 'allSecrets'> {
+function collectSecrets(raw: SecretConfig, env: NodeJS.ProcessEnv) {
   const credentials = new Map<string, ResolvedCredential>();
   const secrets = new Map<string, ResolvedSecret>();
   const allSecrets = new Map<string, ResolvedSecret>();
-  checkEnvNameCollisions('E2E_USER', 'credentials', Object.keys(raw.credentials ?? {}));
-  checkEnvNameCollisions('E2E_SECRET', 'secrets', Object.keys(raw.secrets ?? {}));
-  for (const [name, credential] of Object.entries(raw.credentials ?? {})) {
-    checkCredentialShape(name, credential);
-    const prefix = envName('E2E_USER', name);
-    const username = env[`${prefix}_USERNAME`] ?? credential.username;
-    if (typeof username !== 'string') {
-      throw new ConfigurationError(
-        'INVALID_CONFIG',
-        `credential "${name}" has no username; set username or ${prefix}_USERNAME`,
-      );
+  const values = { credentials, secrets, allSecrets };
+  const missing: { name: string; cause: ConfigurationError }[] = [];
+  const credentialOwners = new Map<string, string>();
+  try {
+    checkEnvNameCollisions('E2E_USER', 'credentials', Object.keys(raw.credentials ?? {}));
+    checkEnvNameCollisions('E2E_SECRET', 'secrets', Object.keys(raw.secrets ?? {}));
+    for (const [name, credential] of Object.entries(raw.credentials ?? {})) {
+      if (credential !== undefined) {
+        checkCredentialShape(name, credential);
+      }
+
+      const passwordName = credentialSecretName(name);
+      credentialOwners.set(passwordName, name);
+      const prefix = envName('E2E_USER', name);
+      const username = env[`${prefix}_USERNAME`] ?? credential?.username;
+      if (typeof username !== 'string') {
+        missing.push({
+          name,
+          cause: new ConfigurationError('INVALID_CONFIG', `credential "${name}" has no username; set username or ${prefix}_USERNAME`),
+        });
+      }
+      // An environment override wins, including over a provider.
+      const password = env[`${prefix}_PASSWORD`] ?? credential?.password;
+      if (isSecretValue(password)) {
+        const secret: ResolvedSecret = { name: passwordName, purpose: 'password', value: password };
+        allSecrets.set(secret.name, secret);
+        if (typeof username === 'string') credentials.set(name, { name, username, password: secret });
+      } else {
+        const cause = new ConfigurationError('INVALID_CONFIG', `credential "${name}" password ${secretValueProblem(password)}`);
+        if (password !== undefined) throw cause;
+        missing.push({ name: passwordName, cause });
+      }
     }
-    // An env override always wins, including over a provider: the operator
-    // rotating a credential must not need to know how it was configured.
-    const password = env[`${prefix}_PASSWORD`] ?? credential.password;
-    if (!isSecretValue(password)) {
-      throw new ConfigurationError('INVALID_CONFIG', `credential "${name}" password ${secretValueProblem(password)}`);
+    for (const [name, entry] of Object.entries(raw.secrets ?? {})) {
+      const owner = credentialOwners.get(name);
+      if (owner !== undefined) {
+        throw new ConfigurationError(
+          'INVALID_CONFIG',
+          `secret "${name}" has the name of credential "${owner}"'s password handle; rename the secret`,
+        );
+      }
+      const value = env[envName('E2E_SECRET', name)] ?? entry;
+      if (isSecretValue(value)) {
+        const secret: ResolvedSecret = { name, purpose: 'generic-secret', value };
+        secrets.set(name, secret);
+        allSecrets.set(name, secret);
+      } else {
+        const cause = new ConfigurationError('INVALID_CONFIG', `secret "${name}" ${secretValueProblem(value)}`);
+        if (value !== undefined) throw cause;
+        missing.push({ name, cause });
+      }
     }
-    const secret: ResolvedSecret = { name: credentialSecretName(name), purpose: 'password', value: password };
-    credentials.set(name, { name, username, password: secret });
-    allSecrets.set(secret.name, secret);
+    return { values, missing, invalid: undefined };
+  } catch (cause) {
+    // A normal run still reports an earlier missing value first. Publishers
+    // ignore missing values and surface an invalid declaration instead.
+    return { values, missing, invalid: { cause } };
   }
-  for (const [name, entry] of Object.entries(raw.secrets ?? {})) {
-    const owner = [...credentials.values()].find((credential) => credential.password.name === name);
-    if (owner !== undefined) {
-      throw new ConfigurationError(
-        'INVALID_CONFIG',
-        `secret "${name}" has the name of credential "${owner.name}"'s password handle; rename the secret`,
-      );
-    }
-    const value = env[envName('E2E_SECRET', name)] ?? entry;
-    if (!isSecretValue(value)) {
-      throw new ConfigurationError('INVALID_CONFIG', `secret "${name}" ${secretValueProblem(value)}`);
-    }
-    const secret: ResolvedSecret = { name, purpose: 'generic-secret', value };
-    secrets.set(name, secret);
-    allSecrets.set(name, secret);
-  }
-  return { credentials, secrets, allSecrets };
 }
 
 const CREDENTIAL_KEYS = new Set(['username', 'password']);
@@ -961,6 +1001,10 @@ function resolveAgents(
   }
   const agents = new Map<string, ResolvedAgentConfig>();
   for (const [name, value] of Object.entries(raw ?? {})) {
+    if (value === undefined) {
+      continue;
+    }
+
     if (!AGENT_NAME_PATTERN.test(name)) {
       throw new ConfigurationError(
         'INVALID_CONFIG',
@@ -985,7 +1029,7 @@ function resolveAgents(
 }
 
 function computeConfigDigest(
-  raw: ProjectConfig & { readonly reporters?: unknown; readonly filters?: unknown },
+  raw: ProjectConfig & { readonly reporters?: unknown; readonly filters?: unknown; readonly services?: unknown },
   projectId: string,
   targets: readonly ResolvedTarget[],
 ): string {
@@ -1005,15 +1049,20 @@ function computeConfigDigest(
   // enters the digest either; the built-in ids digest as they always have,
   // so adding a reporter to a config leaves its cache valid.
   // `failOnSkippedFailure` decides only the exit code, never what runs, and
-  // `maxDuration` only when the run stops. A test filter decides what runs
-  // before any worker starts and never changes what a test does, so adding
-  // one leaves the replays valid, like a reporter.
+  // `maxDuration` only when the run stops. `fullyParallel`, at the top or on
+  // a target, decides which worker runs a test, never what the test does.
+  // A test filter decides what runs before any worker starts and never
+  // changes what a test does, so adding one leaves the replays valid, like
+  // a reporter. A service is a dependency the app uses at runtime, so it
+  // isn't included in the digest either.
   // `targets` digest by declaration below and never enter the clone: an
   // engine holds `secrets.get()` handles, which refuse to serialize.
   const {
     failOnSkippedFailure: _failOnSkippedFailure,
     maxDuration: _maxDuration,
+    fullyParallel: _fullyParallel,
     filters: _filters,
+    services: _services,
     artifacts: _artifacts,
     output: _output,
     trace: _trace,
@@ -1039,7 +1088,7 @@ function computeConfigDigest(
     sanitized['credentials'] = Object.fromEntries(
       Object.entries(raw.credentials).map(([name, credential]) => [
         name,
-        { username: credential.username, password: { secretName: name } },
+        { username: credential?.username, password: { secretName: name } },
       ]),
     );
   }
@@ -1055,31 +1104,34 @@ function computeConfigDigest(
 
 /**
  * The agents as the digest records them. Each entry passed `resolveAgents`,
- * so it is a plain options object: its plain options are cloned, its tools
- * named, and its executor reduced to what identifies it.
+ * so it is a plain options object, or `undefined`, which is left out like an
+ * `undefined` tool. Its plain options are cloned, its tools named, and its
+ * executor reduced to what identifies it.
  */
 function digestAgents(agents: NonNullable<ProjectConfig['agents']>): unknown {
   return Object.fromEntries(
-    Object.entries(agents).map(([name, entry]) => {
-      const { tools, executor, ...options } = entry ?? {};
-      return [
-        name,
-        {
-          ...(structuredCloneJsonSafe(options) as Record<string, unknown>),
-          ...(tools === undefined ? {} : { tools: Object.keys(tools).toSorted() }),
-          ...(executor === undefined
-            ? {}
-            : {
-                executor: {
-                  name: executor.name,
-                  ...(executor.version === undefined ? {} : { version: executor.version }),
-                  ...(executor.cache === undefined ? {} : { cache: executor.cache }),
-                  ...(executor.model === undefined ? {} : { model: modelIdentity(executor.model) }),
-                  ...(executor.judge === undefined ? {} : { judge: modelIdentity(executor.judge) }),
-                },
-              }),
-        },
-      ];
+    Object.entries(agents).flatMap(([name, entry]) => {
+      if (entry === undefined) {
+        return [];
+      }
+
+      const { tools, executor, ...options } = entry;
+      const digest = {
+        ...(structuredCloneJsonSafe(options) as Record<string, unknown>),
+        ...(tools === undefined ? {} : { tools: Object.keys(tools).filter((tool) => tools[tool] !== undefined).toSorted() }),
+        ...(executor === undefined
+          ? {}
+          : {
+              executor: {
+                name: executor.name,
+                ...(executor.version === undefined ? {} : { version: executor.version }),
+                ...(executor.cache === undefined ? {} : { cache: executor.cache }),
+                ...(executor.model === undefined ? {} : { model: modelIdentity(executor.model) }),
+                ...(executor.judge === undefined ? {} : { judge: modelIdentity(executor.judge) }),
+              },
+            }),
+      };
+      return [[name, digest]];
     }),
   );
 }

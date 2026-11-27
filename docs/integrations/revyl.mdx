@@ -1,12 +1,15 @@
 ---
-title: Test mobile apps on Revyl
+title: Test apps and websites on Revyl
 sidebarTitle: Revyl
-description: Run mobile app tests on Revyl's hosted iOS simulators and Android emulators with @e2e-dev/revyl.
+description: Run mobile app tests on Revyl's hosted iOS simulators and Android emulators, and web tests in Revyl's hosted Chrome, with @e2e-dev/revyl.
 ---
 
 `@e2e-dev/revyl` is a hosted device provider for the mobile engine.
 It starts a Revyl device for each worker, installs your app on it, and releases the device when the run ends.
 Use the standard `app`, `screen`, and `expect` APIs to test your app's user flows.
+For websites, `revylBrowsers()` from `@e2e-dev/revyl/web` is a
+[browser provider](/browser#hosted-browsers) that runs each test in Chrome on
+Revyl ([Run web targets in browsers](#run-web-targets-in-browsers)).
 
 ## Install and authenticate
 
@@ -36,7 +39,8 @@ Xcode, or Android SDK. Build your app separately, as a zipped iOS simulator
 ## Configure a target
 
 Set `device: revyl({ app, device })` on the mobile engine. `app` is the build's
-`https` URL, and `device` is a model from Revyl's catalog.
+`https` URL, and `device` is a model from Revyl's catalog. To test a local
+build instead, leave `app` out and set the target's `app.appPath`.
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -70,9 +74,22 @@ export default {
 Revyl installs `app` when it starts each device, so leave `app.appPath` off
 the target. For Android, `bundleId` is the app's package name.
 
-A screen read on a Revyl device takes about 2.5 s, and sometimes more than
-5 s. Set `assertionTimeout` to `15_000`. With the default of 5 s, an `expect`
-can fail before it reads the screen one time.
+Without `app`, each device starts with no app, and the device provider uploads
+the target's `app.appPath` to it and installs it there: a zipped iOS
+simulator `.app` or an Android `.apk`. Do not also call `device.installApp()`
+for that build, because that uploads it a second time.
+
+```ts title="e2e.config.ts"
+{
+  name: 'android-local',
+  engine: mobile({ platform: 'android', device: revyl({ device: 'Pixel 7' }) }),
+  app: { appPath: './build/app-debug.apk', bundleId: 'com.example.app' },
+}
+```
+
+A screen read on a Revyl device takes about 2.5 s (occasionally over 5 s),
+so set `assertionTimeout` to `15_000`. With the default 5 s, an `expect` can
+time out before it even reads the screen once.
 
 ## Test an app flow
 
@@ -94,7 +111,7 @@ test('opens the cart', async ({ app, screen }) => {
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `app` | required | `https` URL of the build. A local path is refused, since Revyl cannot read it. |
+| `app` | none, so the target's `app.appPath` is installed | `https` URL of the build. A local path is refused, since Revyl cannot read it; use `app.appPath` for a local build. |
 | `device` | required | Device model as Revyl lists it, such as `iPhone 17 Pro Max` or `Pixel 7`. |
 | `osVersion` | Revyl's default for the model | OS version as Revyl lists it, such as `iOS 27.0` or `Android 14`. |
 
@@ -106,9 +123,18 @@ Unknown or invalid options fail config load with `INVALID_CONFIG`.
 - A device runs from lease until release. The engine releases every acquired
   device when the run finishes or is interrupted.
 - If the runner is killed before it releases a device, nothing sends the
-  session another command, and Revyl ends it after 30 minutes idle.
+  session another command, and Revyl ends it after 5 minutes idle.
+- A release fails the run when agent-device can't confirm it ended the
+  session, even when every test passed. This happens when Revyl session
+  cleanup fails (with more than 20 seconds of `cleanupTimeout` remaining) or
+  goes unconfirmed across daemon stop, or when the daemon exits during the run.
+  On Windows, ending the session before daemon stop also requires more than
+  20 seconds of remaining `cleanupTimeout` (keep the default 30 seconds).
 - `app` must be reachable over `https` without credentials in the URL. A
-  presigned storage URL works.
+  presigned storage URL works. Set `app` or `app.appPath`, not both.
+- An `app.appPath` build is uploaded to each device's own session, so a run
+  with `workers: 4` uploads it four times. To upload a large build once, host
+  it at an `https` URL and pass that as `app`.
 - The app runs on Revyl's network, not yours, and port reverse is not
   available, so it cannot reach `localhost` or a server on your network.
   Point it at a server it can reach over `https`.
@@ -117,11 +143,98 @@ Unknown or invalid options fail config load with `INVALID_CONFIG`.
   for evidence instead.
 - Revyl enters text at a point. Use `fill`. `pressSequentially` and typing
   into the focused field fail with `UNSUPPORTED_CAPABILITY`.
-- Revyl does not control device settings. These `device` methods fail with
-  `UNSUPPORTED_CAPABILITY`: `setNetwork`, `setAirplaneMode`, `setPermission`,
-  `setLocation`, `clearLocation`, `setAppearance`, `setOrientation`,
-  `setBiometrics`, `enrollBiometrics`, `clearKeychain`, `clipboard`, and
-  `setClipboard`. `foregroundApp` fails on Android, and `back` fails on iOS.
+- `setAppearance` and `setPermission` work on both platforms, but Revyl's
+  iOS simulators refuse the `camera` and `notifications` permissions.
+  `setOrientation` turns an Android device to all four sides, and an iOS
+  device to `portrait` and `landscape-left` only. `setLocation` works on
+  iOS, and `clearKeychain` works on iOS only.
+- These `device` methods fail with `UNSUPPORTED_CAPABILITY`: `setNetwork`,
+  `setAirplaneMode`, `setLocation` on Android, `clearLocation`,
+  `setBiometrics`, `enrollBiometrics`, `clipboard`, and `setClipboard`.
+  `foregroundApp` fails on Android, and `back` fails on iOS.
+
+## Run web targets in browsers
+
+`revylBrowsers()` starts a Revyl web session for each test attempt and
+attaches the web engine to its Chrome over CDP, so web tests use the same
+`app`, `screen`, `browser`, and `expect` APIs as on a local browser.
+
+Install the integration alongside the web engine:
+
+<CodeGroup>
+```bash npm
+npm install --save-dev e2e @e2e-dev/web @e2e-dev/revyl
+```
+
+```bash pnpm
+pnpm add -D e2e @e2e-dev/web @e2e-dev/revyl
+```
+
+```bash bun
+bun add -d e2e @e2e-dev/web @e2e-dev/revyl
+```
+</CodeGroup>
+
+Create a Web app in Revyl, for example with
+`revyl app create --name "My site" --platform web`, and pass its id as `app`.
+`url` is the page each session opens on; Revyl registers it as a build of
+the app and checks that it loads before the test starts. Set the engine's
+`viewport` to `null` and give the session's size to `revylBrowsers()`
+instead, since a Revyl browser keeps the size its session opened with:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { revylBrowsers } from '@e2e-dev/revyl/web';
+
+export default {
+  targets: [
+    {
+      name: 'revyl',
+      engine: web({
+        browser: revylBrowsers({ app: '<Revyl Web app id>', url: 'https://staging.example.com', viewport: { width: 1280, height: 800 } }),
+        viewport: null,
+      }),
+      app: { url: 'https://staging.example.com' },
+    },
+  ],
+} satisfies E2EConfig;
+```
+
+The reporter logs `session <id>, watch at <link>` for each session. The
+link opens the session in Revyl, live while the test runs, and needs a
+Revyl sign-in. With `REVYL_API_URL` set, it logs `session <id>` alone.
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `app` | required | Id of the Revyl Web app the sessions run under. |
+| `url` | required | `http(s)` URL each session opens on, without credentials in it. Revyl must be able to load it. |
+| `viewport` | Revyl's default | `{ width, height }` in CSS pixels, 320 to 3840 by 240 to 2160. The browser keeps it for the whole session. |
+| `idleTimeoutSeconds` | `600` | Seconds without activity before Revyl ends a session the run left open, at least 60. |
+
+Unknown or invalid options fail config load with `INVALID_CONFIG`.
+
+### Web limits
+
+- Every attempt, retries included, starts a new session, on the session's
+  one browser context and its first tab. Each test pays for a session start,
+  and the [limits of a per-attempt lease](/browser#pick-a-lease-scope) apply.
+- The web engine's `viewport` must be `null`. Revyl refuses to resize the
+  browser, so `browser.setViewport` and a set `viewport` fail.
+- The CDP URL works once. A dropped connection is not reattached, and the
+  attempt fails; a retry starts a new session.
+- An attempt that records video, such as with `--video`, gets Revyl's own
+  recording of the session as `video/recording.mp4`. Revyl publishes it only
+  once the session ends, so stopping a recording ends the session. In a test
+  with `video: 'off'` that calls `app.startRecording()`, the
+  `app.stopRecording()` call ends the session, and the rest of the test has
+  no browser.
+- Downloads are unavailable: Revyl's browser refuses them.
+- The site runs on Revyl's network, so point `url` and `app.url` at a
+  deployed URL, not `localhost`.
+- When an attempt ends, on every exit path, the provider stops its session.
+  If the run itself dies, Revyl ends each session after
+  `idleTimeoutSeconds` without activity.
 
 ## Next
 

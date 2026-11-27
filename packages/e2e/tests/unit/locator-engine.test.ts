@@ -112,6 +112,10 @@ function makeEngine(script: ScreenScript, options: { actionTimeout?: number; bud
       },
       actions: new Set(LOCATOR_ACTION_KINDS),
       pointerActions: new Set(['tap']),
+      measuresViewport: true,
+      async viewportIntersection() {
+        return { intersects: true, ratio: 1 };
+      },
   } as unknown as TargetSession;
   const engine = new LocatorEngine({
     session,
@@ -123,6 +127,20 @@ function makeEngine(script: ScreenScript, options: { actionTimeout?: number; bud
   });
   return { engine, calls, origins, resolveTimeouts, performed };
 }
+
+describe('readViewport', () => {
+  it('reads a ref superseded between the resolve and the read as stale, not as gone', async () => {
+    const { engine } = makeEngine({ read: ['stale'] });
+    const reads = engine.reads(engine.deadline(1_000));
+    expect(await engine.readViewport(EXPRESSION, reads)).toEqual({ node: null, count: 1, stale: true });
+    expect(await engine.readViewport(EXPRESSION, reads)).toEqual({
+      node: NODE,
+      count: 1,
+      stale: false,
+      intersection: { intersects: true, ratio: 1 },
+    });
+  });
+});
 
 describe('locator.blur', () => {
   it.each([true, false])('honors the declared capability (supported: %s)', async (supported) => {
@@ -512,10 +530,10 @@ describe('AttemptBudget.capped', () => {
 });
 
 describe('LocatorEngine read contract', () => {
-  it('collapses stale reads to a zero-count sample so assertion polls re-resolve', async () => {
+  it('marks a stale read as a stale sample with no node so assertion polls re-resolve', async () => {
     const { engine } = makeEngine({ read: ['stale'] });
     const sample = await engine.tryRead(EXPRESSION, engine.reads(new Deadline(5_000)));
-    expect(sample).toEqual({ node: null, count: 0 });
+    expect(sample).toEqual({ node: null, count: 1, stale: true });
   });
 
   it('translates non-stale read failures', async () => {
@@ -790,11 +808,12 @@ describe('LocatorEngine retries a cross-realm driver failure', () => {
     expect(calls.resolve).toBe(2);
   });
 
-  it('treats a foreign stale read as zero matches while polling', async () => {
+  it('treats a foreign stale read as a stale sample while polling', async () => {
     const { engine } = makeEngine({ read: ['foreign-stale'] });
     await expect(engine.tryRead(EXPRESSION, engine.reads(new Deadline(0)))).resolves.toEqual({
       node: null,
-      count: 0,
+      count: 1,
+      stale: true,
     });
   });
 

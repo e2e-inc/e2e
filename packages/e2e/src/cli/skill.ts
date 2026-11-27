@@ -9,6 +9,26 @@ export const SKILL_NAME = 'e2e';
 /** Printed when a build or an install left the skill files out of the package. */
 export const MISSING_SKILL_MESSAGE = 'this installation ships no skill files; reinstall e2e';
 
+/**
+ * Every file the skill has shipped, relative to its directory. Append-only:
+ * a file removed from the skill keeps its line, so `e2e init` and
+ * `e2e upgrade` remove it from a project's copy, and a file a project adds
+ * under any other path stays. `e2e upgrade` runs the CLI from before the
+ * install, so the list it reads is the old version's, which holds every file
+ * that version's copy can have.
+ */
+export const SHIPPED_SKILL_FILES: readonly string[] = [
+  'SKILL.md',
+  'references/agent.md',
+  'references/bug-bash.md',
+  'references/debugging.md',
+  'references/explore.md',
+  'references/mcp.md',
+  'references/running.md',
+  'references/setup.md',
+  'references/writing-tests.md',
+];
+
 const TOPIC_PREFIX = 'references/';
 
 /**
@@ -24,6 +44,12 @@ function skillDirectory(): string | undefined {
     if (existsSync(path.join(dir, 'SKILL.md'))) return dir;
   }
   return undefined;
+}
+
+/** The skill an installed copy of the package at `packageDir` ships, or undefined when it ships none. */
+export function packagedSkillDirectory(packageDir: string): string | undefined {
+  const dir = path.join(packageDir, 'skills', SKILL_NAME);
+  return existsSync(path.join(dir, 'SKILL.md')) ? dir : undefined;
 }
 
 export interface SkillFile {
@@ -53,16 +79,19 @@ export function readSkillFiles(from?: string): readonly SkillFile[] {
   return [...files.filter((file) => file.relative === 'SKILL.md'), ...files.filter((file) => file.relative !== 'SKILL.md')];
 }
 
-/** Topics `e2e guide <topic>` accepts: one per `references/<topic>.md`. */
-export function skillTopics(): readonly string[] {
-  return readSkillFiles()
+/** Topics `e2e guide <topic>` accepts: one per `references/<topic>.md`. `from` as in `readSkillFiles`. */
+export function skillTopics(from?: string): readonly string[] {
+  return readSkillFiles(from)
     .filter((file) => file.relative.startsWith(TOPIC_PREFIX) && file.relative.endsWith('.md'))
     .map((file) => file.relative.slice(TOPIC_PREFIX.length, -'.md'.length));
 }
 
-/** The overview (`SKILL.md` without its frontmatter) or one topic's text; undefined for an unknown topic. */
-export function readGuide(topic: string | undefined): string | undefined {
-  const files = readSkillFiles();
+/**
+ * The overview (`SKILL.md` without its frontmatter) or one topic's text;
+ * undefined for an unknown topic. `from` as in `readSkillFiles`.
+ */
+export function readGuide(topic: string | undefined, from?: string): string | undefined {
+  const files = readSkillFiles(from);
   if (topic === undefined) {
     return files.find((file) => file.relative === 'SKILL.md')?.content.replace(/^---\n[\s\S]*?\n---\n+/, '');
   }

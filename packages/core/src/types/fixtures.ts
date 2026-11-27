@@ -3,6 +3,10 @@
  * test, and what `test.extend()` takes. Re-exported from `types.ts`.
  */
 
+import type { EngineHandle, EngineIsolation } from '../engine/index.ts';
+import type { TestFixtures } from '../types.ts';
+import type { ServiceValues } from './services.ts';
+
 /**
  * How long one fixture instance lives. `test`, the default, is one instance
  * per test attempt that names it, shared by its `beforeEach` hooks, its
@@ -22,6 +26,13 @@ export type FixtureScope = 'test' | 'worker';
 export interface WorkerFixtures {
   /** The target's platform label: `web`, `ios`, `android`, or an engine's own string. */
   readonly platform: string;
+  /**
+   * Values yielded by the config's `services`, keyed by name. Each worker, each
+   * `e2e mcp` session, and each `openHost` host receives a copy of the data
+   * (sessions on one host share the same copy). Each function becomes an async
+   * function called in the process that started the services.
+   */
+  readonly services: Readonly<Record<string, unknown>>;
 }
 
 /** @deprecated `beforeAll` and `afterAll` receive the worker fixtures: use `WorkerFixtures`. */
@@ -66,9 +77,10 @@ export type WorkerFixtureDefinition<Worker, Value> = readonly [
  *
  * A name the base already has is not a new fixture, so declaring it in
  * `Extra` or `ExtraWorker` is a type error. Defined beside them, it extends
- * that fixture, a built-in one included (`FixtureOverrides`): inside its
- * function its own name is the fixture it extends, and it keeps that
- * fixture's type and scope:
+ * that fixture, a built-in one included: inside its function its own name is
+ * the fixture it extends, and it keeps that fixture's type. The override of
+ * a worker fixture is declared with `scope: 'worker'` here, since the
+ * fixtures this call returns keep it a worker fixture:
  *
  *   base.extend({ app: async ({ app }, use) => { await app.open('/'); await use(app); } })
  */
@@ -83,20 +95,145 @@ export type FixtureDefinitions<Base, Extra, Worker = {}, ExtraWorker = {}> = {
   readonly [K in keyof NoInfer<ExtraWorker>]: K extends keyof Base | keyof Extra
     ? never
     : WorkerFixtureDefinition<Worker & NoInfer<ExtraWorker>, NoInfer<ExtraWorker>[K]>;
-} & FixtureOverrides<Base & NoInfer<Extra> & NoInfer<ExtraWorker>, Worker & NoInfer<ExtraWorker>, Base, Worker>;
+} & {
+  readonly [K in Extract<keyof Base, PropertyKey>]?: K extends keyof Worker
+    ? WorkerFixtureDefinition<Worker & NoInfer<ExtraWorker>, Base[K]>
+    : TestFixtureDefinition<Base & NoInfer<Extra> & NoInfer<ExtraWorker>, Base[K]>;
+};
 /**
  * Fixtures that extend ones the base already has, each optional. `Sees` and
  * `WorkerSees` are what an override's function receives: the base's
  * fixtures, and the ones declared beside it.
  */
 export type FixtureOverrides<Sees, WorkerSees, Base = Sees, Worker = WorkerSees> = {
-  readonly [K in keyof Base]?: FixtureOverride<Base, Worker, K, Sees, WorkerSees>;
+  // Map over keys shared by all members of a union `Base`, such as
+  // `ConfigFixtures`. Mapping directly over `keyof Base` would map each
+  // member separately. Each override type would then be a union of fixture
+  // functions, and the parameter types could not be inferred.
+  readonly [K in Extract<keyof Base, PropertyKey>]?: FixtureOverride<Base, Worker, K, Sees, WorkerSees>;
 };
 /**
  * A fixture that extends `K`, one the base already has: it hands over the
- * same type and keeps the scope, so the override of a worker fixture
- * receives worker fixtures (`WorkerSees`) only.
+ * same type. Its scope is the one it declares, else `test`, and only the
+ * override of a worker fixture can be a worker fixture.
+ *
+ * The override of a worker fixture with options receives worker fixtures
+ * (`WorkerSees`) only, whatever its scope: TypeScript can't type the
+ * function of a tuple by the `scope` beside it. A function without options
+ * is a test fixture, so it receives every fixture (`Sees`).
  */
 export type FixtureOverride<Base, Worker, K extends keyof Base, Sees, WorkerSees> = K extends keyof Worker
-  ? FixtureFn<WorkerSees, Base[K]> | WorkerFixtureDefinition<WorkerSees, Base[K]>
+  ? FixtureFn<Sees, Base[K]> | readonly [FixtureFn<WorkerSees, Base[K]>, { readonly scope?: FixtureScope; readonly auto?: boolean }]
   : TestFixtureDefinition<Sees, Base[K]>;
+
+/** The names in `Overrides` that are test fixtures: every override not declared with `scope: 'worker'`. */
+export type TestOverrides<Overrides> = {
+  [K in keyof Overrides]-?: Overrides[K] extends readonly [unknown, { readonly scope: 'worker' }] ? never : K;
+}[keyof Overrides];
+
+/**
+ * `Worker` without the fixtures in `Names`, one target at a time, so the
+ * union of `ConfigFixtures` keeps a member per target.
+ */
+export type OmitEach<Worker, Names extends PropertyKey> = Worker extends unknown ? Omit<Worker, Names> : never;
+
+/**
+ * The fixtures in `Names` that `Worker` has, one target at a time. `platform`
+ * is kept, so a member pairs only with the test fixtures of its own target.
+ */
+export type PickEach<Worker, Names extends PropertyKey> = Worker extends unknown ? Pick<Worker, Extract<Names | 'platform', keyof Worker>> : never;
+
+/**
+ * Test or worker fixture types for each target in `Config`, the third type
+ * argument of `test.extend`. Each union member is one target, with the
+ * fixtures of that target's engine. A fixture that only other targets have
+ * is typed as `undefined`, like its runtime value.
+ *
+ * Engine fixtures, `app`, and `screen` are worker fixtures on a target
+ * whose engine has `isolation: 'worker'`, and test fixtures otherwise.
+ * The test half has them on every target, so a test still gets `app` and
+ * `screen` from a pair of members that a `string` platform keeps.
+ * `platform` is in both halves, so an intersection of members with
+ * different platforms reduces to `never`. The `services` fixture lives in the
+ * worker half and gets its type from the config's `services`.
+ */
+export type ConfigFixtures<Config, Half extends FixtureScope, Handle = ConfigEngines<Config>> = {} extends Config
+  ? {}
+  : Handle extends EngineHandle<infer Fixtures, infer Platform, infer Isolation>
+    ? { readonly platform: Platform }
+      & (Half extends 'worker' ? { readonly services: ConfigServices<Config> } : {})
+      & (Half extends ([Isolation] extends ['worker'] ? FixtureScope : 'test') ? Pick<TestFixtures, 'app' | 'screen'> & Fixtures : {})
+      & { readonly [Name in Exclude<ConfigFixtureNames<ConfigEngines<Config>>, keyof Fixtures>]?: undefined }
+    : never;
+
+/**
+ * `Base` without the fixtures that `ConfigFixtures` types per target. Without
+ * this, a fixture typed on the base `test` (`device: Device`, say) would keep
+ * that type on every target, even where it's `undefined`.
+ */
+export type ConfigBase<Base, Config> = {} extends Config ? Base : Omit<Base, ConfigFixtureNames<ConfigEngines<Config>> | 'app' | 'screen' | 'services'>;
+
+/** Mapped service values from `Config`, keyed by name. Empty when the config doesn't declare any services. */
+type ConfigServices<Config> = Config extends { readonly services?: infer Services } ? ServiceValues<NonNullable<Services>> : {};
+
+/**
+ * `Config` with `targets` replaced by an error message when the targets
+ * weren't inferred. It's the constraint for `test.extend`'s third type
+ * argument, so an annotated config fails to compile instead of leaving
+ * fixtures typed wrong.
+ */
+export type InferredConfig<Config> = {
+  readonly [Key in keyof Config]: Key extends 'targets' ? InferredTargets<Config[Key]> : Config[Key];
+};
+
+/** `Targets` when the target types were inferred, or the error message. */
+type InferredTargets<Targets> = Targets extends readonly (infer Each)[]
+  ? [UninferredTarget<Each>] extends [never]
+    ? Targets
+    : "The config's targets don't have inferred types because of a type annotation. Write the config with `as const satisfies E2EConfig` or `defineConfig` instead."
+  : Targets;
+
+/** Targets whose `engine` is optional and can hold an engine, or `never`. */
+type UninferredTarget<Each> = Each extends unknown
+  ? 'engine' extends keyof Each
+    ? undefined extends Each['engine']
+      ? [Exclude<Each['engine'], undefined>] extends [never]
+        ? never
+        : Each
+      : never
+    : never
+  : never;
+
+/**
+ * `Fixtures` without the targets that a test's `platforms` option skips: a
+ * target whose platform isn't in `Platform`. A target whose platform type is
+ * `string` is kept for any `Platform`.
+ */
+export type SelectedFixtures<Fixtures, Platform> = Fixtures extends unknown
+  ? Fixtures extends { readonly platform: infer Own }
+    ? [Extract<Own, Platform> | Extract<Platform, Own>] extends [never]
+      ? never
+      : Fixtures
+    : Fixtures
+  : never;
+
+/**
+ * The engine handle of each target in `Config`. A target without an engine
+ * has a plain `EngineHandle`. If the engine's platform type is `string`, the
+ * target's `platform` is used instead.
+ */
+type ConfigEngines<Config> = Config extends { readonly targets: readonly (infer Each)[] }
+  ? Each extends { readonly engine: EngineHandle<infer Fixtures extends object, infer Platform extends string, infer Isolation extends EngineIsolation> }
+    ? EngineHandle<Fixtures, string extends Platform ? TargetPlatform<Each> : Platform, Isolation>
+    : EngineHandle<{}, TargetPlatform<Each>>
+  : never;
+
+/** The `platform` a target declares, else `string`. */
+type TargetPlatform<Target> = Target extends { readonly platform: infer Platform extends string } ? Platform : string;
+
+/**
+ * Engine fixture names from `Handle`, excluding core fixtures. Core
+ * fixtures such as `app` and `screen` are defined on every target and may
+ * have a narrower type on some engines.
+ */
+type ConfigFixtureNames<Handle> = Handle extends EngineHandle<infer Fixtures> ? Exclude<keyof Fixtures, keyof TestFixtures> : never;

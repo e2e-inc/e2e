@@ -7,7 +7,9 @@ import {
   type NodeRef,
   type OperationContext,
   type PointerAction,
+  type ScrollEdge,
   type SemanticNode,
+  type ViewportIntersection,
   type ViewportPoint,
   type ViewportSize,
 } from '../engine/surface.ts';
@@ -468,14 +470,48 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
    * Reads one node for polling surfaces; returns null while zero matches.
    * A poll that waits for absence passes `missingFrame: 'empty'`: nothing
    * under a frame that is not in the document is attached, so the sample is
-   * zero matches rather than a wait for the frame.
+   * zero matches rather than a wait for the frame. A ref that went stale
+   * before it was read is `stale`, one match with no node: a poll for
+   * absence samples again instead of reading the node as gone.
    */
   async tryRead(
     expression: LocatorExpression,
     reads: ReadWindow,
     missingFrame: MissingFrame = 'wait',
-  ): Promise<{ node: SemanticNode | null; count: number }> {
+  ): Promise<{ node: SemanticNode | null; count: number; stale: boolean }> {
     return this.readOne(expression, reads, missingFrame);
+  }
+
+  /**
+   * Reads the one current match and measures how much of it is inside the
+   * viewport, for `toBeInViewport`: one resolve, one read from it, and one
+   * measure of the same ref, all inside `reads`, never a second observation.
+   * Zero matches or a missing frame read as no node. A ref that went stale
+   * before it was read or measured is `stale`, so the poll samples again
+   * instead of reading the node as gone. An engine that cannot measure is
+   * refused before the resolve, so a missing match never hides it.
+   */
+  async readViewport(
+    expression: LocatorExpression,
+    reads: ReadWindow,
+  ): Promise<{ node: SemanticNode | null; count: number; stale: boolean; intersection?: ViewportIntersection }> {
+    if (!this.session.measuresViewport) {
+      throw new ConfigurationError(
+        'UNSUPPORTED_CAPABILITY',
+        'toBeInViewport is not available on this target: its engine does not implement viewportIntersection',
+      );
+    }
+    const { node, count, stale } = await this.readOne(expression, reads, 'empty');
+    if (node === null) return { node, count, stale };
+    try {
+      const intersection = await reads.read((timeoutMs) =>
+        this.session.viewportIntersection(node.ref, this.readOperation(timeoutMs)),
+      );
+      return { node, count, stale, intersection };
+    } catch (cause) {
+      if (asEngineError(cause)?.code === 'NODE_STALE') return { node, count, stale: true };
+      throw translateLocatorError(cause, expression);
+    }
   }
 
   /**
@@ -488,19 +524,24 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
     return node;
   }
 
+  /**
+   * Resolves and reads the one current match. A ref superseded between the
+   * resolve and the read is one match with no node and `stale` set: a poll
+   * samples again, and `readNow` reads it as gone.
+   */
   private async readOne(
     expression: LocatorExpression,
     reads: ReadWindow,
     missingFrame: MissingFrame,
-  ): Promise<{ node: SemanticNode | null; count: number }> {
+  ): Promise<{ node: SemanticNode | null; count: number; stale: boolean }> {
 const ref = await this.singleOf(await this.resolveOnce(expression, reads, missingFrame), expression);
-    if (ref === null) return { node: null, count: 0 };
+    if (ref === null) return { node: null, count: 0, stale: false };
     try {
       const node = await reads.read((timeoutMs) => this.session.read(ref, this.readOperation(timeoutMs)));
-      return { node, count: 1 };
+      return { node, count: 1, stale: false };
     } catch (cause) {
       if (asEngineError(cause)?.code === 'NODE_STALE') {
-        return { node: null, count: 0 };
+        return { node: null, count: 1, stale: true };
       }
       throw translateLocatorError(cause, expression);
     }
@@ -550,6 +591,76 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
       },
       this.deadline(timeoutMs),
     );
+  }
+
+  /**
+   * Scrolls a container to an edge within one deadline: the node `expression`
+   * names, or the screen's container when there is none. A scroll that ran
+   * out of budget (an engine timeout, or input that may have landed) did not
+   * reach the edge; an engine stops a little before the deadline, so that is
+   * said whether or not it has passed, with the engine's reason, which tells
+   * a list still moving from a stuck read, and names the step's timeout
+   * rather than the time the engine took. Only the scroll's own failure is
+   * read that way: a locate or a first observation that ran out stays what
+   * it was.
+   */
+  async scrollTo(expression: LocatorExpression | undefined, edge: ScrollEdge, timeoutMs?: number): Promise<void> {
+    const action = { kind: 'scrollTo', edge } as const;
+    this.checkAction(action);
+    const deadline = this.deadline(timeoutMs);
+    const target = expression === undefined ? '' : `: ${describeExpression(expression)}`;
+    const notReached = (cause: unknown): TestError | undefined => {
+      const engineError = asEngineError(cause);
+      if (engineError?.code !== 'OPERATION_TIMEOUT' && engineError?.code !== 'ACTION_MAY_HAVE_COMMITTED') return undefined;
+      return new TestError('ACTION_FAILED', `scrollTo('${edge}') did not reach the edge within ${deadline.endsAt - deadline.startedAt}ms (${engineError.message})${target}`, { cause });
+    };
+    if (expression === undefined) await this.scrollScreenTo(action, deadline, notReached);
+    else await this.performUntil(expression, action, deadline, notReached);
+  }
+
+  /**
+   * The screen's `scrollTo`: on the observation root, observing first when
+   * none has named it, recorded as an engine event like a node action.
+   */
+  private async scrollScreenTo(
+    action: Extract<LocatorAction, { kind: 'scrollTo' }>,
+    deadline: Deadline,
+    notReached: (cause: unknown) => TestError | undefined,
+  ): Promise<void> {
+    const startedAt = timestamp();
+    const startedMs = Date.now();
+    const fail = (failure: Error & { readonly code: string }): never => {
+      this.recordEvent({
+        kind: 'engine',
+        name: action.kind,
+        startedAt,
+        durationMs: Date.now() - startedMs,
+        status: this.signal.aborted ? 'cancelled' : 'failed',
+        code: failure.code,
+        detail: `scrollTo ${action.edge} on the screen`,
+      });
+      throw failure;
+    };
+    let root: NodeRef;
+    try {
+      root = await this.session.rootRef(this.operationWithin(deadline));
+    } catch (cause) {
+      return fail(translateLocatorError(cause));
+    }
+    if (deadline.expired()) return fail(this.lateAction(action.kind, 'the screen'));
+    try {
+      await this.session.perform(root, action, this.operationWithin(deadline));
+    } catch (cause) {
+      return fail(notReached(cause) ?? translateLocatorError(cause));
+    }
+    this.recordEvent({
+      kind: 'engine',
+      name: action.kind,
+      startedAt,
+      durationMs: Date.now() - startedMs,
+      status: 'passed',
+      detail: `scrollTo ${action.edge} on the screen`,
+    });
   }
 
   /** Performs one pointer action at a viewport point, with no node behind it. */
@@ -622,6 +733,12 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     await this.dispatchAt({ x: at.x + offset.x, y: at.y + offset.y }, action, deadline);
   }
 
+  /** The failure of an action that was not sent: its phase was cancelled, or its deadline passed first. */
+  private lateAction(kind: string, target: string): Error & { readonly code: string } {
+    if (!this.signal.aborted) return lateAction(kind, target);
+    return isE2EError(this.signal.reason) ? this.signal.reason : cancelledError();
+  }
+
   /** One pointer dispatch within a deadline, its engine error translated to the public taxonomy. */
   private async dispatchAt(point: ViewportPoint, action: PointerAction, deadline: Deadline): Promise<void> {
     const startedAt = timestamp();
@@ -637,8 +754,8 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
         detail: `${action.kind} at (${Math.round(point.x)}, ${Math.round(point.y)})`,
       });
     if (deadline.expired()) {
-      const failure = lateAction(action.kind, `(${Math.round(point.x)}, ${Math.round(point.y)})`);
-      record('failed', failure.code);
+      const failure = this.lateAction(action.kind, `(${Math.round(point.x)}, ${Math.round(point.y)})`);
+      record(this.signal.aborted ? 'cancelled' : 'failed', failure.code);
       throw failure;
     }
     try {
@@ -701,11 +818,17 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
     }
   }
 
-  /** `perform` within a deadline a caller shares across steps, such as the swipes of one scroll. */
+  /**
+   * `perform` within a deadline a caller shares across steps, such as the
+   * swipes of one scroll. `performFailure` reads a failure of the perform
+   * itself, never of the locate before it; `undefined` leaves it to the usual
+   * translation.
+   */
   async performUntil(
     expression: LocatorExpression,
     action: LocatorAction | ActionBuilder,
     deadline: Deadline,
+    performFailure?: (cause: unknown) => (Error & { readonly code: string }) | undefined,
   ): Promise<void> {
     if (typeof action !== 'function') this.checkAction(action);
     const startedAt = timestamp();
@@ -721,8 +844,8 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
       const record = (status: StepEvent['status'], code?: string): void =>
         this.recordAction({ node, kind: resolved.kind, startedAt, startedMs, waitedMs, stale, status, code });
       if (deadline.expired()) {
-        const failure = lateAction(resolved.kind, describeExpression(expression));
-        record('failed', failure.code);
+        const failure = this.lateAction(resolved.kind, describeExpression(expression));
+        record(this.signal.aborted ? 'cancelled' : 'failed', failure.code);
         throw failure;
       }
       try {
@@ -737,7 +860,7 @@ const ref = await this.singleOf(await this.resolveOnce(expression, reads, missin
           stale += 1;
           continue;
         }
-        const failure = translateLocatorError(cause, expression);
+        const failure = performFailure?.(cause) ?? translateLocatorError(cause, expression);
         record(this.signal.aborted ? 'cancelled' : 'failed', failure.code);
         throw failure;
       }

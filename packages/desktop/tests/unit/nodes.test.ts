@@ -43,6 +43,36 @@ describe('projectSnapshot', () => {
     expect(bindings.get(signIn.ref.id)).toMatchObject({ ref: '@s1y1hxmo5pexrl:e5', actions: ['Click', 'SetFocus'] });
   });
 
+  it("reads a heading's level from the app, else from its description", () => {
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'W',
+          children: [
+            { role: 'heading', name: 'Summary', level: 2 },
+            { role: 'heading', name: 'Notes', description: 'heading level 3' },
+            { role: 'heading', name: 'Plain' },
+          ],
+        },
+      },
+      minter(),
+    );
+    expect(all(root).filter((node) => node.role === 'heading').map((node) => [node.name, node.level])).toEqual([
+      ['Summary', 2],
+      ['Notes', 3],
+      ['Plain', undefined],
+    ]);
+    const heading = (level: number) =>
+      resolveExpression(
+        { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'heading', exact: true }, name: { kind: 'string', value: 'Summary', exact: true }, level } },
+        [root],
+      );
+    expect(heading(2)).toHaveLength(1);
+    expect(heading(1)).toEqual([]);
+  });
+
   it('reports a secure field as a password field with no value', () => {
     const { root } = project('macos/appkit-form');
     const password = byTestId(root, 'password')!;
@@ -58,28 +88,11 @@ describe('projectSnapshot', () => {
     expect(byTestId(root, 'password')).toMatchObject({ inputPurpose: 'password', states: { secure: true } });
   });
 
-  it("leaves out the window's own title-bar buttons, and keeps the app's", () => {
+  it("keeps every Close button the driver reports: it leaves the window's own out by their subrole", () => {
     const { root } = project('macos/sign-in-form');
     expect(all(root).filter((node) => node.role === 'button').map((node) => node.name)).toEqual(['Sign in']);
-    const own = projectSnapshot(
-      {
-        snapshot_id: 's',
-        tree: {
-          role: 'window',
-          name: 'W',
-          children: [
-            { role: 'button', name: 'Close', native_id: { kind: 'ax_identifier', value: 'close' }, ref_id: '@s:e1' },
-            { role: 'group', name: 'Toolbar', children: [{ role: 'button', name: 'Close', ref_id: '@s:e2' }] },
-          ],
-        },
-      },
-      minter(),
-    );
-    expect(all(own.root).filter((node) => node.role === 'button' && node.name === 'Close')).toHaveLength(2);
-    const sheet = projectSnapshot({ snapshot_id: 's', tree: { role: 'window', name: 'About', children: [{ role: 'button', name: 'Close', ref_id: '@s:e1', bounds: { x: 0, y: 0, width: 80, height: 18 } }] } }, minter());
-    expect(all(sheet.root).filter((node) => node.role === 'button' && node.name === 'Close')).toHaveLength(1);
-    // A small Close button of the app's, below the title bar, is the app's; the one in the title bar is the window's.
     const small = { width: 16, height: 16 };
+    // An app's own small Close button, even in the title bar beside another, is the app's.
     const panel = projectSnapshot(
       {
         snapshot_id: 's',
@@ -90,33 +103,12 @@ describe('projectSnapshot', () => {
           children: [
             { role: 'button', name: 'Close', ref_id: '@s:e1', bounds: { x: 108, y: 208, ...small } },
             { role: 'button', name: 'Minimize', ref_id: '@s:e3', bounds: { x: 131, y: 208, ...small } },
-            { role: 'button', name: 'Zoom', ref_id: '@s:e4', bounds: { x: 154, y: 208, ...small } },
-            { role: 'button', name: 'Close', ref_id: '@s:e2', bounds: { x: 460, y: 320, ...small } },
           ],
         },
       },
       minter(),
     );
-    expect(all(panel.root).filter((node) => node.role === 'button' && node.name === 'Close').map((node) => node.rect)).toEqual([{ x: 360, y: 120, ...small }]);
-    expect(all(panel.root).filter((node) => node.name === 'Minimize' || node.name === 'Zoom')).toEqual([]);
-    // An app's own small Close button in the title bar's far corner stands alone, apart from the window's row of buttons: it is kept.
-    const corner = projectSnapshot(
-      {
-        snapshot_id: 's',
-        tree: {
-          role: 'window',
-          name: 'Panel',
-          bounds: { x: 100, y: 200, width: 400, height: 300 },
-          children: [
-            { role: 'button', name: 'Close', ref_id: '@s:e1', bounds: { x: 108, y: 208, ...small } },
-            { role: 'button', name: 'Minimize', ref_id: '@s:e3', bounds: { x: 131, y: 208, ...small } },
-            { role: 'button', name: 'Close', ref_id: '@s:e2', bounds: { x: 476, y: 208, ...small } },
-          ],
-        },
-      },
-      minter(),
-    );
-    expect(all(corner.root).filter((node) => node.role === 'button' && node.name === 'Close').map((node) => node.rect)).toEqual([{ x: 376, y: 8, ...small }]);
+    expect(all(panel.root).filter((node) => node.role === 'button').map((node) => node.name)).toEqual(['Close', 'Minimize']);
   });
 
   it('marks no id stable that sits inside a look-alike, whose own id is new every snapshot', () => {
@@ -192,6 +184,132 @@ describe('projectSnapshot', () => {
     expect(root.children?.[1]?.role).toBe('image');
   });
 
+  it('reports the read-only state toBeEditable reads: of a text field always, of a combo box only when it takes text', () => {
+    const form = project('macos/sign-in-form').root;
+    expect(byTestId(form, 'username')?.states).toMatchObject({ readonly: false });
+    expect(byTestId(form, 'password')?.states).toMatchObject({ readonly: false });
+    // A pop-up menu takes no text, which is not read-only: no state, as on a device.
+    expect(byTestId(form, 'plan')?.states).not.toHaveProperty('readonly');
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Form',
+          children: [
+            { role: 'textfield', name: 'Order id', ref_id: '@s:e1', states: ['readonly'], available_actions: ['Click'] },
+            { role: 'combobox', name: 'City', ref_id: '@s:e2', available_actions: ['Click', 'SetValue'] },
+            { role: 'textfield', name: 'Unknown', ref_id: '@s:e3', available_actions: ['Click'] },
+          ],
+        },
+      },
+      minter(),
+    );
+    expect(root.children?.map((node) => node.states?.readonly)).toEqual([true, false, undefined]);
+  });
+
+  it('reads a control collapsed to no width or height as hidden, but not a container with children, listed or cut off', () => {
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Form',
+          bounds: { x: 0, y: 0, width: 200, height: 200 },
+          children: [
+            { role: 'button', name: 'Collapsed', ref_id: '@s:e1', bounds: { x: 10, y: 10, width: 0, height: 20 } },
+            { role: 'button', name: 'Shown', ref_id: '@s:e2', bounds: { x: 10, y: 40, width: 80, height: 20 } },
+            { role: 'group', name: 'Wrapper', bounds: { x: 0, y: 0, width: 0, height: 0 }, children: [{ role: 'button', name: 'Inside', ref_id: '@s:e3', bounds: { x: 10, y: 70, width: 80, height: 20 } }] },
+            { role: 'group', name: 'Deep', bounds: { x: 0, y: 0, width: 0, height: 0 }, children_count: 3 },
+          ],
+        },
+      },
+      minter(),
+    );
+    const byName = (name: string) => all(root).find((node) => node.name === name);
+    expect(byName('Collapsed')?.states?.hidden).toBe(true);
+    expect(byName('Shown')?.states?.hidden).toBeUndefined();
+    expect(byName('Wrapper')?.states?.hidden).toBeUndefined();
+    expect(byName('Deep')?.states?.hidden).toBeUndefined();
+    expect(byName('Inside')?.states?.hidden).toBeUndefined();
+  });
+
+  it('reads everything under a hidden node as hidden, under a wrapper it leaves out too, and swipes none of it', () => {
+    const pane = (name: string, ref: string) => ({ role: 'scrollarea', name, ref_id: ref, available_actions: ['Scroll'], children: [{ role: 'button', name: `${name} item`, ref_id: `${ref}b` }] });
+    const screen = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Panes',
+          children: [
+            { role: 'group', states: ['hidden'], children: [pane('Drawer', '@s:e1')] },
+            { role: 'group', name: 'Panel', states: ['hidden'], children: [{ role: 'button', name: 'Panel item', ref_id: '@s:e3' }] },
+            pane('Main', '@s:e2'),
+          ],
+        },
+      },
+      minter(),
+    );
+    const byName = (name: string) => all(screen.root).find((node) => node.name === name);
+    for (const name of ['Drawer', 'Drawer item', 'Panel', 'Panel item']) expect(byName(name)?.states?.hidden).toBe(true);
+    expect(byName('Main')?.states?.hidden).toBeUndefined();
+    expect(byName('Main item')?.states?.hidden).toBeUndefined();
+    expect(screen.scrollTargets?.vertical).toBe(byName('Main')?.ref.id);
+  });
+
+  it('reads every node of a minimized window as hidden, the window itself too', () => {
+    const { root } = projectSnapshot(load('macos/sign-in-form'), minter(), { minimized: true });
+    expect(resolveExpression({ kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'window', exact: true }, visible: true } }, [root])).toEqual([]);
+    expect(all(root).every((node) => node.states?.hidden === true)).toBe(true);
+  });
+
+  it("takes the window's title from its accessibility root, not the window list's app name", () => {
+    const screen = projectSnapshot({ snapshot_id: 's', window: { id: 'w-1', title: 'SignInForm' }, tree: { role: 'window', name: 'Sign In', children: [] } }, minter());
+    expect(screen.title).toBe('Sign In');
+    expect(projectSnapshot({ snapshot_id: 's', window: { id: 'w-1', title: 'Untitled' }, tree: { role: 'window', children: [] } }, minter()).title).toBe('Untitled');
+  });
+
+  it('swipes the first visible, enabled node the driver offers Scroll, past a list or table that cannot scroll', () => {
+    const screen = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Feed',
+          children: [
+            { role: 'table', name: 'Filters', ref_id: '@s:e1', available_actions: ['Select'] },
+            { role: 'list', name: 'Sidebar', ref_id: '@s:e2', available_actions: ['Select'] },
+            { role: 'scrollarea', name: 'Drawer', ref_id: '@s:e3', states: ['offscreen'], available_actions: ['Scroll'] },
+            { role: 'scrollarea', name: 'Archive', ref_id: '@s:e4', states: ['disabled'], available_actions: ['Scroll'] },
+            { role: 'group', name: 'Posts', ref_id: '@s:e5', available_actions: ['Scroll'] },
+          ],
+        },
+      },
+      minter(),
+    );
+    expect(screen.scrollTargets).toEqual({ vertical: screen.root.children?.[4]?.ref.id, horizontal: screen.root.children?.[4]?.ref.id });
+  });
+
+  it('swipes each way the first node that scrolls that way, past a carousel for a swipe down', () => {
+    const screen = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Store',
+          children: [
+            { role: 'scrollarea', name: 'Carousel', ref_id: '@s:e1', available_actions: ['Scroll'], scroll_axes: ['horizontal'] },
+            { role: 'scrollarea', name: 'List', ref_id: '@s:e2', available_actions: ['Scroll'], scroll_axes: ['vertical'] },
+          ],
+        },
+      },
+      minter(),
+    );
+    const [carousel, list] = screen.root.children ?? [];
+    expect(screen.scrollTargets).toEqual({ vertical: list?.ref.id, horizontal: carousel?.ref.id });
+  });
+
   it('counts a node with children it did not list as a cut-short tree', () => {
     const screen = projectSnapshot({ snapshot_id: 's', complete: true, tree: { role: 'window', name: 'W', children: [{ role: 'group', name: 'Deep', children_count: 3 }] } }, minter());
     expect(screen.truncated).toBe(true);
@@ -200,6 +318,21 @@ describe('projectSnapshot', () => {
   it('reads a placeholder from its own field, not from a hint', () => {
     const { root } = projectSnapshot({ snapshot_id: 's', tree: { role: 'window', name: 'W', children: [{ role: 'textfield', name: 'Email', placeholder: 'Email address', hint: 'column 1 of 2', ref_id: '@s:e1' }] } }, minter());
     expect(root.children?.[0]?.attributes).toMatchObject({ placeholder: 'Email address', hint: 'column 1 of 2' });
+  });
+
+  it('reads a node\'s name and developer id as its label and identifier attributes', () => {
+    const { root } = projectSnapshot({ snapshot_id: 's', tree: { role: 'window', name: 'W', children: [{ role: 'button', name: 'Delete', native_id: { kind: 'ax_identifier', value: 'delete' }, ref_id: '@s:e1' }] } }, minter());
+    expect(root.children?.[0]?.attributes).toMatchObject({ label: 'Delete', identifier: 'delete' });
+  });
+
+  it('gives a text node, and a name longer than any control has, no label, so no paragraph rides along whole in an observation', () => {
+    const paragraph = 'word '.repeat(20_000);
+    const { root } = projectSnapshot(
+      { snapshot_id: 's', tree: { role: 'window', name: 'W', children: [{ role: 'statictext', value: paragraph }, { role: 'button', name: paragraph, ref_id: '@s:e1' }, { role: 'statictext', value: 'Signed in' }] } },
+      minter(),
+    );
+    // A short text gets none either: its name is its text, which textContent reads.
+    expect(root.children?.map((child) => child.attributes?.label)).toEqual([undefined, undefined, undefined]);
   });
 
   it('keeps ids for siblings that share a developer id but not a name', () => {

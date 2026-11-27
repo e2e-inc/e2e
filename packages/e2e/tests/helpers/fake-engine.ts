@@ -81,6 +81,8 @@ export interface RecordedSessionCall {
 export type RecordedCall = RecordedPerform | RecordedPointerAction | RecordedKey | RecordedSessionCall;
 
 export interface FakeEngineBehavior {
+  /** The worker cap `prepare` reports to the run; without it the engine has no `prepare`. */
+  preparedWorkers?: number;
   /** Throw to fail worker boot. Called before any attempt. */
   onInit?(info: EngineInitInfo): void | Promise<void>;
   /** Throw or hang to fail attempt launches. */
@@ -137,6 +139,8 @@ export interface FakeEngineBehavior {
   tapModifiers?: boolean;
   /** Declares `session.back`, `restart`, and `reset` beside `open`; with a scene, the last two close the app. */
   navigation?: boolean;
+  /** The platform the engine declares it drives; default none, so its target names one. */
+  platform?: string;
   /**
    * A device with a pinned app: no `session.open`, and `restart` relaunches
    * the app, opening the scene at the fake's location. Overrides `navigation`.
@@ -254,10 +258,13 @@ export function createFakeEngine(behavior: FakeEngineBehavior = {}): FakeEngineH
   const location = `${FAKE_APP_URL}/`;
   let videoStartedAt: string | undefined;
 
+  const { preparedWorkers } = behavior;
   const engine = defineEngine({
     name: 'fake',
     version: '1.0.0',
     spiVersion: ENGINE_SPI_VERSION,
+    ...(behavior.platform === undefined ? {} : { platform: behavior.platform }),
+    ...(preparedWorkers === undefined ? {} : { prepare: async () => ({ workers: preparedWorkers }) }),
     async init(info) {
       events.push('init');
       inits.push(info);
