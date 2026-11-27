@@ -205,8 +205,8 @@
         "label": "Custom executors"
       },
       {
-        "id": "web-scraping",
-        "label": "Web scraping"
+        "id": "automation",
+        "label": "Automation"
       }
     ],
     "platform": [
@@ -1025,7 +1025,7 @@
           "nodejs"
         ],
         "useCase": [
-          "web-scraping"
+          "automation"
         ],
         "platform": [
           "web"
