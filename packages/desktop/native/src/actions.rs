@@ -57,6 +57,12 @@ fn refused(error: AXError, what: &str) -> Failure {
     }
 }
 
+/// The failure of an AX attribute write: only a refusal says nothing was sent. Any other answer may follow a write
+/// the app took, whose handler ran (one that replaced the element answers a gone element), so it counts as delivered.
+fn write_failed(error: AXError, what: &str) -> Failure {
+    if refuses(error) { refused(error, what) } else { refused(error, what).delivered() }
+}
+
 thread_local! {
     /// The action this thread runs: its input run, which a cancel marks, and its deadline.
     static CURRENT: std::cell::RefCell<Option<(input::TypingRun, Instant)>> = const { std::cell::RefCell::new(None) };
@@ -496,7 +502,7 @@ fn click_shown(entry: &Entry, deadline: Instant) -> Outcome<()> {
     }
     if matches!(role, "cell" | "option" | "tab") && settable(element, "AXSelected", "click")? {
         go("select")?;
-        element.set_bool("AXSelected", true).map_err(|error| refused(error, "select"))?;
+        element.set_bool("AXSelected", true).map_err(|error| write_failed(error, "select"))?;
         if until(deadline, || element.boolean("AXSelected") == Some(true)) {
             return Ok(());
         }
@@ -521,7 +527,7 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
     go("focus")?;
     // A focus write that failed after the app took it (a focus handler that replaced the element) may have run its
     // handlers: only a refusal shows nothing was sent, as for `set_value`.
-    element.set_bool("AXFocused", true).map_err(|error| if refuses(error) { refused(error, "focus") } else { refused(error, "focus").delivered() })?;
+    element.set_bool("AXFocused", true).map_err(|error| write_failed(error, "focus"))?;
     if until(deadline, holds) { Ok(()) } else { Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus")) }
 }
 
@@ -786,7 +792,7 @@ fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     };
     // A write the app answered with anything but a refusal may have run its change handler (one that replaced the
     // field answers a gone element): only a refusal says nothing was sent.
-    written.map_err(|error| if moved_focus || !refuses(error) { refused(error, "set value").delivered() } else { refused(error, "set value") })?;
+    written.map_err(|error| if moved_focus { refused(error, "set value").delivered() } else { write_failed(error, "set value") })?;
     if secure {
         // A secure field shows no value, but counts its characters: the count says the text landed whole (one a
         // formatter cut short does not), with no secret read. A field that counts none is taken at the write's word.
@@ -1123,7 +1129,7 @@ fn choose_row(list: Option<&Element>, row: &Element, deadline: Instant, unselect
         Some(list) if by_rows => list.set_elements("AXSelectedRows", std::slice::from_ref(row)),
         _ => row.set_bool("AXSelected", true),
     };
-    written.map_err(|error| refused(error, "select the row"))?;
+    written.map_err(|error| write_failed(error, "select the row"))?;
     if until(deadline, || row.boolean("AXSelected") == Some(true)) {
         return Ok(true);
     }
@@ -1208,7 +1214,7 @@ fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
         {
             let next = (current + if forward { step } else { -step }).clamp(0.0, 1.0);
             go("scroll")?;
-            return bar.set_number("AXValue", next).map_err(|error| refused(error, "scroll"));
+            return bar.set_number("AXValue", next).map_err(|error| write_failed(error, "scroll"));
         }
         // A step is about a line: as many as make the pages asked for, so a fast swipe goes further than a slow one.
         return repeat(&bar, if forward { "AXIncrement" } else { "AXDecrement" }, ((pages * LINES_PER_PAGE).round() as usize).max(1));
@@ -1665,6 +1671,15 @@ mod tests {
     /// A deadline the test never reaches.
     fn later() -> Instant {
         Instant::now() + Duration::from_secs(60)
+    }
+
+    #[test]
+    fn counts_a_write_the_app_answered_with_anything_but_a_refusal_as_delivered() {
+        use super::write_failed;
+        use crate::failure::Delivery;
+        assert_eq!(write_failed(crate::ax::AX_INVALID_ELEMENT, "set value").delivery, Delivery::Unknown, "a handler replaced the element");
+        assert_eq!(write_failed(crate::ax::AX_ATTRIBUTE_UNSUPPORTED, "set value").delivery, Delivery::NotDelivered);
+        assert_eq!(write_failed(crate::ax::AX_API_DISABLED, "set value").delivery, Delivery::NotDelivered);
     }
 
     #[test]
