@@ -24,14 +24,14 @@ runs:
         if command -v rustup >/dev/null; then
           exit 0
         fi
-        case "$(uname -m)" in
-          arm64) target=aarch64-apple-darwin sha256="$SHA256_AARCH64_APPLE_DARWIN" ;;
-          x86_64) target=x86_64-apple-darwin sha256="$SHA256_X86_64_APPLE_DARWIN" ;;
+        case "$(uname -s) $(uname -m)" in
+          "Darwin arm64") target=aarch64-apple-darwin sha256="$SHA256_AARCH64_APPLE_DARWIN" ;;
+          "Darwin x86_64") target=x86_64-apple-darwin sha256="$SHA256_X86_64_APPLE_DARWIN" ;;
           *) echo "no pinned rustup-init for $(uname -s) $(uname -m)" >&2; exit 1 ;;
         esac
         dir="$RUNNER_TEMP/rustup-init"
         mkdir -p "$dir"
-        curl --proto '=https' --tlsv1.2 -sSf -o "$dir/rustup-init" \
+        curl --proto '=https' --tlsv1.2 -sSf --retry 3 -o "$dir/rustup-init" \
           "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$target/rustup-init"
         echo "$sha256  $dir/rustup-init" | shasum -a 256 -c -
         chmod +x "$dir/rustup-init"
