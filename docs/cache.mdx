@@ -292,7 +292,9 @@ steps:
   doesn't read.
 - Two branches that each recorded into one test conflict in both files.
   Keep both sides in each, then run `npx e2e cache ls` to check the file
-  reads.
+  reads. Where both sides recorded the same step under the same key, keep
+  one side's step in the YAML and its entry in the lock: a lock that lists
+  a key twice doesn't read.
 - Two tests whose names come out the same get one name each: the second to
   record adds `--` and a hash of its test id.
 - Recordings hold no prompts, conversations, screenshots, observed trees,
