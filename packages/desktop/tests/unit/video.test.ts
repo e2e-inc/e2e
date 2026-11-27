@@ -1,10 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { desktop } from '../../src/engine.ts';
 import { WindowVideo } from '../../src/video.ts';
 import { failure, fakeDriver, type Answer, type FakeDriver } from '../helpers/fake-driver.ts';
 import { attempt, cleanUp, initialized, launched, operation, scratch } from '../helpers/surface.ts';
+
+// The suite runs on any OS, and the engine reads the Darwin version from `os.release()`: macOS 26 here, so video is supported.
+vi.mock('node:os', async (original) => ({ ...(await original<typeof import('node:os')>()), release: () => '25.0.0' }));
 
 afterEach(cleanUp);
 
