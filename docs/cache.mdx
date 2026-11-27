@@ -313,7 +313,9 @@ steps:
 - Recordings hold no prompts, conversations, screenshots, observed trees,
   or secret values. A secret fill stores only the secret's name. A title
   that spells a secret the run learns only mid-test is filed redacted, so
-  that test records again on every run: keep secret values out of titles.
+  that test records again on every run, and an agent or target name that
+  spells one reads as `invalid-entry`: keep secret values out of titles and
+  names.
 
 <Warning>
 Non-secret typed values are stored verbatim. Review cache diffs before
