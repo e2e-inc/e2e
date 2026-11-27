@@ -443,7 +443,20 @@ fn click(entry: &Entry, deadline: Instant) -> Outcome<()> {
         }
         return Ok(());
     }
-    if matches!(role, "row" | "cell" | "treeitem" | "option" | "tab") && settable(element, "AXSelected", "click")? {
+    // An NSTableView's row is selected through its table (`AXSelectedRows`), and a cell in a row through that row: neither
+    // takes a press, and the row's own `AXSelected` may not be writable.
+    let row = match role {
+        "row" | "treeitem" => Some(element.clone()),
+        "cell" => element.element("AXParent").filter(|parent| matches!(parent.text("AXRole").as_deref(), Some("AXRow" | "AXOutlineRow"))),
+        _ => None,
+    };
+    if let Some(row) = row {
+        let list = row.element("AXParent");
+        if choose_row(list.as_ref(), &row, deadline, "the row did not become selected")? {
+            return Ok(());
+        }
+    }
+    if matches!(role, "cell" | "option" | "tab") && settable(element, "AXSelected", "click")? {
         go("select")?;
         element.set_bool("AXSelected", true).map_err(|error| refused(error, "select"))?;
         if until(deadline, || element.boolean("AXSelected") == Some(true)) {
@@ -950,17 +963,36 @@ fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<()> {
             }
             return Ok(());
         }
-        let by_rows = settable(element, "AXSelectedRows", "select")?;
-        // The read above can take long on a slow app; the caller may have given up since.
-        go("select")?;
-        let written = if by_rows { element.set_elements("AXSelectedRows", std::slice::from_ref(&row)) } else { row.set_bool("AXSelected", true) };
-        written.map_err(|error| refused(error, "choose the option"))?;
-        if until(deadline, || row.boolean("AXSelected") == Some(true)) {
+        if choose_row(Some(element), &row, deadline, &format!("\"{label}\" did not become selected"))? {
             return Ok(());
         }
-        return Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("\"{label}\" did not become selected")));
+        return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "the list takes no selection through accessibility"));
     }
     Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("a {role} has no options to select")))
+}
+
+/// Selects `row`, through `list`'s `AXSelectedRows` when the list takes it, else through the row's own `AXSelected`, and
+/// waits for the row to show it is selected (`unselected` when it does not). `Ok(false)` when neither can be written:
+/// nothing was sent.
+fn choose_row(list: Option<&Element>, row: &Element, deadline: Instant, unselected: &str) -> Outcome<bool> {
+    let by_rows = match list {
+        Some(list) => settable(list, "AXSelectedRows", "select")?,
+        None => false,
+    };
+    if !by_rows && !settable(row, "AXSelected", "select")? {
+        return Ok(false);
+    }
+    // The reads before can take long on a slow app; the caller may have given up since.
+    go("select")?;
+    let written = match list {
+        Some(list) if by_rows => list.set_elements("AXSelectedRows", std::slice::from_ref(row)),
+        _ => row.set_bool("AXSelected", true),
+    };
+    written.map_err(|error| refused(error, "select the row"))?;
+    if until(deadline, || row.boolean("AXSelected") == Some(true)) {
+        return Ok(true);
+    }
+    Err(Failure::unconfirmed(codes::ACTION_FAILED, unselected))
 }
 
 /// A scroll area's scroll bar for one axis. A SwiftUI `List` lists it only as a child, with no `AXVerticalScrollBar`.
