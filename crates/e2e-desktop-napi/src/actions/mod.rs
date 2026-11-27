@@ -1116,6 +1116,20 @@ mod tests {
     }
 
     #[test]
+    fn fails_a_stepper_value_read_that_stalled_or_went_away_before_any_step() {
+        use super::shown_number;
+        use crate::ax::{AX_CANNOT_COMPLETE, AX_FAILURE, AX_INVALID_ELEMENT, Value};
+        use crate::failure::{Delivery, codes};
+        assert_eq!(shown_number(Ok(Value::Number(4.0)), "set value").unwrap(), Some(4.0));
+        assert_eq!(shown_number(Ok(Value::Text("four".into())), "set value").unwrap(), None);
+        assert_eq!(shown_number(Err(AX_FAILURE), "set value").unwrap(), None);
+        let stall = shown_number(Err(AX_CANNOT_COMPLETE), "set value").expect_err("a stall");
+        assert_eq!((stall.code, stall.delivery), (codes::APP_UNRESPONSIVE, Delivery::NotDelivered));
+        let gone = shown_number(Err(AX_INVALID_ELEMENT), "set value").expect_err("gone");
+        assert_eq!((gone.code, gone.delivery), (codes::STALE_REF, Delivery::NotDelivered));
+    }
+
+    #[test]
     fn takes_only_a_finite_number() {
         assert_eq!(super::finite(" 3 "), Ok(3.0));
         for text in ["NaN", "inf", "-infinity", "three"] {

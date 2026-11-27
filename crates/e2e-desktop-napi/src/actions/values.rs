@@ -213,6 +213,16 @@ pub(super) fn step_to(
     Ok(same(now, target, size))
 }
 
+/// The number a stepper shows, from its `AXValue` read. A read the app did not answer in time, or of an element that
+/// is gone, is no proof the stepper shows no number: it fails before anything is sent, a stall as one a retry may get
+/// past. A value that is no number is `None`.
+pub(super) fn shown_number(read: Result<Value, AXError>, what: &str) -> Outcome<Option<f64>> {
+    match read {
+        Ok(Value::Number(number)) => Ok(Some(number)),
+        Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => Err(unread(error, what)),
+        _ => Ok(None),
+    }
+}
 /// Whether a stepper's target lies outside the range it reports: below `min` or above `max`. A bound it does not report
 /// limits nothing.
 pub(super) fn outside(target: f64, min: Option<f64>, max: Option<f64>) -> bool {
@@ -233,16 +243,8 @@ pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Out
         // A stepper whose value cannot be written still steps toward a number.
         let names = action_names(element, "set value")?;
         let steps = names.iter().any(|name| name == "AXIncrement" || name == "AXDecrement");
-        // A value the app did not answer in time is no proof the stepper shows no number: a stall, which a retry may get past.
-        let current = if steps {
-            match element.attribute("AXValue") {
-                Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => return Err(unread(error, "set value")),
-                current => Some(current),
-            }
-        } else {
-            None
-        };
-        if let (Some(Ok(Value::Number(_))), Ok(target)) = (current, finite(text)) {
+        let current = if steps { shown_number(element.attribute("AXValue"), "set value")? } else { None };
+        if let (Some(first), Ok(target)) = (current, finite(text)) {
             // A value outside the range the stepper reports is one no step reaches: refused before any press.
             let bound = |name: &str| match element.attribute(name) {
                 Ok(Value::Number(number)) => Some(number),
@@ -255,7 +257,9 @@ pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Out
                 Ok(Value::Number(number)) => Some(number),
                 _ => None,
             };
-            let mut shown = number();
+            // The number read above, not a second read, which a stall would turn into no number and a fill that stops
+            // short without a step.
+            let mut shown = Some(first);
             let reached = step_to(
                 target,
                 shown,
