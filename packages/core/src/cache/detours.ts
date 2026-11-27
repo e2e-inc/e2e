@@ -197,7 +197,7 @@ interface PlaceKeys {
  * same address that followed a departure from it, with nothing typed,
  * chosen, or set on the way. Each wrong turn from one menu is a detour of
  * its own, so a replay that stops between two of them still has the first
- * whole (`detourOf` in `agent/step-cache.ts`).
+ * whole (`prefixDetours` in `agent/step-cache.ts`).
  *
  * A place spelled as an entry keeps it (the location a recording kept,
  * copied onto an action a replay ran before a hand-off) has no record ids

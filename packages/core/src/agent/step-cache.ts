@@ -488,10 +488,10 @@ export class StepTraceSession {
     }
     // The replayed actions are this step's recording now; the ones it ran without looking keep where they were recorded.
     this.recorder?.keepLocations(trace.actions.slice(0, outcome.executed));
-    // So are the detours the entry found among them (`findDetoursAfterReplay`).
-    const spans = trace.detours?.filter(({ to }) => to <= outcome.executed);
-    this.replayed = spans === undefined ? undefined : { executed: outcome.executed, spans };
-    this.handOff(outcome, stopReason, detail, this.detourOf(trace, outcome.executed));
+    // So are the detours they made: the report names them, and this step's recording keeps them (`findDetoursAfterReplay`).
+    const ran = this.prefixDetours(trace, outcome.executed);
+    if (trace.detours !== undefined) this.replayed = { executed: outcome.executed, spans: ran.map(({ from, to }) => ({ from, to })) };
+    this.handOff(outcome, stopReason, detail, this.describeDetours(ran));
     return undefined;
   }
 
@@ -567,7 +567,7 @@ export class StepTraceSession {
 
   private selfFinalize(trace: ActionTrace, outcome: ReplayOutcome): StepVerdict {
     this.replayedWhole = true;
-    const detour = this.detourOf(trace);
+    const detour = this.describeDetours(findDetours(trace));
     this.info = {
       mode: 'self-finalized',
       replayedActions: outcome.executed,
@@ -693,20 +693,16 @@ export class StepTraceSession {
   }
 
   /**
-   * The recording's detours as the report names them (`cache/detours.ts`),
-   * or undefined when it has none; with `executed`, those of the actions a
-   * replay that handed off ran, read as a flow of their own that ends where
-   * the next recorded action stood, so a trip the replay completed is not
-   * merged with one it never reached. A span the recording run found that
-   * ends inside the prefix is kept as found: a stored location reads `:id`
+   * The detours of the first `executed` actions of a recording, which a
+   * replay ran before it handed off, read as a flow of their own that ends
+   * where the next recorded action stood, so a trip the replay completed is
+   * not merged with one it never reached. A span the recording run found
+   * that ends inside them is kept as found: a stored location reads `:id`
    * for a record id and a query value, so comparing again would lose a trip
-   * to another record. Only a span the hand-off cut through is read again, on the
-   * stored locations, and a trip found there counts only inside it.
-   * Joined with commas: the report line separates its own parts with
-   * semicolons (`cacheLine`).
+   * to another record. Only a span the hand-off cut through is read again,
+   * on the stored locations, and a trip found there counts only inside it.
    */
-  private detourOf(trace: ActionTrace, executed = trace.actions.length): string | undefined {
-    if (executed >= trace.actions.length) return this.describeDetours(findDetours(trace));
+  private prefixDetours(trace: ActionTrace, executed: number): TraceDetour[] {
     const next = trace.actions[executed]?.at;
     const ran = {
       actions: trace.actions.slice(0, executed),
@@ -714,14 +710,18 @@ export class StepTraceSession {
       ...(next === undefined ? {} : { endPath: next }),
     };
     const spans = trace.detours;
-    if (spans === undefined) return this.describeDetours(findDetours(ran));
+    if (spans === undefined) return findDetours(ran);
     const finished = findDetours({ ...ran, detours: spans.filter(({ to }) => to <= executed) });
     const cut = spans.filter(({ from, to }) => from < executed && executed < to);
     const inCut = cut.length === 0 ? [] : findDetours(ran).filter(({ from, to }) => cut.some((span) => span.from <= from && to <= span.to));
-    return this.describeDetours([...finished, ...inCut].toSorted((a, b) => a.from - b.from));
+    return [...finished, ...inCut].toSorted((a, b) => a.from - b.from);
   }
 
-  /** Detours as the report names them, or undefined for none: redacted, then cut between words to the bound (`boundDetour`). */
+  /**
+   * Detours as the report names them, or undefined for none: redacted, then
+   * cut between words to the bound (`boundDetour`). Joined with commas: the
+   * report line separates its own parts with semicolons (`cacheLine`).
+   */
   private describeDetours(detours: readonly TraceDetour[]): string | undefined {
     return detours.length === 0 ? undefined : boundDetour(this.options.redact(detours.map(describeDetour).join(', ')));
   }

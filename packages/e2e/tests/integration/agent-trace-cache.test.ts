@@ -1587,3 +1587,71 @@ describe('trace cache: a tap on the icon inside a switch', () => {
     }, 240_000);
   }
 });
+
+/**
+ * Opens About, then the echo page from it, goes back to About, then follows
+ * Home and taps Increment: a trip from About inside one from Home. After a
+ * hand-off it presses Tab on About, which sets nothing a detour reads but
+ * ends the trip from Home, then goes Home and taps Increment.
+ */
+function innerTripExecutor(appUrl: string, record: ExecutorRecord): StepExecutor {
+  return {
+    name: 'inner-trip-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      record.calls += 1;
+      let observation = await context.observe();
+      if (context.replayedPrefix === undefined) {
+        await context.actions.tap({ id: nodeIdFor(observation.text, /link "About"/) });
+        await context.observe();
+        await context.actions.navigate(`${appUrl}/echo`);
+        await context.observe();
+        await context.actions.back();
+        observation = await context.observe();
+      } else {
+        await context.actions.pressKey('Tab');
+      }
+      await context.actions.tap({ id: nodeIdFor(observation.text, /link "Home"/) });
+      observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+      return { status: 'passed' as const, summary: 'the counter shows 1' };
+    },
+  };
+}
+
+describe('trace cache: a hand-off inside a trip, after a trip it completed', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/detour.e2e.ts': DETOUR_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('keeps the inner trip the replay completed in the recording it makes again, as its report names it', async () => {
+    const options = (record: ExecutorRecord) => ({
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: innerTripExecutor(app.url, record) } }, cache: 'read-write' as const },
+    });
+    const step = (outcome: RunOutcome) => resultByTitle(outcome, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect((await runExisting(project, options({ calls: 0, prefixes: [] }))).exitCode).toBe(0);
+    expect(readOnlyEntry(project).entry.payload.detours).toEqual([{ from: 0, to: 4 }]);
+    // Home no longer finds its recorded target: the replay runs the trip to the echo page and back, then hands off on About.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      actions: payload.actions.map((action, index) => (index === 3 && action.name === 'tap' ? { ...action, target: { ...action.target, name: 'No Such Link' } } : action)),
+    }));
+    const handedOff: ExecutorRecord = { calls: 0, prefixes: [] };
+    const outcome = await runExisting(project, options(handedOff));
+    expect(outcome.exitCode).toBe(0);
+    expect(handedOff.calls).toBe(1);
+    const inner = 'actions 2-3 left /about for /echo and came back with nothing typed, chosen, or set';
+    expect(step(outcome).cache).toMatchObject({ mode: 'agent-concluded', replayedActions: 3, detour: inner, write: 'saved' });
+    expect(readOnlyEntry(project).entry.payload.detours).toEqual([{ from: 1, to: 3 }]);
+  }, 240_000);
+});
