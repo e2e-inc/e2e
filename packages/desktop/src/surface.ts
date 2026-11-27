@@ -71,6 +71,8 @@ const UNREADABLE = new Error('no window of the app could be read');
 
 /** The cause of a read of an app that quit since it launched. */
 const QUIT = new Error('the app quit');
+/** The cause of a retryable read that failed listing the app's windows: it saw none, nor that there are none. */
+const UNLISTED = new Error('the app did not list its windows in time');
 
 /** The cause of a screenshot withheld because its secure fields could not be shown masked, which the harness reads as masking it could not prove. */
 const UNMASKED = new Error('the secure fields of the screenshot could not be placed');
@@ -485,7 +487,8 @@ export class DesktopSurface {
         // A window not readable yet, or one replaced while it was read, is what this wait looks at below; so is an app that quit.
         const stale = cause instanceof EngineError && cause.code === 'NODE_STALE' && cause.retryable;
         if (!(cause instanceof EngineError && (stale || cause.cause === QUIT))) throw cause;
-        if (stale) sawWindow = true;
+        // A window list the app did not answer in time saw no window: an app still starting up answers it so.
+        if (stale && cause.cause !== UNLISTED) sawWindow = true;
       }
       // A window whose root the app did not answer for is there but not readable yet, which is what this wait is for.
       if (screen !== undefined && !screen.rootUnread) return;
@@ -841,7 +844,9 @@ export class DesktopSurface {
         }
         return [];
       }
-      throw translate(cause, 'list windows', false);
+      const error = translate(cause, 'list windows', false);
+      if (error instanceof EngineError && error.code === 'NODE_STALE') throw new EngineError('NODE_STALE', error.message, { retryable: true, cause: UNLISTED });
+      throw error;
     }
   }
 
