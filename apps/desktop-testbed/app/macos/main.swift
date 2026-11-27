@@ -120,7 +120,6 @@ final class DoubleClickButton: NSButton {
   }
 }
 
-/// The second window: one control per capability, and a status line.
 /// A field that grows as it takes the keyboard, as a search field does: its box when focused is not the one it was read with.
 final class GrowingField: NSTextField {
   lazy var width = widthAnchor.constraint(equalToConstant: 80)
@@ -131,6 +130,17 @@ final class GrowingField: NSTextField {
   }
 }
 
+/// A field that gives the keyboard to another control as soon as it takes it: a key meant for it must not follow.
+final class HandoffField: NSTextField {
+  weak var heir: NSView?
+
+  override func becomeFirstResponder() -> Bool {
+    DispatchQueue.main.async { [weak self] in self?.window?.makeFirstResponder(self?.heir) }
+    return super.becomeFirstResponder()
+  }
+}
+
+/// The second window: one control per capability, and a status line.
 final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSTextFieldDelegate {
   var window: NSWindow?
   var popup: NSWindow?
@@ -152,7 +162,7 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
 
   func show() {
     if let window { window.makeKeyAndOrderFront(nil); return }
-    let window = NSWindow(contentRect: NSRect(x: 660, y: 200, width: 360, height: 900),
+    let window = NSWindow(contentRect: NSRect(x: 660, y: 200, width: 360, height: 930),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.title = "Controls"
     window.isReleasedWhenClosed = false
@@ -211,6 +221,11 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
       tag.width.isActive = true
       return tag
     })
+
+    let handoff = HandoffField()
+    handoff.setAccessibilityLabel("Hands off")
+    handoff.heir = note
+    handoff.widthAnchor.constraint(equalToConstant: 260).isActive = true
 
     // An NSTabView's items are AXRadioButtons with the AXTabButton subrole: they read as tabs, the active one selected.
     let tabs = NSTabView()
@@ -275,7 +290,7 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
 
     let draft = NSHostingView(rootView: DraftAlert { [weak self] text in self?.status.stringValue = text })
 
-    let stack = NSStackView(views: [scroll, accountScroll, note, opener, tags, tabs, options, volume, disabled, enableLater, size, agree, closeTab, draft, double, hover, hoverStatus, status])
+    let stack = NSStackView(views: [scroll, accountScroll, note, opener, tags, handoff, tabs, options, volume, disabled, enableLater, size, agree, closeTab, draft, double, hover, hoverStatus, status])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)

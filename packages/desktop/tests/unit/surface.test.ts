@@ -1299,7 +1299,7 @@ describe('DesktopSurface: keys', () => {
       ...screen('w-mine', { ...window, children: [card([note(focused)]), card([{ role: 'statictext', value: 'Draft', bounds: { x: 10, y: 60, width: 80, height: 20 } }])] }),
       interactive: screen('w-mine', { ...window, children: [card([note(focused)])] }),
     });
-    const { surface, fake } = await launched({ snapshot: [read(false), read(false), read(false), read(false), read(true)] }, { observe: false, options: { snapshot: 'interactive', headed: true } });
+    const { surface, fake } = await launched({ snapshot: [read(false), read(false), read(false), read(false)] }, { observe: false, options: { snapshot: 'interactive', headed: true } });
     const before = await surface.observe(operation(), undefined);
     const [located] = await surface.locate(testId('note'), operation());
     const after = await surface.observe(operation(), undefined);
@@ -1363,6 +1363,8 @@ describe('DesktopSurface: typing', () => {
     const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')] });
     await surface.typeText('ada', { replace: true }, operation());
     expect(inputs(fake)).toEqual(['selectAll', 'press backspace', 'type']);
+    // The delete goes only while the field itself still holds focus: the driver checks the element the select-all went to.
+    expect(last(fake, 'press')).toMatchObject({ combo: 'backspace', focusedRef: (fake.of('act')[0]!.args[0] as { ref: string }).ref });
     // A field whose selection accessibility cannot set gets the select-all key through the real keyboard; in the background, nothing.
     const refused = (): Scenario => ({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], act: [failure('ACTION_NOT_SUPPORTED', 'not_delivered'), { ok: true, data: {} }] });
     const keys = await launched(refused(), { options: { headed: true } });
@@ -1395,7 +1397,7 @@ describe('DesktopSurface: typing', () => {
 
   it('reports a delete the driver refused, since select all moved focus off the field, as possibly committed', async () => {
     const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], press: [failure('ACTION_FAILED', 'not_delivered', 'the control lost keyboard focus before the key was sent, so nothing was sent')] });
-    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/delete the selection: .*lost keyboard focus/) });
+    await expect(surface.typeText('ada', { replace: true }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/^delete the selection: the control lost keyboard focus/) });
     expect(fake.acted()).toEqual(['selectAll']);
   });
 

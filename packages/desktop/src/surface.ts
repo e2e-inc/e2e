@@ -1558,7 +1558,9 @@ async function afterChange(label: string, run: () => Promise<unknown>): Promise<
   try {
     await run();
   } catch (cause) {
-    throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${label}: ${(cause as Error).message} (an earlier command of this step changed the app)`, { retryable: false, cause });
+    const message = (cause as Error).message;
+    // A translated failure already opens with the label.
+    throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${message.startsWith(`${label}: `) ? message : `${label}: ${message}`} (an earlier command of this step changed the app)`, { retryable: false, cause });
   }
 }
 

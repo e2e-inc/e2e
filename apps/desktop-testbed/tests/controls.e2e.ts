@@ -80,6 +80,19 @@ test.describe('controls window', () => {
     await expect(screen.getByTestId('controls-status')).toHaveText('Submitted: x');
   });
 
+  test('sends no key to a field that gave the keyboard away as it was focused', async ({ screen }) => {
+    // The field hands focus to Note: the key must not follow it there.
+    const refused = await screen
+      .getByRole('textbox', 'Hands off')
+      .press('x')
+      .then(
+        () => undefined,
+        (cause: unknown) => cause,
+      );
+    expect(String(refused)).toMatch(/did not take keyboard focus|lost keyboard focus/);
+    await expect(screen.getByRole('textbox', 'Note')).toHaveValue('');
+  });
+
   test('stops typing when a key opens another window, so the rest of the text does not follow the keyboard there', async ({ screen, desktop }) => {
     const opener = screen.getByRole('textbox', 'Opener');
     // The first character opens the Popup window and moves the keyboard into its field.
