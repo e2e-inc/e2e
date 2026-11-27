@@ -745,8 +745,11 @@ describe('replayTrace: bare-point drags', () => {
   it.each([
     { label: 'waits for the destination when the source point resolves same-named candidates', twinX: 220, placeable: true },
     { label: 'stops when same-named sources overlap at the recorded point', twinX: 25, placeable: false },
-    { label: 'refuses the remaining twin when the source leaves while waiting for the destination', twinX: 220, placeable: false, sourceLeaves: true },
-  ])('$label', async ({ twinX, placeable, sourceLeaves }) => {
+    { label: 'refuses the remaining twin when the source leaves while waiting for the destination', twinX: 220, placeable: false, change: 'source-leaves' },
+    { label: 'refuses a twin that moves into the recorded point', twinX: 220, placeable: false, change: 'twin-moves' },
+    { label: 'stops when only the unrelated twin leaves', twinX: 220, placeable: false, change: 'twin-leaves' },
+    { label: 'stops when the source count drops from three to two', twinX: 220, placeable: false, change: 'three-to-two' },
+  ])('$label', async ({ twinX, placeable, change }) => {
     const card: SemanticNode = { ref: { id: 'c', revision: 'r1' }, role: 'button', name: 'Card', rect: { x: 0, y: 0, width: 200, height: 100 } };
     const twin: SemanticNode = { ...card, ref: { id: 'twin', revision: 'r1' }, rect: { x: twinX, y: 0, width: 200, height: 100 } };
     const lane: SemanticNode = { ref: { id: 'l', revision: 'r1' }, role: 'region', name: 'Done', rect: { x: 450, y: 0, width: 200, height: 100 } };
@@ -759,9 +762,14 @@ describe('replayTrace: bare-point drags', () => {
     };
     const drags: unknown[] = [];
     const host = makeHost({ onAction: (name, detail) => void (name === 'dragAt' && drags.push(detail)) });
-    host.capture = async () => host.looks.length === 1
-      ? screen([card, twin])
-      : screen(sourceLeaves ? [twin, lane] : [{ ...card, rect: { x: 25, y: 0, width: 200, height: 100 } }, twin, lane]);
+    const third: SemanticNode = { ...twin, ref: { id: 'third', revision: 'r1' }, rect: { x: 700, y: 0, width: 200, height: 100 } };
+    const movedCard = { ...card, rect: { x: 25, y: 0, width: 200, height: 100 } };
+    const before = change === 'three-to-two' ? [card, twin, third] : [card, twin];
+    let after = [movedCard, twin, lane];
+    if (change === 'source-leaves') after = [twin, lane];
+    if (change === 'twin-moves') after = [{ ...card, ref: twin.ref }, lane];
+    if (change === 'twin-leaves') after = [movedCard, lane];
+    host.capture = async () => screen(host.looks.length === 1 ? before : after);
 
     const outcome = await replayTrace(host, trace([drag]));
     if (placeable) {
@@ -771,7 +779,7 @@ describe('replayTrace: bare-point drags', () => {
     } else {
       expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
       expect(drags).toEqual([]);
-      expect(host.looks).toEqual(sourceLeaves ? ['held-still', 'raw'] : ['held-still']);
+      expect(host.looks).toEqual(change === undefined ? ['held-still'] : ['held-still', 'raw']);
     }
   });
 });

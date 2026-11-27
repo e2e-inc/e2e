@@ -482,7 +482,7 @@ interface Ends {
  * still loading is waited for whatever the destination shows. Each end keeps
  * its twin refusal on later looks, as `relocate` does. A coordinate source
  * that can be placed on this look lets an unresolved destination wait.
- * If both points can be placed, the current look is enough.
+ * If the source loses a candidate during that wait, the drag stops.
  * Returns the last look judged; nothing when no look could be read.
  */
 async function relocateEnds(
@@ -494,15 +494,20 @@ async function relocateEnds(
 ): Promise<Ends | undefined> {
   const refused = new Set<TraceTargetDescriptor>();
   let latest: Ends | undefined;
-  let sourceNeedsPoint = false;
-  const judge = (descriptor: TraceTargetDescriptor, screen: SemanticScreen, needsPoint = false): { readonly relocated: Relocated; readonly wait: boolean } => {
+  let sourceCandidateCount: number | undefined;
+  const judge = (descriptor: TraceTargetDescriptor, screen: SemanticScreen, previousCount?: number): { readonly relocated: Relocated; readonly wait: boolean } => {
     const result = relocateDescriptor(descriptor, screen.nodes);
+    if (previousCount !== undefined) {
+      const count = result.kind === 'found' ? 1 : result.failure === 'target-ambiguous' ? result.candidates.length : 0;
+      // When the point distinguished the source, a smaller set might have
+      // lost that source. The same point could now land on another control.
+      if (count < previousCount) {
+        return { relocated: { kind: 'failed', failure: 'target-ambiguous', candidates: [], screen, twinLeft: true }, wait: false };
+      }
+    }
     if (result.kind === 'found') {
       const node = screen.nodes.get(result.id);
       if (node === undefined) return { relocated: { kind: 'failed', failure: 'target-not-found' }, wait: true };
-      // Once the point distinguished the source, a lone named match may
-      // be the other control. Require the point on the new observation.
-      if (needsPoint) return { relocated: { kind: 'failed', failure: 'target-ambiguous', candidates: [result.id], screen }, wait: false };
       return { relocated: { ...result, node }, wait: false };
     }
     if (result.failure === 'target-ambiguous' && result.twinLeft === true) refused.add(descriptor);
@@ -510,15 +515,16 @@ async function relocateEnds(
     return { relocated: marked.failure === 'target-ambiguous' ? { ...marked, screen } : marked, wait: retryable(marked, descriptor) };
   };
   const settled = await pollSettled(host, (screen) => {
-    const from = source === undefined ? undefined : judge(source, screen, sourceNeedsPoint);
+    const from = source === undefined ? undefined : judge(source, screen, sourceCandidateCount);
     const to = destination === undefined ? undefined : judge(destination, screen);
     const unresolved = (descriptor: TraceTargetDescriptor | undefined, judged: typeof from) =>
       descriptor !== undefined && refused.has(descriptor) && judged?.relocated.kind === 'failed';
     latest = { screen, ends: [from?.relocated, to?.relocated], refused: unresolved(source, from) || unresolved(destination, to) };
     if (from?.relocated.kind === 'failed') {
       if (from.wait) return undefined;
-      if (to?.wait === true && shouldWaitForDestination?.(from.relocated, to.relocated) === true) {
-        sourceNeedsPoint = true;
+      if (from.relocated.failure === 'target-ambiguous' && to?.wait === true
+        && shouldWaitForDestination?.(from.relocated, to.relocated) === true) {
+        sourceCandidateCount = from.relocated.candidates.length;
         return undefined;
       }
       return latest;
