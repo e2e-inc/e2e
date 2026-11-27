@@ -156,6 +156,8 @@ export class ElectronSurface {
     // Started now: the quit, and a launch or quit ahead in the queue, spend the operation's time too.
     const budget = new Budget(operation, 'app.open');
     return this.app.serialized(async () => {
+      // A call cancelled, or out of time, while it waited for its turn does nothing to the app.
+      budget.check();
       await this.app.quit(operation, RESTART_CLOSE_MS);
       await this.launch(operation, budget);
     });
@@ -165,7 +167,10 @@ export class ElectronSurface {
   reset(operation: OperationContext): Promise<void> {
     const budget = new Budget(operation, 'app.open');
     return this.app.serialized(async () => {
+      budget.check();
       await this.app.quit(operation, DISCARD_CLOSE_MS);
+      // A quit that took the rest of the time leaves the app's data as it was.
+      budget.check();
       if (this.userDataDir !== undefined) {
         rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         // As private as mkdtemp made it: the app's data is no other local user's to list.

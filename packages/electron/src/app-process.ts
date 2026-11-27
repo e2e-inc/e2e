@@ -145,6 +145,8 @@ export class AppProcess {
   async launch(setup: LaunchSetup, operation: OperationContext, budget = new Budget(operation, 'app.open')): Promise<void> {
     // One budget for the whole launch, ending a little before the operation does so the launch reports why it failed
     // rather than the operation timing out; each phase gets what the ones before it left.
+    // An operation cancelled, or out of time after the quit before it, starts no app.
+    budget.check();
     const timeout = Math.max(1, budget.waits.remaining());
     const deadline = new Deadline(timeout);
     const left = (): number => Math.max(1, deadline.remaining());

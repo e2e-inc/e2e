@@ -176,6 +176,14 @@ describe('launch', () => {
     expect(String(failure)).toMatch(/1 window has loaded nothing yet/);
   });
 
+  it('starts no app when the operation spent all its time before the launch', async () => {
+    const { directory, launch } = appWith(`require('node:fs').writeFileSync(require('node:path').join(__dirname, 'started'), '1'); app.whenReady().then(() => { ${LOADED}; });`);
+    const failure = await launch(500, AbortSignal.timeout(5000), 700).then(() => undefined, (error: unknown) => error);
+    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(existsSync(path.join(directory, 'started'))).toBe(false);
+  });
+
   it('kills the whole app when its launch is cancelled', async () => {
     const { directory, launch } = appWith(`app.whenReady().then(() => { new BrowserWindow({ show: false }); require('node:fs').writeFileSync(require('node:path').join(__dirname, 'ready'), '1'); });`);
     const cancel = new AbortController();
