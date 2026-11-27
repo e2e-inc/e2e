@@ -620,11 +620,13 @@ impl Walk {
         let description = read.description.clone().filter(|description| Some(description) != name.as_ref());
 
         let mut states = Vec::new();
-        // The app's focused element is the one source: a table's cells report the table's focus as their own.
+        // The app's focused element is the one source: a table's cells report the table's focus as their own. An app
+        // that names none (a panel another process hosts) leaves an element's own flag, never a row's or a cell's, of
+        // which every one in a focused list says it is.
         let focused = match &self.focused {
             Some(focused) => focused == element,
             None if self.focus_unknown => false,
-            None => read.focused == Some(true),
+            None => read.focused == Some(true) && !roles::named_by_content(role),
         };
         if focused {
             states.push("focused");
