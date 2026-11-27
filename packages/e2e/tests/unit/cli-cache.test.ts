@@ -223,6 +223,9 @@ describe('e2e cache clear', () => {
     const directory = path.join(root, CACHE_DIR);
     mkdirSync(directory, { recursive: true });
     writeFileSync(path.join(directory, 'a-torn.yml'), '# Replay recording of one e2e test. Review it\nsteps: [ torn', 'utf8');
+    // A pair a later e2e wrote, its lock in a format this one does not read.
+    writeFileSync(path.join(directory, 'a-later.yml'), '# Replay recording of one e2e test. Review it\nsteps: []\n', 'utf8');
+    writeFileSync(path.join(directory, 'a-later.lock.json'), '{\n  "format": "e2e-replay-lock-2",\n  "entries": []\n}\n', 'utf8');
     writeFileSync(path.join(directory, `${'c'.repeat(64)}.json`), 'torn', 'utf8');
     writeFileSync(path.join(directory, 'a-torn.yml.0123456789abcdef.tmp'), '{}', 'utf8');
     writeFileSync(path.join(directory, '.a-torn.pending.0123456789abcdef.tmp'), '{}', 'utf8');

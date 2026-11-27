@@ -52,8 +52,11 @@ export const RECORDING_LOCK_FORMAT = 'e2e-replay-lock-1';
 /** How every YAML this runner writes opens: its header comment's first words. */
 const RECORDING_HEADER = '# Replay recording of one e2e test.';
 
-/** The lock's `format` line, matched as text so that a lock JSON cannot parse (a merge conflict) still shows it. */
-const LOCK_FORMAT_FIELD = new RegExp(`"format"\\s*:\\s*"${RECORDING_LOCK_FORMAT}"`, 'u');
+/**
+ * The lock's `format` line, matched as text so that a lock JSON cannot parse (a merge conflict) still shows it.
+ * Any version: a lock another `e2e` wrote in a format this one does not read is still the store's own file.
+ */
+const LOCK_FORMAT_FIELD = /"format"\s*:\s*"e2e-replay-lock-\d+"/u;
 
 /**
  * Whether a pair's files say this runner wrote them, from the start of each:
