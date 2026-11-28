@@ -27,10 +27,10 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { addonFile, findAddon, hostPlatform, replaceAddon } from './native/addons.ts';
+import { addonFile, findAddon, hostPlatform } from './native/addons.ts';
 import { REPO_ROOT } from './public-packages.ts';
 
 const pnpmVersion = process.argv[2];
@@ -76,13 +76,17 @@ const mobileManifest = JSON.parse(readFileSync(join(REPO_ROOT, 'packages/mobile/
 const problems: string[] = [];
 let workspaceYaml: string | undefined;
 try {
-  // The platform package carries no addon in a checkout: it gets the one `pnpm run build` placed beside the loader.
+  // The platform package carries no addon in a checkout: a copy of it gets the one `pnpm run build` placed beside the
+  // loader, so a release build already placed in the package stays as it is.
   const addon = addonFile(util, host);
   const built = join(util.packageDir, addon);
   if (!existsSync(built)) throw new Error(`${built} is missing; run pnpm run build first`);
-  replaceAddon(built, join(util.packageDir, 'npm', host, addon));
+  const hostPackage = join(root, `util-${host}`);
+  cpSync(join(util.packageDir, 'npm', host), hostPackage, { recursive: true });
+  copyFileSync(built, join(hostPackage, addon));
   for (const name of PACKAGES) {
-    const packed = run(join(REPO_ROOT, 'packages', name), 'pnpm', ['pack', '--pack-destination', tarballs]);
+    const dir = name === `util/npm/${host}` ? hostPackage : join(REPO_ROOT, 'packages', name);
+    const packed = run(dir, 'pnpm', ['pack', '--pack-destination', tarballs]);
     if (packed.status !== 0) throw new Error(`pnpm pack failed in packages/${name}:\n${packed.output}`);
   }
   const files = readdirSync(tarballs);
