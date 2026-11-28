@@ -626,7 +626,8 @@ await electron.waitForURL(/\/workspace\/[^/]+\/debug$/);
 - Waits for the active window's URL, polling until `timeout` or else the
   [`assertionTimeout`](/reference/config#assertiontimeout).
 - A string is an absolute URL, compared as one. An Electron app has no base
-  URL, so a path or a glob is refused: use a `RegExp` for a pattern.
+  URL, so a string with no scheme is refused. A string is never a glob: use a
+  `RegExp` for a pattern.
 - The wait goes on through a navigation and through the window closing while
   the app still runs.
 
@@ -664,6 +665,8 @@ await expect(electron).not.toHaveTitle('Sign in');
 | --- | --- |
 | `INVALID_ARGUMENT` | `expected` is neither a string nor a `RegExp`, a URL string that is not absolute, or an option the matcher does not take. |
 | `LOCATOR_AMBIGUOUS` | `target` matches several nodes. |
+| `APP_NOT_OPEN` | The app is not running or quit under the wait, or a dialog no handler answered is open. |
+| `ACTION_FAILED` | A read of the window did not answer, as after its renderer crashed. |
 | `ASSERTION_FAILED` | The condition did not hold in time. The error has the last value read. |
 
 #### Windows and the active window

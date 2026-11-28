@@ -45,8 +45,6 @@ export class WindowConditions {
   /** Polls `read` until it matches, or fails with the last read once the assertion timeout (or `timeout`) is over. */
   private async poll(call: PollCall, label: string, read: (deadline: Deadline) => Promise<Sample>, timeout: number | undefined): Promise<void> {
     const { context } = this;
-    // A dialog nothing answered fails this step, as it fails any other.
-    this.surface.failOnDialog();
     const deadline = new Deadline(context.operation(stepTimeout(timeout, call.api) ?? context.timeouts.assertion).timeoutMs);
     let last: Sample | undefined;
     await pollCondition({
@@ -54,6 +52,8 @@ export class WindowConditions {
       signal: context.signal,
       negated: call.negated,
       evaluate: async () => {
+        // A dialog nothing answered fails this step, as it fails any other: one that opens under the wait, too.
+        this.surface.failOnDialog();
         try {
           last = await read(deadline);
         } catch (cause) {

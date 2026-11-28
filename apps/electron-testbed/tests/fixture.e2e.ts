@@ -201,6 +201,28 @@ test.describe('expect(electron) and the fixture\'s waits', () => {
     await expect(electron).toHaveURL(/index\.html$/);
   });
 
+  test('waits through the window closing while the app opens another', async ({ electron }) => {
+    const waiting = electron.waitForURL(/controls\.html$/, { timeout: 5000 });
+    await electron.evaluate(({ app, BrowserWindow }) => {
+      app.removeAllListeners('window-all-closed');
+      BrowserWindow.getAllWindows()[0]?.close();
+      setTimeout(() => {
+        new BrowserWindow({ show: false });
+        void (globalThis as unknown as { testbedOpen(page: string): Promise<void> }).testbedOpen('controls.html');
+      }, 300);
+    });
+    await waiting;
+  });
+
+  test('fails a wait on a dialog that opens under it', async ({ electron }) => {
+    await electron.activeWindow().evaluate(() => {
+      setTimeout(() => (globalThis as unknown as { confirm(message: string): boolean }).confirm('Later?'), 300);
+    });
+    const started = Date.now();
+    expect(String(await failure(expect(electron).toHaveTitle('Never', { timeout: 10_000 })))).toContain('unhandled confirm dialog: Later?');
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
   test('ends a wait at once when the app quits under it', async ({ electron }) => {
     const started = Date.now();
     const waiting = failure(electron.waitForURL(/never\.html$/, { timeout: 20_000 }));
