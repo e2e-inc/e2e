@@ -1070,7 +1070,9 @@ trees, on both platforms, without a device.
   `## Verified`. The examples commit no lockfile and gate no pull request, so
   nothing else catches one left on an old version.
 - Canaries are hand-run, never from CI: `pnpm run canary` with `GITHUB_TOKEN`
-  set versions and builds every public package as a changesets snapshot, and
+  set, and `UTIL_NATIVE_DIR` naming the `util-native-*` artifacts of a CI run
+  (a Mac cannot build all eight; CONTRIBUTING.md has the download), versions
+  and builds every public package as a changesets snapshot, and
   `pnpm run canary:publish` publishes them to the `canary` dist-tag, then runs
   `scripts/restore-peer-ranges.ts`. Publishing
   is its own step because npm's two-factor prompt is interactive. Never publish
