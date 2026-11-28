@@ -173,6 +173,9 @@ describe('doctor', () => {
     const appDir = writeAppBundle(dir, 'Phone.app', xmlPlist('com.example.app', ['iPhoneOS']));
 
     const byUdid = doctorHarness({ device: '00008110-001A2B3C4D5E6F70', appPath: 'Phone.app', bundleId: 'com.example.app' });
+    byUdid.fake.respond('devices.list', () => [
+      { platform: 'ios', id: '00008110-001A2B3C4D5E6F70', name: 'iPhone 15', kind: 'device', booted: true },
+    ]);
     expect((await byUdid.engine.doctor!(info(byUdid, dir)))[0]).toEqual({
       id: 'app-path',
       status: 'pass',
@@ -263,7 +266,7 @@ describe('doctor', () => {
       controller.abort();
       throw new Error('aborted');
     });
-    await expect(h.engine.doctor!({ ...info(h, dir), signal: controller.signal })).rejects.toBeDefined();
+    await expect(h.engine.doctor!({ ...info(h, dir), signal: controller.signal })).rejects.toMatchObject({ code: 'CANCELLED' });
   });
 
   it('reads a binary Info.plist that plutil wrote, with UTF-16 strings and nested containers', () => {
