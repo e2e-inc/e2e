@@ -64,6 +64,24 @@ function readMessage(raw: string): Message | undefined {
 }
 
 /**
+ * Calls a handler so that its throw cannot cut short the delivery it is part
+ * of: the frames after it in the same chunk, and the listeners after it for
+ * the same event, are still delivered, or their commands would never be
+ * answered. The error is thrown again on a turn of its own, the way an
+ * `EventTarget` reports a listener's error, so it still surfaces as the bug
+ * it is.
+ */
+function deliver(handler: () => void): void {
+  try {
+    handler();
+  } catch (cause) {
+    queueMicrotask(() => {
+      throw cause;
+    });
+  }
+}
+
+/**
  * The pipe a browser started with `--remote-debugging-pipe` reads commands
  * from (its fd 3) and writes to (its fd 4): JSON messages, each ended by a
  * NUL byte. No port is opened, so no other process can connect.
@@ -79,7 +97,7 @@ export function pipeTransport(write: Writable, read: Readable): Transport {
       buffered.push(chunk.subarray(start, end));
       const message = Buffer.concat(buffered).toString('utf8');
       buffered = [];
-      for (const handler of messageHandlers) handler(message);
+      for (const handler of messageHandlers) deliver(() => handler(message));
       start = end + 1;
       end = chunk.indexOf(0, start);
     }
@@ -249,7 +267,7 @@ export class Session {
   }
 
   emit(event: string, params: unknown): void {
-    for (const handler of this.listeners.get(event) ?? []) (handler as (params: unknown) => void)(params);
+    for (const handler of this.listeners.get(event) ?? []) deliver(() => (handler as (params: unknown) => void)(params));
   }
 
   markDetached(): void {

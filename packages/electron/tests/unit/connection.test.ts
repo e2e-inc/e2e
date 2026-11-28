@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Connection, pipeTransport, ProtocolError, type Transport } from '../../src/cdp/connection.ts';
 
 /** A transport whose other end the test plays: what was sent, and a way to answer. */
@@ -121,5 +121,53 @@ describe('pipeTransport', () => {
     fromBrowser.emit('data', Buffer.from('{"a":1}\0{"b":'));
     fromBrowser.emit('data', Buffer.from('"é"}\0'));
     expect(received).toEqual(['{"a":1}', '{"b":"é"}']);
+  });
+});
+
+describe('a listener that throws', () => {
+  /** Holds the errors `deliver` throws again on their own turn, so the test reads them instead of the runner. */
+  function capturedRethrows(): unknown[] {
+    const errors: unknown[] = [];
+    vi.spyOn(globalThis, 'queueMicrotask').mockImplementation((task) => {
+      try {
+        task();
+      } catch (cause) {
+        errors.push(cause);
+      }
+    });
+    return errors;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('still delivers the frames after it in the same chunk, and reports its error', async () => {
+    const errors = capturedRethrows();
+    const fromBrowser = new PassThrough();
+    const connection = new Connection(pipeTransport(new PassThrough(), fromBrowser));
+    connection.root.on('Target.targetCreated', () => {
+      throw new Error('listener bug');
+    });
+    const version = connection.root.send('Browser.getVersion');
+    fromBrowser.emit('data', Buffer.from(
+      `${JSON.stringify({ method: 'Target.targetCreated', params: { targetInfo: { targetId: 'T1' } } })}\0${JSON.stringify({ id: 1, result: { product: 'Chrome/1' } })}\0`,
+    ));
+    await expect(version).resolves.toMatchObject({ product: 'Chrome/1' });
+    expect(errors).toEqual([new Error('listener bug')]);
+  });
+
+  it('does not stop the listeners after it for the same event', () => {
+    const errors = capturedRethrows();
+    const { transport, receive } = fakeTransport();
+    const connection = new Connection(transport);
+    const seen: string[] = [];
+    connection.root.on('Target.targetDestroyed', () => {
+      throw new Error('first listener bug');
+    });
+    connection.root.on('Target.targetDestroyed', ({ targetId }) => seen.push(targetId));
+    receive({ method: 'Target.targetDestroyed', params: { targetId: 'T1' } });
+    expect(seen).toEqual(['T1']);
+    expect(errors).toEqual([new Error('first listener bug')]);
   });
 });
