@@ -101,10 +101,22 @@ matches nothing fails in seconds instead of the default 30. Rerun a failure
 with `--last-failed`: it keeps the failed run's trace, where a plain run
 starts `results/` empty.
 
-```bash
+<CodeGroup>
+```bash npm
 npx e2e run tests/checkout.e2e.ts --action-timeout 5000
 npx e2e run --last-failed
 ```
+
+```bash pnpm
+pnpm exec e2e run tests/checkout.e2e.ts --action-timeout 5000
+pnpm exec e2e run --last-failed
+```
+
+```bash bun
+bunx e2e run tests/checkout.e2e.ts --action-timeout 5000
+bunx e2e run --last-failed
+```
+</CodeGroup>
 
 ## Map each API
 
