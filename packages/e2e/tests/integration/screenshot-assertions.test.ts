@@ -651,6 +651,31 @@ test('invalid', async ({ app, screen }) => {
   }, 30_000);
 
   it(
+    'fails as the decoder says when the screenshot is only a PNG header, even where the locator falls outside the size it states',
+    async () => {
+      // The header states 2x2, so the button at x 100 is outside it; the pixel data is cut off.
+      const header = new Uint8Array(Transformer.fromRgbaPixels(new Uint8Array(16), 2, 2).pngSync()).subarray(0, 33);
+      const { fake } = screenEngine(() => ({ data: header, mediaType: 'image/png', width: 2, height: 2, scale: 1 }));
+      const test = `import { test, expect } from 'e2e';
+
+test('cut', async ({ app, screen }) => {
+  await app.open('/');
+  await expect(screen.getByRole('button')).toHaveScreenshot('button', { timeout: 1000 });
+});
+`;
+      const { outcome, project } = await runProject({ 'tests/cut.e2e.ts': test }, { appUrl: FAKE_APP_URL, config: fakeConfig(fake) });
+      try {
+        const error = attemptOf(outcome, 'cut').error;
+        expect(error?.message).toContain('not a readable PNG: unexpected end of file');
+        expect(error?.message).not.toContain('outside the viewport');
+      } finally {
+        project.cleanup();
+      }
+    },
+    30_000,
+  );
+
+  it(
     'refuses a .not with nothing stored to differ from',
     async () => {
       const { fake } = screenEngine(() => screenPng(WHITE, BLUE));

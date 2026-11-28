@@ -71,7 +71,11 @@ async function captureOnce(context: ScreenContext, request: CaptureRequest, read
   let crop: ImageBox | undefined;
   if (box !== undefined) {
     crop = clipBox(size, box);
-    if (crop === undefined) return { missing: `${shown} is outside the viewport` };
+    if (crop === undefined) {
+      // A header with a broken image after it fails as the decoder says so, not as a locator off screen.
+      await decodePng(pixels.data);
+      return { missing: `${shown} is outside the viewport` };
+    }
   }
   const origin = crop ?? { x: 0, y: 0 };
   const boxes: ImageBox[] = [];
