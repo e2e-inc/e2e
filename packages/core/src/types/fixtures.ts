@@ -6,6 +6,7 @@
 import type { EngineHandle, EngineIsolation } from '../engine/index.ts';
 import type { TestFixtures } from '../types.ts';
 import type { ServiceValues } from './services.ts';
+import type { TestInfo, WorkerInfo } from './test-info.ts';
 
 /**
  * How long one fixture instance lives. `test`, the default, is one instance
@@ -42,13 +43,16 @@ export type SuiteFixtures = WorkerFixtures;
  * Defines one fixture: everything before `await use(value)` is its setup,
  * everything after is its teardown. The fixtures it destructures in its
  * first parameter are the ones it depends on, set up before it; one that
- * needs none writes `async ({}, use) => {}`. The body, its hooks, and the
- * fixtures that name it run while `use` is pending; it resolves once they
- * are done, whether or not the body failed.
+ * needs none writes `async ({}, use) => {}`. The third parameter is `TestInfo`
+ * for a test fixture and `WorkerInfo` for a worker fixture; `Info` defaults to
+ * `WorkerInfo`, which both receive, so a fixture typed without it fits either
+ * scope. The body, its hooks, and the fixtures that name it run while `use`
+ * is pending; it resolves once they are done, whether or not the body failed.
  */
-export type FixtureFn<Fixtures, Value> = (
+export type FixtureFn<Fixtures, Value, Info = WorkerInfo> = (
   fixtures: Fixtures,
   use: (value: Value) => Promise<void>,
+  info: Info,
 ) => Promise<void>;
 /**
  * A test fixture: its function, or the function and its options. With
@@ -56,15 +60,16 @@ export type FixtureFn<Fixtures, Value> = (
  * anything names it.
  */
 export type TestFixtureDefinition<Fixtures, Value> =
-  | FixtureFn<Fixtures, Value>
-  | readonly [FixtureFn<Fixtures, Value>, { readonly scope?: 'test'; readonly auto?: boolean }];
+  | FixtureFn<Fixtures, Value, TestInfo>
+  | readonly [FixtureFn<Fixtures, Value, TestInfo>, { readonly scope?: 'test'; readonly auto?: boolean }];
 /**
  * A worker fixture: its function and `{ scope: 'worker' }`. It sees worker
- * fixtures only. With `auto: true` it is set up once per worker, before the
- * first test or suite hook of its chain, whether or not anything names it.
+ * fixtures and `WorkerInfo` only. With `auto: true` it is set up once per
+ * worker, before the first test or suite hook of its chain, whether or not
+ * anything names it.
  */
 export type WorkerFixtureDefinition<Worker, Value> = readonly [
-  FixtureFn<Worker, Value>,
+  FixtureFn<Worker, Value, WorkerInfo>,
   { readonly scope: 'worker'; readonly auto?: boolean },
 ];
 /**
@@ -120,10 +125,12 @@ export type FixtureOverrides<Sees, WorkerSees, Base = Sees, Worker = WorkerSees>
  * The override of a worker fixture with options receives worker fixtures
  * (`WorkerSees`) only, whatever its scope: TypeScript can't type the
  * function of a tuple by the `scope` beside it. A function without options
- * is a test fixture, so it receives every fixture (`Sees`).
+ * is a test fixture, so it receives every fixture (`Sees`). The same holds
+ * for its info argument: typed `WorkerInfo`, it is the test's `TestInfo` at
+ * run time when the override's scope is `test`, which extends `WorkerInfo`.
  */
 export type FixtureOverride<Base, Worker, K extends keyof Base, Sees, WorkerSees> = K extends keyof Worker
-  ? FixtureFn<Sees, Base[K]> | readonly [FixtureFn<WorkerSees, Base[K]>, { readonly scope?: FixtureScope; readonly auto?: boolean }]
+  ? FixtureFn<Sees, Base[K], TestInfo> | readonly [FixtureFn<WorkerSees, Base[K], WorkerInfo>, { readonly scope?: FixtureScope; readonly auto?: boolean }]
   : TestFixtureDefinition<Sees, Base[K]>;
 
 /** The names in `Overrides` that are test fixtures: every override not declared with `scope: 'worker'`. */

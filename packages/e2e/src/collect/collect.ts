@@ -49,6 +49,7 @@ export function testIdentity(test: CollectedTest): TestIdentity {
     declarationIndex: test.declarationIndex,
     sessions: test.sessions,
     tags: test.tags,
+    annotations: test.annotations,
     source: test.source,
     file: test.file,
     id: test.id,

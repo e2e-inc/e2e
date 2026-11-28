@@ -15,8 +15,9 @@ import { resultId } from '@e2e-dev/core/lib/internal/ids';
 import { packageVersion } from '@e2e-dev/core/lib/internal/package-version';
 import type { RunEventFact, RunEventOf, RunEventResult, SetupStep } from '../run/events.ts';
 import type { AppLogRecord, StepRecord } from '@e2e-dev/core/lib/run/steps';
-import { cleanupErrorsOf, expectedFailureOf, failureBeforeSkip, type ArtifactRecord, type AttemptRecord, type AttemptStatus, type FailureEvidence, type ResultStatus, type SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
+import { cleanupErrorsOf, expectedFailureOf, failureBeforeSkip, memberRan, verdictAttempt, type ArtifactRecord, type AttemptRecord, type AttemptStatus, type FailureEvidence, type ResultStatus, type SerialGroupRecord } from '@e2e-dev/core/lib/run/records';
 import type { Reporter, ReporterSummary } from '../run-types.ts';
+import { annotationLabel, shownAnnotations, type Annotated } from './annotations.ts';
 import { builtin } from './builtin-id.ts';
 import { projectSource } from './build.ts';
 import { codeFrame, userFrame } from './code-frame.ts';
@@ -138,6 +139,8 @@ interface ResultDetails {
   readonly cleanupErrors: readonly SerializedError[];
   /** Why the told attempt skipped itself, when it failed anyway. */
   readonly skipReason: string | undefined;
+  /** The told attempt or member, when one ran: its annotations are the ones shown. */
+  readonly annotated: Annotated | undefined;
   readonly replays: readonly ReplayNotice[];
 }
 
@@ -174,7 +177,7 @@ function passingRunSteps(
 function attemptDetails(attempts: readonly AttemptRecord[], passed: boolean, configured: ConfiguredModel | undefined): ResultDetails {
   const steps = attempts.map((attempt) => attempt.steps);
   // A retry the run interrupted tells nothing; the failure before it is the verdict.
-  const told = attempts.findLast((attempt) => attempt.status !== 'interrupted') ?? attempts.at(-1);
+  const told = verdictAttempt(attempts);
   return {
     durationMs: attempts.reduce((total, attempt) => total + attempt.durationMs, 0),
     usage: stepsUsage(steps),
@@ -187,6 +190,7 @@ function attemptDetails(attempts: readonly AttemptRecord[], passed: boolean, con
     appLog: appLogSummary(told?.appLog ?? []),
     cleanupErrors: cleanupErrorsOf(attempts),
     skipReason: told?.status === 'skipped' ? undefined : told?.skip?.reason,
+    annotated: told,
     replays: replayNotices(steps, configured),
   };
 }
@@ -255,6 +259,8 @@ function serialMemberDetails(group: SerialGroupRecord, testId: string, passed: b
     appLog: appLogSummary(own?.appLog ?? []),
     cleanupErrors: cleanupErrorsOf(group.attempts),
     skipReason: neverRan ? undefined : own.skip?.reason,
+    // A member that skipped itself ran, and may have pushed annotations first.
+    annotated: own !== undefined && memberRan(own) ? own : undefined,
     replays: replayNotices(steps, configured),
   };
 }
@@ -918,7 +924,7 @@ export class ListReporter {
     // Read before `detailsOf` releases the result's serial group.
     const skippedAfter = failureBeforeSkip(result, (id) => this.pendingSerial.get(id)?.group);
     const id = resultId(result.test.id, result.target.name, result.agent, result.repeat);
-    const { durationMs, usage, models, cache, error, videos, screenshots, failure, screenPath, appLog, skipReason, replays, cleanupErrors } =
+    const { durationMs, usage, models, cache, error, videos, screenshots, failure, screenPath, appLog, skipReason, annotated, replays, cleanupErrors } =
       this.detailsOf(result);
     this.screenshots.push(...screenshots);
     addUsage(this.runUsage, usage);
@@ -941,6 +947,7 @@ export class ListReporter {
       this.window.redraw();
       return;
     }
+    const annotations = shownAnnotations(annotated, result.test.annotations);
     const line: TestLine = {
       title,
       declarationIndex: result.test.declarationIndex,
@@ -950,6 +957,7 @@ export class ListReporter {
       firstErrorLine: error === undefined ? undefined : bounded(error.message).split('\n')[0],
       skipReason: result.skip === undefined ? undefined : bounded(result.skip.reason),
       ...expectedFailureLine(result),
+      ...(annotations.length === 0 ? {} : { annotations }),
       cleanupErrors,
       steps,
       replays,
@@ -1065,12 +1073,14 @@ export class ListReporter {
         return [
           `   ${pc.green(F_CHECK)} ${title}${this.expectedTag(line)} ${duration}${ai}`,
           ...this.expectedFailureLines(line),
+          ...this.annotationLines(line),
           ...this.cleanupLines(line),
         ];
       case 'flaky':
         return [
           `   ${pc.yellow(F_CHECK)} ${title} ${pc.yellow('(flaky)')}${this.expectedTag(line)} ${duration}${ai}`,
           ...this.expectedFailureLines(line),
+          ...this.annotationLines(line),
           ...this.cleanupLines(line),
         ];
       case 'skipped': {
@@ -1079,13 +1089,13 @@ export class ListReporter {
           line.skipReason === undefined || line.skipReason === 'skipped'
             ? ''
             : pc.dim(pc.gray(` [${line.skipReason}]`));
-        return [`   ${pc.dim(pc.gray(F_DOWN))} ${title}${reason}`];
+        return [`   ${pc.dim(pc.gray(F_DOWN))} ${title}${reason}`, ...this.annotationLines(line)];
       }
       case 'interrupted':
-        return [`   ${pc.yellow(F_CROSS)} ${title} ${pc.yellow('(interrupted)')} ${duration}${ai}`];
+        return [`   ${pc.yellow(F_CROSS)} ${title} ${pc.yellow('(interrupted)')} ${duration}${ai}`, ...this.annotationLines(line)];
       default: {
         const status = line.status === 'failed' ? '' : pc.red(` (${line.status})`);
-        const rows = [`   ${pc.red(`${F_CROSS} ${title}`)}${status} ${duration}${ai}`];
+        const rows = [`   ${pc.red(`${F_CROSS} ${title}`)}${status} ${duration}${ai}`, ...this.annotationLines(line)];
         if (line.firstErrorLine !== undefined) {
           // A glance line; the `Failed Tests` section carries the whole message.
           const glance = fitColumns(line.firstErrorLine, terminalColumns() - ERROR_GLANCE_INDENT);
@@ -1094,6 +1104,16 @@ export class ListReporter {
         return rows;
       }
     }
+  }
+
+  /** One dim glance line per annotation under the test. */
+  private annotationLines(line: TestLine): string[] {
+    const annotations = line.annotations;
+    if (annotations === undefined || annotations.length === 0) return [];
+    return annotations.map((annotation) => {
+      const glance = fitColumns(annotationLabel(annotation, bounded), terminalColumns() - ERROR_GLANCE_INDENT);
+      return `     ${this.pc.dim(`${F_RIGHT} ${glance}`)}`;
+    });
   }
 
   /** ` (failed as expected)` after the title of a test whose `test.fail` mark covered its failure. */

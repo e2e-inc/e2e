@@ -49,6 +49,7 @@ function failedResult(error: SerializedError, title = 'case'): ResultRecord {
       declarationIndex: 0,
       sessions: [],
       tags: [],
+      annotations: [],
       source: undefined,
       file: 'tests/case.e2e.ts',
       id: `tests/case.e2e.ts::suite::${title}`,
@@ -326,5 +327,20 @@ describe('run limits', () => {
       maxEventsPerStep: 1_000,
       maxModelTokensPerCall: 64_000,
     });
+  });
+});
+
+describe('result annotations', () => {
+  it('come from the verdict attempt, not a retry the run interrupted', () => {
+    const failed = failedResult(productFailure);
+    const verdictAttempt: AttemptRecord = { ...failed.attempts[0]!, annotations: [{ type: 'attempt', description: 'first' }] };
+    const interrupted: AttemptRecord = {
+      ...failedAttempt(productFailure),
+      index: 1,
+      status: 'interrupted',
+      annotations: [{ type: 'attempt', description: 'interrupted' }],
+    };
+    const document = build({ results: [{ ...failed, attempts: [verdictAttempt, interrupted] }] });
+    expect(document.run.results[0]!.annotations).toEqual([{ type: 'attempt', description: 'first' }]);
   });
 });

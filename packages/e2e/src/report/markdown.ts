@@ -44,6 +44,7 @@ import {
   toldAttempt,
 } from './failure-text.ts';
 import { cell, code, formatDuration, link, MAX_ID_CHARS, MAX_PATH_CHARS, MAX_TITLE_CHARS, plural } from './markdown-text.ts';
+import { annotationLabel } from './annotations.ts';
 import { outcome, type Outcome } from './outcome.ts';
 import { isExploreVerdict } from './traces.ts';
 import { posixRelative } from './write.ts';
@@ -450,14 +451,20 @@ function row(cells: readonly string[]): string {
 function testRow({ result, final }: Entry, withAgent: boolean): string {
   const skipped = result.status === 'skipped';
   const expected = result.attempts.at(-1)?.expectedFailure;
-  const note = skipped
-    ? `skipped: ${cell(result.skip?.reason ?? 'skipped')}`
-    : expected?.error !== undefined
-      ? `failed as expected: ${cell(expected.reason)}, ${cell(expected.error.code)}: ${cell(expected.error.message)}`
-      : result.status === 'flaky'
-        ? `${plural(final.failedAttempts, 'failed attempt')} first`
-        : '';
-  const name = `${testName(result)}${note === '' ? '' : ` (${note})`}`;
+  const notes: string[] = [];
+  if (skipped) {
+    notes.push(`skipped: ${cell(result.skip?.reason ?? 'skipped')}`);
+  } else if (expected?.error !== undefined) {
+    notes.push(`failed as expected: ${cell(expected.reason)}, ${cell(expected.error.code)}: ${cell(expected.error.message)}`);
+  } else if (result.status === 'flaky') {
+    notes.push(`${plural(final.failedAttempts, 'failed attempt')} first`);
+  }
+  for (const annotation of result.annotations ?? []) {
+    notes.push(
+      annotationLabel(annotation, cell),
+    );
+  }
+  const name = `${testName(result)}${notes.length === 0 ? '' : ` (${notes.join('; ')})`}`;
   return row([ICON[statusBucket(result.status)], name, ...(withAgent ? [agentCell(final.final.steps)] : []), skipped ? '' : formatDuration(final.durationMs)]);
 }
 

@@ -6,7 +6,8 @@ import { isFileApp } from '@e2e-dev/core/lib/config/app';
 import { BLOCKABLE_CODES } from '@e2e-dev/core/lib/agent/executor';
 import { DEFAULT_LIMITS } from '@e2e-dev/core/lib/config/agent';
 import type { ResolvedConfig, ResolvedLimits, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
-import type { AgentErrorCode } from '@e2e-dev/core/lib/types';
+import type { AgentErrorCode, TestAnnotation } from '@e2e-dev/core/lib/types';
+import { shownAnnotations } from './annotations.ts';
 import type { ErrorCategory, ErrorDetails, ErrorPhase, HookScope, SerializedError } from '@e2e-dev/core/lib/internal/errors';
 import { resultId, timestamp } from '@e2e-dev/core/lib/internal/ids';
 import { obj } from '@e2e-dev/core/lib/internal/objects';
@@ -16,7 +17,7 @@ import { projectRelativePath } from '@e2e-dev/core/lib/internal/source';
 import type { VcsInfo } from '../internal/vcs.ts';
 import { summarizeResults } from './summary.ts';
 import type { SkipInfo } from '@e2e-dev/core/lib/run/records';
-import { expectedFailureOf, someSkippedAfterFailure } from '@e2e-dev/core/lib/run/records';
+import { expectedFailureOf, someSkippedAfterFailure, verdictAttempt } from '@e2e-dev/core/lib/run/records';
 import { describeTarget, type TargetProvenance } from '@e2e-dev/core/lib/run/provision';
 import type { EngineSpiVersion } from '@e2e-dev/core/lib/engine/contract';
 import type {
@@ -296,6 +297,8 @@ export interface ReportAttempt extends ReportAttemptBase {
    * mark does not cover keeps that error and has no `error` here.
    */
   expectedFailure?: { reason: string; error?: ReportError } | undefined;
+  /** Annotations declared on the test and pushed at runtime via `testInfo.annotations`; absent when none. */
+  annotations?: readonly TestAnnotation[] | undefined;
 }
 
 export interface ReportSerialMember {
@@ -312,6 +315,8 @@ export interface ReportSerialMember {
   /** What the runner saw when this member's failure landed. */
   failure?: FailureEvidence | undefined;
   skip?: SkipInfo | undefined;
+  /** Annotations declared on the member and pushed at runtime via `testInfo.annotations`; absent when none. */
+  annotations?: readonly TestAnnotation[] | undefined;
   secondaryErrors: readonly ReportError[];
 }
 
@@ -369,6 +374,8 @@ export interface ReportResult {
   repeat: number;
   /** The tags the test declares; `[]` when none. */
   tags: readonly string[];
+  /** Annotations on the test (from its last verdict attempt, or declared annotations when it never ran); absent when none. */
+  annotations?: readonly TestAnnotation[] | undefined;
   /**
    * Whether the selection chose this test. A test left out (another file
    * than the positionals named, a tag filter, a platform it does not declare)
@@ -602,6 +609,7 @@ function serializeAttempt(attempt: AttemptRecord): ReportAttempt {
             ...(attempt.expectedFailure.error === undefined ? {} : { error: serializeErrorRecord(attempt.expectedFailure.error) }),
           },
         }),
+    ...(attempt.annotations === undefined || attempt.annotations.length === 0 ? {} : { annotations: attempt.annotations }),
     steps: attempt.steps.map(serializeStep),
     ...(attempt.appLog === undefined ? {} : { appLog: attempt.appLog }),
   };
@@ -621,6 +629,7 @@ function serializeSerialMember(member: SerialMemberRecord): ReportSerialMember {
     error: member.error === undefined ? undefined : serializeErrorRecord(member.error),
     ...(member.failure === undefined ? {} : { failure: member.failure }),
     ...(member.skip === undefined ? {} : { skip: member.skip }),
+    ...(member.annotations === undefined || member.annotations.length === 0 ? {} : { annotations: member.annotations }),
     secondaryErrors: member.secondaryErrors.map(serializeErrorRecord),
   };
 }
@@ -653,7 +662,12 @@ function serializeSerialGroup(group: SerialGroupRecord): ReportSerialGroup {
   };
 }
 
-function serializeResult(config: ResolvedConfig | undefined, result: ResultRecord): ReportResult {
+function serializeResult(
+  config: ResolvedConfig | undefined,
+  result: ResultRecord,
+  serialGroupsById: ReadonlyMap<string, SerialGroupRecord>,
+): ReportResult {
+  const annotations = resultAnnotations(result, serialGroupsById);
   return {
     id: resultId(result.test.id, result.target.name, result.agent, result.repeat),
     testId: result.test.id,
@@ -667,6 +681,7 @@ function serializeResult(config: ResolvedConfig | undefined, result: ResultRecor
     agent: result.agent,
     repeat: result.repeat,
     tags: result.test.tags,
+    ...(annotations.length === 0 ? {} : { annotations }),
     selected: result.selected,
     serialGroupId: result.serialGroupId,
     status: result.status,
@@ -674,6 +689,20 @@ function serializeResult(config: ResolvedConfig | undefined, result: ResultRecor
     ...expectedFailureField(result),
     attempts: result.serialGroupId !== undefined ? [] : result.attempts.map(serializeAttempt),
   };
+}
+
+/** The verdict attempt's annotations, or the verdict serial member's; see `shownAnnotations`. */
+function resultAnnotations(
+  result: ResultRecord,
+  serialGroupsById: ReadonlyMap<string, SerialGroupRecord>,
+): readonly TestAnnotation[] {
+  if (result.serialGroupId === undefined) return shownAnnotations(verdictAttempt(result.attempts), result.test.annotations);
+  const group = serialGroupsById.get(result.serialGroupId);
+  const verdict = group?.attempts
+    .filter((attempt) => !attempt.cutRetry)
+    .flatMap((attempt) => attempt.members.filter((member) => member.testId === result.test.id))
+    .at(-1);
+  return shownAnnotations(verdict, result.test.annotations);
 }
 
 /** The result's `expectedFailure` field, from its last attempt's mark. */
@@ -841,9 +870,10 @@ export function buildReport(options: BuildReportOptions): Report1Document {
           serializeTarget(config, target, options.targetProvenance.get(target.name)),
         );
 
+  const serialGroupsById = new Map(options.serialGroups.map((group) => [group.id, group]));
   const results = options.results
     .toSorted(compareResults)
-    .map((result) => serializeResult(config, result));
+    .map((result) => serializeResult(config, result, serialGroupsById));
 
   const targetIndex = new Map<string, number>();
   for (const target of config?.targets ?? []) targetIndex.set(target.name, target.index);

@@ -8,7 +8,7 @@
  * Keeping this interface narrow is what lets one scheduler own all execution.
  */
 
-import type { MainToWorker, WorkerToMain } from './worker/protocol.ts';
+import type { MainToWorker, WorkerSlots, WorkerToMain } from './worker/protocol.ts';
 
 export interface UnitRunnerEvents {
   onMessage(message: WorkerToMain): void;
@@ -30,10 +30,7 @@ export interface UnitRunner {
   kill(): void;
 }
 
-/**
- * Starts one worker for a target; run-wide settings are closed over.
- * `workerSlot` is the worker's 0-based slot among that target's live workers,
- * the lowest one free at spawn time, so an engine can hand each slot its own
- * device.
- */
-export type SpawnUnitRunner = (targetName: string, workerSlot: number, events: UnitRunnerEvents) => UnitRunner;
+export type { WorkerSlots };
+
+/** Starts one worker for a target in `slots`; run-wide settings are closed over. */
+export type SpawnUnitRunner = (targetName: string, slots: WorkerSlots, events: UnitRunnerEvents) => UnitRunner;

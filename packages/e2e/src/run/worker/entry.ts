@@ -236,7 +236,7 @@ async function bootstrap(
     artifactsRoot: message.artifactsRoot,
     rerunDir: message.rerunDir,
     headed: message.headed,
-    workerSlot: message.workerSlot,
+    slots: message.slots,
     env: process.env,
     isolated: true,
     resolvePairs,

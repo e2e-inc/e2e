@@ -14,7 +14,7 @@ import { classifyError, ConfigurationError, serializeError } from '@e2e-dev/core
 import type { DebugTrace } from '@e2e-dev/core/lib/internal/debug';
 import type { InMemoryAttempts } from './execute.ts';
 import type { SessionStore } from '@e2e-dev/core/lib/run/sessions';
-import type { SpawnUnitRunner, UnitRunner, UnitRunnerEvents } from './unit-runner.ts';
+import type { SpawnUnitRunner, UnitRunner, UnitRunnerEvents, WorkerSlots } from './unit-runner.ts';
 import { pairKey } from './units.ts';
 import { copyServiceValues, type RunServices } from './services.ts';
 import type { MainToWorker, RunUnitMessage, WirePair } from './worker/protocol.ts';
@@ -47,6 +47,46 @@ export interface InProcessRunnerOptions {
   readonly envFor: (targetName: string) => Readonly<Record<string, string | undefined>>;
 }
 
+/**
+ * The slots of live in-process runners, oldest first. One run caps its
+ * in-process workers at 1, but two programmatic runs in one process may be
+ * live at once, and `process.env` holds one value: it names the newest live
+ * runner's slots, and the values from before the first are back once the
+ * last ends. `testInfo` carries each attempt's own slots either way.
+ */
+const liveSlots: WorkerSlots[] = [];
+let envBeforeInProcessRuns: Readonly<Record<'TEST_WORKER_INDEX' | 'TEST_PARALLEL_INDEX', string | undefined>> | undefined;
+
+function claimWorkerEnv(slots: WorkerSlots): void {
+  envBeforeInProcessRuns ??= {
+    TEST_WORKER_INDEX: process.env['TEST_WORKER_INDEX'],
+    TEST_PARALLEL_INDEX: process.env['TEST_PARALLEL_INDEX'],
+  };
+  liveSlots.push(slots);
+  writeWorkerEnv(slots);
+}
+
+function releaseWorkerEnv(slots: WorkerSlots): void {
+  const index = liveSlots.indexOf(slots);
+  if (index !== -1) liveSlots.splice(index, 1);
+  const newest = liveSlots.at(-1);
+  if (newest !== undefined) {
+    writeWorkerEnv(newest);
+    return;
+  }
+  if (envBeforeInProcessRuns === undefined) return;
+  for (const [name, value] of Object.entries(envBeforeInProcessRuns)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+  envBeforeInProcessRuns = undefined;
+}
+
+function writeWorkerEnv(slots: WorkerSlots): void {
+  process.env['TEST_WORKER_INDEX'] = String(slots.workerIndex);
+  process.env['TEST_PARALLEL_INDEX'] = String(slots.parallelIndex);
+}
+
 class InProcessRunner implements UnitRunner {
   readonly exit: Promise<void>;
   private readonly worker: TargetWorker;
@@ -70,10 +110,11 @@ class InProcessRunner implements UnitRunner {
 
   constructor(
     private readonly targetName: string,
-    private readonly workerSlot: number,
+    private readonly slots: WorkerSlots,
     private readonly events: UnitRunnerEvents,
     private readonly options: InProcessRunnerOptions,
   ) {
+    claimWorkerEnv(slots);
     let finish = (): void => undefined;
     this.exit = new Promise<void>((resolve) => {
       finish = resolve;
@@ -163,6 +204,7 @@ class InProcessRunner implements UnitRunner {
   private end(detail: string): void {
     if (this.exited) return;
     this.exited = true;
+    releaseWorkerEnv(this.slots);
     process.off('unhandledRejection', this.onRejection);
     process.off('uncaughtException', this.onException);
     this.events.onExit(detail);
@@ -183,8 +225,12 @@ class InProcessRunner implements UnitRunner {
       artifactsRoot: this.options.artifactsRoot,
       rerunDir: this.options.rerunDir,
       headed: this.options.headed,
-      workerSlot: this.workerSlot,
-      env: this.options.envFor(this.targetName),
+      slots: this.slots,
+      env: {
+        ...this.options.envFor(this.targetName),
+        TEST_WORKER_INDEX: String(this.slots.workerIndex),
+        TEST_PARALLEL_INDEX: String(this.slots.parallelIndex),
+      },
       isolated: false,
       debug: this.options.debug,
       holdSteps: this.options.holdSteps,
@@ -224,5 +270,5 @@ async function resolveFromSelection(
 
 /** Creates the spawn factory the scheduler uses for in-process execution. */
 export function inProcessSpawner(options: InProcessRunnerOptions): SpawnUnitRunner {
-  return (targetName, workerSlot, events) => new InProcessRunner(targetName, workerSlot, events, options);
+  return (targetName, slots, events) => new InProcessRunner(targetName, slots, events, options);
 }

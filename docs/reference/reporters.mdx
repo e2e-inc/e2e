@@ -73,6 +73,8 @@ reporters: ['list'], // default
 - The output ends with a `Failed` row per failed test: its file and line,
   its error's first line, and its trace page when one was written, so `e2e run | tail` still
   names what broke.
+- A test with [annotations](/reference/test#annotation) prints one dim
+  `type: description` line per annotation under its row.
 
 #### `dot`
 
@@ -157,6 +159,8 @@ reporters: ['list', 'junit'],
   `<system-out>[[ATTACHMENT|<path>]]</system-out>`, which GitLab CI shows in
   the pipeline test report. The path is relative to `$CI_PROJECT_DIR`, or to
   the project root when that is unset; screenshots outside it get no link.
+- A test's [annotations](/reference/test#annotation) go in its
+  `<testcase>` as `<properties><property name="<type>" value="<description>"/></properties>`.
 
 #### `markdown`
 
@@ -168,7 +172,9 @@ reporters: ['list', 'markdown'],
 
 It does what `junit` does with `summary.md`, through
 [`renderMarkdownReport`](#rendermarkdownreport), and takes the same
-`outputFile`: `markdown({ outputFile: 'reports/summary.md' })`.
+`outputFile`: `markdown({ outputFile: 'reports/summary.md' })`. A test's
+[annotations](/reference/test#annotation) follow its title in its row, as
+`type: description`.
 
 <a id="rendermarkdownreport" />
 
@@ -226,6 +232,8 @@ reporters: ['list', 'ctrf'],
   A tool that counts `retries + 1` runs counts the skipped attempt too.
 - `status` is CTRF's `passed`, `failed`, `skipped`, or `other`. `rawStatus`
   keeps e2e's own: `timed-out` is `failed`, `interrupted` is `other`.
+- A test's [annotations](/reference/test#annotation) are in
+  `extra['e2e-inc.e2e'].annotations`.
 - Run errors, such as a failed `afterAll`, go in `results.errors` and never
   count as a test. A tool that counts failed tests alone reads such a run as
   green, so [gate the job](/ci#gate-pull-requests) on the exit code.

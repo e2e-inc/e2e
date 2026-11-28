@@ -29,7 +29,7 @@ import { SerialGroupProgress, serialGroupId } from './serial.ts';
 import type { HeldStep, HoldReads, StepHold, StepHoldContext } from './step-hold.ts';
 import { StepAttachmentRelay } from './step-attachment-relay.ts';
 import type { StepProgress } from '@e2e-dev/core/lib/run/steps';
-import type { SpawnUnitRunner, UnitRunner } from './unit-runner.ts';
+import type { SpawnUnitRunner, UnitRunner, WorkerSlots } from './unit-runner.ts';
 import {
   INTERRUPTED_BEFORE_START,
   countsTowardFailureLimit,
@@ -239,12 +239,12 @@ class SchedulerWorker {
 
   constructor(
     readonly targetName: string,
-    readonly workerSlot: number,
+    readonly slots: WorkerSlots,
     spawn: SpawnUnitRunner,
     onMessage: (worker: SchedulerWorker, message: WorkerToMain) => void,
     onExit: (worker: SchedulerWorker, detail: string, signal: NodeJS.Signals | null, active: WatchedAttempt | undefined) => void,
   ) {
-    this.runner = spawn(targetName, workerSlot, {
+    this.runner = spawn(targetName, slots, {
       onMessage: (message) => onMessage(this, message),
       onExit: (detail, signal) => {
         this.clearKillTimer();
@@ -441,6 +441,8 @@ class Scheduler {
   private heldSince: number | undefined;
   /** Time in completed intervals when all running workers were held. */
   private heldMs = 0;
+  /** Next monotonic worker index assigned to a newly spawned worker. */
+  private nextWorkerIndex = 0;
 
   constructor(private readonly options: RunUnitsOptions) {}
 
@@ -952,14 +954,19 @@ class Scheduler {
     );
   }
 
-  /** Starts a worker on the lowest slot none of the target's workers holds, so a replacement takes over the slot of the one that exited. */
+  /** Starts a worker on the lowest target slot and global parallel slot free, with a fresh monotonic worker index. */
   private spawn(state: TargetState): SchedulerWorker {
-    const taken = new Set(this.workersOf(state.target.name).map((worker) => worker.workerSlot));
+    const taken = new Set(this.workersOf(state.target.name).map((worker) => worker.slots.workerSlot));
     let workerSlot = 0;
     while (taken.has(workerSlot)) workerSlot += 1;
+    const takenParallel = new Set(this.workers.map((worker) => worker.slots.parallelIndex));
+    let parallelIndex = 0;
+    while (takenParallel.has(parallelIndex)) parallelIndex += 1;
+    const workerIndex = this.nextWorkerIndex;
+    this.nextWorkerIndex += 1;
     const worker = new SchedulerWorker(
       state.target.name,
-      workerSlot,
+      { workerSlot, workerIndex, parallelIndex },
       this.options.spawn,
       (target, message) => this.onMessage(target, message),
       (target, detail, signal, active) => this.onExit(target, detail, signal, active),
@@ -1285,12 +1292,12 @@ class Scheduler {
       const { finished, running } = worker.attempts.get(key) ?? { finished: [], running: undefined };
       if (hung !== undefined && key === hung.pair) {
         this.markSessionsFailed(state, pair);
-        this.report(finishedResult(pair, [...finished, hungAttempt(hung)]));
+        this.report(finishedResult(pair, [...finished, hungAttempt(hung, pair)]));
         continue;
       }
       if (interrupted) {
         if (appExited && running !== undefined) {
-          this.report(finishedResult(pair, [...finished, interruptedAttempt(active?.pair === key ? active : undefined, running)]));
+          this.report(finishedResult(pair, [...finished, interruptedAttempt(active?.pair === key ? active : undefined, running, pair)]));
           continue;
         }
         this.report(
@@ -1341,6 +1348,7 @@ class Scheduler {
               error: crash,
               secondaryErrors: [],
               cleanup: 'forced',
+              ...declaredAnnotations(pair),
             },
           ],
         }),
@@ -1402,7 +1410,7 @@ function hangError(hung: WatchedAttempt): SerializedError {
  * attempts: a body that blocked the event loop once does so again, so it is
  * not retried.
  */
-function hungAttempt(hung: WatchedAttempt): AttemptRecord {
+function hungAttempt(hung: WatchedAttempt, pair: TestTargetPair): AttemptRecord {
   return {
     id: hung.id,
     index: hung.index,
@@ -1414,11 +1422,12 @@ function hungAttempt(hung: WatchedAttempt): AttemptRecord {
     error: hangError(hung),
     secondaryErrors: [],
     cleanup: 'forced',
+    ...declaredAnnotations(pair),
   };
 }
 
 /** An interrupted attempt synthesized when an app exit stops its worker. */
-function interruptedAttempt(active: WatchedAttempt | undefined, index: number): AttemptRecord {
+function interruptedAttempt(active: WatchedAttempt | undefined, index: number, pair: TestTargetPair): AttemptRecord {
   return {
     id: active?.id ?? uuidv7(),
     index,
@@ -1429,5 +1438,15 @@ function interruptedAttempt(active: WatchedAttempt | undefined, index: number): 
     artifacts: [],
     secondaryErrors: [],
     cleanup: 'forced',
+    ...declaredAnnotations(pair),
   };
+}
+
+/**
+ * The annotations of an attempt whose worker died before it recorded its
+ * own: the declared ones, already redacted at collection. Runtime pushes
+ * died with the worker.
+ */
+function declaredAnnotations(pair: TestTargetPair): Pick<AttemptRecord, 'annotations'> {
+  return pair.test.annotations.length === 0 ? {} : { annotations: [...pair.test.annotations] };
 }

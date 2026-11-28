@@ -6,6 +6,7 @@ import { resultId } from '../internal/ids.ts';
 import type { SourceLocation } from '../internal/source.ts';
 import { keeps, type Keep } from '../internal/recording-modes.ts';
 import type { ResolvedTarget } from '../config/resolve.ts';
+import type { TestAnnotation } from '../types.ts';
 import type { AppLogRecord, StepRecord } from './steps.ts';
 
 /**
@@ -21,6 +22,8 @@ export interface TestIdentity {
   readonly sessions: readonly string[];
   /** The tags the test declares, outermost describe first, each once; what `--tag` selects on. */
   readonly tags: readonly string[];
+  /** Static annotations declared on the test and its enclosing describes, outermost first, redacted; `[]` when none. */
+  readonly annotations: readonly TestAnnotation[];
   readonly source: SourceLocation | undefined;
   /** Normalized project-root-relative file path with `/` separators. */
   readonly file: string;
@@ -153,6 +156,8 @@ export interface AttemptRecord {
   skip?: SkipInfo;
   /** Set when the attempt was marked expected to fail (`test.fail`); see `settleExpectedFailure`. */
   expectedFailure?: ExpectedFailureInfo;
+  /** Annotations declared on the test and pushed at runtime via `testInfo.annotations`, redacted; absent when none. */
+  annotations?: TestAnnotation[];
   secondaryErrors: SerializedError[];
   /** What the engine said the attempt ran on (`EngineAttemptContext.environment`), redacted. */
   environment?: Record<string, string>;
@@ -180,6 +185,8 @@ export interface SerialMemberRecord {
    * member that skipped itself first; see `AttemptRecord.skip`.
    */
   skip?: SkipInfo;
+  /** Annotations declared on the member and pushed at runtime via `testInfo.annotations`, redacted; absent when none. */
+  annotations?: TestAnnotation[];
   secondaryErrors: SerializedError[];
 }
 
@@ -238,6 +245,15 @@ export type FailedStatus = Exclude<AttemptStatus, 'passed' | 'skipped'>;
  */
 export function isFailedStatus(status: AttemptStatus | ResultStatus): status is FailedStatus {
   return status !== 'passed' && status !== 'skipped' && status !== 'flaky';
+}
+
+/**
+ * The attempt a result's verdict comes from: the last one the run did not
+ * interrupt, since an interrupted retry decides nothing. The last attempt
+ * when every one was interrupted.
+ */
+export function verdictAttempt<Attempt extends { readonly status: AttemptStatus }>(attempts: readonly Attempt[]): Attempt | undefined {
+  return attempts.findLast((attempt) => attempt.status !== 'interrupted') ?? attempts.at(-1);
 }
 
 /**

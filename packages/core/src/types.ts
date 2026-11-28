@@ -14,6 +14,7 @@ import type { EngineHandle } from './engine/index.ts';
 import type { KeyModifier, Momentum, ScrollDirection, ScrollEdge, SelectOption, ViewportPoint } from './engine/contract.ts';
 import type { CacheStore } from './cache/store.ts';
 import type { ConfigBase, ConfigFixtures, FixtureDefinitions, FixtureOverrides, InferredConfig, OmitEach, PickEach, SelectedFixtures, TestOverrides, WorkerFixtures } from './types/fixtures.ts';
+import type { TestAnnotation, TestInfo, WorkerInfo } from './types/test-info.ts';
 
 export type { KeyModifier, Momentum, ScrollDirection, ScrollEdge, SelectOption } from './engine/contract.ts';
 export type { CacheReadResult, CacheStore } from './cache/store.ts';
@@ -31,6 +32,15 @@ export type {
   WorkerFixtures,
 } from './types/fixtures.ts';
 export type { CopyableServiceValue, Service, ServiceMap, ServiceStartContext, ServiceValue, ServiceValues } from './types/services.ts';
+export type {
+  TestAnnotation,
+  TestConfigInfo,
+  TestInfo,
+  TestInfoError,
+  TestInfoStatus,
+  TestTargetInfo,
+  WorkerInfo,
+} from './types/test-info.ts';
 export type {
   Credential,
   CredentialConfig,
@@ -906,6 +916,12 @@ export interface TestOptions {
    * records as one unit. A mode set here is required of the target's engine.
    */
   video?: RecordingMode;
+  /**
+   * Annotations attached to the test (or every test in a group), carried in
+   * the report. One `{ type, description? }` or a list; enclosing describe
+   * annotations come first, then the test's own.
+   */
+  annotation?: TestAnnotation | readonly TestAnnotation[];
 }
 
 export interface DescribeOptions extends TestOptions {
@@ -939,17 +955,24 @@ export interface SetupOptions extends Omit<TestOptions, 'session' | 'only' | 'sk
  * parameter (`async ({ app, screen }) => {}`), and the runner sets up only
  * those; a body that takes the whole object (`async (fixtures) => {}`) or a
  * rest property is a `COLLECTION_ERROR`. The same holds for a hook and for
- * the first parameter of a `test.extend()` fixture.
+ * the first parameter of a `test.extend()` fixture. The second parameter
+ * receives `TestInfo`; a body may leave it out.
  */
-export type TestFn<Fixtures = TestFixtures> = (fixtures: Fixtures) => void | Promise<void>;
-/** A setup test body; `session.save` is the extra fixture. */
+export type TestFn<Fixtures = TestFixtures> = (fixtures: Fixtures, testInfo: TestInfo) => void | Promise<void>;
+/** A setup test body; `session.save` is the extra fixture, and the second parameter receives `TestInfo`. */
 export type SetupFn<Fixtures = TestFixtures> = (
   fixtures: Fixtures & SetupFixtures,
+  testInfo: TestInfo,
 ) => void | Promise<void>;
-/** A hook body: `beforeEach` and `afterEach` get the test's fixtures, `beforeAll` and `afterAll` its worker fixtures. */
-export type TestHookFn<Fixtures = TestFixtures> = (fixtures: Fixtures) => void | Promise<void>;
-/** @deprecated use `TestHookFn<WorkerFixtures>`. */
-export type SuiteHookFn = TestHookFn<WorkerFixtures>;
+/**
+ * A hook body: `beforeEach` and `afterEach` get the test's fixtures and
+ * `TestInfo`, `beforeAll` and `afterAll` its worker fixtures and `WorkerInfo`.
+ * `Info` defaults to `WorkerInfo`, which both receive, so a hook typed without
+ * it fits all four.
+ */
+export type TestHookFn<Fixtures = TestFixtures, Info = WorkerInfo> = (fixtures: Fixtures, info: Info) => void | Promise<void>;
+/** @deprecated use `TestHookFn<WorkerFixtures, WorkerInfo>`. */
+export type SuiteHookFn = TestHookFn<WorkerFixtures, WorkerInfo>;
 /** A `describe` body. An async body is a type error. */
 export type SynchronousBody<Result> = Extract<Result, PromiseLike<unknown>> extends never
   ? () => Result
@@ -1003,15 +1026,16 @@ export interface TestRegistrar<Fixtures = TestFixtures & WorkerFixtures> {
 
 /**
  * The `test.each` body arguments for the rows' type: array rows spread, then
- * the fixtures. Rows that are not all arrays are passed whole. Not
- * distributive, so a mixed table is decided once, as at run time. An
- * `unknown` row may be either at run time, so only the fixtures, last, are known.
+ * the fixtures, then `TestInfo`. Rows that are not all arrays are passed whole.
+ * Not distributive, so a mixed table is decided once, as at run time. An
+ * `unknown` row may be either at run time, so only the fixtures and `TestInfo`,
+ * last, are known.
  */
 export type EachArgs<Row, Fixtures> = [Row] extends [readonly unknown[]]
-  ? [...Row, Fixtures]
+  ? [...Row, Fixtures, TestInfo]
   : unknown extends Row
-    ? [...unknown[], Fixtures]
-    : [Row, Fixtures];
+    ? [...unknown[], Fixtures, TestInfo]
+    : [Row, Fixtures, TestInfo];
 
 /** A `test.each` or `test.for` body: the row's arguments, then the fixtures. */
 export type EachFn<Args extends readonly unknown[]> = (...args: Args) => void | Promise<void>;
@@ -1094,14 +1118,14 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    * fail as duplicate titles. As in a test body, destructure the fixtures
    * (`{ app }`): e2e sets up only the ones named there.
    */
-  each<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[...Row, Fixtures & Worker]>;
+  each<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[...Row, Fixtures & Worker, TestInfo]>;
   each<Row>(rows: readonly Row[]): EachRegistrar<EachArgs<Row, Fixtures & Worker>>;
   /**
-   * `test.each` that never spreads: the body takes `(row, fixtures)` for
-   * every row, an array row included. Titles format as in `test.each`.
+   * `test.each` that never spreads: the body takes `(row, fixtures, testInfo)`
+   * for every row, an array row included. Titles format as in `test.each`.
    */
-  for<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker]>;
-  for<Row>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker]>;
+  for<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker, TestInfo]>;
+  for<Row>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker, TestInfo]>;
   /** Registers one test that is expected to fail. */
   fail(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
@@ -1149,6 +1173,12 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
    * Outside a test the call is `COLLECTION_ERROR`.
    */
   step<T>(title: string, body: () => T | Promise<T>): Promise<T>;
+  /**
+   * Returns `TestInfo` for the currently running test attempt. Available inside
+   * a test body, `beforeEach`, `afterEach`, and test-scoped fixtures. Outside a
+   * running test, or inside a suite hook or worker-scoped fixture, throws an error.
+   */
+  info(): TestInfo;
   /** Registers one focused local test. CI rejects focused tests. */
   only(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /** Registers one setup test with statically declared session outputs. */
@@ -1230,13 +1260,13 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail, `describe.only` a focused one. */
   describe: DescribeAPI;
   /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
-  beforeEach(fn: TestHookFn<Fixtures & Worker>): void;
+  beforeEach(fn: TestHookFn<Fixtures & Worker, TestInfo>): void;
   /** Registers a test-attempt teardown hook: it runs before the test's fixtures are torn down. */
-  afterEach(fn: TestHookFn<Fixtures & Worker>): void;
-  /** Registers a suite setup hook, run once per describe between attempts, with the worker fixtures. */
-  beforeAll(fn: TestHookFn<Worker>): void;
-  /** Registers a suite teardown hook, run once per describe between attempts, with the worker fixtures. */
-  afterAll(fn: TestHookFn<Worker>): void;
+  afterEach(fn: TestHookFn<Fixtures & Worker, TestInfo>): void;
+  /** Registers a suite setup hook, run once per describe between attempts, with the worker fixtures and `WorkerInfo`. */
+  beforeAll(fn: TestHookFn<Worker, WorkerInfo>): void;
+  /** Registers a suite teardown hook, run once per describe between attempts, with the worker fixtures and `WorkerInfo`. */
+  afterAll(fn: TestHookFn<Worker, WorkerInfo>): void;
 }
 
 /**
