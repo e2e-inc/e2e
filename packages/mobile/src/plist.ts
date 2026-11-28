@@ -14,7 +14,7 @@ const BPLIST_TRAILER_SIZE = 32;
  * Parses an XML or binary (`bplist00`) property list buffer into a JS value.
  * Returns `undefined` if the buffer is empty, an unsupported format, or malformed.
  */
-function parsePlist(data: Buffer): PlistValue | undefined {
+export function parsePlist(data: Buffer): PlistValue | undefined {
   if (data.length >= BPLIST_MAGIC.length && data.subarray(0, BPLIST_MAGIC.length).equals(BPLIST_MAGIC)) {
     return parseBinaryPlist(data);
   }
@@ -120,11 +120,7 @@ function parseBinaryPlist(buf: Buffer): PlistValue | undefined {
           const header = readLength(pos, info);
           const byteLength = header === undefined ? undefined : header.length * 2;
           if (header === undefined || byteLength === undefined || header.dataPos + byteLength > offsetTableOffset) return undefined;
-          const codeUnits: number[] = [];
-          for (let i = 0; i < header.length; i += 1) {
-            codeUnits.push(buf.readUInt16BE(header.dataPos + i * 2));
-          }
-          return String.fromCharCode(...codeUnits);
+          return Buffer.from(buf.subarray(header.dataPos, header.dataPos + byteLength)).swap16().toString('utf16le');
         }
         case 0xa:
         case 0xc: {
@@ -143,7 +139,7 @@ function parseBinaryPlist(buf: Buffer): PlistValue | undefined {
         case 0xd: {
           const header = readLength(pos, info);
           if (header === undefined || header.dataPos + header.length * 2 * objectRefSize > offsetTableOffset) return undefined;
-          const dict: Record<string, PlistValue> = {};
+          const dict = Object.create(null) as Record<string, PlistValue>;
           const keysOffset = header.dataPos;
           const valuesOffset = header.dataPos + header.length * objectRefSize;
           for (let i = 0; i < header.length; i += 1) {
@@ -298,8 +294,8 @@ function parseXmlPlist(text: string): PlistValue | undefined {
         }
       }
       case 'dict': {
-        if (tag.selfClosing) return {};
-        const dict: Record<string, PlistValue> = {};
+        if (tag.selfClosing) return Object.create(null) as Record<string, PlistValue>;
+        const dict = Object.create(null) as Record<string, PlistValue>;
         while (true) {
           skipTrivia();
           if (text.startsWith('</dict>', cursor)) {
@@ -346,7 +342,7 @@ function unescapeXml(raw: string): string {
         const codePoint = entity.startsWith('#x')
           ? Number.parseInt(entity.slice(2), 16)
           : Number.parseInt(entity.slice(1), 10);
-        return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : '';
+        return Number.isFinite(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : '';
       }
     }
   });

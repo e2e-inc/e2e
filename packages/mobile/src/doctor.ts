@@ -70,23 +70,28 @@ function statusOf(status: string): EngineDoctorCheck['status'] | undefined {
 
 /** Physical iOS device UDIDs (8-16 ECID or 40-char legacy SHA1). */
 const PHYSICAL_IOS_UDID = /^(?:[0-9A-F]{8}-[0-9A-F]{16}|[0-9A-F]{40})$/i;
+/** Simulator UDIDs (8-4-4-4-12 UUID). */
+const SIMULATOR_IOS_UDID = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
+
+type IosTargetKind = 'simulator' | 'device' | 'unknown';
 
 /**
- * Whether the target selects only physical iOS devices, so `Info.plist`
- * expects `iPhoneOS` rather than `iPhoneSimulator`.
+ * Classifies whether the target selects simulators, physical iOS devices, or
+ * cannot be determined (for example when `devices.list` fails).
  */
-async function isPhysicalIosTarget(
+async function classifyIosTarget(
   devices: readonly (string | undefined)[],
   client: AgentDeviceClient,
   signal: AbortSignal,
-): Promise<boolean> {
+): Promise<IosTargetKind> {
   const configured = devices.filter((name): name is string => name !== undefined);
-  if (configured.length > 0 && configured.every((name) => PHYSICAL_IOS_UDID.test(name))) {
-    return true;
+  if (configured.length > 0) {
+    if (configured.every((name) => PHYSICAL_IOS_UDID.test(name))) return 'device';
+    if (configured.every((name) => SIMULATOR_IOS_UDID.test(name))) return 'simulator';
   }
   try {
     const inventory: unknown = await runCommand('devices', () => client.devices.list({ platform: 'ios' }), signal);
-    if (!Array.isArray(inventory)) return false;
+    if (!Array.isArray(inventory)) return 'simulator';
     const entries = inventory.filter(
       (entry): entry is { id?: unknown; name?: unknown; kind?: unknown; platform?: unknown; booted?: unknown } =>
         typeof entry === 'object' && entry !== null,
@@ -95,12 +100,14 @@ async function isPhysicalIosTarget(
       const matched = configured
         .map((target) => entries.find((entry) => entry.id === target || entry.name === target))
         .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
-      return matched.length === configured.length && matched.every((entry) => entry.kind === 'device');
+      return matched.length === configured.length && matched.every((entry) => entry.kind === 'device')
+        ? 'device'
+        : 'simulator';
     }
     const booted = entries.filter((entry) => entry.platform === 'ios' && entry.booted === true);
-    return booted.length > 0 && booted.every((entry) => entry.kind === 'device');
+    return booted.length > 0 && booted.every((entry) => entry.kind === 'device') ? 'device' : 'simulator';
   } catch {
-    return false;
+    return 'unknown';
   }
 }
 
@@ -138,8 +145,8 @@ async function buildCheck(
   const rawPlatforms = plist.CFBundleSupportedPlatforms;
   const platforms = Array.isArray(rawPlatforms) ? rawPlatforms.filter((entry): entry is string => typeof entry === 'string') : undefined;
   if (platforms !== undefined && !platforms.includes('iPhoneSimulator')) {
-    const physical = await isPhysicalIosTarget(devices, client, info.signal);
-    if (!physical) {
+    const targetKind = await classifyIosTarget(devices, client, info.signal);
+    if (targetKind === 'simulator') {
       const detail = platforms.length > 0
         ? `is a device build (${platforms.join(', ')})`
         : 'is not a simulator build (CFBundleSupportedPlatforms does not include iPhoneSimulator)';
@@ -151,12 +158,22 @@ async function buildCheck(
     }
   }
 
-  const bundleId = plist.CFBundleIdentifier;
-  if (info.app.bundleId !== undefined && typeof bundleId === 'string' && bundleId.length > 0 && bundleId !== info.app.bundleId) {
+  const bundleId = typeof plist.CFBundleIdentifier === 'string' && plist.CFBundleIdentifier.length > 0
+    ? plist.CFBundleIdentifier
+    : undefined;
+  const displayName = typeof plist.CFBundleDisplayName === 'string' && plist.CFBundleDisplayName.length > 0
+    ? plist.CFBundleDisplayName
+    : undefined;
+  const bundleName = typeof plist.CFBundleName === 'string' && plist.CFBundleName.length > 0
+    ? plist.CFBundleName
+    : undefined;
+  const appIdentifiers = [bundleId, displayName, bundleName].filter((id): id is string => id !== undefined);
+  if (info.app.bundleId !== undefined && appIdentifiers.length > 0 && !appIdentifiers.includes(info.app.bundleId)) {
+    const reported = bundleId !== undefined ? `CFBundleIdentifier ${bundleId}` : `bundle name ${displayName ?? bundleName}`;
     return [{
       id: 'app-path',
       status: 'fail',
-      message: `app.appPath ${resolved} has CFBundleIdentifier ${bundleId}, but app.bundleId is ${info.app.bundleId}`,
+      message: `app.appPath ${resolved} has ${reported}, but app.bundleId is ${info.app.bundleId}`,
     }];
   }
 

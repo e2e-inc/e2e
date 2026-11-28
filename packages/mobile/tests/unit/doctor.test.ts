@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { EngineDoctorInfo } from '@e2e-dev/core/engine';
+import { parsePlist } from '../../src/plist.ts';
 import { harness, PROJECT_ROOT, type Harness, type HarnessOptions } from '../helpers/harness.ts';
 
 const MACHINE = [
@@ -211,6 +212,75 @@ describe('doctor', () => {
       status: 'pass',
       message: badBinDir,
     });
+  });
+
+  it('skips the simulator-platform check when devices.list fails (unknown target kind)', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const appDir = writeAppBundle(dir, 'UnknownTarget.app', xmlPlist('com.example.app', ['iPhoneOS']));
+    const h = doctorHarness({ device: 'iPhone 15', appPath: 'UnknownTarget.app', bundleId: 'com.example.app' });
+    h.fake.respond('devices.list', () => {
+      throw new Error('daemon unavailable');
+    });
+    expect((await h.engine.doctor!(info(h, dir)))[0]).toEqual({
+      id: 'app-path',
+      status: 'pass',
+      message: appDir,
+    });
+  });
+
+  it('accepts app.bundleId matching CFBundleDisplayName or CFBundleName', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.example.app</string>
+  <key>CFBundleDisplayName</key>
+  <string>HelloApp</string>
+  <key>CFBundleName</key>
+  <string>Hello</string>
+  <key>CFBundleSupportedPlatforms</key>
+  <array><string>iPhoneSimulator</string></array>
+</dict>
+</plist>`;
+    const appDir = writeAppBundle(dir, 'Named.app', plist);
+
+    const byDisplayName = doctorHarness({ appPath: 'Named.app', bundleId: 'HelloApp' });
+    expect((await byDisplayName.engine.doctor!(info(byDisplayName, dir)))[0]).toEqual({
+      id: 'app-path',
+      status: 'pass',
+      message: appDir,
+    });
+
+    const byBundleName = doctorHarness({ appPath: 'Named.app', bundleId: 'Hello' });
+    expect((await byBundleName.engine.doctor!(info(byBundleName, dir)))[0]).toEqual({
+      id: 'app-path',
+      status: 'pass',
+      message: appDir,
+    });
+  });
+
+  it('decodes large UTF-16BE binary plist strings, ignores __proto__ pollution, and clamps out-of-range XML entities', () => {
+    const longText = 'A'.repeat(200_000);
+    const utf16Payload = Buffer.from(longText, 'utf16le').swap16();
+    const lenBytes = Buffer.from([0x12, (longText.length >> 24) & 0xff, (longText.length >> 16) & 0xff, (longText.length >> 8) & 0xff, longText.length & 0xff]);
+    const strObj = Buffer.concat([Buffer.from([0x6f]), lenBytes, utf16Payload]);
+    const offsetTable = Buffer.alloc(4);
+    offsetTable.writeUInt32BE(8, 0);
+    const trailer = Buffer.alloc(32);
+    trailer[6] = 4;
+    trailer[7] = 1;
+    trailer.writeBigUInt64BE(1n, 8);
+    trailer.writeBigUInt64BE(0n, 16);
+    trailer.writeBigUInt64BE(BigInt(8 + strObj.length), 24);
+    const bplist = Buffer.concat([Buffer.from('bplist00', 'ascii'), strObj, offsetTable, trailer]);
+    expect(parsePlist(bplist)).toBe(longText);
+
+    const protoXml = Buffer.from('<plist version="1.0"><dict><key>__proto__</key><dict><key>polluted</key><true/></dict><key>ok</key><string>&#x110000;hi&#65;</string></dict></plist>');
+    const parsed = parsePlist(protoXml) as Record<string, unknown>;
+    expect(Object.getPrototypeOf(parsed)).toBeNull();
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(parsed.ok).toBe('hiA');
   });
 });
 
