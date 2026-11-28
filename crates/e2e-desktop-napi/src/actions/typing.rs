@@ -115,7 +115,7 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
         }
     };
     CURRENT.with(|current| match current.borrow().as_ref() {
-        Some((run, _)) => input::type_text(text, route, run, deadline, &still),
+        Some((run, ..)) => input::type_text(text, route, run, deadline, &still),
         None => Err(Failure::refused(codes::INTERNAL, "type ran outside an action")),
     })
 }

@@ -77,31 +77,44 @@ fn write_failed(error: AXError, what: &str) -> Failure {
 }
 
 thread_local! {
-    /// The action this thread runs: its input run, which a cancel marks, and its deadline.
-    static CURRENT: std::cell::RefCell<Option<(input::TypingRun, Instant)>> = const { std::cell::RefCell::new(None) };
+    /// The action this thread runs: its input run, which a cancel marks, its deadline, and the last moment a wait that
+    /// ends in a refusal may run to (`refusal_cutoff`).
+    static CURRENT: std::cell::RefCell<Option<(input::TypingRun, Instant, Instant)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Refuses to send input once the caller gave up on the action: it was cancelled, or its deadline passed. The reads
 /// before an input can take long on a slow app, and input sent after the caller moved on would land unasked.
 fn go(what: &str) -> Outcome<()> {
     CURRENT.with(|current| match current.borrow().as_ref() {
-        Some((run, _)) if run.cancelled() => Err(Failure::refused(codes::TIMEOUT, format!("{what}: the action was cancelled before its input was sent"))),
-        Some((_, deadline)) if Instant::now() >= *deadline => {
+        Some((run, ..)) if run.cancelled() => Err(Failure::refused(codes::TIMEOUT, format!("{what}: the action was cancelled before its input was sent"))),
+        Some((_, deadline, _)) if Instant::now() >= *deadline => {
             Err(Failure::refused(codes::TIMEOUT, format!("{what}: the action's time ran out before its input was sent")))
         }
         _ => Ok(()),
     })
 }
 
-/// The last moment a wait that ends in a refusal may run to in the running action: its deadline less `ANSWER_MARGIN`.
+/// The least time the engine gives an input call before it cuts it off, however little of the action's budget was left
+/// (`MIN_INPUT_MS` in the engine's `driver.ts`).
+const INPUT_FLOOR: Duration = Duration::from_millis(500);
+
+/// The last moment a wait that ends in a refusal may run to in an action that starts at `now` with `deadline`:
+/// `ANSWER_MARGIN` before the engine cuts the call off, and never past the deadline. A short budget still waits to its
+/// deadline, since the engine waits `INPUT_FLOOR` for the answer.
+fn refusal_cutoff(now: Instant, deadline: Instant) -> Instant {
+    let cut = deadline.max(now + INPUT_FLOOR);
+    cut.checked_sub(ANSWER_MARGIN).unwrap_or(cut).min(deadline)
+}
+
+/// The last moment a wait that ends in a refusal may run to in the running action (`refusal_cutoff` at its start).
 fn refuse_at() -> Option<Instant> {
-    CURRENT.with(|current| current.borrow().as_ref().map(|(_, deadline)| deadline.checked_sub(ANSWER_MARGIN).unwrap_or(*deadline)))
+    CURRENT.with(|current| current.borrow().as_ref().map(|(_, _, refuse)| *refuse))
 }
 
 /// Whether the caller cancelled the running action. Unlike `go`, a deadline that passed does not count: cleanup such as
 /// closing a menu runs past it, but never past a cancel, after which the caller has moved on.
 fn cancelled() -> bool {
-    CURRENT.with(|current| current.borrow().as_ref().is_some_and(|(run, _)| run.cancelled()))
+    CURRENT.with(|current| current.borrow().as_ref().is_some_and(|(run, ..)| run.cancelled()))
 }
 
 /// The failure for a read that failed before anything was sent: nothing reached the app. A read the app did not answer
@@ -229,7 +242,7 @@ fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
                 ax::AX_CANNOT_COMPLETE => element.attribute("AXRole").err(),
                 // A press that closes what holds its element (a dismissed alert) can leave it readable a moment more.
                 _ => {
-                    let deadline = CURRENT.with(|current| current.borrow().as_ref().map(|(_, deadline)| *deadline));
+                    let deadline = CURRENT.with(|current| current.borrow().as_ref().map(|(_, deadline, _)| *deadline));
                     let end = gone_wait_end(Instant::now(), deadline);
                     loop {
                         let then = element.attribute("AXRole").err();
@@ -365,11 +378,11 @@ fn menu_shown(pid: i32, before: usize, deadline: Instant) {
 /// stays disabled: a disabled AppKit control may still offer AXPress and acknowledge it while ignoring it. A control
 /// with no enabled state goes at once.
 fn enabled(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
-    let refuse_at = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
+    let give_up = refuse_at().unwrap_or_else(|| refusal_cutoff(Instant::now(), deadline));
     loop {
         match element.attribute("AXEnabled") {
             Ok(value) if value.boolean() == Some(false) => {
-                if Instant::now() + POLL >= refuse_at {
+                if Instant::now() + POLL >= give_up {
                     return Err(Failure::refused(codes::ACTION_FAILED, "the control is disabled"));
                 }
                 go(what)?;
@@ -513,7 +526,7 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<bool> {
 /// Runs `work` as the action `input_id` names: until it returns, every input it sends first checks that the action was
 /// not cancelled and is still in time (`go`).
 fn guarded<T>(input_id: Option<u32>, deadline: Instant, work: impl FnOnce() -> Outcome<T>) -> Outcome<T> {
-    CURRENT.with(|current| *current.borrow_mut() = Some((input::TypingRun::start(input_id), deadline)));
+    CURRENT.with(|current| *current.borrow_mut() = Some((input::TypingRun::start(input_id), deadline, refusal_cutoff(Instant::now(), deadline))));
     let outcome = work();
     CURRENT.with(|current| current.borrow_mut().take());
     outcome
@@ -816,8 +829,9 @@ mod tests {
     #[test]
     fn sends_no_input_once_the_action_was_cancelled_or_ran_out_of_time() {
         // Ids near the input tests' ids: tests share one registry, and a run 4096 ids past another drops that one's mark.
-        let set =
-            |id: u32, deadline: Instant| super::CURRENT.with(|current| *current.borrow_mut() = Some((crate::input::TypingRun::start(Some(id)), deadline)));
+        let set = |id: u32, deadline: Instant| {
+            super::CURRENT.with(|current| *current.borrow_mut() = Some((crate::input::TypingRun::start(Some(id)), deadline, deadline)))
+        };
         crate::input::cancel_input(1_000_031);
         set(1_000_031, later());
         assert!(super::go("press").is_err());
@@ -1197,6 +1211,18 @@ mod tests {
         assert_eq!(gone_wait_end(now, Some(now + Duration::from_secs(5))), now + GONE_WAIT);
         let soon = now + ANSWER_MARGIN + Duration::from_millis(40);
         assert_eq!(gone_wait_end(now, Some(soon)), now + Duration::from_millis(40));
+    }
+
+    #[test]
+    fn gives_a_wait_that_ends_in_a_refusal_the_time_the_engine_waits_for_its_answer() {
+        use super::refusal_cutoff;
+        let now = Instant::now();
+        let ms = Duration::from_millis;
+        // A long budget: the answer comes a margin before its end.
+        assert_eq!(refusal_cutoff(now, now + ms(2_000)), now + ms(1_800));
+        // A short one: the engine waits 500 ms for the answer, so the wait runs to its deadline, or a margin before 500 ms.
+        assert_eq!(refusal_cutoff(now, now + ms(200)), now + ms(200));
+        assert_eq!(refusal_cutoff(now, now + ms(400)), now + ms(300));
     }
 
     #[test]
