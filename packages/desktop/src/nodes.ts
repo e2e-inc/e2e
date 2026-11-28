@@ -413,10 +413,14 @@ export function projectSnapshot(
   };
 }
 
-/** A heading's level: the one the app reports, else one its description names (`heading level 2`). */
+/**
+ * A heading's level: the one the app reports, else one its description names (`heading level 2`). A description that
+ * is also the heading's name is the heading's own text (`Battery level 2`) unless it reads as a level and nothing else.
+ */
 function headingLevel(node: RawNode): { level?: number } {
   if (node.level !== undefined) return { level: node.level };
-  const match = /\blevel (\d)\b/i.exec(node.description ?? '');
+  const description = node.description ?? '';
+  const match = (description === node.name ? /^heading level ([1-6])$/i : /\blevel (\d)\b/i).exec(description);
   return match === null ? {} : { level: Number(match[1]) };
 }
 
