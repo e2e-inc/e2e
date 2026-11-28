@@ -525,3 +525,45 @@ describe('withTimeout', () => {
     await assertion;
   });
 });
+
+describe('a read an engine cuts ahead of the deadline', () => {
+  const cut = new EngineError('OPERATION_TIMEOUT', 'locate timed out', { retryable: false });
+  /** Misses, then has its last read cut 40 ms before the deadline, as an engine that ends a read ahead of its budget does. */
+  const poll = (deadline: Deadline, signal: AbortSignal, onTimeout: () => Error): Promise<void> =>
+    pollCondition({
+      deadline,
+      signal,
+      negated: false,
+      evaluate: async () => {
+        if (deadline.remaining() >= POLL_INTERVAL_MS) return false;
+        await sleep(deadline.remaining() - 40);
+        throw cut;
+      },
+      onTimeout,
+    });
+
+  it('fails the poll at its deadline, not when the read was cut', async () => {
+    vi.useFakeTimers();
+    const deadline = new Deadline(350);
+    let failedAt = 0;
+    const assertion = expect(poll(deadline, new AbortController().signal, () => {
+      failedAt = Date.now();
+      return new Error('poll timed out');
+    })).rejects.toThrow('poll timed out');
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+    expect(failedAt).toBe(deadline.endsAt);
+  });
+
+  it('ends the poll as cancelled when what capped its deadline cancels it there', async () => {
+    vi.useFakeTimers();
+    const deadline = new Deadline(350);
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 350);
+    const onTimeout = vi.fn(() => new Error('poll timed out'));
+    const assertion = expect(poll(deadline, controller.signal, onTimeout)).rejects.toMatchObject({ code: 'CANCELLED' });
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+    expect(onTimeout).not.toHaveBeenCalled();
+  });
+});

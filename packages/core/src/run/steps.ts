@@ -572,6 +572,14 @@ export class StepRecorder {
    */
   owner = 'the test body';
   /**
+   * Whether the deadline of the phase steps run in has passed, asked of what
+   * enforces it (`AttemptTimeout.expire`). A step that fails after it is
+   * recorded as cancelled, the way the timeout cuts a running step: a call
+   * the deadline capped runs out as the timeout's timer comes due, and the
+   * event loop may run either first.
+   */
+  pastDeadline: (() => boolean) | undefined = undefined;
+  /**
    * Whether a top-level step started now waits at `hold`: in `beforeEach` and
    * the body, never in launch or teardown. A pause fails outside these parts
    * of the attempt, and after the body ends.
@@ -948,7 +956,10 @@ export class StepRecorder {
       registerProviderKeys(process.env);
       // A step that failed on its own, or that another abort reached first, keeps that failure.
       const name = step.named;
-      const cause = name !== undefined && thrown === name.reason ? name.error : thrown;
+      const timedOut = !step.abandoned && signal?.aborted !== true && this.pastDeadline?.() === true;
+      const cause = timedOut
+        ? new TestError('CANCELLED', `${record.api} cancelled`)
+        : name !== undefined && thrown === name.reason ? name.error : thrown;
       const failure = modelFailure(cause, this.redact ?? processSecrets.redact);
       if (step.abandoned) {
         const rejection = failure ?? cause;

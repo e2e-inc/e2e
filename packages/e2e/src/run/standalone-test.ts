@@ -315,6 +315,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       const leaveWorkerFixtures = attemptFixtures.enter();
       // The session's recorder is the test's while it runs, and the session's again after.
       const sessionOwner = steps.owner;
+      steps.pastDeadline = () => timeout.expire();
       // Whatever happens below, the slot is free for the next test once the body is done.
       try {
         /** Set once the body's race settled: a body cut short that runs on is no longer the test's to report. */
@@ -392,6 +393,7 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
       } finally {
         steps.phase = undefined;
         steps.owner = sessionOwner;
+        steps.pastDeadline = undefined;
         publication.abort();
         leaveWorkerFixtures();
       }

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Deadline } from '@e2e-dev/core/lib/internal/time';
+import { TestError } from '@e2e-dev/core/lib/internal/errors';
 import { AttemptBudget, AttemptTimeout } from '@e2e-dev/core/lib/run/budget';
+import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
 import { AttemptHolds } from '../../src/run/step-hold.ts';
 
 const never = (): Promise<never> => new Promise<never>(() => {});
@@ -41,6 +43,48 @@ describe('AttemptTimeout', () => {
     await passed.race(Promise.resolve(), () => new Error('timed out'));
     expect(passed.set(60_000)).toBe(false);
     expect(passed.timeoutMs).toBe(5_000);
+  });
+
+  /**
+   * A wait the deadline capped, running out as the race's timer comes due:
+   * blocking the event loop past the deadline leaves the timer unrun, so the
+   * wait's own failure is what the loop reaches first.
+   */
+  function cappedWait(timeoutMs: number, started = Date.now()): () => Promise<never> {
+    return async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      while (Date.now() < started + timeoutMs) {}
+      throw new TestError('LOCATOR_NOT_FOUND', 'locator did not become visible');
+    };
+  }
+
+  it('records a step that runs out at the deadline, before the timer ran, as cut by the timeout', async () => {
+    const abort = new AbortController();
+    const steps = new StepRecorder('a', { signal: abort.signal });
+    const timeout = new AttemptTimeout(new AttemptBudget(abort.signal, new Deadline(20)), 20);
+    steps.pastDeadline = () => timeout.expire();
+    const body = steps.group('Wait for a missing button', () => steps.run('locator', 'locator.waitFor', 'button', cappedWait(20)));
+    const raced = timeout.race(body, () => {
+      abort.abort();
+      return new Error('timed out');
+    });
+
+    await expect(raced).rejects.toThrow('timed out');
+    expect(steps.all().map((step) => [step.api, step.status, step.error?.code])).toEqual([
+      ['test.step', 'cancelled', undefined],
+      ['locator.waitFor', 'cancelled', 'CANCELLED'],
+    ]);
+  });
+
+  it('keeps the failure of a step that fails before the deadline', async () => {
+    const abort = new AbortController();
+    const steps = new StepRecorder('a', { signal: abort.signal });
+    const timeout = new AttemptTimeout(new AttemptBudget(abort.signal, new Deadline(5_000)), 5_000);
+    steps.pastDeadline = () => timeout.expire();
+    const raced = timeout.race(steps.run('locator', 'locator.waitFor', 'button', cappedWait(0)), () => new Error('timed out'));
+
+    await expect(raced).rejects.toThrow('did not become visible');
+    expect(steps.all().map((step) => [step.api, step.status, step.error?.code])).toEqual([['locator.waitFor', 'failed', 'LOCATOR_NOT_FOUND']]);
   });
 });
 

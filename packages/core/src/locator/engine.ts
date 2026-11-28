@@ -25,7 +25,7 @@ import {
 import { requireKey } from '../internal/keys.ts';
 import { isPixelPoint, resolveScreenPoint } from '../internal/geometry.ts';
 import { describeExpression, expressionHints, filterSpine } from './expression.ts';
-import { abortError, cancelledError, Deadline, POLL_INTERVAL_MS, pollDelay, pollReads, ReadWindow, sleep, StepDeadline, stepTimeout } from '../internal/time.ts';
+import { abortError, cancelledError, Deadline, POLL_INTERVAL_MS, pollDelay, pollReads, ReadWindow, sleep, sleepUntil, StepDeadline, stepTimeout } from '../internal/time.ts';
 import { timestamp } from '../internal/ids.ts';
 import { obj } from '../internal/objects.ts';
 import { targetLabel } from '../cache/trace.ts';
@@ -319,8 +319,9 @@ export class LocatorEngine {
         refs = await this.resolveOnce(expression, reads);
       } catch (cause) {
         // A resolve the deadline cut off, after one that matched nothing, is the wait running out.
-if (sampled && reads.cutOff(cause)) throw await notFound(cause);
-        throw cause;
+        if (!sampled || !reads.cutOff(cause)) throw cause;
+        await sleepUntil(deadline, this.signal);
+        throw await notFound(cause);
       }
       sampled = true;
       const ref = await this.singleOf(refs, expression);

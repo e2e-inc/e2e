@@ -730,6 +730,7 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       const budget = new AttemptBudget(attemptAbort.signal, new Deadline(pair.options.timeout));
       endBudget = () => budget.end();
       const timeout = new AttemptTimeout(budget, pair.options.timeout, announce);
+      steps.pastDeadline = () => timeout.expire();
       announce();
       const saveSession =
         context.kind !== 'setup'
