@@ -37,8 +37,8 @@ interface Ran {
 
 let calls: Call[];
 let ran: Ran[];
-/** The state each `GET /computer-runs/{id}` reads, in turn; the last one repeats. */
-let states: string[];
+/** The state, or the whole report, each `GET /computer-runs/{id}` reads, in turn; the last one repeats. */
+let states: (string | Record<string, unknown>)[];
 /** Answers an exchange as the relay on the Mac would. */
 let relay: (request: ExchangeRequest) => ExchangeAnswer;
 
@@ -64,7 +64,10 @@ beforeEach(() => {
     calls.push({ method: init.method ?? 'GET', path: url.pathname, body });
     const route = `${init.method ?? 'GET'} ${url.pathname}`;
     if (route === 'POST /api/v1/computer-runs') return json({ computer_session_id: body!.computer_session_id, state: 'starting' });
-    if (/^GET \/api\/v1\/computer-runs\/[^/]+$/.test(route)) return json({ state: states.length > 1 ? states.shift() : states[0] });
+    if (/^GET \/api\/v1\/computer-runs\/[^/]+$/.test(route)) {
+      const report = states.length > 1 ? states.shift()! : states[0]!;
+      return json(typeof report === 'string' ? { state: report } : report);
+    }
     if (/\/(start|stop)$/.test(route)) return json({});
     if (route.endsWith('/operations')) {
       const command = body!.command as Record<string, unknown>;
@@ -183,6 +186,20 @@ describe('the Revyl computer transport', () => {
 
     expect(paths().at(-1)).toBe(`POST /api/v1/computer-runs/${COMPUTER}/stop`);
     expect(markers()).toEqual([]);
+  });
+
+  it("reads a persistent computer's own state, not its latest run's, which stays failed after it stopped", async () => {
+    states = [
+      { state: 'failed', persistent: { state: 'stopped' } },
+      { state: 'failed', persistent: { state: 'starting' } },
+      { state: 'active', persistent: { state: 'running' } },
+    ];
+    const connection = await transport({ computer: COMPUTER }).open(context());
+    expect(paths().filter((call) => call.startsWith('POST'))).toEqual([`POST /api/v1/computer-runs/${COMPUTER}/start`]);
+    await connection.close(1000);
+
+    states = [{ state: 'active', persistent: { state: 'stopping' } }];
+    await expect(transport({ computer: COMPUTER }).open(context())).rejects.toThrow(`Revyl computer ${COMPUTER} is stopping; run again once it has stopped`);
   });
 
   it('stops the computer it created when setting it up fails, and names why', async () => {

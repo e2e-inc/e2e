@@ -67,21 +67,32 @@ export class RevylComputerClient {
 
   /** The computer's state as Revyl reports it: `starting`, `active`, `stopped`, and so on. */
   async state(id: string, signal: AbortSignal): Promise<string> {
-    const report = fields(await this.#retry(signal, () => this.#json('GET', `/api/v1/computer-runs/${encodeURIComponent(id)}`, undefined, signal)));
-    if (typeof report.state !== 'string') throw new Error(`Revyl reports no state for computer ${id}`);
-    return report.state;
+    const { state } = await this.#report(id, signal);
+    if (state === undefined) throw new Error(`Revyl reports no state for computer ${id}`);
+    return state;
   }
 
   /** Waits until the computer runs; one that failed or stopped instead fails with Revyl's reason. */
   async waitUntilActive(id: string, signal: AbortSignal): Promise<void> {
     for (;;) {
-      const report = fields(await this.#retry(signal, () => this.#json('GET', `/api/v1/computer-runs/${encodeURIComponent(id)}`, undefined, signal)));
-      if (report.state === 'active') return;
-      if (typeof report.state === 'string' && ENDED.has(report.state)) {
-        throw new Error(`Revyl computer ${id} is ${report.state}${typeof report.failure_reason === 'string' ? `: ${report.failure_reason}` : ''}`);
-      }
+      const { state, failureReason } = await this.#report(id, signal);
+      if (state === 'active') return;
+      if (state !== undefined && ENDED.has(state)) throw new Error(`Revyl computer ${id} is ${state}${failureReason === undefined ? '' : `: ${failureReason}`}`);
       await sleep(2_000, signal);
     }
+  }
+
+  /**
+   * The computer's state, and the reason its latest run failed. A persistent
+   * computer's state is its own, `running` read as `active`: the run report
+   * beside it describes its latest run, which stays `failed` or `stopped`
+   * after the computer stopped.
+   */
+  async #report(id: string, signal: AbortSignal): Promise<{ readonly state: string | undefined; readonly failureReason: string | undefined }> {
+    const report = fields(await this.#retry(signal, () => this.#json('GET', `/api/v1/computer-runs/${encodeURIComponent(id)}`, undefined, signal)));
+    const persistent = fields(report.persistent).state;
+    const state = typeof persistent === 'string' ? (persistent === 'running' ? 'active' : persistent) : report.state;
+    return { state: typeof state === 'string' ? state : undefined, failureReason: typeof report.failure_reason === 'string' ? report.failure_reason : undefined };
   }
 
   /**
