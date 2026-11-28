@@ -8,6 +8,8 @@ https://e2e.com/docs/<path>.
 
 - A complete file
 - Structure: one describe, arrange-act-assert, one behavior
+- Cases: what each requirement needs
+- Review: before the suite is done
 - Registration
 - Fixtures
 - Locators
@@ -17,10 +19,10 @@ https://e2e.com/docs/<path>.
 - The browser fixture (browser only)
 - Habits
 
-Always read "A complete file" and "Structure" first. Load later API sections
-(`Registration`, `Fixtures`, `Locators`, `expect`, `Sign-in sessions`,
-`The browser fixture`) only as needed: each keeps the rules that trip
-agents up and names the docs page with the full API.
+Always read "A complete file", "Structure", "Cases", and "Review" first. Load
+later API sections (`Registration`, `Fixtures`, `Locators`, `expect`,
+`Sign-in sessions`, `The browser fixture`) only as needed: each keeps the
+rules that trip agents up and names the docs page with the full API.
 
 ## A complete file
 
@@ -224,6 +226,74 @@ Write every test so a failing title names what broke.
   passing locator/engine matcher, `locator.waitFor`, `agent.assert`, or
   `agent.waitFor` confirms preceding `agent.act` steps for the replay cache
   (`expect.poll` and plain-value `expect` confirm nothing).
+
+## Cases: what each requirement needs
+
+List the cases before writing tests: one happy path per requirement misses
+most regressions. For each sentence of the requirement, add every case below
+that applies, each as its own test with its own arrange steps.
+
+- **A limit it states:** the largest and the smallest allowed value, the
+  first value outside each end, and empty, whitespace-only, zero, and
+  negative input where a value is required.
+- **A rule that compares records** ("already exists", "at most N"): break it
+  with a record the test created, not only with seeded data.
+- **A row action:** unless the requirement is about position 1, add three
+  rows where the list allows and act on the middle one shown ("Act on the
+  second item shown"), checking the rows above and below it stay unchanged.
+  Repeat each row action (tick, edit, delete) with each view control
+  (filter, sort, search) switched on, on the second row shown after one the
+  control hides or moves.
+- **A reversible action** (tick, favorite, lock): one test does it, another
+  starts from the done state and undoes it.
+- **A sum, count, or progress line:** at least three counted items with
+  different values, plus one in an excluded state when the figure excludes
+  any.
+- **A view control** (filter, sort, search): for a filter or search, a list
+  where every item matches, one where none does, and a mixed one; for a
+  sort, create the records out of that order.
+- **A rejection** (a refused form, a failed sign-in): the message, and
+  that the state the refusal protects held, such as no record created or
+  changed, or protected content still gated. For each, add a test where a
+  valid try follows the rejected one.
+- **A state it says is kept or ended** (saved, signed out, removed): in its
+  own test, wait for confirmation, reload or reopen afresh, and check it
+  there; for a signed-out or removed state, also open the screen that
+  needed it.
+- **A fixed set** (the seeded items, the options of a select): compare the
+  whole rendered list (`toHaveText([...])` when order is promised, or
+  sorted copies when only membership is promised), and run one test per
+  member with `test.each` when each member has behavior to exercise, never
+  only the first two.
+
+## Review: before the suite is done
+
+Reread every file as its reviewer and fix what you find.
+
+- **Setup written twice:** move it to a fixture or a helper module with
+  typed parameters, never `any`.
+- **A CSS selector, test id, or `browser.evaluate` read** where a role,
+  label, or text locator and matcher can observe the state (keeping
+  `expect.poll` for computed CSS or DOM values no matcher reads): use the
+  accessible locator and matcher.
+- **An assertion another row could satisfy:** scope it to the named row or
+  card and assert the promised state there, such as `toHaveText` on the
+  value cell, `toBeChecked` on the toggle, or `toHaveCount(0)` after
+  removal.
+- **A rejection checked by its message or a count alone:** also check the
+  state the refusal protects, reopening afresh to check the unchanged rows
+  with list-form `toHaveText` and literal values when no persisted write is
+  promised, or checking that protected content stays gated after a failed
+  sign-in.
+- **A persisted change checked only on the screen that made it:** add a
+  test that waits for confirmation, reloads or reopens afresh, and checks
+  the saved state.
+- **An opaque value the app assigns** (order number, generated id,
+  timestamp): read it from the screen rather than guessing a formula; when
+  the requirement specifies a calculation, assert the expected literal from
+  the inputs.
+- **A test that needs another to run first, or changes records another
+  test reads:** give it records of its own.
 
 ## Registration
 
