@@ -447,7 +447,7 @@ an example test.
 | `electronApp.evaluate(fn, arg)` | `electron.evaluate(fn, arg)` |
 | `page.evaluate(fn, arg)` in the renderer, `page.reload()`, `page.url()` | `electron.activeWindow().evaluate(fn, arg)`, `reload()`, `url()` |
 | `page.keyboard`, `page.mouse` | `electron.keyboard`, `electron.mouse` |
-| `page.waitForURL(re)` | `electron.waitForURL(re)`. A string is a URL, not a glob: rewrite a glob as a `RegExp` |
+| `page.waitForURL(re)` | `electron.waitForURL(re)`. A string is an absolute URL: rewrite a glob or a path as a `RegExp` |
 | `page.waitForFunction(fn, arg)` | `await expect.poll(() => electron.activeWindow().evaluate(fn, arg)).toBeTruthy()` |
 | `expect(page).toHaveURL(url)`, `toHaveTitle(title)` | `expect(electron).toHaveURL(url)`, `toHaveTitle(title)` |
 | `expect(locator).toHaveClass(cls)` | `expect(electron).toHaveClass(locator, cls)` |

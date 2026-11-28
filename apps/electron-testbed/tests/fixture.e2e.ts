@@ -1,5 +1,6 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { test } from '@e2e-dev/electron';
 import { credentials, expect } from 'e2e';
 
@@ -145,22 +146,65 @@ test.describe('expect(electron) and the fixture\'s waits', () => {
   });
 
   test('waits for the active window\'s URL and title, and says what it saw when they never come', async ({ electron }) => {
+    const here = await electron.activeWindow().url();
+    const controls = here.replace(/index\.html$/, 'controls.html');
     await expect(electron).toHaveURL(/app\/index\.html$/);
+    await expect(electron).toHaveURL(here);
+    await expect(electron).not.toHaveURL(controls);
+    await expect(electron).toHaveURL(/APP\/INDEX\.HTML$/, { ignoreCase: true });
+    await expect(electron).not.toHaveURL(/APP\/INDEX\.HTML$/);
+    // A RegExp of another realm is one too.
+    await expect(electron).toHaveURL(runInNewContext('/index\\.html$/') as RegExp);
     await expect(electron).toHaveTitle('Sign In');
+    // A string is the whole title, not a part of it.
+    await expect(electron).not.toHaveTitle('Sign');
     await expect(electron).not.toHaveTitle('Controls');
-    // A string is a URL, compared as one and resolved against the window's own.
-    await expect(electron).toHaveURL(await electron.activeWindow().url());
-    await expect(electron).toHaveURL('index.html');
-    await expect(electron).not.toHaveURL('controls.html');
     // The title stays, so its negation fails at the deadline rather than on a read the deadline cut short.
     expect(await failure(expect(electron).not.toHaveTitle('Sign In', { timeout: 300 }))).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('observed: title "Sign In"') });
+    // The wait goes on through the page load, to the absolute URL it names.
     const opened = electron.evaluate(() => (globalThis as unknown as { testbedOpen: (page: string) => Promise<void> }).testbedOpen('controls.html'));
-    await electron.waitForURL(/controls\.html$/);
+    await electron.waitForURL(controls);
     await opened;
     await expect(electron).toHaveTitle(/^Contr/);
     expect(await failure(expect(electron).toHaveTitle('Sign In', { timeout: 300 }))).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('observed: title "Controls"') });
-    expect(await failure(electron.waitForURL('index.html', { timeout: 300 }))).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('controls.html') });
-    expect(await failure(expect(electron).toHaveURL(/x/, { ignoreCase: true } as never))).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(await failure(electron.waitForURL(here, { timeout: 300 }))).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('controls.html') });
+  });
+
+  test('refuses a URL with nothing to resolve against, and an option it does not take', async ({ electron }) => {
+    // An Electron app has no base URL, and the window's own moves with the wait.
+    for (const relative of ['index.html', 'sub/page.html', '/index.html', '']) {
+      expect(await failure(expect(electron).toHaveURL(relative))).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('absolute URL') });
+      expect(await failure(electron.waitForURL(relative))).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    }
+    expect(await failure(expect(electron).toHaveURL(/x/, { ignoreCase: 'yes' } as never))).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(await failure(electron.waitForURL(/x/, { ignoreCase: true } as never))).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(await failure(expect(electron).toHaveTitle('x', { ignoreCase: true } as never))).toMatchObject({ code: 'INVALID_ARGUMENT' });
+  });
+
+  test('reads the OS window\'s title for a document with none', async ({ electron }) => {
+    await electron.evaluate(({ BrowserWindow }) => {
+      const untitled = new BrowserWindow({ show: false, title: 'Inspector' });
+      untitled.on('page-title-updated', (event) => event.preventDefault());
+      void untitled.loadURL('data:text/html,<h1>No title</h1>');
+    });
+    await (await electron.window({ title: 'Inspector' })).activate();
+    await expect(electron).toHaveTitle('Inspector');
+  });
+
+  test('fails on a dialog nothing answered, as any step does', async ({ electron }) => {
+    await electron.activeWindow().evaluate(() => {
+      setTimeout(() => (globalThis as unknown as { confirm(message: string): boolean }).confirm('Sure?'), 0);
+    });
+    await expect.poll(async () => String(await failure(expect(electron).toHaveURL(/index\.html$/)))).toContain('unhandled confirm dialog: Sure?');
+    await expect(electron).toHaveURL(/index\.html$/);
+  });
+
+  test('ends a wait at once when the app quits under it', async ({ electron }) => {
+    const started = Date.now();
+    const waiting = failure(electron.waitForURL(/never\.html$/, { timeout: 20_000 }));
+    await failure(electron.evaluate(({ app }) => app.quit()));
+    expect(await waiting).toMatchObject({ code: 'APP_NOT_OPEN' });
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 
   test('waits for an element\'s class', async ({ screen, electron }) => {
@@ -180,6 +224,8 @@ test.describe('expect(electron) and the fixture\'s waits', () => {
       }, 200);
     });
     await expect(electron).toHaveClass(scan, 'dimmed busy');
+    // A string is the whole class list, not one of its classes.
+    await expect(electron).not.toHaveClass(scan, 'dimmed');
     // A node that never comes is the assertion's failure; several are the locator's.
     expect(await failure(expect(electron).toHaveClass(electron.locator('.no-such'), 'x', { timeout: 300 }))).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('observed: no node') });
     expect(await failure(expect(electron).toHaveClass(electron.locator('button'), 'x'))).toMatchObject({ code: 'LOCATOR_AMBIGUOUS' });

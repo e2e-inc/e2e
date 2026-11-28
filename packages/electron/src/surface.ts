@@ -356,7 +356,7 @@ export class ElectronSurface {
   }
 
   /** Fails the step that follows a dialog nothing answered, or whose handler failed. */
-  private failOnDialog(): void {
+  failOnDialog(): void {
     const unhandled = this.dialogs.take();
     if (unhandled !== undefined) throw unhandled;
   }

@@ -45,6 +45,8 @@ export class WindowConditions {
   /** Polls `read` until it matches, or fails with the last read once the assertion timeout (or `timeout`) is over. */
   private async poll(call: PollCall, label: string, read: (deadline: Deadline) => Promise<Sample>, timeout: number | undefined): Promise<void> {
     const { context } = this;
+    // A dialog nothing answered fails this step, as it fails any other.
+    this.surface.failOnDialog();
     const deadline = new Deadline(context.operation(stepTimeout(timeout, call.api) ?? context.timeouts.assertion).timeoutMs);
     let last: Sample | undefined;
     await pollCondition({
@@ -57,7 +59,7 @@ export class WindowConditions {
         } catch (cause) {
           if (!this.passing(cause)) throw cause;
           // What the read before it saw stays what the failure reports: this one saw nothing.
-          last = { matches: undefined, observed: last?.observed ?? 'nothing: the window was loading, closing, or did not answer in time' };
+          last = { matches: undefined, observed: last?.observed ?? 'nothing: the window was loading or closing' };
         }
         return last.matches;
       },
@@ -67,28 +69,33 @@ export class WindowConditions {
   }
 
   /**
-   * Whether a failed read is one a wait goes on through: the document or the
-   * node went away under it (a navigation, a re-render), the deadline cut it
-   * off, or the window is closed or not there yet while the app still runs.
+   * Whether a failed read is one a wait goes on through: the document went
+   * away under it (a navigation), or the window is closed or not there yet
+   * while the app still runs. A read that hangs is the poll's own to judge.
    */
   private passing(cause: unknown): boolean {
     if (!(cause instanceof EngineError)) return false;
-    return cause.retryable || cause.code === 'OPERATION_TIMEOUT' || (cause.code === 'INVALID_STATE' && this.surface.appRunning);
+    return cause.retryable || (cause.code === 'INVALID_STATE' && this.surface.appRunning);
   }
 
-  private url(call: PollCall, expected: string | RegExp, timeout: number | undefined): Promise<void> {
-    if (typeof expected !== 'string' && !(expected instanceof RegExp)) throw new TestError('INVALID_ARGUMENT', `${call.name} takes a URL string or a RegExp`);
-    return this.poll(call, `URL ${String(expected)}`, () => {
+  private url(call: PollCall, expected: string | RegExp, options: { readonly ignoreCase?: boolean; readonly timeout?: number } | undefined): Promise<void> {
+    const ignoreCase = options?.ignoreCase;
+    if (ignoreCase !== undefined && typeof ignoreCase !== 'boolean') throw new TestError('INVALID_ARGUMENT', `${call.name} option ignoreCase must be a boolean`);
+    const pattern = toTextPattern(expected);
+    // An Electron target has no base URL, and the window's own moves with the wait: a relative string has nothing to resolve against.
+    if (pattern.kind !== 'regexp' && !URL.canParse(pattern.value)) {
+      throw new TestError('INVALID_ARGUMENT', `${call.name} takes an absolute URL or a RegExp, not ${JSON.stringify(pattern.value)}: an Electron app has no base URL to resolve it against`);
+    }
+    return this.poll(call, `URL ${String(expected)}${ignoreCase === true ? ' (ignoring case)' : ''}`, () => {
       const url = this.surface.shownWindow().page.url();
-      // A string is a URL, compared as one and resolved against the window's own: an Electron app has no base URL.
-      return Promise.resolve({ matches: urlMatches(url, expected, url), observed: `URL ${url}` });
-    }, timeout);
+      return Promise.resolve({ matches: urlMatches(url, expected, url, ignoreCase), observed: `URL ${url}` });
+    }, options?.timeout);
   }
 
   /** `electron.waitForURL()`: the poll `expect(electron).toHaveURL` runs. */
   waitForURL(expected: string | RegExp, options: { readonly timeout?: number } | undefined): Promise<void> {
     rejectUnknownOptions('electron.waitForURL', options, ['timeout']);
-    return this.url({ api: 'electron.waitForURL', name: 'electron.waitForURL', negated: false }, expected, options?.timeout);
+    return this.url({ api: 'electron.waitForURL', name: 'electron.waitForURL', negated: false }, expected, options);
   }
 
   /** The `expect(electron)` matchers, or their negations. */
@@ -103,7 +110,10 @@ export class WindowConditions {
       get not() {
         return negate();
       },
-      toHaveURL: (expected, options) => this.url(call('toHaveURL'), expected, timeoutOf('toHaveURL', options)),
+      toHaveURL: (expected, options) => {
+        rejectUnknownOptions(`expect.${negated ? 'not.' : ''}toHaveURL`, options, ['ignoreCase', 'timeout']);
+        return this.url(call('toHaveURL'), expected, options);
+      },
       toHaveTitle: (expected, options) => {
         const pattern = toTextPattern(expected, { exact: true });
         return this.poll(call('toHaveTitle'), `title ${describePattern(pattern)}`, async (deadline) => {

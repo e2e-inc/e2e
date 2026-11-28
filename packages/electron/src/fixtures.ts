@@ -92,8 +92,8 @@ export interface ElectronMouse {
 export interface ElectronExpectation {
   /** The same matchers, negated. */
   readonly not: ElectronExpectation;
-  /** The window's URL: a string is a URL, compared as one and resolved against the window's own; a `RegExp` is tested against it. */
-  toHaveURL(expected: string | RegExp, options?: { readonly timeout?: number }): Promise<void>;
+  /** The window's URL: a string is an absolute URL, compared as one; a `RegExp` is tested against it. */
+  toHaveURL(expected: string | RegExp, options?: { readonly ignoreCase?: boolean; readonly timeout?: number }): Promise<void>;
   /** The window's title, the document's or else the OS window's. */
   toHaveTitle(expected: TextMatch, options?: { readonly timeout?: number }): Promise<void>;
   /** The `class` attribute of the one node `target` matches: a string is the whole class list, a `RegExp` is tested against it. */
@@ -119,8 +119,8 @@ export interface Electron extends Expectable<ElectronExpectation> {
   /** The active window, the one `screen`, `expect`, and the agent act on. Throws `INVALID_STATE` when the app has no open window. */
   activeWindow(): ElectronWindow;
   /**
-   * Waits for the active window's URL to match: a string is a URL, resolved
-   * against the window's own and never a glob; a `RegExp` is tested against it. Rejects with `ASSERTION_FAILED` after
+   * Waits for the active window's URL to match: a string is an absolute URL,
+   * never a glob or a path; a `RegExp` is tested against it. Rejects with `ASSERTION_FAILED` after
    * `timeout` milliseconds, or else the assertion timeout.
    */
   waitForURL(url: string | RegExp, options?: { readonly timeout?: number }): Promise<void>;

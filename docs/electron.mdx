@@ -210,15 +210,14 @@ await expect(electron).toHaveClass(screen.getByRole('row', 'Draft'), /selected/)
 await expect(electron).not.toHaveTitle('Sign in');
 ```
 
-- `toHaveURL` and `waitForURL` take a URL or a `RegExp`. A string is compared
-  as a URL and resolves against the window's current one, so `'settings.html'`
-  matches a sibling file. A glob such as `'**/settings'` isn't one: use a
-  `RegExp`.
+- `toHaveURL` and `waitForURL` take an absolute URL or a `RegExp`. An Electron
+  app has no base URL, so a path such as `'settings.html'` or a glob such as
+  `'**/settings'` is `INVALID_ARGUMENT`: use a `RegExp`.
 - `toHaveClass` takes the locator first. A string is the whole class list. An
   element with no `class` attribute matches no string, `''` included.
 - Every matcher takes `{ timeout }`.
 
-`electron.waitForURL()` waits the same way without asserting:
+`electron.waitForURL()` runs the same wait as a step of its own:
 
 ```ts
 await electron.waitForURL(/\/workspace\/[^/]+\/debug$/);
