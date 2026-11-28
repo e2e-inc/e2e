@@ -339,7 +339,7 @@ export interface Engine {
    * no value reaches the config digest.
    */
   readonly secrets?: readonly Secret[];
-  /** Steering hooks: open, back, resize, restart, reset. */
+  /** Steering hooks: open, openLink, back, resize, switchTab, closeTab, restart, reset. */
   readonly session?: EngineSession;
   /**
    * Runs once per target in the runner, after collection and before workers,
@@ -1841,6 +1841,7 @@ reproduces these semantics; import them instead of carrying a copy.
 | --- | --- |
 | [`matchesText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `TextPattern`, `string` |
 | [`resolveExpression`, `expressionSelectors`](#resolveexpression) | `SemanticNode[]`, `readonly string[]` |
+| [`shownText`](#showntext) | `string \| undefined` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`, `sameSite`](#site-helpers) | `string`, `boolean` |
 | [`isRefusedLinkScheme`](#isrefusedlinkscheme) | `boolean` |
@@ -1898,14 +1899,18 @@ async locate(expression) {
 },
 ```
 
+- `text` matches a node's `text`, or its `name` when `text` is omitted or
+  blank ([`shownText`](#showntext)); `label` matches the `name`.
+- A `filter`'s `hasText` reads `name`, `text`, and `value`, so it keeps a
+  node a `text` query skips.
 - `text` and `label` answer with the innermost match when a container echoes
   a descendant's text.
-- A `text` query matches a node's name or its text. With
-  `textQuery: 'text'` it matches the text alone, as a browser does, for a
-  tree that carries every element's text. A scoped text query then also
-  answers with the scope element when the text is its own.
-- An engine whose tree is the whole truth (a device) calls it; a browser
-  engine reproduces it.
+- With `textQuery: 'text'` a `text` query matches the `text` alone, as a
+  browser does, for a tree that carries every element's text. A scoped text
+  query then also answers with the scope element when the text is its own.
+- An engine whose tree is the whole truth (a device, a desktop app) calls
+  it. A browser engine answers with its own query engine, where `text` reads
+  text content and never an accessible name.
 - A `selector` expression needs the `selector` option, which answers
   synchronously. An engine whose selector language is asynchronous (a
   DevTools query, a device daemon) queries every selector
@@ -1913,6 +1918,23 @@ async locate(expression) {
   results.
 - A `frame` expression is `FRAME_NOT_FOUND`.
 - A `union` expression matches either branch in document order, without duplicate nodes.
+
+#### `shownText`
+
+The string a `text` query reads a node by: its `text`, or its `name` when
+`text` is omitted or blank.
+
+```ts
+export function shownText(node: Pick<SemanticNode, 'name' | 'text'>): string | undefined;
+```
+
+```ts
+shownText({ name: 'Words', text: '5' }); // '5'
+shownText({ name: 'Close' }); // 'Close'
+```
+
+An engine that matches text itself calls it, so its `getByText` agrees with
+`resolveExpression`.
 
 #### `urlMatches`
 
