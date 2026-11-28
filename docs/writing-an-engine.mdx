@@ -1,6 +1,6 @@
 ---
 title: Writing an engine
-description: Implement the e2e engine contract for another UI platform.
+description: "Implement the e2e/engine contract with defineEngine to connect screen, app, and agent calls to another UI platform, such as a desktop app or a TV."
 "og:image": "https://e2e.com/docs/images/og/writing-an-engine.png?v=093c02efc1"
 "twitter:image": "https://e2e.com/docs/images/og/writing-an-engine.png?v=093c02efc1"
 ---
@@ -11,7 +11,9 @@ platform. `@e2e-dev/web` and `@e2e-dev/mobile` use the same public
 `defineEngine` API and are complete examples.
 
 This page builds one in TypeScript, served in the runner's process. To run
-one in another process or language, see [Engine servers](/engine-servers).
+one in another process or language, see
+[Engine servers](/reference/engine-protocol#engine-servers).
+[Engines](/engines) compares the two paths.
 
 Engines drive user interfaces only. For an inbox, a database, or a test API,
 write a fixture with [`test.extend`](/reference/test#your-own-fixtures).
@@ -116,15 +118,15 @@ a missing one fail with `UNSUPPORTED_CAPABILITY`. Start with these:
 | `observe(context, options?)` | Agent observations and the replay cache |
 | `perform(ref, action, context)` + `actions` | Node actions of the declared kinds, including viewport scrolling through `swipe` |
 | `locate(expression, context)` | `screen`, `Locator`, and `expect(locator)` |
-| `validateApp(app, info)` | A config-load check of the target's `app`. Throw `INVALID_CONFIG` naming `info.targetName` for a field the platform needs or can't drive. [Reference](/reference/engine#app) |
+| `validateApp(app, info)` | A config-load check of the target's `app`. Throw `INVALID_CONFIG` naming `info.targetName` for a field the platform needs or can't drive. See [`validateApp`](/reference/engine#validateapp) |
 | `session.{open?,back?,resize?,switchTab?,closeTab?,restart?,reset?}` | `app.open()`, `app.back()`, `app.restart()`, `app.clearState()`, and the agent's `navigate`, `back`, `resize_viewport`, `switch_tab`, and `close_tab` verbs |
 
 Pointer actions, the keyboard, saved state, artifacts, and contributed
 fixtures are optional capabilities too. `actions`, `location`, `pointer`,
 and `keyboard` require `observe`. The agent gets only the tools your
-declared kinds unlock; the
-[engine reference](/reference/engine#capabilities) lists every member and
-which kind unlocks which tool.
+declared kinds unlock;
+[Capabilities in `e2e/engine`](/reference/engine#capabilities) lists every
+member and which kind unlocks which tool.
 
 Agent and locator actions both reach `perform` as a `LocatorAction`. When
 one node can't do a declared action, throw `UNSUPPORTED_CAPABILITY`.
@@ -142,11 +144,11 @@ one node can't do a declared action, throw `UNSUPPORTED_CAPABILITY`.
 | `startAttempt` | Before each attempt | Create the test's UI |
 | `settleAttempt` | After the body, and again after teardown | Throw the error of a test callback no step awaited, such as a dialog handler |
 | `endAttempt` | After each attempt, also after a failed start | Clean up the test's UI. Make it idempotent |
-| `dispose` | At worker shutdown, even if `init` never ran | Release the worker's resources |
+| `dispose` | At worker shutdown once `init` was called, even if it failed | Release the worker's resources |
 | `finish` | One time per target, after the last worker is gone, whenever `prepare` ran | Release what `prepare` acquired |
 
 Use `info.env` for the processes you start and `info.log` to report
-progress. The [engine reference](/reference/engine#lifecycle) has each
+progress. [Lifecycle in `e2e/engine`](/reference/engine#lifecycle) has each
 hook's arguments and budgets.
 
 ## Nodes and refs
@@ -238,8 +240,7 @@ must replace the app's whole persisted state, not merge into it.
 
 ## Errors
 
-Throw `EngineError` with a code from the
-[engine reference](/reference/engine).
+Throw [`EngineError`](/reference/engine#engineerror) with one of its codes.
 
 - Only `NODE_STALE` and `FRAME_NOT_FOUND` can be retryable.
 - Use `ACTION_MAY_HAVE_COMMITTED` when an action may already have taken
@@ -255,7 +256,7 @@ they are [built-in fixtures](/reference/test#fixtures). Wrap their
 methods with `context.fixture` to record each call as a `<fixture>.<method>`
 step, with its own artifacts and failures. Fixtures run in the runner's
 process, beside the test. An engine server gets them from `connectEngine`; see
-[Keep host work on the client](/engine-servers#keep-host-work-on-the-client).
+[Keep host work on the client](/reference/engine-protocol#keep-host-work-on-the-client).
 
 ```ts
 fixtures: {
@@ -278,8 +279,8 @@ export const test = base.extend<{ device: Device }>();
 
 The fixture context also gives URL policy checks, timeouts, budgets,
 artifacts, and locator and assertion factories, such as
-`expectable(target, factory)` for `expect(fixture)`. See the
-[engine reference](/reference/engine#contributed-fixtures).
+`expectable(target, factory)` for `expect(fixture)`. See
+[Contributed fixtures in `e2e/engine`](/reference/engine#contributed-fixtures).
 
 ## Ship a tool pack
 
@@ -317,13 +318,13 @@ has examples of these checks.
 ## Next
 
 <CardGroup cols={2}>
-  <Card title="Engine contract" icon="gear" href="/reference/engine">
-    Every type and hook of `e2e/engine`.
+  <Card title="e2e/engine" icon="book" href="/reference/engine">
+    Every type, hook, and error code of the contract.
   </Card>
   <Card title="Mobile engine reference" icon="mobile-screen" href="/reference/mobile">
     A complete device engine to read alongside.
   </Card>
-  <Card title="Engine servers" icon="network-wired" href="/engine-servers">
+  <Card title="Engine servers" icon="network-wired" href="/reference/engine-protocol#engine-servers">
     Run the engine in another process, machine, or language.
   </Card>
 </CardGroup>

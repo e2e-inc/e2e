@@ -4,7 +4,9 @@
  * the engine starts Electron and reads its windows.
  */
 
-import { ConfigurationError, rejectUnknownKeys } from '@e2e-dev/core/engine';
+import { statSync } from 'node:fs';
+import path from 'node:path';
+import { ConfigurationError, rejectUnknownKeys, TestError } from '@e2e-dev/core/engine';
 
 /** Variables no app is started with, whoever sets them, by their upper-case names. */
 export const REFUSED_ENV: ReadonlySet<string> = new Set(['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS']);
@@ -21,8 +23,14 @@ export interface ElectronOptions {
    * package installed in the project, which runs the target's `app.appPath`.
    */
   readonly executablePath?: string | undefined;
-  /** Variables added to the app's environment, over the run's own. */
+  /**
+   * Variables added to the app's environment. The app does not get the run's
+   * environment, only what a process needs to start and draw (`PATH`,
+   * `HOME`, the locale, the display): pass anything else it reads here.
+   */
   readonly env?: Readonly<Record<string, string>> | undefined;
+  /** The directory the app's process starts in: absolute, or relative to the project root. Default: the project root. */
+  readonly cwd?: string | undefined;
   /** The attribute `getByTestId` reads. Default `data-testid`. */
   readonly testIdAttribute?: string | undefined;
   /**
@@ -36,6 +44,7 @@ export interface ElectronOptions {
 const OPTION_KEYS = Object.keys({
   executablePath: true,
   env: true,
+  cwd: true,
   testIdAttribute: true,
   settle: true,
 } satisfies Record<keyof ElectronOptions, true>);
@@ -44,6 +53,7 @@ const OPTION_KEYS = Object.keys({
 export interface ResolvedElectronOptions {
   readonly executablePath?: string;
   readonly env: Readonly<Record<string, string>>;
+  readonly cwd?: string;
   readonly testIdAttribute: string;
   readonly settleMs: number;
 }
@@ -82,21 +92,12 @@ export function resolveOptions(options: ElectronOptions | undefined): ResolvedEl
   const bag: ElectronOptions = options === undefined ? {} : options;
   if (typeof bag !== 'object' || bag === null || Array.isArray(bag)) throw new ConfigurationError('INVALID_CONFIG', 'electron() options must be an object');
   rejectUnknownKeys('electron() options', bag, OPTION_KEYS);
-  const { executablePath, env, testIdAttribute, settle } = bag;
+  const { executablePath, env, cwd, testIdAttribute, settle } = bag;
   if (executablePath !== undefined && (typeof executablePath !== 'string' || executablePath === '')) {
     throw new ConfigurationError('INVALID_CONFIG', 'electron({ executablePath }) must be a path to an executable');
   }
-  if (env !== undefined && (typeof env !== 'object' || env === null || Array.isArray(env) || Object.values(env).some((value) => typeof value !== 'string'))) {
-    throw new ConfigurationError('INVALID_CONFIG', 'electron({ env }) must be an object of variable name to string value');
-  }
-  // Windows reads a variable's name in any case.
-  const refused = env === undefined ? undefined : Object.keys(env).find((name) => REFUSED_ENV.has(name.toUpperCase()));
-  if (refused !== undefined) {
-    throw new ConfigurationError(
-      'INVALID_CONFIG',
-      `electron({ env }) must not set ${refused}: ${refused.toUpperCase() === 'NODE_OPTIONS' ? 'the engine starts the app with its own Node.js switches' : 'it starts the binary as plain Node.js, which opens no window'}`,
-    );
-  }
+  checkEnv('electron({ env })', env, 'INVALID_CONFIG');
+  checkCwdShape('electron({ cwd })', cwd, 'INVALID_CONFIG');
   if (testIdAttribute !== undefined && (typeof testIdAttribute !== 'string' || !ATTRIBUTE_NAME.test(testIdAttribute))) {
     throw new ConfigurationError('INVALID_CONFIG', `electron({ testIdAttribute }) must be an attribute name such as "data-testid", got ${JSON.stringify(testIdAttribute)}`);
   }
@@ -106,7 +107,57 @@ export function resolveOptions(options: ElectronOptions | undefined): ResolvedEl
   return {
     ...(executablePath === undefined ? {} : { executablePath }),
     env: env ?? {},
+    ...(cwd === undefined ? {} : { cwd }),
     testIdAttribute: testIdAttribute ?? 'data-testid',
     settleMs: settle === false ? 0 : (settle ?? DEFAULT_SETTLE_MS),
   };
+}
+
+type RefusalCode = 'INVALID_CONFIG' | 'INVALID_ARGUMENT';
+
+/** A config's mistake is a configuration error; a test's call with the same mistake is the test's. */
+function refusal(code: RefusalCode, message: string): Error {
+  return code === 'INVALID_CONFIG' ? new ConfigurationError(code, message) : new TestError(code, message);
+}
+
+/** Checks variables for the app's environment: names to strings, none of the ones no app is started with. */
+function checkEnv(label: string, env: unknown, code: RefusalCode): asserts env is Readonly<Record<string, string>> | undefined {
+  if (env === undefined) return;
+  if (typeof env !== 'object' || env === null || Array.isArray(env) || Object.values(env).some((value) => typeof value !== 'string')) {
+    throw refusal(code, `${label} must be an object of variable name to string value`);
+  }
+  // Windows reads a variable's name in any case.
+  const refused = Object.keys(env).find((name) => REFUSED_ENV.has(name.toUpperCase()));
+  if (refused !== undefined) {
+    throw refusal(code, `${label} must not set ${refused}: ${refused.toUpperCase() === 'NODE_OPTIONS' ? 'the engine starts the app with its own Node.js switches' : 'it starts the binary as plain Node.js, which opens no window'}`);
+  }
+}
+
+function checkCwdShape(label: string, cwd: unknown, code: RefusalCode): asserts cwd is string | undefined {
+  if (cwd !== undefined && (typeof cwd !== 'string' || cwd === '')) throw refusal(code, `${label} must be a path to a directory`);
+}
+
+/** Checks that `cwd` names a directory a process can start in, from the project root. */
+export function checkCwd(label: string, projectRoot: string, cwd: string | undefined, code: RefusalCode): void {
+  if (cwd === undefined) return;
+  const resolved = path.resolve(projectRoot, cwd);
+  if (statSync(resolved, { throwIfNoEntry: false })?.isDirectory() !== true) throw refusal(code, `${label} names ${resolved}, which is not a directory`);
+}
+
+const LAUNCH_KEYS = ['args', 'env', 'cwd', 'timeout'];
+
+/** What `electron.launch()` was given, checked: the arguments, variables, and directory one test adds to its launches. */
+export function checkLaunchOptions(options: unknown, projectRoot: string): { readonly args: readonly string[]; readonly env: Readonly<Record<string, string>>; readonly cwd?: string } {
+  const label = 'electron.launch()';
+  if (options === undefined) return { args: [], env: {} };
+  if (typeof options !== 'object' || options === null || Array.isArray(options)) throw refusal('INVALID_ARGUMENT', `${label} takes an object of options`);
+  rejectUnknownKeys(`${label} options`, options, LAUNCH_KEYS, 'INVALID_ARGUMENT');
+  const { args = [], env, cwd } = options as { readonly args?: unknown; readonly env?: unknown; readonly cwd?: unknown };
+  if (!Array.isArray(args) || args.some((argument) => typeof argument !== 'string')) throw refusal('INVALID_ARGUMENT', 'electron.launch({ args }) must be a list of strings');
+  const owned = (args as string[]).map(ownedArgument).find((reason) => reason !== undefined);
+  if (owned !== undefined) throw refusal('INVALID_ARGUMENT', `electron.launch({ args }) ${owned}`);
+  checkEnv('electron.launch({ env })', env, 'INVALID_ARGUMENT');
+  checkCwdShape('electron.launch({ cwd })', cwd, 'INVALID_ARGUMENT');
+  checkCwd('electron.launch({ cwd })', projectRoot, cwd, 'INVALID_ARGUMENT');
+  return { args: [...(args as string[])], env: { ...env }, ...(cwd === undefined ? {} : { cwd }) };
 }

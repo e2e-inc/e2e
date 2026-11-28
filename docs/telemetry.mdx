@@ -1,6 +1,6 @@
 ---
 title: Telemetry
-description: What the CLI sends, what it never sends, and how to turn it off.
+description: "See what anonymous usage data the e2e CLI sends, what it never sends, where it goes, and how to opt out of telemetry."
 "og:image": "https://e2e.com/docs/images/og/telemetry.png?v=723dc5172f"
 "twitter:image": "https://e2e.com/docs/images/og/telemetry.png?v=723dc5172f"
 ---
@@ -118,7 +118,7 @@ own tools count together as `tool`, and any other name as `other`.
 | `result` | `scaffolded`, `already-initialized`, `cancelled`, `install-failed`, `not-interactive`, `invalid-project`, or `example-failed` |
 | `yes`, `existing_config` | Whether `--yes` was given, and whether a config already existed, so no engine or gateway was asked |
 | `example` | The `--example` name (`with-vite`, `with-expo`, ...), `null` without the flag |
-| `engine`, `gateway` | The ids of the engines and the model gateway chosen for a new config (`web`, `mobile`, `web,mobile`, `none`; `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok`, `none`), `null` when not asked. Never the endpoint typed for an OpenAI-compatible gateway |
+| `engine`, `gateway` | The ids of the engines and the model gateway chosen for a new config (`web`, `mobile`, `electron`, a comma-separated list such as `web,mobile`, `none`; `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok`, `none`), `null` when not asked. Never the endpoint typed for an OpenAI-compatible gateway |
 | `skill`, `mcp`, `install` | Whether the agent skill, the MCP registration, and the dependency install were chosen |
 | `ci` | The CI pipeline chosen (`github-actions`, `gitlab`, or `none`), `null` when not asked |
 

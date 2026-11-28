@@ -203,7 +203,7 @@ test('asks for the email', async ({ app, agent, screen }) => {
 | `retryTapIfNoChange` | नतीजे पर असर्ट करें, फिर टेस्ट में दोबारा टैप करें। बिना देखे दूसरा टैप किसी कंट्रोल को दो बार चला सकता है |
 | `waitToSettleTimeoutMs` | एक्शन के बाद अपने `timeout` के साथ एक असर्शन; वही असर्शन वेट है |
 | `toggleAirplaneMode`, `toggleDarkMode` | सीधे वह स्टेट सेट करें जो आपको चाहिए: `device.setAirplaneMode(true)`, `device.setAppearance('dark')` |
-| Maestro Studio | [`npx e2e mcp`](/mcp-server) पर कोडिंग एजेंट, या `npx e2e run --watch` या `--step` के साथ `screen.debug()` |
+| Maestro Studio | [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) पर कोडिंग एजेंट, या `npx e2e run --watch` या `--step` के साथ `screen.debug()` |
 | `waitForAnimationToEnd` | एनिमेशन जिस चीज़ पर ख़त्म होता है उस पर `await expect(locator).toBeVisible()` |
 | `below`, `above`, `leftOf`, `rightOf` | `getByLabel`, एक टेस्ट id, शेयर किए हुए कंटेनर पर `filter({ has })`, या एक `agent.act` लक्ष्य |
 

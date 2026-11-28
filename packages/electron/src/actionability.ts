@@ -29,6 +29,19 @@ export interface WaitTarget {
 /** The checks `waitReady` runs: the `NodeOps` that answer `Readiness`. */
 type ReadinessCheck = { [K in keyof NodeOps]: ReturnType<NodeOps[K]> extends Readiness ? K : never }[keyof NodeOps];
 
+/** Why Chromium's accessibility tree leaves out a node a modal dialog or an `inert` element blocks. */
+const INERT_REASONS = new Set(['activeModalDialog', 'inertElement']);
+
+/**
+ * Whether Chromium holds the node inert. It alone knows which modal dialog is
+ * on top and what a closed shadow root holds; the page-side checks read only
+ * the `inert` attributes the page can reach.
+ */
+async function blocked(target: WaitTarget): Promise<boolean> {
+  const { nodes } = await target.window.page.session.send('Accessibility.getPartialAXTree', { backendNodeId: target.backendNodeId, fetchRelatives: false });
+  return nodes[0]?.ignoredReasons?.some((reason) => INERT_REASONS.has(reason.name)) === true;
+}
+
 /** Waits until a page-side check passes, for actions that need no point. Gives up with the check's last reason at the deadline. */
 export async function waitReady<K extends ReadinessCheck>(target: WaitTarget, check: K, ...args: Parameters<NodeOps[K]>): Promise<void> {
   let reason = '';
@@ -38,8 +51,8 @@ export async function waitReady<K extends ReadinessCheck>(target: WaitTarget, ch
     negated: false,
     evaluate: async () => {
       const state: Readiness = await target.devtools.callOn(target.window.page, target.backendNodeId, check, ...args);
-      if (state.ok) return true;
-      reason = state.reason;
+      if (state.ok && (check === 'checkConnected' || !(await blocked(target)))) return true;
+      reason = state.ok ? 'it is inert (a modal or the app blocks it)' : state.reason;
       return false;
     },
     onTimeout: () => notActionable(`the element cannot take the action: ${reason}`),

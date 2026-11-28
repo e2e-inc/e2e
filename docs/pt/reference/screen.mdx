@@ -1,0 +1,1702 @@
+---
+title: screen e Locator
+description: Consultas, refinamento, ações e leituras.
+"og:image": "https://e2e.com/docs/images/og/reference/screen.png?v=1b21c45d37"
+"twitter:image": "https://e2e.com/docs/images/og/reference/screen.png?v=1b21c45d37"
+---
+
+A fixture `screen` cria localizadores. Um `Locator` guarda uma consulta e a
+resolve quando uma ação, uma leitura ou uma asserção roda. Toda consulta
+também roda em um localizador, restrita à subárvore dele.
+
+```ts title="tests/invoices.e2e.ts"
+import { expect, test } from 'e2e';
+
+test('void an invoice', async ({ app, screen }) => {
+  await app.open('/invoices');
+  const row = screen.getByRole('listitem').filter({ hasText: 'Invoice 42' });
+  await row.getByRole('button', 'Void').tap();
+  await expect(row.getByText('Voided')).toBeVisible();
+});
+```
+
+## Referência
+
+### Consultas
+
+| Método | Retorna |
+| --- | --- |
+| [`getByRole`](#getbyrole) | `Locator` |
+| [`getByLabel`](#getbylabel) | `Locator` |
+| [`getByPlaceholder`](#getbyplaceholder) | `Locator` |
+| [`getByText`](#getbytext) | `Locator` |
+| [`getByDisplayValue`](#getbydisplayvalue) | `Locator` |
+| [`getByTestId`](#getbytestid) | `Locator` |
+
+Toda consulta retorna um `Locator` de forma síncrona e não faz nenhum
+trabalho. Uma chave de opção que a consulta não aceita (`{ nam: 'Save' }`)
+lança `INVALID_LOCATOR`, com os nomes das chaves que a consulta aceita.
+
+Uma string passada como nome para `getByRole`, ou para `getByLabel`,
+`getByPlaceholder`, `getByText` ou `getByDisplayValue`, corresponde ao texto
+inteiro, diferenciando maiúsculas de minúsculas, após a normalização dos
+espaços em branco: `getByRole('button', 'Save')` não corresponde a
+`Save changes`. Com `{ exact: false }`, a correspondência passa a ser por
+substring, sem diferenciar maiúsculas de minúsculas, e uma `RegExp`
+corresponde como foi escrita.
+
+Toda consulta aceita `visible: true`; veja
+[Duplicatas ocultas](#hidden-duplicates).
+
+#### `getByRole`
+
+Corresponde a nós pelo [papel](#types), opcionalmente restritos a um nome
+acessível e a estados.
+
+```ts
+/** Creates a lazy role query. An alias such as `img` is rewritten to its role. */
+getByRole(role: Role | RoleAlias, options?: RoleOptions): Locator;
+/** Creates a lazy role query narrowed to an accessible name: `getByRole('button', 'Sign in')`. */
+getByRole(role: Role | RoleAlias, name: TextMatch, options?: Omit<RoleOptions, 'name'>): Locator;
+```
+
+```ts
+screen.getByRole('button', 'Save');
+screen.getByRole('button', 'Save', { exact: false });
+screen.getByRole('button', { name: 'Save', disabled: true }); // the object form
+screen.getByRole('heading', /welcome/i, { level: 1 });
+```
+
+O nome acessível vem em segundo lugar, uma string ou uma `RegExp`, com as
+outras opções depois do nome. A forma de objeto, `{ name: 'Save' }`, é a
+mesma consulta. As opções são [`RoleOptions`](#types).
+Para conteúdo visível dentro de um item de lista ou de um status sem rótulo,
+filtre por texto, por exemplo `screen.getByRole('listitem').filter({ hasText: 'Invoice 42' })`.
+
+<Note>
+Uma consulta por papel nunca corresponde a um nó oculto da árvore de
+acessibilidade: um nó que não é renderizado, ou um nó sob `aria-hidden`. Nos
+outros tipos de consulta, `visible: true` mantém só os nós que são
+renderizados, a mesma verificação que `toBeVisible()` faz, então um nó
+`aria-hidden` que mesmo assim é pintado conta como visível. Veja
+[Duplicatas ocultas](#hidden-duplicates). Em um dispositivo ou em um app
+desktop, uma consulta por papel pula todo nó que a engine marca como oculto, o
+que pode incluir um nó rolado para fora da área visível: veja
+[mobile](/reference/mobile#visibility) e
+[desktop](/desktop#what-differs-from-the-web) para saber o que cada uma marca.
+</Note>
+
+##### Alias `img`
+
+`img` é um alias, não um papel ([`RoleAlias`](#types)).
+`getByRole('img', { name })` cria a mesma consulta que
+`getByRole('image', { name })`, então um teste portado do Playwright mantém a
+grafia que já usava. Na web, `image` abrange `<img>` com texto alternativo e
+qualquer elemento com `role="img"`. Um `<img alt="">` é decoração e não
+corresponde a nada, a menos que tenha um `title`, um `tabindex` ou um atributo
+ARIA global: nesse caso, ele é um `image`.
+
+##### Papéis na web
+
+A engine web deriva os papéis do HTML da mesma forma que o HTML-AAM:
+
+- `<progress>` é `progressbar`, `<meter>` é `meter`, `<hr>` é `separator`.
+- `<fieldset>` e `<details>` são `group`.
+- `<input type="number">` é `spinbutton`. `<input type="file">` é `button`,
+  como o Chrome e o Playwright o leem.
+- `<select size="3">` é um `listbox`, como um `multiple`. Um
+  `<input list>` que nomeia um `<datalist>` é um `combobox`.
+- Um `<td>` de uma tabela `role="grid"` é um `gridcell`.
+- `<thead>` e `<tbody>` são `rowgroup`.
+- `<th scope="row">` é `rowheader`. Um `<th>` sem scope ao lado de uma célula
+  de dados com texto ou filhos também é um `rowheader`; linhas só de
+  cabeçalhos mantêm `columnheader`. Um cabeçalho sem scope sozinho em uma
+  tabela de uma linha não tem papel de cabeçalho, mas um `scope="col"` ou
+  `scope="colgroup"` explícito mantém `columnheader`.
+- `<figure>` é `figure`, `<article>` é `article`.
+- `<header>` e `<footer>` são `banner` e `contentinfo` só fora de conteúdo de
+  seccionamento ou de um elemento com papel de seccionamento (`article`,
+  `complementary`, `main`, `navigation`, `region`).
+- `<form>` e `<section>` são `form` e `region` só quando têm um
+  `aria-label`, `aria-labelledby` ou `title`.
+- `<menu>` é um `list`; só `role="menu"` é um `menu`.
+- `role="presentation"` e `role="none"` são ignorados em um elemento focável
+  ou em um elemento com um atributo ARIA global, como `aria-label`, do jeito
+  que o `getByRole` os lê: `<button role="none">` continua sendo um `button`.
+
+Os nomes seguem as mesmas regras:
+
+- Um `<legend>`, `<figcaption>` ou `<caption>` nomeia seu fieldset, figura ou
+  tabela, então `toHaveAccessibleName` lê o que
+  `getByRole('group', { name })` encontrou.
+- Um papel que o accname nomeia pelo conteúdo (um botão, link, título, aba,
+  item de menu, opção, checkbox, radio, switch, célula, cabeçalho de linha ou
+  de coluna, linha, item de árvore, tooltip) recebe o nome dos seus
+  descendentes, incluindo a shadow tree de um custom element. Então
+  `getByRole('checkbox', { name })` e `toHaveAccessibleName(name)` concordam
+  em um `<div role="checkbox">`. Um descendente com papel próprio que não é
+  texto nem estrutura (um badge `status`, o `group` filho de um item de
+  árvore, um `img`) acrescenta só o próprio rótulo ou `title`: uma aba que
+  contém `Inbox <span role="status">3</span>` é `Inbox`.
+- Um `<input type="submit">` ou `type="reset"` sem `value` é lido como
+  `Submit` ou `Reset`.
+
+##### Papéis em um dispositivo
+
+Uma engine de dispositivo mapeia os tipos da plataforma que conhece: uma barra
+de abas ou um controle segmentado é um `tablist`, um indicador de progresso é
+um `progressbar`, um stepper é um `spinbutton`. A engine mantém qualquer outro
+tipo como está, então um papel sem widget nativo, como `tooltip` ou `figure`,
+não corresponde a nada em um celular.
+
+##### Hosts de edição
+
+Um host de edição `contenteditable`, a raiz em que um editor TipTap,
+ProseMirror, Lexical ou Slate é renderizado, é um `textbox`.
+
+- O valor do host é o texto como renderizado. Enquanto o host tem o foco, a
+  `selection` dele é o texto selecionado dentro dele. O valor mantém espaços e
+  quebras de linha, então `toHaveValue` e `inputValue()` leem um editor com
+  `white-space: pre-wrap` como uma textarea.
+- Um editor vazio é lido como `''`: um editor que contém só o `<p><br></p>` ou
+  o espaço sem quebra de largura zero com que o editor preenche uma linha
+  vazia. Esse padding nunca faz parte de um valor.
+- O host é nomeado pelo `aria-label`, pelo `aria-placeholder` ou pelo
+  `data-placeholder` que o editor pinta. Os blocos dentro do host são
+  conteúdo, não textboxes.
+- A tag não importa: um `<article contenteditable>` é o editor, não um
+  artigo. Um controle nativo ou uma superfície desenhada que se torna editável
+  mantém o próprio papel.
+- Um nome vindo do `data-placeholder` de um bloco (TipTap, ProseMirror) some
+  assim que o editor tem conteúdo, como acontece com a dica pintada. A partir
+  daí, o host é um `textbox` sem nome. Um nome vindo do `aria-label`,
+  `aria-labelledby`, `aria-placeholder` ou `data-placeholder` (Quill) do
+  próprio host permanece.
+
+`getByRole` é resolvido pelo seletor de papel do Playwright, que não tem essa
+regra. Então `getByRole` só encontra um editor quando o host tem
+`role="textbox"`; `getByLabel` e `getByTestId` chegam a ele de qualquer forma.
+Baseie um teste em um rótulo ou em um test id, não no placeholder.
+
+#### `getByLabel`
+
+```ts
+/** Creates a lazy accessible-label query. */
+getByLabel(text: TextMatch, options?: TextMatchOptions): Locator;
+```
+
+```ts
+await screen.getByLabel('Email').fill('ada@example.test');
+```
+
+#### `getByPlaceholder`
+
+```ts
+/** Creates a lazy placeholder query. */
+getByPlaceholder(text: TextMatch, options?: TextMatchOptions): Locator;
+```
+
+```ts
+await screen.getByPlaceholder('Search memory...').fill('launch');
+```
+
+#### `getByText`
+
+```ts
+/** Creates a lazy visible-text query. */
+getByText(text: TextMatch, options?: TextMatchOptions): Locator;
+```
+
+```ts
+screen.getByText('Welcome back', { exact: false });
+```
+
+##### Texto repetido
+
+`getByText` responde com o nó correspondente mais interno, então um contêiner
+que repete o texto do filho conta uma vez. Os navegadores fazem isso
+nativamente. Em um dispositivo, a engine aplica a mesma regra, já que o iOS
+informa um `Text` do React Native como uma host view mais um filho
+`StaticText` com o mesmo rótulo. Duas correspondências em que nenhuma contém
+a outra continuam sendo `LOCATOR_AMBIGUOUS`.
+
+#### `getByDisplayValue`
+
+Corresponde a controles pelo valor exibido.
+
+```ts
+/** Creates a lazy displayed-value query. */
+getByDisplayValue(value: TextMatch, options?: TextMatchOptions): Locator;
+```
+
+```ts
+await screen.getByDisplayValue('ada@example.test').clear();
+```
+
+<Note>
+Na engine web, um localizador `getByDisplayValue` não pode ser o escopo de uma
+consulta filha nem de um filtro `has`; os dois falham com
+`UNSUPPORTED_CAPABILITY`. O Playwright não tem seletor para o valor atual de
+um controle, então a engine filtra os candidatos depois da busca.
+</Note>
+
+#### `getByTestId`
+
+Corresponde ao `testId` do nó.
+
+```ts
+/** Creates a lazy test-id query: a string matches the whole id, case-sensitive; a RegExp tests it. An engine may also match an id without its platform's namespacing. */
+getByTestId(id: TextMatch, options?: { visible?: boolean }): Locator;
+```
+
+```ts
+screen.getByTestId('todo-3');
+screen.getByTestId(/total-budgeted$/);
+```
+
+- Na web, `testId` é o valor do atributo de test id da engine
+  (`web({ testIdAttribute })`, padrão `data-testid`).
+- Em um dispositivo, é o accessibility identifier ou o resource id. Sobre o
+  namespace, veja os
+  [resource ids do Android](/reference/mobile#capabilities) da engine mobile.
+- `visible` é a única opção.
+
+#### Duplicatas ocultas
+
+Toda consulta aceita `visible: true`, que descarta os nós que a plataforma
+informa como ocultos antes de a regra de correspondência única ser aplicada.
+Frameworks costumam manter uma cópia oculta de conteúdo no documento, como uma
+gaveta fechada ou um painel de aba inativo, e sem `visible` as duas cópias
+correspondem.
+
+```ts
+await browser.reload();
+// Two "No memories yet" nodes exist for a moment; one is display:none.
+await expect(screen.getByText('No memories yet', { visible: true })).toBeVisible();
+await screen.getByPlaceholder('Search memory...', { visible: true }).fill('launch');
+await screen.getByTestId('memory-list', { visible: true }).getByRole('listitem').first().tap();
+```
+
+`visible` usa a mesma verificação de visibilidade que `toBeVisible()`,
+`isVisible()` e `waitFor()`: o que é renderizado, como o Playwright lê.
+
+- Oculto: `display: none`, `visibility: hidden`, uma caixa sem tamanho, o
+  corpo de um `<details>` fechado, incluindo conteúdo de shadow DOM e de slot,
+  e conteúdo sob `content-visibility: hidden`.
+- Não oculto: o corpo de um `<details>` fechado que o CSS da página mostra por
+  meio de `::details-content`, e conteúdo sob `content-visibility: hidden`
+  definido em um elemento cuja caixa não pula esse conteúdo
+  (`display: contents`, um elemento inline, uma tabela, uma linha de tabela,
+  ruby). Um `<svg>`, `<button>` ou `<fieldset>` inline cria uma caixa própria,
+  então conteúdo sob um deles continua sendo lido como oculto.
+- Não oculto: `aria-hidden`, já que um spinner decorativo marcado com ele
+  continua sendo pintado, então `toBeHidden()` em um spinner assim espera até
+  ele sumir.
+- Um filho que define `visibility: visible` sob um pai oculto está visível.
+- Na web, texto diretamente sob um elemento `display: contents` com
+  `visibility: hidden` está oculto, enquanto o Playwright o considera visível.
+- Na web, tudo dentro de um `<iframe>` oculto está oculto, incluindo frames de
+  origem cruzada.
+- Funciona com escopos, `filter`, `first`, `last` e `nth`:
+  `getByText('Save', { visible: true }).first()` é a primeira correspondência
+  visível.
+
+Prefira essa opção a `browser.locator('p:visible')`, que prende o teste ao CSS.
+
+### Refinamento
+
+| Método | Retorna |
+| --- | --- |
+| [`filter`](#filter) | `Locator` |
+| [`or`](#or) | `Locator` |
+| [`first`](#first) | `Locator` |
+| [`last`](#last) | `Locator` |
+| [`nth`](#nth) | `Locator` |
+
+O refinamento retorna um novo localizador sem consultar o app.
+
+#### `filter`
+
+```ts
+/** Adds deterministic locator filters. */
+filter(options: { hasText?: TextMatch; hasNotText?: TextMatch; has?: Locator; hasNot?: Locator }): Locator;
+```
+
+```ts
+const row = screen.getByRole('listitem').filter({ hasText: 'Invoice 42', hasNotText: 'Paid' });
+await row.getByRole('button', 'Void').tap();
+```
+
+- `hasText` com uma string é uma correspondência de substring, sem diferenciar
+  maiúsculas de minúsculas, sobre o nó encontrado e os descendentes dele, ao
+  contrário do texto de uma consulta, que corresponde exatamente. Passe uma
+  `RegExp` para algo mais estrito.
+- `hasNotText` exclui as correspondências com esse texto na subárvore, usando
+  as mesmas regras de substring ou de `RegExp`.
+- `has` mantém uma correspondência cuja subárvore resolve o localizador interno.
+- `hasNot` descarta uma correspondência cuja subárvore resolve o localizador
+  interno. Segue as mesmas regras de escopo que `has`.
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_LOCATOR` | Nenhum de `hasText`, `hasNotText`, `has` ou `hasNot` é informado. |
+| `INVALID_LOCATOR` | Qualquer outra chave, mesmo ao lado deles: `visible` não é um filtro aqui. |
+| `INVALID_LOCATOR` | `has` ou `hasNot` não é um localizador do runner, ou foi criado pela tela de outro alvo. |
+
+#### `or`
+
+```ts
+/** Matches either locator, preserving document order without duplicate nodes. */
+or(other: Locator): Locator;
+```
+
+`a.or(b)` corresponde a qualquer um dos ramos uma vez, na ordem do documento.
+Continua estrito: quando os dois correspondem a nós diferentes, uma ação
+lança `LOCATOR_AMBIGUOUS`. Adicione `first()` se qualquer um servir. Os dois
+localizadores precisam vir da mesma tela e da mesma tentativa. Na web, os dois
+precisam de cadeias literais idênticas de seletores de frame; ramos de valor
+exibido não podem ser combinados.
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_LOCATOR` | `other` não é um localizador do runner, ou pertence a outra tela ou tentativa. |
+| `UNSUPPORTED_CAPABILITY` | Os ramos na web têm cadeias de seletores de frame diferentes, ou um ramo é uma consulta por valor exibido. |
+
+#### `first`
+
+```ts
+/** Selects the first current match. */
+first(): Locator;
+```
+
+```ts
+await screen.getByRole('listitem').first().tap();
+```
+
+#### `last`
+
+```ts
+/** Selects the last current match. */
+last(): Locator;
+```
+
+```ts
+await screen.getByRole('listitem').last().tap();
+```
+
+#### `nth`
+
+```ts
+/** Selects one zero-based current match. */
+nth(index: number): Locator;
+```
+
+```ts
+await screen.getByRole('row').nth(2).getByRole('checkbox').check();
+```
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_LOCATOR` | Um índice negativo ou não inteiro. |
+
+### Ações da tela
+
+| Método | Retorna |
+| --- | --- |
+| [`screen.tapAt`](#screen-tapat) | `Promise<void>` |
+| [`screen.doubleTapAt`](#screen-doubletapat) | `Promise<void>` |
+| [`screen.swipe`](#screen-swipe) | `Promise<void>` |
+| [`screen.scrollUntilVisible`](#screen-scrolluntilvisible) | `Promise<void>` |
+| [`screen.scrollTo`](#screen-scrollto) | `Promise<void>` |
+
+`tapAt`, `doubleTapAt` e `swipe` agem sobre o viewport.
+
+#### `screen.tapAt`
+
+Use-o para um marcador em um canvas ou para um controle que a árvore não lista.
+
+```ts
+/** Taps a viewport point, in pixels or percentages, with no node behind it. */
+tapAt(point: ScreenPoint, options?: ActionOptions): Promise<void>;
+```
+
+```ts
+const map = (await screen.getByRole('image', 'Map').boundingBox())!;
+await screen.tapAt({ x: map.x + 360, y: map.y + 70 });
+
+await screen.tapAt({ x: '50%', y: '50%' });
+```
+
+- Cada coordenada está em pixels CSS, o espaço de coordenadas de
+  `boundingBox()`, ou é uma porcentagem do viewport de `'0%'` a `'100%'`,
+  arredondada para o pixel mais próximo (`'100%'` é o último pixel). As duas
+  formas podem ser misturadas: `{ x: '50%', y: 120 }`.
+- Uma porcentagem lê a tela uma vez para saber o tamanho dela.
+- Nada é resolvido nem esperado; a página decide onde o toque cai.
+- Usa `config.actionTimeout`.
+- Prefira um localizador quando a árvore lista o controle, já que um ponto
+  muda junto com o layout. Para um ponto dentro de um nó, `tap({ position })`
+  lê a caixa do nó para você.
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_ARGUMENT` | Uma coordenada negativa ou não finita, ou uma string que não é uma porcentagem de `'0%'` a `'100%'`. |
+| `UNSUPPORTED_CAPABILITY` | A engine não lista `tap` nas suas ações de ponteiro. |
+
+<Note>
+`tapAt` não respeita escopo: chamado em um localizador, ele toca um ponto do
+viewport do mesmo jeito.
+</Note>
+
+#### `screen.doubleTapAt`
+
+Use-o para tocar duas vezes em um ponto do viewport quando a árvore não lista
+o alvo do toque.
+
+```ts
+/** Double-taps a viewport point, in pixels or percentages, with no node behind it. */
+doubleTapAt(point: ScreenPoint, options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.doubleTapAt({ x: 120, y: 240 }, { timeout: 1_000 });
+```
+
+- Recebe um `ScreenPoint`, em pixels ou porcentagens, como
+  [`tapAt`](#screen-tapat).
+- A página ou o dispositivo decide o que recebe o gesto. Na web, envia um
+  clique duplo com o botão principal.
+- Em um dispositivo, envia dois toques no ponto, como `doubleTap()` faz em um
+  nó. Veja
+  [Limitações conhecidas de dispositivos](/mobile#known-device-limitations)
+  para o intervalo entre eles no iOS.
+- O tempo limite padrão é `config.actionTimeout`.
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_ARGUMENT` | Uma coordenada negativa ou não finita, uma string que não é uma porcentagem de `'0%'` a `'100%'`, ou uma opção desconhecida. |
+| `UNSUPPORTED_CAPABILITY` | A engine não lista `doubleTap` nas suas ações de ponteiro. |
+
+<Note>
+`doubleTapAt` não respeita escopo: chamado em um localizador, ele toca duas
+vezes um ponto do viewport do mesmo jeito.
+</Note>
+
+#### `screen.swipe`
+
+```ts
+/** Performs a viewport-level swipe: in a direction, or along a path from one point to another. */
+swipe(options: SwipeOptions | SwipePathOptions): Promise<void>;
+```
+
+```ts
+await screen.swipe({ direction: 'up', momentum: 'fast' });
+
+const row = (await screen.getByText('Design review').boundingBox())!;
+await screen.swipe({
+  from: { x: row.x + row.width - 10, y: row.y + row.height / 2 },
+  to: { x: row.x + 10, y: row.y + row.height / 2 },
+  duration: 300,
+});
+
+await screen.swipe({ from: { x: '50%', y: '80%' }, to: { x: '50%', y: '20%' } });
+```
+
+`{ direction, momentum? }` é um gesto de rolagem na tela:
+
+- `direction` é o sentido em que o conteúdo rola, não o do dedo: `'down'`
+  revela o que está abaixo.
+- `momentum` é a força do impulso, `'none'` por padrão. `'none'` é um arrasto
+  simples de metade da superfície, `'slow'` um impulso curto, `'fast'` um
+  longo. A engine decide a distância que cada um percorre.
+
+`{ from, to, duration? }` é um gesto de deslizar ao longo de um caminho entre
+dois pontos do viewport: um gesto de deslizar por toque em um dispositivo, um
+arrasto de ponteiro em uma plataforma de documentos. Use-o para revelar a ação
+de uma linha, fechar uma sheet ou arrastar um cartão entre colunas.
+
+- `from` e `to` são do tipo `ScreenPoint`, em pixels ou porcentagens, como
+  [`tapAt`](#screen-tapat) recebe.
+- `duration` é quanto tempo o gesto leva, um inteiro de 16 a 10000 ms. Quando
+  omitido, vale o padrão da engine.
+
+Usa `config.actionTimeout` e não aceita a opção `timeout`.
+
+| Lança | Quando |
+| --- | --- |
+| `ACTION_FAILED` | O gesto é rejeitado. |
+| `INVALID_ARGUMENT` | Uma mistura das duas formas, uma duração fora do intervalo, uma coordenada fora do plano ou que não é uma porcentagem de `'0%'` a `'100%'`, ou uma chave `timeout`. |
+| `UNSUPPORTED_CAPABILITY` | A engine não lista `swipe` nas suas ações (uma direção) ou `swipeTo` nas suas ações de ponteiro (um caminho). |
+
+#### `screen.scrollUntilVisible`
+
+```ts
+/**
+ * Scrolls until a locator resolves visibly or times out: the viewport on
+ * `screen`, the node itself on a locator. `momentum` is the stride of each
+ * step, `slow` unless told otherwise.
+ */
+scrollUntilVisible(
+  target: Locator,
+  options?: { direction?: ScrollDirection; momentum?: Momentum; timeout?: number },
+): Promise<void>;
+```
+
+```ts
+await screen.scrollUntilVisible(screen.getByRole('button', 'Accept'));
+await screen.getByTestId('feed').scrollUntilVisible(row);
+```
+
+| Opção | Tipo | Padrão |
+| --- | --- | --- |
+| `target` | `Locator` | - |
+| `options.direction` | `ScrollDirection` | `'down'` |
+| `options.momentum` | `Momentum` | `'slow'` |
+| `options.timeout` | `number` | `30000` |
+
+- `momentum` segue a definição de [`screen.swipe`](#screen-swipe). Um impulso
+  mais longo é mais rápido, mas não pode levar o alvo além da superfície sem
+  que ele seja visto, como acontece em uma lista virtualizada.
+- `timeout` tem padrão próprio, não `config.actionTimeout`. Ele limita a
+  rolagem inteira, incluindo cada gesto de deslizar.
+- Em um localizador, cada etapa da rolagem desliza nesse nó. Assim, um
+  feed ou uma tabela que é o próprio contêiner de rolagem pagina sem que o
+  ponteiro passe sobre o elemento antes.
+- A rolagem é interrompida na primeira correspondência que não está oculta. Em
+  um dispositivo, um nó sob o teclado virtual está oculto, então a rolagem
+  continua ([Visibilidade no mobile](/reference/mobile#visibility)).
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_LOCATOR` | `target` não é um localizador do runner, ou foi criado pela tela de outro alvo. |
+| `INVALID_ARGUMENT` | Uma opção que o método não aceita. |
+| `LOCATOR_NOT_FOUND` | O prazo expira antes, incluindo quando ele interrompe um gesto de deslizar no meio. |
+
+#### `screen.scrollTo`
+
+Rola até uma borda da página ou de uma lista, até onde for possível. Use-o no
+lugar de `cy.scrollTo('bottom')` do Cypress, `scrollTo('bottom')` do Detox ou
+`scrollToEnd()` do Appium.
+
+```ts
+/**
+ * Scrolls a container to an edge, as far as it goes: on `screen` the
+ * screen's main scrolling content, else the content under its center; on
+ * a locator the node, or its nearest ancestor that scrolls along that axis
+ * (on a device, whatever scrolls under a drag inside the node's box, so
+ * locate the list, not a row). Resolves at once when it is there already or
+ * nothing scrolls. `timeout` bounds the whole scroll.
+ */
+scrollTo(edge: ScrollEdge, options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.scrollTo('bottom');
+await expect(screen.getByRole('contentinfo')).toBeInViewport();
+
+await screen.getByTestId('feed').scrollTo('top', { timeout: 60_000 });
+```
+
+`edge` é `'top'`, `'bottom'`, `'left'` ou `'right'`. Para rolar uma lista
+dentro da página, chame o método na lista: [`scrollTo`](#scrollto).
+
+- Na web, `screen` rola a página. Quando a própria página não rola, como em
+  um app shell, o método rola o contêiner de rolagem sob o centro do viewport;
+  ele não entra em um iframe nesse ponto, então chame o método em um
+  localizador dentro do frame. O deslocamento é definido com a própria API de
+  rolagem da página, então `scroll-behavior: smooth` é ignorado e nenhum
+  evento de roda do mouse é disparado.
+- Em um dispositivo, o método arrasta em direção à borda a partir do meio do
+  contêiner (a tela, em `screen`), com até três arrastos por vez, até que um
+  arrasto não mova nada. Um spinner não conta como movimento. Uma lista de 45
+  telas leva cerca de 22 s em um emulador Android e 50 s em um simulador iOS,
+  então dê um `timeout` maior para uma lista muito longa.
+- Conteúdo que cresce quando o fim é alcançado é acompanhado: na web, o método
+  salta de novo até que um salto não mova nada; em um dispositivo, arrasta de
+  novo enquanto a lista muda. Nenhum dos dois espera um carregamento lento.
+  Para chegar a uma linha que um feed carrega, use
+  [`scrollUntilVisible`](#screen-scrolluntilvisible).
+- Em um dispositivo, um arrasto que cai sobre algo que não rola não move nada,
+  então é lido como a borda.
+- Em um dispositivo, o último arrasto passa da borda, então `scrollTo('top')`
+  em uma lista com pull-to-refresh atualiza a lista. Conteúdo que muda sozinho
+  dentro do contêiner, como um timer ou um carrossel automático, é lido como
+  movimento e faz o método continuar arrastando até o tempo limite: chame
+  `scrollTo` na lista, não na tela.
+- O tempo limite é [`config.actionTimeout`](/reference/config#actiontimeout).
+- A tela de um frame (`browser.frameLocator()`) recusa o método. Chame-o em um
+  localizador dentro do frame.
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_ARGUMENT` | Uma borda que o método não conhece, uma opção diferente de `timeout`, ou a tela de um frame. |
+| `ACTION_FAILED` | A borda não foi alcançada antes do tempo limite: `scrollTo('bottom') did not reach the edge within 30000ms (the content was still moving after 24 drags when the budget ran out)`. Os parênteses trazem o motivo da engine. |
+| `UNSUPPORTED_CAPABILITY` | A engine não lista `scrollTo` nas suas ações; a engine desktop, por exemplo, não lista. |
+
+### Leituras da tela
+
+| Método | Retorna |
+| --- | --- |
+| [`screen.tree`](#screen-tree) | `Promise<string>` |
+| [`screen.debug`](#screen-debug) | `Promise<void>` |
+| [`screen.pause`](#screen-pause) | `Promise<void>` |
+
+`tree` e `debug` leem a tela inteira uma vez, sem esperar, e funcionam em
+todas as engines. Eles rodam como um passo. Um localizador não tem esses
+métodos, e um frame lança `INVALID_ARGUMENT`.
+
+#### `screen.tree`
+
+Retorna a tela como o agente a lê. Use-o para escrever um localizador.
+
+```ts
+/**
+ * Reads the whole screen once, without waiting, as the agent reads it: one
+ * node per line, `#id role "name" text="…" [states]`, children indented,
+ * secrets redacted.
+ */
+tree(options?: ActionOptions): Promise<string>;
+```
+
+```text
+#n29 textbox "New todo"
+#n30 button "Add"
+ #n35 listitem "Milk Delete Milk" testid="todo"
+  #n36 checkbox "Milk" [checked]
+```
+
+- Usa `config.actionTimeout`.
+- O texto tem o mesmo formato e o mesmo limite de tamanho que a
+  [tela no momento da falha](/debugging#traces) do trace.
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_ARGUMENT` | Chamado em um frame, ou com uma opção que o método não aceita. |
+
+#### `screen.debug`
+
+Imprime [`screen.tree()`](#screen-tree) na
+[saída de console](/debugging#console-output) do teste.
+
+```ts
+/** Prints `tree()` to the test's output. */
+debug(options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.debug();
+```
+
+#### `screen.pause`
+
+O teste é pausado nesta linha, com o app aberto, até ser retomado.
+Veja [Pausar um teste](/debugging#pause-a-test) para as teclas e os comandos.
+Use o ID da pausa para [se conectar via MCP](/reference/mcp#attaching-to-a-held-test).
+
+```ts
+/**
+ * Pauses the test at this line, with the app open, until it is resumed with
+ * Enter in the terminal or with `e2e run --step next` from another shell in
+ * the same directory. In `e2e run`, the test is paused each time the line
+ * runs. Paused time doesn't count toward the test's timeout. Call it with
+ * `await` on `screen`, between steps in fixture setup, a `beforeEach` hook,
+ * or the test body. Anywhere else, or with `CI` set, the test isn't paused
+ * and the call fails.
+ */
+pause(): Promise<void>;
+```
+
+```ts
+await screen.pause();
+```
+
+- O teste é pausado em toda tentativa, incluindo novas tentativas e testes de
+  preparação.
+- Em uma execução com `--step`, o teste é pausado em `screen.pause()` mesmo
+  depois de `n`, `a` ou `e2e run --step rest`.
+- O tempo em pausa não conta para nenhum tempo limite.
+- Um teste não é pausado em uma sessão aberta por um `open_session {test}` do
+  [MCP](/coding-agents#let-the-agent-use-the-app), em um programa sobre `@e2e-dev/core` ou `openHost`, nem
+  em `run()` de `e2e/runner`. Com `CI` definida, o teste falha mesmo assim com
+  `PAUSE_UNAVAILABLE` em `run()`, como em `e2e run`.
+- Em `e2e run --watch`, só a execução atual é cancelada quando `q` é
+  pressionado em uma pausa ou quando `e2e run --step stop` roda.
+- Um localizador não tem esse método.
+
+| Lança | Quando |
+| --- | --- |
+| `PAUSE_UNAVAILABLE` | `CI` está definida. Remova a chamada antes de fazer commit, ou rode o teste com `e2e run` em um terminal. Uma chamada em um lugar onde a pausa não é permitida falha, em vez disso, com o erro correspondente abaixo. |
+| `INVALID_ARGUMENT` | É chamado em um localizador ou em um frame, em um hook [`afterEach`](/reference/test#aftereach), na desmontagem de uma fixture ou em código não aguardado que roda depois que o corpo retornou. Chame-o em `screen`, entre passos na preparação de uma fixture, em um hook `beforeEach` ou no corpo do teste. |
+| `ACTION_FAILED` | É chamado dentro de um passo do agente, como um hook [`onAction`](/reference/agent#agent-act) ou um [executor personalizado](/executors). O passo falha com a mensagem da pausa, e o teste não é pausado. Em uma [ferramenta do projeto](/tools) no agente embutido, a recusa volta para o modelo como um resultado de ferramenta com falha, e o passo continua. Chame-o entre passos em vez disso. |
+| `ASSERTION_FAILED` | É chamado dentro de uma leitura de [`expect.poll`](/reference/expect#polling-a-value). A leitura é tentada de novo até o polling esgotar o tempo limite. Chame-o fora da leitura. |
+| `STEP_NOT_AWAITED` | O corpo do teste retorna enquanto um `screen.pause()` que o corpo não aguardou ainda está esperando. O teste falha na linha da pausa. Coloque `await` antes da chamada. |
+| `RUNNER_BUSY` | A execução não tem um terminal, e outra execução no diretório já é controlada com `e2e run --step`. Encerre essa execução com `e2e run --step stop`, ou rode este teste em um terminal. Depois que a outra execução terminar, um teste é pausado no próximo `screen.pause()` desta execução. |
+
+### Ações do localizador
+
+| Método | Retorna |
+| --- | --- |
+| [`tap`](#tap) | `Promise<void>` |
+| [`click`](#tap) | `Promise<void>` |
+| [`doubleTap`](#doubletap) | `Promise<void>` |
+| [`dblclick`](#doubletap) | `Promise<void>` |
+| [`secondaryTap`](#secondarytap) | `Promise<void>` |
+| [`longPress`](#longpress) | `Promise<void>` |
+| [`fill`](#fill) | `Promise<void>` |
+| [`pressSequentially`](#presssequentially) | `Promise<void>` |
+| [`clear`](#clear) | `Promise<void>` |
+| [`press`](#press) | `Promise<void>` |
+| [`check`](#check) | `Promise<void>` |
+| [`uncheck`](#uncheck) | `Promise<void>` |
+| [`selectOption`](#selectoption) | `Promise<void>` |
+| [`focus`](#focus) | `Promise<void>` |
+| [`blur`](#blur) | `Promise<void>` |
+| [`hover`](#hover) | `Promise<void>` |
+| [`setInputFiles`](#setinputfiles) | `Promise<void>` |
+| [`dragTo`](#dragto) | `Promise<void>` |
+| [`scrollIntoView`](#scrollintoview) | `Promise<void>` |
+| [`swipe`](#swipe) | `Promise<void>` |
+| [`scrollTo`](#scrollto) | `Promise<void>` |
+
+Cada ação resolve um nó, espera o nó ficar acionável e realiza uma operação.
+O tempo limite é [`config.actionTimeout`](/reference/config#actiontimeout), e
+toda ação aceita `{ timeout }` para substituí-lo: `0` espera até o tempo
+limite do teste, ou até `cleanupTimeout` em `afterEach`. Uma ação aceita só
+as opções que a sua assinatura nomeia.
+
+| Lança | Quando |
+| --- | --- |
+| `UNSUPPORTED_CAPABILITY` | A engine não lista o tipo da ação em `actions`; lançado antes de chegar à engine. |
+| `INVALID_ARGUMENT` | Uma chave de opção que a ação não aceita, incluindo `trial`, `force` ou `noWaitAfter` do Playwright, ou um valor negativo, `NaN` ou infinito em `timeout`. Lançado antes de o nó ser resolvido, então o controle nunca é tocado. |
+| `LOCATOR_NOT_FOUND` | Nenhuma correspondência antes do tempo limite. |
+| `LOCATOR_AMBIGUOUS` | Mais de uma correspondência. |
+| `ACTION_FAILED` | A ação pode já ter sido efetivada; ela nunca é repetida. |
+
+#### `tap`
+
+```ts
+/** Taps exactly one matching actionable node, `count` times in a row; with `position`, taps that point of its box once it is in view, with no other actionability check. */
+tap(options?: TapOptions): Promise<void>;
+/** Alias of tap. */
+click(options?: TapOptions): Promise<void>;
+```
+
+```ts
+await screen.getByRole('button', 'Save').tap({ timeout: 10_000 });
+await screen.getByRole('image', 'Seat map').tap({ position: { x: 120, y: 48 } });
+await row.click({ modifiers: ['Shift'] });
+await screen.getByText('Shipping address').tap({ count: 3 });
+```
+
+As opções são [`TapOptions`](#types):
+
+- `count`: quantos toques seguidos, um inteiro seguro positivo, padrão 1. Em
+  um navegador, os cliques chegam como um único clique múltiplo, então um
+  clique triplo seleciona um parágrafo. Em um dispositivo, são `count`
+  toques na cadência de `doubleTap`. `count: 2` é a mesma ação que
+  [`doubleTap()`](#doubletap). Três ou mais precisam de uma engine que liste
+  a ação `multiTap`; a engine de navegador e a engine mobile listam essa ação.
+- `modifiers`: a engine de navegador mantém essas teclas pressionadas.
+- `position`: um deslocamento a partir do canto superior esquerdo do nó, por
+  dentro da borda, em pixels CSS. Quando a engine lista `scrollIntoView`, ela
+  rola até o nó ficar visível. Depois lê a caixa do nó e despacha o ponteiro
+  nesse ponto. Nenhum nó fica por trás do gesto, então as outras verificações
+  de acionabilidade da plataforma (habilitado, não coberto) não rodam.
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_ARGUMENT` | Um modificador desconhecido ou repetido, `modifiers` junto com `position`, um `count` que não é um inteiro seguro positivo, ou um `count` acima de 1 junto com `position`. |
+| `UNSUPPORTED_CAPABILITY` | `modifiers` em uma engine que não declara `tapModifiers`, entre elas a engine mobile; lançado antes de a engine agir. |
+| `UNSUPPORTED_CAPABILITY` | Um `count` de 3 ou mais em uma engine sem a ação `multiTap`, ou acima do limite da engine (200 na engine mobile); lançado antes de a engine agir. |
+| `UNSUPPORTED_CAPABILITY` | `position` em uma engine sem a ação de ponteiro `tap`. |
+| `ACTION_FAILED` | `position` em um nó que a engine de navegador não consegue trazer para a área visível; a rolagem dessa engine espera a visibilidade. Nas outras engines, a falha é a que elas informam. |
+| `LOCATOR_NOT_FOUND` | `position` em um nó que é resolvido, mas nunca mostra uma caixa visível dentro do tempo limite. |
+
+#### `doubleTap`
+
+```ts
+/** Double-taps exactly one matching actionable node. */
+doubleTap(options?: ClickOptions): Promise<void>;
+/** Alias of doubleTap. */
+dblclick(options?: ClickOptions): Promise<void>;
+```
+
+```ts
+await screen.getByRole('cell', 'Q3 budget').doubleTap();
+```
+
+Aceita `timeout` e `modifiers`, com as mesmas regras e os mesmos erros de
+[`tap`](#tap).
+
+#### `secondaryTap`
+
+```ts
+/** Secondary-taps exactly one matching actionable node: a right click, a two-finger tap. */
+secondaryTap(options?: ClickOptions): Promise<void>;
+```
+
+```ts
+await screen.getByRole('row', /Invoice 42/).secondaryTap();
+```
+
+Aceita `timeout` e `modifiers`, com as mesmas regras e os mesmos erros de
+[`tap`](#tap).
+
+#### `longPress`
+
+```ts
+/** Long-presses exactly one matching actionable node. */
+longPress(options?: LongPressOptions): Promise<void>;
+```
+
+```ts
+await screen.getByText('Design review').longPress({ duration: 800 });
+```
+
+- `duration` é o tempo de pressionamento, um inteiro de 100 a 10000 ms.
+  Qualquer outro valor é `INVALID_ARGUMENT`.
+- Sem essa opção, vale o padrão da engine: 500 ms na engine de navegador e um
+  segundo na engine mobile, acima do que um `Pressable` do React Native usa
+  em `delayLongPress`.
+
+#### `fill`
+
+Substitui o conteúdo atual do campo.
+
+```ts
+/** Fills exactly one input. Secret values are never logged. */
+fill(value: string | Secret, options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByLabel('Email').fill('ada@example.test');
+await screen.getByLabel('Password').fill(credentials.user('member').password);
+```
+
+Um `Secret` é resolvido no host logo antes da chamada e nunca é registrado em
+log, incluído em relatórios nem enviado a um modelo.
+
+<Note>
+`fill` define o valor diretamente e não dispara eventos de tecla. Um
+autocomplete, uma caixa de busca que pesquisa enquanto você digita ou um campo
+com máscara ligado a `keydown` ou `keyup` nunca reage a esse preenchimento.
+Para esses casos, use [`pressSequentially`](#presssequentially).
+</Note>
+
+#### `pressSequentially`
+
+Digita pelo teclado da engine e acrescenta o texto ao conteúdo atual.
+
+```ts
+/**
+ * Focuses exactly one input and types `text` through the keyboard, one
+ * character at a time, so the app receives key events. A `Secret` is
+ * refused; it goes through `fill`.
+ */
+pressSequentially(text: string, options?: PressSequentiallyOptions): Promise<void>;
+```
+
+```ts
+await screen.getByLabel('City').pressSequentially('War', { delay: 50 });
+```
+
+- `delay` espera esse número de milissegundos entre os caracteres, cada um
+  enviado em uma chamada de teclado própria. Sem ele, o texto inteiro vai em
+  uma única chamada.
+- O foco, as pausas e as teclas digitadas compartilham o único prazo da ação:
+  uma pausa é interrompida quando o prazo chega, e nenhum caractere é enviado
+  depois dele.
+- Depende do [contrato do teclado](/reference/engine#engine): `type` precisa
+  entregar o texto como uma pessoa digitando entregaria, para que os eventos
+  de tecla cheguem ao app nas plataformas que têm esses eventos.
+- O passo registra o localizador, não o texto, como em `fill`.
+
+| Lança | Quando |
+| --- | --- |
+| `ACTION_FAILED` | O prazo passou no meio do texto; o erro diz quantos caracteres chegaram. |
+| `UNSUPPORTED_CAPABILITY` | A engine não tem a ação `focus` ou a capability `keyboard`; lançado antes de qualquer nó ser resolvido. |
+| `INVALID_ARGUMENT` | Um `Secret` em tempo de execução (um erro de tipo em tempo de compilação): um segredo é preenchido, nunca digitado tecla por tecla. |
+
+#### `clear`
+
+```ts
+/** Clears exactly one input. */
+clear(options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByLabel('Search').clear();
+```
+
+#### `press`
+
+```ts
+/** Sends one key to exactly one node. */
+press(key: string, options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByRole('textbox', 'Search').press('Enter');
+await screen.getByRole('textbox', 'Notes').press('ControlOrMeta+a');
+```
+
+Uma tecla se escreve com zero ou mais modificadores e uma tecla, unidos por
+`+`, como a [gramática de teclas](/reference/engine#keys) os lista.
+`Shift++` pressiona `+`.
+
+Na engine web, um caractere que não está em um teclado americano (`é`, `中`)
+só é pressionado no Chromium. A página recebe os mesmos `keydown`, `input` e
+`keyup` de qualquer tecla, com um `code` vazio e um `keyCode` igual a 0. No
+Firefox e no WebKit, insira esse caractere com [`fill`](#fill) ou
+[`pressSequentially`](#presssequentially).
+
+| Lança | Quando |
+| --- | --- |
+| `UNSUPPORTED_CAPABILITY` | Uma tecla que a plataforma não tem. Na engine web, um caractere que não está em um teclado americano, no Firefox ou no WebKit. |
+
+#### `check`
+
+```ts
+/** Checks exactly one node. */
+check(options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByRole('checkbox', 'Remember me').check();
+```
+
+Na engine web, um checkbox ou radio escondido sob o próprio rótulo (como no
+Element Plus) é clicado por meio desse rótulo. Qualquer outra coisa por cima
+do ponto em que o clique cai continua falhando com `ACTION_FAILED`.
+
+#### `uncheck`
+
+```ts
+/** Unchecks exactly one node. */
+uncheck(options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByRole('checkbox', 'Remember me').uncheck();
+```
+
+| Lança | Quando |
+| --- | --- |
+| `ACTION_FAILED` | Um radio nativo marcado, que só outro radio do mesmo grupo desmarca. |
+
+#### `selectOption`
+
+```ts
+/** Selects one option from exactly one control. */
+selectOption(value: SelectOption, options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByLabel('Plan').selectOption('Pro');
+await screen.getByLabel('Plan').selectOption({ label: 'Pro' });
+await screen.getByLabel('Plan').selectOption({ value: 'pro' });
+```
+
+Passe uma string com o rótulo, ou um objeto com exatamente uma das chaves
+`label`, `value` (o atributo value, que o formulário envia) ou `index` (a
+partir de zero).
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_ARGUMENT` | Mais de uma opção por chamada: um array, ou um objeto com mais de uma dessas chaves. Também um `index` negativo ou fracionário. Lançado antes de a engine agir. |
+
+#### `focus`
+
+```ts
+/** Focuses exactly one node. */
+focus(options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByLabel('Email').focus();
+```
+
+#### `blur`
+
+```ts
+/** Removes focus from exactly one node if it is focused. */
+blur(options?: ActionOptions): Promise<void>;
+```
+
+Só na web. Se o nó correspondente já está sem foco, a chamada não tem efeito.
+
+```ts
+await screen.getByLabel('Email').blur();
+```
+
+#### `hover`
+
+```ts
+/** Hovers over exactly one matching actionable node. */
+hover(options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByRole('button', 'Account').hover();
+```
+
+#### `setInputFiles`
+
+```ts
+/** Sets the files of exactly one file input, or of a control that opens a file chooser; paths resolve from the project root, payloads supply bytes in memory, and an empty array clears the input. */
+setInputFiles(files: string | readonly string[] | FilePayload | readonly FilePayload[], options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByLabel('Receipt').setInputFiles('fixtures/receipt.pdf');
+await screen.getByLabel('Receipt').setInputFiles({
+  name: 'receipt.txt', mimeType: 'text/plain', buffer: Buffer.from('Receipt total: 12.00'),
+});
+await screen.getByLabel('Receipt').setInputFiles([]);
+```
+
+Só na web. Passe um objeto simples só com os campos de `FilePayload`:
+`name: string`, `mimeType: string` e `buffer: Buffer`. Passe um payload ou um
+array de payloads; não misture caminhos e payloads em um array. O tamanho
+somado dos payloads precisa ser menor que 50 MiB. Para arquivos maiores, use
+um caminho se o alvo suportar a transferência de arquivos desse tamanho. Um
+array vazio limpa o campo e dispara `input` e `change`. Um botão que abre um
+seletor de arquivos aceita as mesmas entradas.
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_ARGUMENT` | Um caminho vazio ou ausente, um caminho sob um diretório que o runner não consegue percorrer, um payload inválido, caminhos e payloads misturados, ou payloads que somam 50 MiB ou mais. |
+| `UNSUPPORTED_CAPABILITY` | Em um dispositivo, ou para payloads em uma engine que não declara `setInputFilePayloads`. |
+| `ACTION_FAILED` | Um botão que não abre nenhum seletor de arquivos. |
+
+#### `dragTo`
+
+```ts
+/** Drags exactly one node to exactly one target. */
+dragTo(target: Locator, options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByText('Design review').dragTo(screen.getByRole('region', 'Done'));
+```
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_LOCATOR` | `target` não é um localizador do runner, ou foi criado pela tela de outro alvo. |
+
+#### `scrollIntoView`
+
+```ts
+/** Scrolls exactly one node into view. */
+scrollIntoView(options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByRole('contentinfo').scrollIntoView();
+```
+
+#### `swipe`
+
+```ts
+/** Performs a swipe scoped to exactly one node. */
+swipe(options: SwipeOptions & ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByTestId('feed').swipe({ direction: 'down', momentum: 'slow' });
+```
+
+Aceita `{ direction, momentum? }` como [`screen.swipe`](#screen-swipe) os
+define, mais `timeout`, que `screen.swipe` recusa. Não tem a forma
+`{ from, to }`.
+
+#### `scrollTo`
+
+```ts
+/** Scrolls this node, or its nearest ancestor that scrolls along the edge's axis, to an edge. */
+scrollTo(edge: ScrollEdge, options?: ActionOptions): Promise<void>;
+```
+
+```ts
+await screen.getByTestId('feed').scrollTo('bottom');
+await screen.getByRole('list', 'Photos').scrollTo('right');
+```
+
+Em um dispositivo, o arrasto acontece dentro da caixa do nó, então localize a
+própria lista, não uma linha. O resto segue o que
+[`screen.scrollTo`](#screen-scrollto) descreve.
+
+### Leituras do localizador
+
+| Método | Retorna |
+| --- | --- |
+| [`textContent`](#textcontent) | `Promise<string \| null>` |
+| [`inputValue`](#inputvalue) | `Promise<string>` |
+| [`getAttribute`](#getattribute) | `Promise<string \| null>` |
+| [`isVisible`](#isvisible) | `Promise<boolean>` |
+| [`isHidden`](#ishidden) | `Promise<boolean>` |
+| [`isEnabled`](#isenabled) | `Promise<boolean>` |
+| [`isDisabled`](#isdisabled) | `Promise<boolean>` |
+| [`isChecked`](#ischecked) | `Promise<boolean>` |
+| [`boundingBox`](#boundingbox) | `Promise<{ x, y, width, height } \| null>` |
+| [`screenshot`](#screenshot) | `Promise<string>` |
+| [`count`](#count) | `Promise<number>` |
+| [`all`](#all) | `Promise<Locator[]>` |
+| [`allTextContents`](#alltextcontents) | `Promise<string[]>` |
+| [`waitFor`](#waitfor) | `Promise<void>` |
+
+As leituras seguem as [Regras de correspondência](#match-rules). `count`,
+`all` e `allTextContents` tiram um snapshot e não esperam.
+
+Em um campo seguro, `textContent`, `inputValue`, `getAttribute` e
+`allTextContents` lançam `POLICY_DENIED`, como fazem os
+[matchers de `expect`](/reference/expect#secure-fields) correspondentes.
+`isEnabled`, `isDisabled`, `isChecked` e `boundingBox` são permitidos nesse
+campo, e `screenshot` mascara o campo.
+
+#### `textContent`
+
+Lê o texto renderizado do nó, com cada sequência de espaços em branco
+reduzida a um único espaço.
+
+```ts
+/** Reads normalized text once a match exists, without retrying for a particular value. */
+textContent(): Promise<string | null>;
+```
+
+```ts
+const message = await screen.getByRole('alert').textContent();
+```
+
+- Na web, é o que `innerText` lê, não o `textContent` do DOM: o
+  `text-transform` do CSS se aplica, descendentes com `display: none` ficam
+  de fora, e um `<br>` é lido como um espaço.
+- Um nó que em si não é renderizado, como um nó com `display: none`, retorna
+  o texto do DOM, como `innerText` faz.
+
+#### `inputValue`
+
+```ts
+/** Reads the current input value. */
+inputValue(): Promise<string>;
+```
+
+```ts
+const email = await screen.getByLabel('Email').inputValue();
+```
+
+Em um checkbox ou radio, `inputValue()` e `toHaveValue` leem o atributo value
+do controle, `on` quando o controle não tem esse atributo, qualquer que seja o
+estado de marcação. `isChecked()` lê o estado.
+
+`inputValue()` lê um widget de intervalo como
+[`toHaveValue`](/reference/expect#tohavevalue) faz. O `inputValue()` do
+Playwright lança erro em um widget ARIA.
+
+| Lança | Quando |
+| --- | --- |
+| `ACTION_FAILED` | Um nó sem valor, como um título ou um botão. Um campo sem valor retorna `""`. |
+
+#### `getAttribute`
+
+```ts
+/** Reads one attribute. */
+getAttribute(name: string): Promise<string | null>;
+```
+
+```ts
+const href = await screen.getByRole('link', 'Docs').getAttribute('href');
+```
+
+Em um dispositivo, um nó tem até cinco atributos:
+
+- `label`: o rótulo de acessibilidade. No iOS, é o próprio rótulo do
+  dispositivo, então um campo vazio cujo placeholder foi retirado mantém o
+  rótulo completo. No Android, é a content description, ou o texto do nó
+  quando não há description. Um campo Android vazio que mostra só a dica não
+  tem `label`, nem um campo Android vazio cuja content description é igual à
+  dica.
+- `resource-id`: o test id do nó, que é o resource id do Android ou o
+  accessibility identifier do iOS (o que o Appium lê como `name`).
+- `class`: o nome da classe Android, ou o tipo de elemento do iOS sem o
+  prefixo `XCUIElementType`, como `TextField` (o que o Appium lê como `type`).
+- `content-desc`: só no Android. Fica ausente quando a content description é
+  igual ao texto visível ou à dica, porque o agent-device só a informa quando
+  ela é diferente.
+- `placeholder`: presente quando a plataforma informa uma dica ou um
+  placeholder.
+
+Em uma nuvem de dispositivos iOS que fornece um page source do Appium, o
+agent-device recorre ao `name` do Appium para os dois valores. `name` é o
+identifier, ou o rótulo quando um elemento não tem identifier. Então, ali,
+`resource-id` e `label` podem retornar cada um o valor do outro: um elemento
+com test id e sem rótulo retorna o test id como `label`. Para o texto que um
+campo contém, use `inputValue()`.
+
+No macOS (`@e2e-dev/desktop`), um nó tem `label` (o nome acessível de um
+controle, até 1.000 caracteres; um nó de texto não tem, já que `textContent`
+lê o texto), `identifier` (o accessibility identifier do desenvolvedor, que
+também é o test id do nó), `description` (omitido quando é o nome acessível,
+que `label` lê, como costuma ser a description de um campo AppKit),
+`placeholder` e `hint` (o texto de ajuda), cada um quando o app o informa. Em
+um campo de senha, `getAttribute` lança `POLICY_DENIED`, como em toda engine.
+
+#### `isVisible`
+
+```ts
+/** Reads current visibility. */
+isVisible(): Promise<boolean>;
+```
+
+```ts
+const open = await screen.getByRole('dialog').isVisible();
+```
+
+- `false` para zero correspondências e para um `frameLocator` cujo frame não
+  está no documento.
+- Usa a mesma verificação de visibilidade que `visible: true` (veja
+  [Duplicatas ocultas](#hidden-duplicates)).
+
+| Lança | Quando |
+| --- | --- |
+| `LOCATOR_AMBIGUOUS` | Várias correspondências. |
+
+#### `isHidden`
+
+```ts
+/** Reads current hidden or absent state, the negation of `isVisible`. */
+isHidden(): Promise<boolean>;
+```
+
+```ts
+const gone = await screen.getByTestId('spinner').isHidden();
+```
+
+É tão estrito quanto `isVisible`: `true` para zero correspondências.
+
+| Lança | Quando |
+| --- | --- |
+| `LOCATOR_AMBIGUOUS` | Várias correspondências. |
+
+#### `isEnabled`
+
+```ts
+/** Reads current enabled state. */
+isEnabled(): Promise<boolean>;
+```
+
+```ts
+const ready = await screen.getByRole('button', 'Pay').isEnabled();
+```
+
+#### `isDisabled`
+
+```ts
+/** Reads current disabled state, the negation of `isEnabled`. */
+isDisabled(): Promise<boolean>;
+```
+
+```ts
+const blocked = await screen.getByRole('button', 'Pay').isDisabled();
+```
+
+É tão estrito quanto `isEnabled`.
+
+| Lança | Quando |
+| --- | --- |
+| `LOCATOR_NOT_FOUND` | Zero correspondências. |
+| `LOCATOR_AMBIGUOUS` | Várias correspondências. |
+
+#### `isChecked`
+
+```ts
+/** Reads current checked state. */
+isChecked(): Promise<boolean>;
+```
+
+```ts
+const remembered = await screen.getByRole('checkbox', 'Remember me').isChecked();
+```
+
+Um papel marcável sem estado informado, como um switch ARIA sem
+`aria-checked`, é lido como `false`.
+
+| Lança | Quando |
+| --- | --- |
+| `ACTION_FAILED` | Um nó sem estado de marcação, como um botão ou um título. |
+
+#### `boundingBox`
+
+```ts
+/** Reads the current viewport-relative rectangle. */
+boundingBox(): Promise<{ x: number; y: number; width: number; height: number } | null>;
+```
+
+```ts
+const map = (await screen.getByRole('image', 'Map').boundingBox())!;
+```
+
+A caixa está em pixels CSS e, em um dispositivo, em pontos (pixels físicos no
+Android). É `null` para um nó que não gera caixa no layout (`display: none`
+nele ou em um ancestral). Um nó com `visibility: hidden` mantém a caixa.
+
+#### `screenshot`
+
+```ts
+/**
+ * Captures a redacted screenshot of the one match and returns its absolute
+ * path. The match is scrolled into view first; one larger than the viewport
+ * keeps the part inside it.
+ */
+screenshot(label?: string): Promise<string>;
+```
+
+```ts
+const card = await screen.getByTestId('order-summary').screenshot('summary');
+```
+
+- O arquivo é o que [`app.screenshot`](/reference/app#screenshot) salva,
+  recortado na caixa da correspondência: um artefato da tentativa em
+  `screenshots/`, com o mesmo mascaramento e a mesma densidade de pixels.
+- `label` entra no nome do passo e no nome do arquivo.
+- Espera a correspondência ficar visível, com a caixa dela e o viewport
+  parados durante toda a captura. Uma correspondência que a página tira do
+  viewport é rolada de volta.
+- A captura de tela da engine precisa ser um PNG do viewport, como são as das
+  engines web, mobile e desktop.
+- O reporter `list` nomeia o arquivo na sua linha `Screenshots`.
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_ARGUMENT` | Um `label` que não é uma string. |
+| `LOCATOR_NOT_FOUND` | Nenhuma correspondência visível dentro do tempo limite de ação, uma que não parou de se mover, ou uma fora do viewport em uma engine que não consegue rolar até ela. |
+| `LOCATOR_AMBIGUOUS` | Mais de uma correspondência. |
+| `ACTION_FAILED`, `ENGINE_FAILURE` | A rolagem ou a captura falhou ou excedeu o tempo limite, como em uma correspondência na web cuja animação nunca termina. |
+| `UNSUPPORTED_CAPABILITY` | A engine não faz capturas de tela, ou produz uma que não é PNG. |
+| `POLICY_DENIED` | No iOS e no Android, um campo seguro na tela não informa os limites (a área) a mascarar. |
+
+#### `count`
+
+```ts
+/** Counts current matches without auto-waiting. */
+count(): Promise<number>;
+```
+
+```ts
+const rows = await screen.getByRole('row').count();
+```
+
+`0` para zero correspondências e para um `frameLocator` cujo frame não está no
+documento.
+
+#### `all`
+
+Resolve a consulta uma vez, para que um loop possa agir em cada linha.
+
+```ts
+/** One `nth(i)` locator per current match, without auto-waiting; empty when nothing matches. */
+all(): Promise<Locator[]>;
+```
+
+```ts
+for (const row of await screen.getByRole('row').all()) {
+  await row.getByRole('checkbox').check();
+}
+```
+
+- Não espera nem exige exatamente uma correspondência: zero correspondências é
+  um array vazio, a mesma regra de snapshot de `count()`. Um `frameLocator`
+  cujo frame não está no documento equivale a zero correspondências aqui,
+  enquanto uma ação ou uma asserção faz polling pelo frame.
+- Cada localizador que `all()` retorna é resolvido de novo quando usado. Uma
+  lista que muda durante o loop pode fazer um `nth(i)` posterior apontar para
+  outra linha, ou para nada. Depois do loop, faça uma asserção sobre a lista.
+
+#### `allTextContents`
+
+```ts
+/** Reads the normalized text of every current match, without auto-waiting; empty when nothing matches. */
+allTextContents(): Promise<string[]>;
+```
+
+```ts
+expect(await screen.getByRole('listitem').allTextContents()).toEqual(['Alpha', 'Beta']);
+```
+
+- O texto é lido como em [`textContent`](#textcontent).
+- Não espera nem exige exatamente uma correspondência: zero correspondências é
+  um array vazio, como em [`all`](#all).
+- Para verificar os textos, use
+  [`toHaveText([...])`](/reference/expect#locator-matchers) em vez de um
+  loop.
+
+#### `waitFor`
+
+```ts
+/**
+ * Waits for the requested locator state, `visible` by default: `attached`
+ * for one match, visible or not; `detached` for none; `hidden` for none or
+ * a hidden one.
+ */
+waitFor(options?: { state?: 'attached' | 'detached' | 'visible' | 'hidden'; timeout?: number }): Promise<void>;
+```
+
+```ts
+await screen.getByTestId('spinner').waitFor({ state: 'hidden' }); // default state: 'visible'
+```
+
+| Estado | Espera por |
+| --- | --- |
+| `'visible'` (padrão) | Uma correspondência visível. |
+| `'attached'` | Uma correspondência, oculta ou exibida. |
+| `'detached'` | Nenhuma correspondência. |
+| `'hidden'` | Uma correspondência oculta, ou nenhuma. |
+
+O padrão de `timeout` é `config.actionTimeout`.
+
+| Lança | Quando |
+| --- | --- |
+| `LOCATOR_NOT_FOUND` | O tempo limite se esgota. |
+| `LOCATOR_AMBIGUOUS` | Várias correspondências, em qualquer estado. |
+| `INVALID_ARGUMENT` | Qualquer outro estado, ou uma chave de opção além de `state` e `timeout`; lançado antes de qualquer coisa ser resolvida. |
+
+## Regras de correspondência
+
+A maioria das operações exige exatamente uma correspondência. Uma leitura faz
+polling pela sua única correspondência até o tempo limite de ação, como uma
+ação faz. Depois, retorna o valor atual sem esperar que ele mude. Use
+[`expect`](/reference/expect) para esperar por um valor.
+
+Um nó que a engine informa como desatualizado é resolvido de novo dentro do
+mesmo tempo limite: uma resolução que concorreu com uma navegação, ou uma
+correspondência que o app substituiu enquanto era lida.
+
+| Operação | Zero correspondências | Várias correspondências |
+| --- | --- | --- |
+| Ações | Fazem polling até o tempo limite, depois `LOCATOR_NOT_FOUND` | `LOCATOR_AMBIGUOUS` |
+| Leituras | Fazem polling até o tempo limite, depois `LOCATOR_NOT_FOUND` | `LOCATOR_AMBIGUOUS` |
+| `count()`, `all()`, `allTextContents()` | `0`, `[]`, `[]` | A contagem, um localizador por correspondência, um texto por correspondência |
+| `isVisible()`, `isHidden()` | `false`, `true` | `LOCATOR_AMBIGUOUS` |
+| Asserções | Fazem polling até o tempo limite, depois `ASSERTION_FAILED` | `LOCATOR_AMBIGUOUS` |
+| Qualquer uma dessas operações sob um frame que não está no documento | Como zero correspondências para `count()`, `all()`, `allTextContents()`, `isVisible()` e `isHidden()`; ações e leituras fazem polling pelo frame até o tempo limite, depois `LOCATOR_NOT_FOUND`; asserções, depois `ASSERTION_FAILED` | `LOCATOR_AMBIGUOUS` quando vários frames correspondem |
+
+## Tipos
+
+```ts
+/**
+ * The closed role vocabulary; an unsupported role is a type error. Every
+ * engine maps its platform's element types onto these names, so a role query
+ * reads the same against a browser and a device. A role the platform has no
+ * widget for matches nothing there; it is never a type error.
+ */
+export type Role =
+  | 'button'
+  | 'link'
+  | 'textbox'
+  | 'searchbox'
+  | 'combobox'
+  | 'listbox'
+  | 'option'
+  | 'checkbox'
+  | 'radio'
+  | 'radiogroup'
+  | 'switch'
+  | 'slider'
+  | 'spinbutton'
+  | 'progressbar'
+  | 'meter'
+  | 'image'
+  | 'heading'
+  | 'tab'
+  | 'tablist'
+  | 'tabpanel'
+  | 'menu'
+  | 'menubar'
+  | 'menuitem'
+  | 'menuitemcheckbox'
+  | 'menuitemradio'
+  | 'toolbar'
+  | 'tooltip'
+  | 'tree'
+  | 'treeitem'
+  | 'list'
+  | 'listitem'
+  | 'table'
+  | 'grid'
+  | 'row'
+  | 'rowgroup'
+  | 'rowheader'
+  | 'cell'
+  | 'gridcell'
+  | 'columnheader'
+  | 'separator'
+  | 'group'
+  | 'article'
+  | 'figure'
+  | 'form'
+  | 'status'
+  | 'alert'
+  | 'dialog'
+  | 'alertdialog'
+  | 'main'
+  | 'navigation'
+  | 'banner'
+  | 'contentinfo'
+  | 'complementary'
+  | 'region';
+
+/**
+ * Spellings `getByRole` accepts beside the vocabulary and rewrites to a `Role`
+ * before the query is built: `img` is the ARIA name of `image`. An alias never
+ * reaches an engine, the replay cache, or a report; a `Role` is what they see.
+ */
+export type RoleAlias = 'img';
+
+/** A string matches exactly; a RegExp uses its own source and flags. */
+export type TextMatch = string | RegExp;
+
+export interface TextMatchOptions {
+  /** Exact match, the default. `false` is case-insensitive substring matching; a RegExp ignores it. */
+  exact?: boolean;
+  /**
+   * When true, nodes the platform reports as hidden are excluded before the
+   * exactly-one rule is applied, so a visible node with a hidden twin (a
+   * prerendered copy kept after navigation, a closed drawer) still resolves.
+   * Omitted or false keeps every match, hidden ones included.
+   */
+  visible?: boolean;
+}
+
+/**
+ * Role query options. A role query never matches a node hidden from the
+ * accessibility tree, on every engine; `visible` (inherited) is the one knob
+ * that narrows the other query kinds, to the nodes `toBeVisible()` accepts.
+ */
+export interface RoleOptions extends TextMatchOptions {
+  /** Accessible name filter. */
+  name?: TextMatch;
+  /** Requires the checked state. */
+  checked?: boolean;
+  /** Requires the disabled state. */
+  disabled?: boolean;
+  /** Requires the selected state. */
+  selected?: boolean;
+  /** Requires the expanded state. */
+  expanded?: boolean;
+  /** Requires the pressed state of a toggle button. */
+  pressed?: boolean;
+  /** Requires a heading level, 1 through 6. */
+  level?: number;
+}
+
+export interface ActionOptions {
+  /** Deadline in milliseconds; defaults to `config.actionTimeout`. */
+  timeout?: number;
+}
+
+/** `longPress` options: the hold time in milliseconds, 100 through 10000, default the engine's own. */
+export interface LongPressOptions extends ActionOptions {
+  /** Hold time in milliseconds, 100 through 10000; unset, the engine's default. */
+  duration?: number;
+}
+
+/** `pressSequentially` options: an optional pause between characters. */
+export interface PressSequentiallyOptions extends ActionOptions {
+  /** Milliseconds to wait between characters; omitted types the whole text in one call. */
+  delay?: number;
+}
+
+export interface SwipeOptions {
+  /** Swipe direction. */
+  direction: ScrollDirection;
+  /** Fling strength; default `none`. The three values are defined under screen.swipe. */
+  momentum?: Momentum;
+  from?: never;
+  to?: never;
+  duration?: never;
+}
+
+/** A swipe along a path between two viewport points: a touch swipe on a device, a pointer drag on a document platform. */
+export interface SwipePathOptions {
+  /** Where the finger goes down. */
+  from: ScreenPoint;
+  /** Where it lifts. */
+  to: ScreenPoint;
+  /** Gesture duration, an integer from 16 through 10000 ms; omitted = the engine's default. */
+  duration?: number;
+  direction?: never;
+  momentum?: never;
+}
+
+/**
+ * A point in CSS pixels. For `tap({ position })` the origin is the node's own
+ * top-left corner, inside its border on a document platform. A `Point` is
+ * also a `ScreenPoint`, whose origin is the viewport's top-left corner, the
+ * space `boundingBox()` reports in.
+ */
+export type Point = ViewportPoint; // { x: number; y: number }
+
+/** CSS pixels, or a percentage of the viewport's width (`x`) or height (`y`), `'0%'` through `'100%'`. */
+export type ScreenCoordinate = number | `${number}%`;
+
+/** A viewport point in pixels, percentages, or both: `{ x: '50%', y: 120 }`. */
+export interface ScreenPoint {
+  readonly x: ScreenCoordinate;
+  readonly y: ScreenCoordinate;
+}
+
+/** `tap`, `click`, `doubleTap`, `dblclick`, and `secondaryTap` options: the action timeout and the keys held for the click. */
+export interface ClickOptions extends ActionOptions {
+  /**
+   * Keys held while the pointer clicks, as a Shift-click extends a selection:
+   * `Shift`, `Control`, `Alt`, `Meta`, or `ControlOrMeta` (Control on Windows
+   * and Linux, Meta on macOS). Needs an engine that declares `tapModifiers`,
+   * `UNSUPPORTED_CAPABILITY` otherwise.
+   */
+  modifiers?: readonly KeyModifier[];
+}
+
+/** A modifier key, for `modifiers` and the `press` key grammar. */
+export type KeyModifier = 'Shift' | 'Control' | 'Alt' | 'Meta' | 'ControlOrMeta';
+
+/** `tap` and `click` options. */
+export interface TapOptions extends ClickOptions {
+  /**
+   * Where to tap, relative to the node's top-left corner, inside its border
+   * on a document platform. Without it the platform picks a point of the
+   * node, usually its center, behind its own actionability checks; with it
+   * the pointer is dispatched at that point once the node is in view and has
+   * a box, which needs the engine's `tap` pointer action.
+   */
+  position?: Point;
+  /**
+   * How many taps in a row, a positive safe integer, default 1. `2` is the
+   * same as `doubleTap()`; 3 or more needs an engine that declares the
+   * `multiTap` action, `UNSUPPORTED_CAPABILITY` otherwise. A count above the
+   * engine's own limit (200 on the mobile engine) is also
+   * `UNSUPPORTED_CAPABILITY`. A count above 1 is not combined with `position`.
+   */
+  count?: number;
+}
+
+/** One option of a select: its label (a bare string too), its `value` attribute, or its zero-based index. */
+export type SelectOption =
+  | string
+  | { label: string; value?: never; index?: never }
+  | { value: string; label?: never; index?: never }
+  | { index: number; label?: never; value?: never };
+
+/** A swipe or scroll direction. */
+export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
+
+/** An edge of a scroll container, which `scrollTo` scrolls to. */
+export type ScrollEdge = 'top' | 'bottom' | 'left' | 'right';
+
+/** Fling strength of a swipe; defined under screen.swipe. */
+export type Momentum = 'none' | 'slow' | 'fast';
+```
+
+## Relacionados
+
+[`expect`](/reference/expect) espera pelo estado de um localizador. A fixture
+[`browser`](/reference/web) acrescenta localizadores CSS e frames.

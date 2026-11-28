@@ -1,11 +1,11 @@
 ---
 title: Notte browsers
 sidebarTitle: Notte
-description: Run web targets in Notte's cloud browsers with the notte() browser provider from @e2e-dev/notte.
+description: "Run e2e web tests in Notte's cloud browsers with the notte() browser provider from @e2e-dev/notte, one session per test attempt."
 ---
 
 `notte()` from `@e2e-dev/notte` is a
-[browser provider](/browser#hosted-browsers) for [Notte](https://notte.cc).
+[browser provider](/reference/web#hosted-browsers) for [Notte](https://notte.cc).
 Each test attempt gets its own cloud browser session. Tests stay the same.
 Only the target's `browser` changes.
 
@@ -78,7 +78,7 @@ The provider leases in `attempt` scope only. A Notte session owns its one
 browser context and refuses new ones, which `worker` scope needs to keep
 tests apart. Each attempt, retries included, runs in a fresh session's
 default context, on its first tab. Each test pays for a session start,
-and the [limits of a per-attempt lease](/browser#hosted-browsers) apply,
+and the [limits of a per-attempt lease](/reference/web#hosted-browsers) apply,
 sessions included.
 
 ## Watch and clean up sessions
@@ -121,7 +121,7 @@ artifacts.
 ## Next
 
 <CardGroup cols={2}>
-  <Card title="Hosted browsers" icon="globe" href="/browser#hosted-browsers">
+  <Card title="Hosted browsers" icon="globe" href="/reference/web#hosted-browsers">
     How a browser provider leases browsers, and the limits of `'attempt'` scope.
   </Card>
   <Card title="Continuous integration" icon="rotate" href="/ci">

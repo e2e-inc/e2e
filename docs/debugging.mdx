@@ -1,21 +1,19 @@
 ---
 title: Debugging a run
-description: Read the trace page, open the evidence, watch the browser, and see what the model was sent.
+description: "Debug a failed end-to-end test with its trace page, the screenshot and app log at the failure, a headed rerun, stepping through the test, and the agent's model calls."
 "og:image": "https://e2e.com/docs/images/og/debugging.png?v=38a51086e1"
 "twitter:image": "https://e2e.com/docs/images/og/debugging.png?v=38a51086e1"
+keywords: [trace, failure, report, artifacts]
 ---
 
-A failed test prints its error and the path to its [trace page](#traces). For
-a summary of the whole run, add the `markdown` reporter. It writes
-`.e2e/summary.md`.
+A failed test prints its error and the path to its trace page. Work through
+the steps below in order and stop at the one that explains the failure.
 
 ## Read the failure
 
 The `list` reporter's `Failed Tests` section shows the error, the failing
 line, nearby matches for a failed locator, what the app logged, and the
-trace page. It quotes the app's first 3 errors (console errors, uncaught
-exceptions, failed requests, 5xx responses), redacted like the trace page.
-`.e2e/summary.md` quotes them too:
+trace page:
 
 ```text
  FAIL  |web| tests/todos.e2e.ts > shows the remaining count
@@ -28,33 +26,24 @@ LOCATOR_NOT_FOUND: locator did not become visible: getByRole("heading", name: "T
  ❯ trace .e2e/results/todos-shows-the-remaining-count-796fac5f12ab34cd/trace.md
 ```
 
-The exit code tells the type of failure:
+The error code names the cause, and
+[Common errors](/reference/errors#common-errors) has the usual cause and fix
+for each one. The [exit code](/reference/errors#exit-codes) tells the type
+of failure and whether a retry can help.
 
-| Exit | Meaning | Retry the job? |
-| ---: | --- | --- |
-| 1 | A test failed | Only if the test is flaky |
-| 2 | Configuration, collection, or policy | Fix the reported problem first |
-| 3 | Engine, app process, model provider, artifact, or cleanup infrastructure failure | If the cause is temporary |
-| 4 | An internal runner error | Report it |
-| 130 | The run was interrupted | |
+For a summary of the whole run, add the
+[`markdown`](/reference/reporters#markdown) reporter, which writes
+`.e2e/summary.md`. A script reads the same facts from
+[`report.json`](/reference/reporters#report-json).
 
-## Traces
+<a id="traces" />
+
+## Open the trace page
 
 By default, each failed, timed out, interrupted, or flaky test gets a trace
-page, `trace.md`, in its [results directory](#artifacts). Open it in an
-editor's markdown preview so its links work. After the browser or device
-the test ran on, it shows:
-
-- **Steps.** The node an action landed on, the values an assertion read
-  while it waited, the replay cache's decision, what the app logged, where
-  the page went, and how the screen changed since the step before.
-- **App log.** Console output, uncaught exceptions, failed requests, and
-  4xx and 5xx responses, each with its step: up to 50 lines, errors and
-  warnings first. An attempt keeps at most 200 errors and warnings and 100
-  other lines.
-- **The agent's last turns.**
-- **Screen at failure.** The screenshot and the semantic tree, captured in
-  at most 5 s. An app that doesn't answer in time gets no screen section.
+page, `trace.md`, in its directory under `.e2e/results/`. Open it in an
+editor's markdown preview so its links work. It lists every step with what
+it did, then the app log, the agent's last turns, and the screen at failure.
 
 <Accordion title="Example trace page">
 
@@ -120,118 +109,53 @@ What the app logged, oldest first, with the step it happened in.
 
 </Accordion>
 
-An assertion that read one value the whole time has a wrong expectation, or
-the app never reached that state: look in the app log for a failed request.
-An assertion whose readings changed (`"2 remaining" x3 -> at 410ms "1
-remaining"`) raced the app. `screen: unchanged` after an action means the
-action had no visible effect. On web, a step's screen is the one an action
-left. On a device, it's the screen the step acted on.
+`--trace` keeps a page for every test of a run, passing ones included. See
+[`trace`](/reference/config#trace) for the modes and
+[What a trace page holds](/reference/config#what-a-trace-page-holds) for
+each part.
 
-The [`trace`](/reference/config#trace) mode sets which tests keep a page.
-`--trace` keeps one for every test of a run, passing ones included.
-`--trace off` writes none. A test's own `trace` option wins over both.
+## Look at the screen and the app log
 
-## Artifacts
+The **Screen at failure** section has the screenshot and the semantic tree
+the test saw. Compare them with the locator or the expectation that failed.
 
-Each test gets one directory under `.e2e/results/` (or
-[`<output>`](/reference/config#output)`/results/`), with its trace page and
-one `attempt-<n>` per attempt. A serial group's tests share one directory:
+The **App log** section has the app's console output, uncaught exceptions,
+and failed requests, each with its step. Check it when an assertion read the
+same wrong value the whole time: a failed request often explains it. An
+assertion whose readings changed raced the app.
 
-```text
-.e2e/results/todos-adds-a-todo-1a2b3c4d5e6f7a8b/trace.md
-.e2e/results/todos-adds-a-todo-1a2b3c4d5e6f7a8b/attempt-1/screen-at-failure.txt
-.e2e/results/todos-adds-a-todo-1a2b3c4d5e6f7a8b/attempt-1/screenshots/001-failure.png
-```
+<a id="artifacts" /><a id="console-output" />
 
-Each run that reaches its tests empties `results/` first. A `--last-failed`
-rerun keeps the files that the runs before it name, and writes its own
-attempts under each test's `rerun-<n>/`.
-
-| Artifact | When |
-| --- | --- |
-| Screenshots | A failed attempt captures one when the engine can. The built-in `agent.assert` captures one after either verdict, unless `screenshot: false`. `app.screenshot('label')` captures one on request, and `locator.screenshot('label')` one element. They mask secure fields only. See [screenshots after a secret fill](/reference/security#screenshots-after-a-secret-fill). |
-| Downloads | Files saved through `browser.waitForDownload`, kind `download`, as the app served them. [Downloads](/reference/security#downloads) says when the runner masks secrets in them. |
-| Videos | When you [record them](#watch-it-happen). Videos mask nothing. See [where redaction stops](/reference/security#where-redaction-stops). |
-| Agent transcripts | With [`--debug`](#agent-steps). |
-
-## For scripts: report.json
-
-Every run that reaches its tests also writes `report.json` to the
-[output directory](/reference/config#output), `.e2e` by default. It holds
-every result of the run in a versioned schema. `--reporter json` prints it to
-stdout:
-
-```bash
-jq '.run | {status, exitCode, errors}' .e2e/report.json
-jq '.run.results[] | select(.status != "passed") | .attempts[-1]
-    | {status, error, failure, steps: [.steps[] | select(.status != "passed") | {api, label, source, status, error}], artifacts}' .e2e/report.json
-```
-
-`run.errors` holds run-level failures. The last attempt of each failed
-result holds:
-
-| Field | Holds |
-| --- | --- |
-| `error` | The code, message, source line, and assertion details |
-| `failure` | The screen and screenshot artifacts, and any locator candidates |
-| `steps` | The calls that led to the failure. Each step's `events` hold what it did (`engine`), what it polled (`poll`), and where the app went (`navigation`). Agent steps add `cache` and recent model turns. `observationTruncated: true` means at least one semantic observation was incomplete. |
-| `appLog` | What the app logged. Each line's `step` is the `index` of its step, absent before the first step. |
-| `artifacts` | The captured files |
-
-A serial group's tests have no `attempts` of their own. Their results are in
-`run.serialGroups`, one member for each test in each attempt. A retry the run
-interrupted or that never reached its members has `cutRetry: true` and does
-not hold the verdicts, so skip it:
-
-```bash
-jq '.run.serialGroups[] | (.attempts | map(select(.cutRetry != true)) | last).members[]? | select(.status != "passed")
-    | {testId, status, error, failure}' .e2e/report.json
-```
+The screenshot, any video, and downloads are files in the test's directory.
+[What a run captures](/reference/config#what-a-run-captures) lists them. A
+`console.log` in the test prints while it runs, under a
+[heading that names the test](/reference/reporters#console-output).
 
 ## Watch it happen
 
+Rerun the test with a visible browser. Add `--video` to record the run.
+
 <CodeGroup>
 ```bash npm
-npx e2e run --headed                      # a visible browser
-npx e2e run --video                       # record every attempt
-npx e2e run --video=retain-on-failure     # record every attempt, keep the failures
+npx e2e run tests/todos.e2e.ts --headed
 ```
 
 ```bash pnpm
-pnpm exec e2e run --headed                      # a visible browser
-pnpm exec e2e run --video                       # record every attempt
-pnpm exec e2e run --video=retain-on-failure     # record every attempt, keep the failures
+pnpm exec e2e run tests/todos.e2e.ts --headed
 ```
 
 ```bash bun
-bunx e2e run --headed                      # a visible browser
-bunx e2e run --video                       # record every attempt
-bunx e2e run --video=retain-on-failure     # record every attempt, keep the failures
+bunx e2e run tests/todos.e2e.ts --headed
 ```
 </CodeGroup>
 
-`--video` takes an optional mode. Put test files before it, or write
-`--video=<mode>`.
+Each recording goes into its attempt's directory, and the failure recap
+prints its path. In CI, set `video: 'on-first-retry'` in the config. A test
+that passes the first time records nothing, and a flaky test leaves a
+recording of its retry.
 
-Each recording goes into its attempt's directory: WebM per page on web, MP4
-on a device. The failure recap prints the path, or the URL when a hosted
-browser keeps the recording. Subtract the recording's `startedAt` from a
-step's `startedAt` to find that step in the video.
-
-In CI, set `video: 'on-first-retry'` in the config. A test that passes the
-first time records nothing, and a flaky test leaves a recording of its
-retry.
-
-A target's `video` wins over the config's, and `--video` wins over both. A
-test's own option, such as `test('checkout', { video: 'on' }, ...)`, wins
-over all of them.
-
-The config's `video` setting and `--video` flag only apply to targets whose
-engine supports recording (other targets are skipped with a notice). Asking
-for video on a specific target or test whose engine can't record fails before
-tests start.
-
-[Recording](/reference/config#recording) has every mode and file.
+[Recording](/reference/config#recording) has every mode, which setting wins,
+and what happens on an engine that can't record.
 
 ## Step through a test
 
@@ -252,116 +176,24 @@ bunx e2e run tests/checkout.e2e.ts --step --headed
 ```
 </CodeGroup>
 
-The held step shows under its test, below the steps that already ran:
+At the prompt, Enter runs the held step, `s` shows the screen, `l` shows the
+app log, and `q` stops the run. Paused time doesn't count against step,
+test, or run timeouts. [Step mode](/reference/cli#step-mode) lists every key and what runs
+without pausing.
 
-```text
- ❯ |web| tests/checkout.e2e.ts 0/1
-   └── pays with a card (k3f9)
-       ✓ app.open "/checkout" 412ms
-       ⏸ step 2  locator.fill "getByLabel("Email")"  tests/checkout.e2e.ts:9
+<a id="step-through-a-test-without-a-terminal" />
 
- Test Files  0 passed (1)
-      Tests  0 passed (1)
-
-Paused (k3f9) at step 2
-  press enter to run this step, press h to show help, press q to quit
-```
-
-The keys follow [`--watch`](/reference/cli#watch-mode). These work at a prompt:
-
-| Key | Does |
-| --- | --- |
-| Enter | runs the held step and holds the next one |
-| `s` | shows the screen's accessibility tree |
-| `l` | shows the current attempt's app log, starting at the newest lines |
-| `n` | runs the rest of this test, retries included, and holds at the next test |
-| `a` | runs the rest of the run without holding steps |
-| `h` | shows every key under the prompt, or hides them |
-| `q`, Esc | stops the run as Ctrl-C does: the test ends `interrupted`, the rest are skipped, exit 130 |
-
-You can scroll through the screen or app log while the test stays paused.
-
-| Viewer key | Does |
-| --- | --- |
-| Up, Down, `k`, `j` | Scroll one line |
-| Page Up, Page Down, `b`, Space | Scroll one page |
-| `g`, `G` | Go to the top or bottom |
-| `s`, `l` | Switch to the screen or log |
-| `p` | Close the viewer and print its text above the live summary |
-| `q`, Esc | Return to the prompt |
-
-- Brief accidental keypresses right after a prompt opens are ignored, while
-  Ctrl-C works at any time.
-- Paused time doesn't count against step, test, or run timeouts.
-- Setup tests, retries, `afterEach` hooks, fixture teardowns, and polling
-  callbacks run without pausing; each `agent.act` counts as one step.
-- Concurrent steps (like `Promise.all`) share a single prompt so a
-  `waitForResponse` paired with a click runs together.
-- Hosted browsers or devices may still close idle sessions if left paused
-  too long.
-
-`--step` runs one test at a time. It is refused in CI, with `--watch`, and
-with `--workers` above 1. With the json reporter it needs stdin and stdout
-to be a terminal: the prompt prints on stderr and the report on stdout at
-the end.
-
-## Step through a test without a terminal
-
-When stdin or stdout is not a terminal, as in a coding agent's shell,
-`--step` runs the test in the background. The command returns at the first
-held step, with the screen that step waits on. Run each later command from
-the same directory. A shell that gives commands a terminal gets the key
-prompt instead; redirect stdin from the null device (`< /dev/null`, or
-`< NUL` in Windows `cmd`).
-
-<CodeGroup>
-```bash npm
-npx e2e run tests/checkout.e2e.ts --step
-npx e2e run --step next
-```
-
-```bash pnpm
-pnpm exec e2e run tests/checkout.e2e.ts --step
-pnpm exec e2e run --step next
-```
-
-```bash bun
-bunx e2e run tests/checkout.e2e.ts --step
-bunx e2e run --step next
-```
-</CodeGroup>
-
-```text
-✓ app.open "/checkout" 124ms
-Paused (k3f9) before step 2 of pays with a card [web]:
-  locator.fill "getByLabel("Email")" (tests/checkout.e2e.ts:9)
-Screen:
-  http://localhost:3000/checkout
-  heading "Checkout"
-  textbox "Email"
-  button "Pay"
-Next: e2e run --step next to run it, e2e run --step rest to run the rest, or e2e run --step stop to end the run.
-```
-
-| Command | Does |
-| --- | --- |
-| `e2e run --step next` | runs the held step and returns at the next one |
-| `e2e run --step rest` | runs the rest of the run without holding steps |
-| `e2e run --step stop` | stops the run as `q` does, exit 130, even while another command waits |
-
-- Each command prints everything that happened since the previous command,
-  along with the redacted accessibility tree of the current screen.
-- Only one stepped run can be active per directory at a time, and an idle
-  step automatically times out after 30 minutes.
-- If a file or directory is literally named `next`, `rest`, or `stop`, pass
-  it with a relative path like `./next`.
+Without a terminal, as in a coding agent's shell, `--step` runs the test in
+the background and returns at the first held step with its screen. Run
+`e2e run --step next` for each later step, `--step rest` to run the rest, or
+`--step stop` to end the run. See
+[Step commands](/reference/cli#step-commands).
 
 ## Pause a test
 
 With [`screen.pause()`](/reference/screen#screen-pause), you can pause the
-test at a line, with the app open, until you resume it. You can use it in
-any `e2e run`, with or without [`--step`](#step-through-a-test). The test
-is paused each time the line runs, such as on every pass of a loop.
+test at a line, with the app open, until you resume it. The test is paused
+each time the line runs, such as on every pass of a loop.
 
 ```ts title="tests/checkout.e2e.ts"
 import { test } from '@e2e-dev/web';
@@ -372,177 +204,43 @@ test('pays with a card', async ({ app, screen }) => {
 });
 ```
 
-Add `--headed` to look at the browser while the test is paused:
+Run the test with `--headed` to look at the browser while it's paused. Press
+Enter to resume, or `s` and `l` for the screen and the app log, as at a
+`--step` prompt. Without a terminal, resume with `e2e run --step next` from
+another shell in the same directory. In CI, `screen.pause()` fails the test
+immediately, so remove it before committing.
+
+<a id="agent-steps" />
+
+## Check what the model was sent
+
+Rerun an `agent.act` or `agent.assert` step live and record what the agent
+did:
 
 <CodeGroup>
 ```bash npm
-npx e2e run tests/checkout.e2e.ts --headed
+npx e2e run tests/todos.e2e.ts --no-cache --debug --ai-trace
 ```
 
 ```bash pnpm
-pnpm exec e2e run tests/checkout.e2e.ts --headed
+pnpm exec e2e run tests/todos.e2e.ts --no-cache --debug --ai-trace
 ```
 
 ```bash bun
-bunx e2e run tests/checkout.e2e.ts --headed
+bunx e2e run tests/todos.e2e.ts --no-cache --debug --ai-trace
 ```
 </CodeGroup>
 
-In a terminal, the pause is shown under its test:
+`--debug` prints a table with one row per agent step: duration, model
+calls, tokens, prompt-cache share, and cost when the provider reports one.
+See [Debug output](/reference/cli#debug-output).
 
-```text
- ❯ |web| tests/checkout.e2e.ts 0/1
-   └── pays with a card (k3f9)
-       ⏸ paused  screen.pause()  tests/checkout.e2e.ts:5
-
- Test Files  0 passed (1)
-      Tests  0 passed (1)
-
-Paused (k3f9) at screen.pause()
-  press enter to resume, press h to show help, press q to quit
-```
-
-Press Enter to resume the test, `h` to list the keys, or `q` to stop the run
-with exit 130, as at a [`--step` prompt](#step-through-a-test).
-Press `s` for the screen or `l` for the app log, then use the [viewer keys](#step-through-a-test).
-
-Without a terminal, as in a coding agent's shell, the pause is printed with
-the screen it waits on:
-
-```text
-Paused (k3f9) in pays with a card [web]:
-  screen.pause() (tests/checkout.e2e.ts:5)
-Screen:
-  http://localhost:3000/checkout
-  heading "Checkout"
-Next: e2e run --step next to resume the test, or e2e run --step stop to end the run.
-```
-
-To resume the test, run `e2e run --step next` from another shell in the
-same directory. To end the run with exit 130, run `e2e run --step stop`. You
-can use these commands with or without a terminal. At this pause, you can
-send `rest` in place of `next`.
-
-To [attach over MCP](/reference/mcp#attaching-to-a-held-test) from the same
-directory, pass the ID from the pause header, as in
-`open_session {attach: "k3f9"}`.
-
-You get an answer once the test is paused again or the run ends. At the
-end, you get `The run has ended.` and the run's exit code. See
-[Step through a test without a terminal](#step-through-a-test-without-a-terminal)
-for what each answer holds.
-
-- Paused time doesn't count toward test timeouts (though runs without a
-  terminal time out after 30 minutes with no command).
-- Pauses run on every attempt, including retries and setup tests. With
-  multiple workers, pauses queue one at a time while other workers continue.
-- Call `await screen.pause()` inside a test body, `beforeEach`, or fixture
-  setup. Only one run per directory can be controlled via `--step` commands
-  at a time.
-- In CI, `screen.pause()` fails the test immediately. Remove it before
-  committing.
-
-## Console output
-
-`console.log` and `console.error` in a test print while it runs, under a
-heading that names the stream, target, file, and test:
-
-```text
-stdout | |web| tests/todos.e2e.ts > adds a todo
-hello from the test
-```
-
-Output from outside a test, such as a file's top level or a reporter,
-prints under `stdout | runner` or `stderr | runner`. Both streams print
-where `list` does: stdout, or stderr beside `json`. Without `list`, `dot`, `line`,
-or another [interactive](/reference/reporters#interactive) reporter, output
-prints on stderr as written, so stdout holds only what a reporter prints
-there. Output from the config load prints on stderr before the
-run header, or a warning replaces it if the load fails.
-
-The runner [redacts](/reference/security#redaction) secret values. The
-report doesn't include console output, so use `expect` or an artifact for
-anything a later reader needs.
-
-## Agent steps
-
-These flags show what the agent did:
-
-<CodeGroup>
-```bash npm
-npx e2e run --debug     # timings and a step table on stderr
-npx e2e run --ai-trace  # every model call, for a trace viewer
-npx e2e run --no-cache  # run the agent live instead of replaying
-```
-
-```bash pnpm
-pnpm exec e2e run --debug     # timings and a step table on stderr
-pnpm exec e2e run --ai-trace  # every model call, for a trace viewer
-pnpm exec e2e run --no-cache  # run the agent live instead of replaying
-```
-
-```bash bun
-bunx e2e run --debug     # timings and a step table on stderr
-bunx e2e run --ai-trace  # every model call, for a trace viewer
-bunx e2e run --no-cache  # run the agent live instead of replaying
-```
-</CodeGroup>
-
-`--debug` adds the run's phase timings and a table with one row per agent
-step: duration, model calls, tokens, prompt-cache share, and cost when the
-provider reports one. Each planned step also saves its model transcript as
-an artifact.
-
-```console
-[e2e debug] agent steps (execution order, model openai/gpt-6-luna-fast, total $0.0312)
-  step                                   total   model  observe  action  calls  tokens in/out  cached       cost
-  act "add a todo named groceries"       3.9s    2.8s    410ms   620ms      3  9412/388       61% (5740)   $0.0198
-  assert "the list shows groceries"      1.2s    1.1s     88ms     0ms      1  3120/41        0% (0)       $0.0114
-```
-
-`--ai-trace` writes `.e2e/ai-trace.json`: one run per agent step, one entry
-per model call, with the redacted input and image bytes replaced by counts.
-Read it with [unbox-ai](https://github.com/e2e-inc/unbox-ai) to see
-prompts, tool calls, and token usage:
-
-<CodeGroup>
-```bash npm
-npx unbox-ai runs .e2e/ai-trace.json
-npx unbox-ai summary .e2e/ai-trace.json --run 0
-```
-
-```bash pnpm
-pnpm dlx unbox-ai runs .e2e/ai-trace.json
-pnpm dlx unbox-ai summary .e2e/ai-trace.json --run 0
-```
-
-```bash bun
-bunx unbox-ai runs .e2e/ai-trace.json
-bunx unbox-ai summary .e2e/ai-trace.json --run 0
-```
-</CodeGroup>
-
-A replayed step makes no model call and leaves no AI trace. Add `--no-cache`
-to trace the whole flow or rule out a stale [recording](/cache).
-
-## Common errors
-
-| Code | Usual cause | Fix |
-| --- | --- | --- |
-| `APP_UNREACHABLE` | Nothing answers at `app.url`, or `app.command` never became ready. On iOS, the message may name the automation runner instead | Set `app.command.log` and read it; check the port; raise `app.command.startupTimeout`. For the iOS runner, follow the message (see [Mobile](/mobile#troubleshooting)) |
-| `APP_ALREADY_RUNNING` | Something already serves `app.url` when the runner wanted to start `app.command` | Stop it, or set `reuseExisting: true` for local runs |
-| `LOCATOR_NOT_FOUND` | Wrong role or name, text not exact, element inside an iframe, page not open | Read the markup for the accessible name; try `exact: false`; `browser.frameLocator` for iframes; `--headed` to look |
-| `LOCATOR_AMBIGUOUS` | Two matches: a hidden duplicate, a repeated label | Add `{ name }`, scope under a container, `filter`, `first()`, or `{ visible: true }` |
-| `ASSERTION_FAILED` | The expectation is wrong, or the state settles after 5 s; for `agent.assert`, the judgment was false | Compare with the screenshot; `{ timeout }` on the matcher; rewrite the question |
-| `ASSERTION_INCONCLUSIVE` | `agent.assert` or `agent.extract` asked about something the screen doesn't show: on another page, still loading, or only in pixels | Open or wait for the right screen first; add `vision: true` when the answer is in pixels (the message says so) |
-| `ACTION_FAILED` | Element covered, disabled, or detached, or an operation timed out | Wait on the right condition with `expect` first; close overlays |
-| `STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT` | The agent ran out of actions, model calls, or time | Scope the goal to one step. Raise the agent entry's `maxSteps` or `maxModelCalls` for the budget, the config `timeout` for an `act` step, or the agent's `judgmentTimeout` for `assert`, `waitFor`, and `extract` |
-| `MODEL_UNAVAILABLE` | No model constructed in the config, or GitHub Copilot doesn't serve the configured model to your account | See [Models](/models); for Copilot, [Pick a model](/subscriptions#pick-a-model) |
-| `MODEL_PROVIDER_FAILED` | Missing or bad key, rate limit, no credits, or every try of one request went 120 s without an answer | Check the key the provider reads and the quota; for a slow local model, a smaller screen (`agents.<name>.maxObservationBytes`) or a faster model |
-| `MODEL_REFUSED` | The model refused the prompt (finish reason `content-filter`). Exit 1 | Rephrase the instruction, or switch to another model |
-
-The [errors reference](/reference/errors) lists every code, its class, and
-its exit code.
+`--ai-trace` writes `.e2e/ai-trace.json` with every model call. Read it with
+unbox-ai, as [Output](/reference/cli#output) shows, to see the prompts and
+tool calls. A replayed step makes no model call and leaves no AI trace, so
+`--no-cache` traces the whole flow and rules out a stale
+[recording](/cache). [Agent steps](/agent-steps) explains what the model
+sees and may do.
 
 ## Next
 
@@ -551,6 +249,6 @@ its exit code.
     Every flag of `e2e run`.
   </Card>
   <Card title="Errors" icon="triangle-exclamation" href="/reference/errors">
-    Every error code.
+    Every error code, with common causes and fixes.
   </Card>
 </CardGroup>

@@ -18,7 +18,7 @@ import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
-import { projectTools } from '@e2e-dev/core/lib/agent/default-agent';
+import { createProjectTools } from '@e2e-dev/core/lib/agent/default-agent';
 import type { ExecutorNode, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
 import { projectTree, redactNode, type NodeRedaction } from '@e2e-dev/core/lib/agent/observation';
 import { imagePointToViewport } from '@e2e-dev/core/lib/agent/point-tap';
@@ -131,7 +131,7 @@ export function createSessionCatalog(options: CatalogOptions): SessionCatalog {
   const defined = options.tools;
   const readOnly = new Set(['observe', 'locate', 'test_lines', 'screenshot']);
   const project: ToolSet = {};
-  for (const [name, tool] of Object.entries(projectTools(context, defined))) {
+  for (const [name, tool] of Object.entries(createProjectTools(context, defined))) {
     if (name in builtIn) {
       options.warn(`project tool "${name}" is not served over MCP: the name belongs to a built-in session tool`);
       continue;

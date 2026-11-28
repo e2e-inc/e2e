@@ -4,8 +4,12 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Deadline, type OperationContext } from '@e2e-dev/core/engine';
+import { waitReady } from '../../src/actionability.ts';
 import { DevTools } from '../../src/devtools.ts';
+import { placeMasks, removeMasks } from '../../src/in-page/masks.ts';
 import { activeUnder, queryAll, type NodeOps } from '../../src/in-page/node-ops.ts';
+import type { AppWindow } from '../../src/windows.ts';
 import { openTestWindow, type TestWindow } from './test-window.ts';
 
 const devtools = new DevTools();
@@ -38,6 +42,16 @@ describe('nodeOp', () => {
     expect(await run(await element('#marked'), 'checkEnabled', true)).toEqual({ ok: false, reason: 'it is disabled' });
     expect(await run(await element('#unmarked'), 'checkEnabled', true)).toEqual({ ok: true });
     expect(await run(await element('#hidden'), 'checkEnabled', false)).toEqual({ ok: false, reason: 'it is not visible' });
+  });
+
+  it('finds an element inert through the slot it is shown in, and refuses a file input under an inert element', async () => {
+    await window.setContent(`<span id="host"><select id="slotted"><option>A</option><option>B</option></select></span><div inert><input id="file" type="file"></div><input id="free" type="file"><script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<div inert><slot></slot></div>';
+    </script>`);
+    const inert = { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
+    expect(await run(await element('#slotted'), 'checkSelect', { label: 'B' })).toEqual(inert);
+    expect(await run(await element('#file'), 'checkFileInput')).toEqual(inert);
+    expect(await run(await element('#free'), 'checkFileInput')).toEqual({ ok: true });
   });
 
   it('hit-tests through a slot and a shadow host, and names the element that covers the point', async () => {
@@ -169,6 +183,13 @@ describe('nodeOp', () => {
     expect(await run(await element('#hands-off'), 'focus')).toBe('moved');
   });
 
+  it('counts focus a composite hands to a part of itself as held', async () => {
+    await window.setContent(`<div id="row" tabindex="0"><input id="editor"></div>`);
+    await window.inPage(() => document.querySelector('#row')!.addEventListener('focus', () => (document.querySelector('#editor') as HTMLInputElement).focus()));
+    expect(await run(await element('#row'), 'focus')).toBe('held');
+    expect(await window.inPage(() => document.activeElement?.id)).toBe('editor');
+  });
+
   it('points at the value an option has when a label names none', async () => {
     await window.setContent(`<select id="kind"><option value="work">Work</option></select>`);
     expect(await run(await element('#kind'), 'checkSelect', { label: 'work' })).toEqual({ ok: false, reason: 'no option matches {"label":"work"}; the options are "Work"; an option has the value "work": pass { value: "work" }' });
@@ -183,6 +204,16 @@ describe('nodeOp', () => {
     // A listbox takes typed keys as typeahead; a button would take a space as a click.
     expect(await run(await element('#list'), 'takesText')).toBe(true);
     expect(await run(await element('#button'), 'takesText')).toBe(false);
+  });
+
+  it('lets a focusable element with key handlers of its own take keys, as a canvas editor does, and not the page or a link', async () => {
+    await window.setContent(`<canvas id="canvas" tabindex="0"></canvas><div id="widget" tabindex="0"></div><a id="link" href="#x">L</a><svg><a id="svg-link" href="#y"><text y="10">S</text></a></svg><select id="pick"><option>A</option></select>`);
+    expect(await run(await element('#canvas'), 'takesText')).toBe(true);
+    expect(await run(await element('#widget'), 'takesText')).toBe(true);
+    expect(await run(await element('#link'), 'takesText')).toBe(false);
+    expect(await run(await element('#svg-link'), 'takesText')).toBe(false);
+    expect(await run(await element('#pick'), 'takesText')).toBe(false);
+    expect(await run(await element('body'), 'takesText')).toBe(false);
   });
 });
 
@@ -220,5 +251,106 @@ describe('queryAll', () => {
     expect(await run(await element('#fixed'), 'viewportIntersection')).toEqual({ intersects: true, ratio: 1 });
     expect(await run(await element('#below'), 'viewportIntersection')).toEqual({ intersects: false, ratio: 0 });
     expect(await run(await element('#boxless'), 'viewportIntersection')).toEqual({ intersects: false, ratio: 0 });
+  });
+});
+
+describe('waitReady', () => {
+  const INERT = /it is inert \(a modal or the app blocks it\)/;
+  const SELECT = (id: string): string => `<select id="${id}"><option>A</option><option>B</option></select>`;
+  /** `'ready'`, or the error `waitReady` gave up with. */
+  const ready = async (selector: string, ...[check, ...args]: Parameters<typeof waitReady> extends [unknown, ...infer Rest] ? Rest : never): Promise<unknown> => {
+    const operation = { signal: new AbortController().signal, timeoutMs: 300, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext;
+    const target = { devtools, window: { page: window.page } as AppWindow, backendNodeId: await element(selector), operation, deadline: new Deadline(300) };
+    return await waitReady(target, check, ...args).then(() => 'ready', (error: unknown) => error);
+  };
+  const selects = (selector: string): Promise<unknown> => ready(selector, 'checkSelect', { label: 'B' });
+  const showModals = (ids: readonly string[]): Promise<void> => window.inPage((shown) => shown.forEach((id) => (document.getElementById(id) as HTMLDialogElement).showModal()), ids);
+
+  it('refuses a control outside an open modal dialog, a file input too, and not one inside it', async () => {
+    await window.setContent(`<input id="file" type="file"><dialog id="modal"><input id="inside"></dialog>`);
+    expect(await ready('#file', 'checkFileInput')).toBe('ready');
+    await showModals(['modal']);
+    expect(await ready('#file', 'checkFileInput')).toMatchObject({ message: expect.stringMatching(INERT) });
+    expect(await ready('#inside', 'checkEditable')).toBe('ready');
+  });
+
+  it('takes a modal dialog in a shadow root as open, and a modal under an inert element as out of its reach, as Chromium does', async () => {
+    await window.setContent(`<input id="file" type="file"><span id="host"></span><div inert><dialog id="nested"><input id="free"></dialog></div><script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<dialog><p>Shadow modal</p></dialog>';
+    </script>`);
+    await window.inPage(() => (document.getElementById('host')!.shadowRoot!.querySelector('dialog') as HTMLDialogElement).showModal());
+    expect(await ready('#file', 'checkFileInput')).toMatchObject({ message: expect.stringMatching(INERT) });
+    await window.inPage(() => (document.getElementById('host')!.shadowRoot!.querySelector('dialog') as HTMLDialogElement).close());
+    await showModals(['nested']);
+    // What Chromium says: the input inside the modal takes focus.
+    expect(await window.inPage(() => {
+      document.getElementById('free')!.focus();
+      return document.activeElement?.id;
+    })).toBe('free');
+    expect(await ready('#free', 'checkEditable')).toBe('ready');
+  });
+
+  it('takes an open modal dialog that is inert itself as inert, with its controls', async () => {
+    await window.setContent(`<dialog id="modal" inert>${SELECT('pick')}<input id="file" type="file"></dialog>`);
+    await showModals(['modal']);
+    expect(await run(await element('#pick'), 'checkSelect', { label: 'B' })).toEqual({ ok: false, reason: 'it is inert (a modal or the app blocks it)' });
+    expect(await run(await element('#file'), 'checkFileInput')).toEqual({ ok: false, reason: 'it is inert (a modal or the app blocks it)' });
+    expect(await selects('#pick')).toMatchObject({ message: expect.stringMatching(INERT) });
+  });
+
+  it('takes the controls of a modal dialog another one covers as inert, centred over it or not, and the top one\'s as free', async () => {
+    for (const placed of ['', 'margin:0;left:0;top:0']) {
+      await window.setContent(`<dialog id="lower" style="width:300px;height:200px">${SELECT('under')}</dialog><dialog id="upper" style="${placed}">${SELECT('over')}</dialog>`);
+      await showModals(['lower', 'upper']);
+      expect(await selects('#under')).toMatchObject({ message: expect.stringMatching(INERT) });
+      expect(await selects('#over')).toBe('ready');
+      // Closed, the top one leaves the one under it free again.
+      await window.inPage(() => (document.getElementById('upper') as HTMLDialogElement).close());
+      expect(await selects('#under')).toBe('ready');
+    }
+  });
+
+  it('reads which modal dialog is on top from Chromium, where a hit test at a dialog\'s centre would not tell', async () => {
+    // The top one lets clicks through its centre, as a full-screen positioner around a panel does.
+    await window.setContent(`<dialog id="lower" style="width:300px;height:200px">${SELECT('under')}</dialog><dialog id="upper" style="pointer-events:none;width:400px;height:300px;border:0;padding:0;background:transparent"><div style="pointer-events:auto;height:40px">${SELECT('over')}</div></dialog>`);
+    await showModals(['lower', 'upper']);
+    expect(await selects('#over')).toBe('ready');
+    expect(await selects('#under')).toMatchObject({ message: expect.stringMatching(INERT) });
+    // The lower one is off screen, with no point to hit.
+    await window.setContent(`<dialog id="lower" style="margin:0;top:-500px;height:100px">${SELECT('under')}</dialog><dialog id="upper">${SELECT('over')}</dialog>`);
+    await showModals(['lower', 'upper']);
+    expect(await selects('#under')).toMatchObject({ message: expect.stringMatching(INERT) });
+    // The top one opens from a component inside the lower one, so a hit at the lower one's centre lands in it.
+    await window.setContent(`<dialog id="lower">${SELECT('under')}<span id="host"></span></dialog><script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<dialog><p>Inner modal</p></dialog>';
+    </script>`);
+    await showModals(['lower']);
+    await window.inPage(() => (document.getElementById('host')!.shadowRoot!.querySelector('dialog') as HTMLDialogElement).showModal());
+    expect(await selects('#under')).toMatchObject({ message: expect.stringMatching(INERT) });
+  });
+
+  it('refuses a control a closed shadow root makes inert, by a modal dialog or an inert slot, which no page-side walk reaches', async () => {
+    await window.setContent(`${SELECT('background')}<span id="host"></span><span id="component">${SELECT('slotted')}</span><script>
+      const root = document.getElementById('host').attachShadow({ mode: 'closed' });
+      root.innerHTML = '<dialog><p>Closed modal</p></dialog>';
+      globalThis.openClosedModal = () => root.querySelector('dialog').showModal();
+      document.getElementById('component').attachShadow({ mode: 'closed' }).innerHTML = '<div inert><slot></slot></div>';
+    </script>`);
+    expect(await selects('#slotted')).toMatchObject({ message: expect.stringMatching(INERT) });
+    expect(await selects('#background')).toBe('ready');
+    await window.inPage(() => (globalThis as unknown as { openClosedModal: () => void }).openClosedModal());
+    expect(await selects('#background')).toMatchObject({ message: expect.stringMatching(INERT) });
+  });
+});
+
+describe('masks', () => {
+  it('leaves an animation the app paused paused, and plays an endless one again after the capture', async () => {
+    await window.setContent(`<div id="paused"></div><div id="running"></div><script>
+      for (const id of ['paused', 'running']) document.getElementById(id).animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000, iterations: Infinity });
+      document.getElementById('paused').getAnimations()[0].pause();
+    </script>`);
+    await window.page.evaluate(placeMasks, 'input[type=password i]');
+    await window.page.evaluate(removeMasks, 'input[type=password i]');
+    expect(await window.inPage(() => ['paused', 'running'].map((id) => document.getElementById(id)!.getAnimations()[0]?.playState))).toEqual(['paused', 'running']);
   });
 });

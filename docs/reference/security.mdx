@@ -1,6 +1,6 @@
 ---
 title: Security rules
-description: Every rule the runner enforces on model input, tool calls, secrets, redaction, sessions, the replay cache, artifacts, and network connections.
+description: "Reference for every security rule the e2e runner enforces on model input, tool calls, secrets, redaction, sessions, the replay cache, artifacts, and network connections."
 "og:image": "https://e2e.com/docs/images/og/reference/security.png?v=888009ffe4"
 "twitter:image": "https://e2e.com/docs/images/og/reference/security.png?v=888009ffe4"
 ---
@@ -60,15 +60,14 @@ larger budget. [How agent steps work](/agent-steps) explains a step in full.
   or config. The one exception is the MCP server's
   [`run_code`](/reference/mcp#run_code): it runs a coding agent's JavaScript
   in the server's Node process, unconfined, with the authority of a test
-  file. The agent can already write a test and run it. What `run_code`
-  returns has the exact value of each configured secret redacted. That
-  prevents accidents and is not a boundary: the code can read every
+  file. What `run_code` returns has the exact value of each configured
+  secret redacted. That is not a boundary: the code can read every
   configured secret and credential, from the config file, the environment, or
   the app, and can return one in a changed form. Don't connect an agent you
-  don't trust with the project's files and secrets, and note that a client
-  which confines the agent's shell may still run this server outside it.
-  `run_code` is on by default, and no flag turns it off: a client that
-  approves the server's `call` tool approves `run_code` with it.
+  don't trust with the project's files and secrets. A client that confines
+  the agent's shell may still run this server outside it. `run_code` is on
+  by default, and no flag turns it off: a client that approves the server's
+  `call` tool approves `run_code` with it.
 
 | Fails with | When |
 | --- | --- |
@@ -84,8 +83,8 @@ These calls fail with `POLICY_DENIED`.
 | --- | --- |
 | Navigation to any scheme but `http:` and `https:`, other than `about:blank` | `file:`, `data:`, `javascript:`, and wrappers such as `view-source:file:` would load local or inline content. |
 | A `request` call to any scheme but `http:` and `https:`, `about:blank` included | It sends an HTTP request; nothing else has an answer to read. |
-| On a target whose `app.url` is a file: navigation to a file outside that file's directory, or to a directory | The agent names navigation URLs, and a page can tell it to. It could open any file you can read, and then carry it to an http(s) address. A directory listing links to its parent. |
-| On such a target: an agent step's observation once the page itself has gone to a file outside the directory, or to a directory | A link or a script in a local page can take the browser there, where a typed URL cannot. The screen is withheld from the model, the trace, and the failure evidence. |
+| On a target whose `app.url` is a file: navigation to a file outside that file's directory, or to a directory | The agent could open any file you can read, and carry it to an http(s) address. |
+| On such a target: an agent step's observation once the page itself has gone to a file outside the directory, or to a directory | The screen is withheld from the model, the trace, and the failure evidence. |
 | A malformed URL | Nothing is repaired. |
 | A `Secret` reaching a JSON sink | Handles carry no value, and no value may be serialized. |
 | Reading a value, text, or attribute from a secure field, with a getter or a `toHaveValue`, `toHaveText`, `toContainText`, or `toHaveAttribute` matcher | Assert the outcome, not the secret. A withheld value is redacted, not empty or absent. |
@@ -119,8 +118,7 @@ These calls fail with `POLICY_DENIED`.
   code is trusted.
 - No screenshot of a file app is sent to a model or kept on its own.
   `agent.assert` and a failure keep none, and `vision: 'only'` is
-  `POLICY_DENIED`. A local page can embed another file in a frame, which
-  the tree leaves out and pixels would show.
+  `POLICY_DENIED`.
 - A [`video`](/reference/config#video) you turn on records the browser
   wherever it goes, a file outside the directory included.
 - The directory of the app's file is the whole readable scope. In a project
@@ -154,19 +152,16 @@ lists.
   unless you list the origin it lands on.
 - On WebKit, `basicAuth` answers a `401` from any origin when an allowed
   origin is on its scheme's default port (`https://staging.example.com`) or
-  has an IPv6 host. WebKit can't scope a credential to such an origin.
+  has an IPv6 host.
 - An extra is an `http:` or `https:` origin with no path, query, or
   fragment, such as `https://api.example.com`. Anything else, a `*` in the
   host, and port `0` are `INVALID_CONFIG` at config load.
 
 ### Site check
 
-The browser engine compares hostnames to decide what counts as the target's
-site. Observations leave out child frames from other sites, and `data:`
-frames.
-
-The check approximates the registrable domain without a public suffix list.
-A shared hosting domain such as `vercel.app` counts as one site.
+Observations leave out child frames from other sites, and `data:` frames.
+The browser engine compares hostnames without a public suffix list, so a
+shared hosting domain such as `vercel.app` counts as one site.
 
 ### Secret fills
 
@@ -190,8 +185,7 @@ test('connect Stripe', async ({ screen, agent }) => {
 | Model-directed (`type_secret`) | The step declared the secret. The secret is configured. The target is an enabled, editable input on the newest observation. A password goes into a password field. Replay repeats these checks. |
 | Deterministic `fill(secret)` | None on the field: test code chose it. The value is still registered for redaction. |
 
-The runner resolves the value on the host and passes it to the engine. The
-model never sees or picks it.
+The model never sees or picks the value.
 
 ### Screenshots after a secret fill
 
@@ -270,8 +264,7 @@ agent's `system`, and an `e2e explore` goal.
 
 The keys your model provider or coding agent signs in with are redacted from
 the terminal, reports, trace pages, and what the run sends the model of
-the screen, tool results, the model's own prose, and a `system` text a config writes, of the built-in agent or of `acp()`. A provider or proxy that quotes a rejected key back in its error
-can't put it in a report. Each shows as `<secret:NAME>`.
+the screen, tool results, the model's own prose, and a `system` text a config writes, of the built-in agent or of `acp()`. Each shows as `<secret:NAME>`.
 
 | Source | Name in the marker |
 | --- | --- |
@@ -283,10 +276,10 @@ can't put it in a report. Each shows as `<secret:NAME>`.
 
 | Rule | Detail |
 | --- | --- |
-| Whole keys only | A key matches as a whole, in the forms above. Cut short at a length limit, it matches when at least half of it is there, and no fewer than 16 characters. Any other part of one isn't a match: keys of one provider start alike. |
-| Length | A value shorter than 20 characters is left alone, so a placeholder for a local model server, such as `ollama`, doesn't rewrite ordinary words. Name a shorter real key under [`secrets`](/reference/config#secrets). A value longer than 8,192 characters is left alone too, as is a shorter one the redactor can't build a pattern for, such as thousands of punctuation characters: neither is a key or token a provider issues. |
+| Whole keys only | A key matches as a whole, in the forms above. Cut short at a length limit, it matches when at least half of it is there, and no fewer than 16 characters. Any other part of one isn't a match. |
+| Length | A value shorter than 20 characters, such as the placeholder `ollama` for a local model server, is left alone. Name a shorter real key under [`secrets`](/reference/config#secrets). A value longer than 8,192 characters is left alone too. |
 | Output | The run holds back the end of an unfinished line that could still become a key, as it does for a secret. A prompt printed without a newline shows with the next output, and is lost if the test then blocks the process until it is stopped. |
-| Keys loaded during a test | The worker reads the named provider variables again before it records a step and before it records a failed step. A key loaded in `beforeEach` is covered by the following steps. |
+| Keys loaded during a test | The named provider variables are read again before each step is recorded. A key loaded in `beforeEach` is covered by the following steps. |
 | Downloads | An app can serve a runner key passed through `inheritEnv`. To cover a key supplied only through `command.env`, also declare its value under `secrets`. See [Downloads](#downloads) for scan limits. |
 | Errors | When a step throws `MODEL_PROVIDER_FAILED`, `CONTEXT_OVERFLOW`, or `MODEL_OUTPUT_INVALID`, the caught error has redacted text and omits the provider SDK's raw cause. Match by `error.code`. |
 | Sessions | A provider key is never added to a [session](#sessions)'s saved secrets. What the app keeps in its own state, such as browser storage, is saved as the app wrote it, encrypted. |
@@ -298,15 +291,12 @@ These keys are not redacted:
   register it or name it under [`secrets`](/reference/config#secrets),
 - a key in another variable, such as a custom provider's,
 - a key spelled into a test or `describe` title, a skip reason, or an
-  `e2e explore` goal. The runner and its workers build test ids from
-  those, and need not know the same keys. Name it under `secrets`,
-- `command.log`, as for every secret: the runner keeps your app's output
-  as written, and your app gets what `inheritEnv` and `command.env` give it,
+  `e2e explore` goal. Name it under `secrets`,
+- `command.log`, as for every secret,
 - a login a coding agent keeps in the OS keyring, and Claude Code's own
   login file,
 - the model's reasoning and the arguments of its own tool calls when
-  they are sent back to the model: a provider signs reasoning and refuses a
-  changed one, and a call is replayed as made. Its prose is redacted,
+  they are sent back to the model. Its prose is redacted,
 - a JSON service key or a key file, such as `AICORE_SERVICE_KEY` and
   `GOOGLE_APPLICATION_CREDENTIALS`,
 - in what Node prints when `NODE_DEBUG` names `child_process` or `net`,
@@ -383,8 +373,8 @@ but authenticated, the secret names.
 | Property | Value |
 | --- | --- |
 | Location | `sessions/<runId>/` under the [output directory](/reference/config#output) (default `.e2e/sessions/<runId>/`), directory mode `0700`, files `0600` |
-| Cipher | AES-256-GCM, a fresh 12-byte IV per save |
-| Key | 32 random bytes generated per run and held in memory. Workers receive it over IPC, never through disk or the environment. |
+| Cipher | AES-256-GCM |
+| Key | 32 random bytes generated per run and held in memory, never written to disk or the environment. |
 | Bound to | Run id, target, engine name and version, platform, and app identity, all authenticated as additional data |
 | Lifetime | At most 24 hours, sooner if the saved state declares an earlier expiry |
 | Cleanup | The directory is removed when the run ends |
@@ -448,11 +438,11 @@ after download redaction, with the `redaction` label the report records.
 | `registry.npmjs.org` | At most one request a day from a CLI command run on a terminal, to check for a newer e2e release. Skipped in CI, when stderr is piped, for `e2e mcp` and `e2e upgrade`, and under `E2E_UPDATE_CHECK_DISABLED`, `NO_UPDATE_NOTIFIER`, `E2E_TELEMETRY_DISABLED`, or `DO_NOT_TRACK`. One request per `e2e feedback` you run, skipped with `--allow-outdated` and under `E2E_TELEMETRY_DISABLED` or `DO_NOT_TRACK`. One request per `e2e` or `@e2e-dev/*` package the project lists with a registry version, each time you run `e2e upgrade`, to `npm_config_registry` instead when the package manager sets it; then the package manager installs from its own registry. |
 | `api.limrun.com` (or `LIMRUN_BASE_URL`) and its devices | Only from [`limrun()`](/integrations/limrun). It signs in with `LIMRUN_API_KEY`. |
 | The Kernel API and its hosted browsers | Only from [`kernel()`](/integrations/kernel). |
-| `api.notte.cc` (or `NOTTE_API_URL`) and its hosted browsers | Only from [`notte()`](/integrations/notte). It signs in with `NOTTE_API_KEY`. For each attempt, it starts a session, connects over the session's CDP URL, reads downloads back from the session's file storage, and stops the session when the attempt ends. The session's console link goes to the log; its token-bearing viewer URL never does. |
+| `api.notte.cc` (or `NOTTE_API_URL`) and its hosted browsers | Only from [`notte()`](/integrations/notte). It signs in with `NOTTE_API_KEY`. The session's console link goes to the log; its token-bearing viewer URL never does. |
 | TestMu AI's CDP hub and its hosted browsers | Only from [`testmuBrowsers()`](/integrations/testmu#run-web-targets-in-browsers). The username and access key travel only in the CDP URL, never in a log line. |
-| `mobile-hub.lambdatest.com`, `mobile-api.lambdatest.com` (or `TESTMU_API_ENDPOINT`), and `manual-api.lambdatest.com` | Only from [`testmu()`](/integrations/testmu#run-mobile-targets-on-devices). It signs in with `LT_USERNAME` and `LT_ACCESS_KEY`. For each session, agent-device looks the device up in the API's catalog, uploads a local `app` to `manual-api.lambdatest.com`, and runs the session on TestMu AI's Appium hub. The provider asks the API for the session's video only when an attempt records one. |
-| `hub-cloud.browserstack.com` and `api-cloud.browserstack.com` (or `BROWSERSTACK_API_ENDPOINT`) | Only from [`browserstack()`](/integrations/browserstack). It signs in with `BROWSERSTACK_USERNAME` and `BROWSERSTACK_ACCESS_KEY`. For each session, agent-device looks the device up in the App Automate API, uploads a local `app`, and runs the session on BrowserStack's Appium hub. For an `https` `app`, the provider has the API fetch the build once per run, and it asks the API for the session's video only when an attempt records one. |
-| `backend.revyl.ai` (or `REVYL_API_URL`) | Only from [`revyl()`](/integrations/revyl) and [`revylBrowsers()`](/integrations/revyl#run-web-targets-in-browsers). Both sign in with `REVYL_API_KEY`. For each worker, `revyl()` has agent-device's Revyl plugin start a Revyl device, which downloads the `https` `app` itself, and stops the device when the run releases it. For each attempt, `revylBrowsers()` starts a Revyl web session, connects over a single-use CDP URL that Revyl relays to the session's browser, and stops the session when the attempt ends. For an attempt that records video, it downloads the session's recording from the signed storage URL Revyl returns. The CDP URL never goes to the log. |
+| `mobile-hub.lambdatest.com`, `mobile-api.lambdatest.com` (or `TESTMU_API_ENDPOINT`), and `manual-api.lambdatest.com` | Only from [`testmu()`](/integrations/testmu#run-mobile-targets-on-devices). It signs in with `LT_USERNAME` and `LT_ACCESS_KEY`. A local `app` is uploaded to `manual-api.lambdatest.com`. |
+| `hub-cloud.browserstack.com` and `api-cloud.browserstack.com` (or `BROWSERSTACK_API_ENDPOINT`) | Only from [`browserstack()`](/integrations/browserstack). It signs in with `BROWSERSTACK_USERNAME` and `BROWSERSTACK_ACCESS_KEY`. A local `app` is uploaded, and the API fetches an `https` `app` itself. |
+| `backend.revyl.ai` (or `REVYL_API_URL`) | Only from [`revyl()`](/integrations/revyl) and [`revylBrowsers()`](/integrations/revyl#run-web-targets-in-browsers). Both sign in with `REVYL_API_KEY`. The Revyl device downloads the `https` `app` itself. For an attempt that records video, `revylBrowsers()` downloads the recording from the signed storage URL Revyl returns. The CDP URL never goes to the log. |
 | `api.e2b.app` and its sandboxes (or `E2B_DOMAIN`, `E2B_API_URL`, `E2B_SANDBOX_URL`) | Only from [`e2b()`](/integrations/e2b#run-android-targets) and [`e2bBrowsers()`](/integrations/e2b#run-web-targets-in-browsers). It signs in with `E2B_API_KEY`. The engine reaches each sandbox's agent-device or Chromium through a tunnel on `127.0.0.1` ([How the sandboxes stay private](/integrations/e2b#how-the-sandboxes-stay-private)), and `e2b()` sends the `.apk` through it. Each Android sandbox downloads Node from `nodejs.org` if Node is absent, and installs agent-device from npm. |
 | The Expo API and the simulators' agent-device daemons | Only from [`expoSimulators()`](/integrations/eas), or its deprecated alias `easSimulators()`. It signs in with `EXPO_TOKEN`, or falls back to the eas-cli login in `~/.expo/state.json`. On a CI runner, set `EXPO_TOKEN` or keep that login out of the runner's home. |
 | `mcr.microsoft.com` | Only from [`smol()`](/integrations/smol), to pull the Playwright image. The machines then have unrestricted network access, and reach every port on your computer's loopback through `host.smolvm.internal`, not only `hostPorts` ([Set up the provider](/integrations/smol#set-up-the-provider)). |

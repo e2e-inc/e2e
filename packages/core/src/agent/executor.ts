@@ -22,6 +22,7 @@ import type { VisionDegradation, StepTurn } from '../run/steps.ts';
 import type { ComputedStyleProperty, ComputedStyleValues } from '../engine/computed-style.ts';
 import type {
   AgentErrorCode,
+  AgentTool,
   ClickOptions,
   JsonValue,
   ModelInstance,
@@ -553,6 +554,49 @@ export interface StepVerdict {
   readonly errorCode?: AgentErrorCode;
 }
 
+/**
+ * One question of the judgment tier (`agent.waitFor`, `agent.extract`) put to
+ * an executor that answers them itself (`StepExecutor.answer`). The runner
+ * has already captured and redacted the evidence, and it validates the
+ * answer and asks again when it is invalid: the executor only gets the text
+ * to its model and the reply back.
+ */
+export interface ExecutorQuestion {
+  /** Trusted runner policy, then trusted project context. */
+  readonly system: string;
+  /** Untrusted evidence and the instruction, which says what JSON the answer holds. */
+  readonly prompt: string;
+  /** The masked screenshots that belong to the prompt, in order; empty unless the call asked for pixels. */
+  readonly images: readonly ExecutorImage[];
+  /** The attempt the question belongs to, so a session can live across its questions. */
+  readonly attempt: ExecutorAttempt;
+  /** Aborts when the test is cancelled or the call's deadline expires. */
+  readonly signal: AbortSignal;
+}
+
+/** One image of an `ExecutorQuestion`. */
+export interface ExecutorImage {
+  readonly data: Uint8Array;
+  readonly mediaType: string;
+  /** CSS pixel geometry. */
+  readonly width: number;
+  readonly height: number;
+}
+
+/** An executor's reply to one `ExecutorQuestion`, with what its model reported of the call. */
+export interface ExecutorAnswer extends ExecutorModelCall {
+  /** The model's reply: one JSON value, alone or in a code fence. */
+  readonly text: string;
+}
+
+/** What `StepExecutor.extend` adds to an executor for a run that needs more than the project configured. */
+export interface ExecutorExtension {
+  /** Guidance appended to the executor's own rules. */
+  readonly system?: string;
+  /** Tools from `defineTool` offered beside the executor's own, by name. */
+  readonly tools?: Readonly<Record<string, AgentTool>>;
+}
+
 /** The brain socket: one step in, one verdict out. */
 export interface StepExecutor {
   readonly name: string;
@@ -587,6 +631,19 @@ export interface StepExecutor {
    */
   readonly vision?: true;
   runStep(context: StepExecutorContext): Promise<StepVerdict>;
+  /**
+   * Answers one judgment question on the executor's own model. With it,
+   * `agent.waitFor` and `agent.extract` run on the executor when the agent
+   * has no `judge` or `model`; without it they need one of the two.
+   */
+  answer?(question: ExecutorQuestion): Promise<ExecutorAnswer>;
+  /**
+   * A copy of this executor that also follows `extension.system` and offers
+   * `extension.tools`. `e2e explore` runs on an executor that has this, with
+   * its exploration rules and `report_finding`; without it, explore runs the
+   * built-in agent in the executor's place.
+   */
+  extend?(extension: ExecutorExtension): StepExecutor;
 }
 
 /**

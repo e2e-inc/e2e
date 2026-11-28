@@ -497,7 +497,7 @@ await screen.pause();
 - リトライやセットアップテストを含め、すべての試行でテストは一時停止します。
 - `--step` 実行では、`n`、`a`、`e2e run --step rest` の後も、テストは `screen.pause()` で一時停止します。
 - 一時停止の時間はどのタイムアウトにも加算しません。
-- [MCP](/mcp-server) の `open_session {test}` が開くセッション、`@e2e-dev/core` や `openHost` を使うプログラム、`e2e/runner` の `run()` では、テストは一時停止しません。`CI` が設定されている場合、`run()` でも `e2e run` と同様に、テストは `PAUSE_UNAVAILABLE` で失敗します。
+- [MCP](/coding-agents#let-the-agent-use-the-app) の `open_session {test}` が開くセッション、`@e2e-dev/core` や `openHost` を使うプログラム、`e2e/runner` の `run()` では、テストは一時停止しません。`CI` が設定されている場合、`run()` でも `e2e run` と同様に、テストは `PAUSE_UNAVAILABLE` で失敗します。
 - `e2e run --watch` では、一時停止中に `q` を押すか `e2e run --step stop` を実行すると、現在の実行だけがキャンセルされます。
 - ロケーターにはありません。
 

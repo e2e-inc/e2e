@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import type {
   ClientContext,
+  ContentBlock,
   InitializeResponse,
   NewSessionResponse,
   RequestPermissionRequest,
@@ -29,7 +30,7 @@ import type {
 } from '@agentclientprotocol/sdk/unstable';
 import { redactSecrets, registerProviderKeys } from 'e2e/agent';
 import { ConfigurationError } from 'e2e/engine';
-import { MCP_SERVER_NAME, serveTools, type ServedTool, type ToolServer } from './mcp.ts';
+import { MCP_SERVER_NAME, serveTools, type ServedTool, type ToolResult, type ToolServer } from './mcp.ts';
 
 /** The ACP SDK's request names, which `selectMode` takes from the session that loaded the SDK. */
 type AcpMethods = typeof import('@agentclientprotocol/sdk/unstable').methods;
@@ -87,9 +88,15 @@ interface OwnCalls {
   readonly ran: Map<string, string>;
 }
 
+/** A base64 image, as a prompt sends one and a tool result returns one. */
+export type PromptImage = NonNullable<ToolResult['image']>;
+
 /** A running agent session. */
 export interface AcpSession {
-  prompt(text: string): Promise<TurnReport>;
+  /** One prompt turn; `images` are sent after the text, for an agent that `acceptsImages`. */
+  prompt(text: string, images?: readonly PromptImage[]): Promise<TurnReport>;
+  /** Whether the agent takes images in a prompt. */
+  readonly acceptsImages: boolean;
   /** Cancels the turn in flight, if any. */
   cancel(): void;
   close(): void;
@@ -231,12 +238,14 @@ export async function startSession(
   return {
     modelId,
     agentName: initialize.agentInfo?.name,
-    async prompt(text) {
+    acceptsImages: initialize.agentCapabilities?.promptCapabilities?.image === true,
+    async prompt(text, images = []) {
       turn.text = '';
       turn.own = { allowed: new Set(), rejected: new Map(), ran: new Map() };
       const costBefore = turn.cost;
       const started = Date.now();
-      const response = await Promise.race([agent.request(methods.agent.session.prompt, { sessionId, prompt: [{ type: 'text', text }] }), toolServerFailed, exited]).catch((error: unknown) => {
+      const prompt: ContentBlock[] = [{ type: 'text', text }, ...images.map((image) => ({ type: 'image' as const, ...image }))];
+      const response = await Promise.race([agent.request(methods.agent.session.prompt, { sessionId, prompt }), toolServerFailed, exited]).catch((error: unknown) => {
         if (isAuthRequired(error) && launch.loginRefused !== undefined) {
           throw new Error(`the agent's credentials were refused: ${launch.loginRefused}`, { cause: error });
         }

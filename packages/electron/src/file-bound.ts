@@ -5,7 +5,7 @@
  * captured.
  */
 
-import { realpathSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,14 +17,21 @@ export interface AppFiles {
   readonly declared: string | undefined;
   /** The first document the app showed. */
   readonly firstDocument: string;
+  /** The project's root: a main script's package is looked for no higher. */
+  readonly projectRoot: string;
 }
 
 /**
  * The directory the app's own pages are in, or undefined when nothing says:
- * what the main process reports, else the declared app path, else the
- * archive or directory of the first local page the app showed.
+ * for a declared main script, the package it belongs to; else what the main
+ * process reports, else the declared app path, else the archive or directory
+ * of the first local page the app showed.
  */
-export function appDirectory({ reported, declared, firstDocument }: AppFiles): string | undefined {
+export function appDirectory({ reported, declared, firstDocument, projectRoot }: AppFiles): string | undefined {
+  // Electron reports a main script's own directory, and a build can put the pages beside it (`out/main/index.js`
+  // and `out/renderer/`): the app is the package the script is in, as it is for an app path that names the directory.
+  // An `.asar` archive is a file too, and the app itself, as Electron reports it: its bound is the archive.
+  if (declared !== undefined && !/\.asar$/i.test(declared) && statSync(declared, { throwIfNoEntry: false })?.isFile() === true) return canonical(packageOf(declared, projectRoot) ?? path.dirname(declared));
   if (reported !== undefined && reported !== '') return canonical(reported);
   if (declared !== undefined) return canonical(statSync(declared, { throwIfNoEntry: false })?.isDirectory() === true ? declared : path.dirname(declared));
   const file = localFile(firstDocument);
@@ -47,6 +54,35 @@ export function outsideApp(location: string, directory: string | undefined): str
   const relative = path.relative(directory, canonical(file));
   const inside = relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
   return inside ? undefined : `the window left the app's directory for ${shown}, a local file outside it, so it is not read`;
+}
+
+/**
+ * The nearest directory above `file`, up to the project's root, with a
+ * `package.json` that names a package, or undefined when none has one: a
+ * manifest above the project (a home directory's, a monorepo's) is no package
+ * of this app's. A manifest that only sets the module type
+ * (`{"type":"commonjs"}`, which build tools write into their output) marks
+ * how Node loads the files there, not a package of its own.
+ */
+function packageOf(file: string, projectRoot: string): string | undefined {
+  const top = path.resolve(projectRoot);
+  for (let directory = path.dirname(path.resolve(file)); ; directory = path.dirname(directory)) {
+    const relative = path.relative(top, directory);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined;
+    const manifest = path.join(directory, 'package.json');
+    if (existsSync(manifest) && !onlyModuleType(manifest)) return directory;
+    if (relative === '') return undefined;
+  }
+}
+
+function onlyModuleType(manifest: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(manifest, 'utf8'));
+    return typeof parsed === 'object' && parsed !== null && Object.keys(parsed).join() === 'type';
+  } catch {
+    // A manifest that cannot be read is no proof the package is elsewhere: the nearer directory is the narrower bound.
+    return false;
+  }
 }
 
 function localFile(location: string): string | undefined {

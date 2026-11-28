@@ -1,6 +1,6 @@
 ---
 title: test
-description: Tests, setup tests, groups, hooks, options, and fixtures.
+description: "API reference for test in e2e, which declares tests, setup tests, groups, and hooks, sets options, skips tests, and adds fixtures with test.extend."
 "og:image": "https://e2e.com/docs/images/og/reference/test.png?v=d1ad3b01c3"
 "twitter:image": "https://e2e.com/docs/images/og/reference/test.png?v=d1ad3b01c3"
 ---
@@ -57,9 +57,10 @@ as `test.describe`, `test.beforeEach`, and the rest:
 
 - A per-test hook imported from `e2e` is typed with the [built-in fixtures](#fixtures)
   every engine has.
-- `@e2e-dev/web`, `@e2e-dev/mobile`, and `@e2e-dev/desktop` export `test`,
-  `describe`, and all four hooks typed with their `browser`, `device`, or
-  `desktop` fixture, so a test file registers from one import.
+- `@e2e-dev/web`, `@e2e-dev/mobile`, `@e2e-dev/desktop`, and
+  `@e2e-dev/electron` export `test`, `describe`, and all four hooks typed
+  with their `browser`, `device`, `desktop`, or `electron` fixture, so a test
+  file registers from one import.
 - A `test` you extended with your own fixtures registers hooks that see them
   through `test.beforeEach`.
 
@@ -105,17 +106,7 @@ test.skip('not on this tenant'); // inside a body, always
 - To skip at collection by option, use the [`skip`](#skip) option.
 - At registration it returns a `TestCase`; inside a body, `void`.
 
-Call `test.skip(condition, reason)` inside a test for a condition you learn
-at runtime, such as a disabled feature flag:
-
-```ts
-test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
-  const organizations = await listOrganizations();
-  test.skip(organizations.length < 2, 'the demo tenant has a single organization');
-  await app.open('/backend');
-  await agent.act(`switch to the organization "${organizations[1].name}"`);
-});
-```
+Inside a body, for a condition you learn at runtime:
 
 - When the condition is true, the call throws, as Playwright's does. Nothing
   after the call runs.
@@ -148,8 +139,8 @@ test.todo('add checkout coverage');
 
 - The test never runs and has no attempts. It is reported `skipped`, with
   `skip.cause` and `skip.reason` both `todo`.
-- A selection of only TODO tests fails with `NO_TESTS`, like any selection
-  with nothing to run, unless `--pass-with-no-tests` is set.
+- A selection of only TODO tests fails with `NO_TESTS` unless
+  `--pass-with-no-tests` is set.
 - It takes no test options and returns a `TestCase`.
 
 | Throws | When |
@@ -201,8 +192,6 @@ test.skipIf(process.env.CI)('opens the system dialog', async ({ app }) => {});
   never runs, and its other options are kept.
 - A [`skip`](#skip) option skips the test whatever the condition, and its
   reason string is the reported reason.
-- Outside a serial group, a falsy condition registers the test as `test`
-  would.
 - It takes the same two forms as [`test`](#test) and has the same fixtures,
   on an extended `test` too.
 
@@ -382,7 +371,6 @@ test('renders the report', async ({ platform }) => {
   replaces the timeout.
 - With a false condition it does nothing. The reason is for the reader and
   is not reported.
-- A retry starts from the [`timeout`](#timeout) option again.
 - There is no `test.slow(title, fn)`. Call `test.slow()` first in the body,
   or pass `timeout`.
 
@@ -465,7 +453,6 @@ test.setup('authenticate', { sessions: ['member'] }, async ({ app, screen, sessi
 
 ```ts
 export interface SetupSession {
-  /** Saves state under a setup-declared name. */
   save(name: string): Promise<void>;
 }
 ```
@@ -594,8 +581,7 @@ describe('checkout', { only: true }, () => {}); // the same, by option
 - A skipped test in a focused group stays focused and is reported with its
   own skip cause, `explicit`, `fixme`, or `todo`.
 - A CI run with a focused group fails with `ONLY_IN_CI`.
-- A serial group can be focused whole. `only` inside a serial group is
-  refused, since the group runs as one unit.
+- A serial group can be focused whole.
 
 | Throws | When |
 | --- | --- |
@@ -673,27 +659,17 @@ It receives [worker fixtures](#worker-fixtures) only:
 On a browser target, `browser`, `app`, and `screen` are test fixtures. Put UI
 setup in `beforeEach`.
 
-On a mobile target:
-
-- The `beforeAll` hooks a test enters run in one short engine attempt of
-  their own, which launches nothing. So do the `afterAll` hooks of the scopes
-  a test leaves.
-- The attempt opens for the first hook that names `device`, `app`, or
-  `screen`, or a worker fixture that names one. Hooks that name none open no
-  attempt.
-- In a serial group, or a test an `e2e mcp` session runs, the hooks run on
-  the attempt already open.
-- When that attempt cannot open, or the run was interrupted, the hooks still
-  run. Reading `device`, `app`, or `screen` then throws with the reason. A
-  failed open is one run error in phase `launch`.
+On a mobile target, `beforeAll` and `afterAll` hooks launch nothing. When
+the engine cannot open for them, or the run was interrupted, the hooks still
+run. Reading `device`, `app`, or `screen` then throws with the reason. A
+failed open is one run error in phase `launch`.
 
 The steps a suite hook takes are in no test's record. A failure names the
 hook's scope.
 
 Each `beforeAll` hook runs on the config `timeout`.
 [`test.setTimeout`](#test-settimeout) or [`test.slow`](#test-slow) inside it changes that hook's
-timeout, and the engine calls the hook makes after it run on the changed one.
-The worker fixtures the hook names are set up before its body runs, so they
+timeout. The worker fixtures the hook names are set up before its body runs, so they
 keep the config `timeout`.
 
 | Throws | When |
@@ -704,7 +680,7 @@ keep the config `timeout`.
 #### `afterAll`
 
 Registers a suite-instance teardown hook. It runs as soon as the scope's last
-test in the realm is done.
+test is done.
 
 ```ts
 afterAll(async () => {
@@ -712,16 +688,16 @@ afterAll(async () => {
 });
 ```
 
-A realm that a failure discards runs `afterAll` for every scope whose
-`beforeAll` started. It receives the same fixtures as
+After a failure, `afterAll` still runs for every scope a test entered,
+including one with no `beforeAll`. It cannot run when the worker itself is
+killed. It receives the same fixtures as
 [`beforeAll`](#beforeall) and has `cleanupTimeout` to finish. A throw is
 `HOOK_FAILED`, as for `beforeAll`.
 
 #### Blocked event loop
 
 A test that blocks its worker's event loop (`while (true) {}` in a fixture,
-`beforeEach`, the body, or `afterEach`) stops every timer in that worker, so
-the worker cannot time it out.
+`beforeEach`, the body, or `afterEach`) cannot be timed out by that worker.
 
 - When the worker has not responded `cleanupTimeout` (at least 5 s) after the
   test timeout, the runner kills it.
@@ -934,7 +910,6 @@ describe('checkout', { serial: true }, () => {
   during the launch, every member skips instead.
 - If a retry is interrupted or never reaches its members, they keep the
   verdicts and durations of the last attempt that ran them.
-- The exit code follows the error's category, as for any other test.
 
 | Throws | When |
 | --- | --- |
@@ -957,7 +932,7 @@ describe('reports', { parallel: true }, () => {
   top level. For every file, set
   [`fullyParallel`](/reference/config#fullyparallel).
 - Tests that run apart on the same worker share the state in the test
-  file: the worker imports the file once for them. Tests on different
+  file. Tests on different
   workers do not, so keep no state in the file that one test leaves for
   another. A `beforeAll` and its `afterAll` can run several times on that
   state, so create in `beforeAll` what `afterAll` closes.
@@ -1022,10 +997,8 @@ The scope decides which code can use a built-in fixture:
 - A worker fixture outlives a test. `beforeAll`, `afterAll`, and
   [worker fixtures](#worker-fixtures) get it too.
 
-A browser test gets a new context, so on web `app`, `screen`, and `browser`
-are test fixtures. A device keeps its state between tests, so on mobile `app`,
-`screen`, and `device` are worker fixtures. An engine of your own sets this
-with [`isolation`](/reference/engine#fixture-isolation).
+An engine of your own sets the scope with
+[`isolation`](/reference/engine#fixture-isolation).
 
 `session` reaches only `test.setup` bodies. [`TestFixtures`](#testfixtures)
 describes each core one. Every other fixture is one of
@@ -1035,8 +1008,8 @@ An engine fixture is `undefined` on a target whose engine doesn't have it.
 See [Engine fixtures across targets](#engine-fixtures-across-targets).
 
 A test body, a hook, and a fixture function name the fixtures they use by
-destructuring their first parameter: `async ({ app, screen }) => {}`. e2e
-reads the names from the function's source. A [`test.each`](#test-each) or
+destructuring their first parameter: `async ({ app, screen }) => {}`. A
+[`test.each`](#test-each) or
 [`test.for`](#test-for) body names them in the parameter after its row.
 
 | Throws | When |
@@ -1079,8 +1052,7 @@ test('signing up sends one welcome email', async ({ app, screen, services }) => 
 ```
 
 All workers share one instance of each service, so a test can observe state
-created by other tests. In the example above, the test creates an inbox with a
-unique address and counts only the emails sent to it.
+created by other tests.
 
 | Throws | When |
 | --- | --- |
@@ -1164,10 +1136,10 @@ checked against that target's fixtures.
 <Note>
 A body or hook that hits the test `timeout` is abandoned, not cancelled, so
 teardown starts while it may still be running. A setup abandoned this way
-that reaches `use` later gets an immediate resolve. Its teardown runs
-detached from the run, so what it allocated is still released. Later
-fixtures, hooks, and the test body do not start after an abandoned setup or
-hook finishes. An app or device call it makes after its phase ended fails with
+that reaches `use` later has `use` resolve at once, so its teardown code
+runs detached from the run, where a throw goes unreported. Later fixtures,
+hooks, and the test body do not start after an abandoned setup or hook
+finishes. An app or device call it makes after its phase ended fails with
 `CANCELLED`. Its other code, such as a Node `fetch`, still runs.
 </Note>
 
@@ -1201,8 +1173,7 @@ export const test = base.extend<{}, { database: Database }>({
   `COLLECTION_ERROR`.
 - On a mobile target its `device`, `app`, and `screen` act in the test or
   hook that is running when it calls them. Its teardown can still drive the
-  device: it runs in a short engine attempt when the fixture names one of
-  them, and without one when it names none.
+  device when the fixture names one of them.
 - A worker keeps one instance of a worker fixture, also when the module
   that declares it is evaluated again: a test file after a failed test, or
   a module that declares tests or hooks. Only the fixture's value is kept,
@@ -1287,37 +1258,29 @@ export const test = base.extend({
   `extend` are for new fixtures.
 - If only some targets have the fixture, the function is still called on the
   other targets, with `undefined` under the fixture's name.
+- In an `extend` call that also adds new fixtures, the override of a worker
+  fixture is declared with `{ scope: 'worker' }`.
+- With options, the override of a worker fixture is typed with worker
+  fixtures only, whatever its scope. Without options it gets every fixture.
 
 ## Types
 
 ### `TestAPI`
 
 ```ts
-/** The two call forms of `describe`. */
 export interface DescribeRegistrar<Options = DescribeOptions> {
-  /** Declares a group synchronously. */
   <Result>(title: string, body: SynchronousBody<Result>): void;
-  /** Declares a configured group synchronously. */
   <Result>(title: string, options: Options, body: SynchronousBody<Result>): void;
 }
 
 export interface DescribeAPI extends DescribeRegistrar {
-  /** Declares a group whose tests are expected to fail, as if it had `fail: true`; a reason goes in the `fail` option of `describe`. */
   fail: DescribeRegistrar<Omit<DescribeOptions, 'fail'>>;
-  /** Configures the scope it is called in: the enclosing `describe`, or the whole file at the top level. */
   configure(options: DescribeConfigureOptions): void;
-  /** Declares a focused group, as if it had `only: true`: its tests are focused the way `test.only` focuses one. CI rejects it with `ONLY_IN_CI`. */
   only: DescribeRegistrar<Omit<DescribeOptions, 'only'>>;
 }
 
-/** The two call forms of `test`, shared with what `test.skipIf` and `test.runIf` return. */
 export interface TestRegistrar<Fixtures = TestFixtures & WorkerFixtures> {
-  /** Registers one test synchronously during module evaluation. */
   (title: string, fn: TestFn<Fixtures>): TestCase;
-  /**
-   * Registers one configured test synchronously during module evaluation.
-   * Its fixtures are typed for the targets its `platforms` option keeps.
-   */
   <const Platform extends string = string>(
     title: string,
     options: TestOptions & { readonly platforms?: readonly Platform[] },
@@ -1325,206 +1288,41 @@ export interface TestRegistrar<Fixtures = TestFixtures & WorkerFixtures> {
   ): TestCase;
 }
 
-/**
- * The two call forms of `test` for `test.each` and `test.for`: one test per
- * row, each titled from the row. `Args` are the body's arguments.
- */
 export interface EachRegistrar<Args extends readonly unknown[]> {
-  /** Registers one test per row synchronously during module evaluation. */
   (title: string, fn: EachFn<Args>): readonly TestCase[];
-  /** Registers one configured test per row synchronously during module evaluation. */
   (title: string, options: TestOptions, fn: EachFn<Args>): readonly TestCase[];
 }
 
 export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> extends TestRegistrar<Fixtures & Worker> {
-  /** Registers one skipped test. */
   skip(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
-  /**
-   * Inside a running test: skips it when `condition` is true (or always,
-   * with no condition) by throwing, so nothing after the call runs. The
-   * attempt is reported `skipped` with `reason`; steps that already ran stay
-   * in the report without deciding the status, and teardown still runs. A
-   * setup test cannot skip: its sessions are owed.
-   * Outside a test body this form is `COLLECTION_ERROR`; use the `skip`
-   * option to skip at collection.
-   */
   skip(condition: boolean, reason?: string): void;
   skip(reason?: string): void;
-  /** Registers an unfinished test, reported as skipped with cause and reason `todo`. */
   todo(title: string): TestCase;
-  /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
   fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
-  /**
-   * Inside a running test: skips it as fixme when `condition` is true (or
-   * always, with no condition), as `test.skip` does. The skip cause is
-   * `fixme`, and the reason `fixme`, or `fixme: <reason>` when `reason` is not
-   * blank. A setup test cannot skip. Outside a test body this form is
-   * `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a test fixme at
-   * collection.
-   */
   fixme(condition: boolean, reason?: string): void;
   fixme(reason?: string): void;
-  /**
-   * Returns a function that registers one test, like `test(title, fn)`:
-   * skipped when `condition` is truthy, as if it had the `skip` option. The
-   * condition is read once, at this call, so it can only depend on what is
-   * known while the file is collected (`process.platform`, `process.env.CI`):
-   *
-   *   test.skipIf(process.platform === 'win32')('file watcher', async () => {});
-   *
-   * A `skip` option skips the test whatever the condition. A serial group
-   * rejects the call: set `skip` on the serial `describe` instead. A Promise
-   * condition also fails the call: await it first.
-   */
   skipIf<Condition>(condition: SynchronousCondition<Condition>): TestRegistrar<Fixtures & Worker>;
-  /**
-   * Returns a function that registers one test, like `test(title, fn)`:
-   * skipped when `condition` is falsy, `test.skipIf(!condition)`.
-   */
   runIf<Condition>(condition: SynchronousCondition<Condition>): TestRegistrar<Fixtures & Worker>;
-  /**
-   * Returns a function that registers one test per row, like `test(title,
-   * fn)`, in row order. The title is formatted from the row: `$name` and
-   * `$name.path` read an object row, and `%s`, `%d`, `%i`, `%f`, `%j`, `%o`
-   * take an array row's items in order (any other row is the one item). `%#`
-   * is the row index, `%$` the row number, `%%` a percent sign. When every
-   * row is an array, each row is spread into the body's arguments; otherwise
-   * every row is the first one. The fixtures come last:
-   *
-   *   test.each([{ user: 'Ada' }, { user: 'Grace' }])('signs in as $user', async ({ user }, { app }) => {});
-   *   test.each([[1, 2, 3]])('%i + %i = %i', async (a, b, sum, { app }) => {});
-   *
-   * Rows must be a non-empty array. Two rows that format to the same title
-   * fail as duplicate titles. As in a test body, destructure the fixtures
-   * (`{ app }`): e2e sets up only the ones named there.
-   */
   each<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[...Row, Fixtures & Worker]>;
   each<Row>(rows: readonly Row[]): EachRegistrar<EachArgs<Row, Fixtures & Worker>>;
-  /**
-   * `test.each` that never spreads: the body takes `(row, fixtures)` for
-   * every row, an array row included. Titles format as in `test.each`.
-   */
   for<Row extends readonly unknown[] | [unknown]>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker]>;
   for<Row>(rows: readonly Row[]): EachRegistrar<[Row, Fixtures & Worker]>;
-  /** Registers one test that is expected to fail. */
   fail(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
-  /**
-   * Inside a running test: marks it expected to fail when `condition` is
-   * true (or always, with no condition). The body keeps running. A test
-   * failure then passes the test, keeping the error and `reason` in the
-   * report; a pass fails it with `UNEXPECTED_PASS`. Infrastructure failures
-   * and interrupts are not covered. A setup test or a serial group member
-   * cannot be marked. Outside a test body this form is `COLLECTION_ERROR`;
-   * use `test.fail(title, fn)` or the `fail` option to mark at collection.
-   */
   fail(condition: boolean, reason?: string): void;
   fail(reason?: string): void;
-  /**
-   * Triples the running test's timeout in force when `condition` is true (or
-   * always), as Playwright's `test.slow()` does: once per attempt, so a
-   * second call does nothing. In a `beforeAll` hook it triples that hook's
-   * timeout. Otherwise it follows `setTimeout`'s rules; `reason` is not
-   * reported.
-   */
   slow(condition: boolean, reason?: string): void;
   slow(reason?: string): void;
-  /**
-   * Inside a running test or a `beforeEach` hook: gives the test a timeout
-   * of `timeout` ms, counted from the start of the attempt like the
-   * `timeout` option, which it replaces for this attempt. A timeout shorter
-   * than the time already spent times the test out at once. Inside a
-   * `beforeAll` hook: gives that hook a timeout of `timeout` ms, counted from
-   * its start. `afterEach` and `afterAll` hooks run on `cleanupTimeout` and
-   * cannot change it. A timeout that is not a positive integer is
-   * `INVALID_ARGUMENT`; outside a running test or hook the call is
-   * `COLLECTION_ERROR`, so use the `timeout` option there.
-   */
   setTimeout(timeout: number): void;
-  /**
-   * Inside a running test, hook, or fixture: runs `body` as one step named
-   * `title` and returns what it returns. Reports show the title, with the
-   * calls `body` makes nested under it; steps nest. The step fails when
-   * `body` throws, and the error goes on to the test:
-   *
-   *   await test.step('Log in as test user', async () => {
-   *     await screen.getByTestId('login_button').tap();
-   *   });
-   *
-   * In a `beforeAll` or `afterAll` hook, a worker fixture, or an
-   * `openHost()` session, `body` just runs, and no report gets a step for
-   * `title`. A call from work its phase left running, such as a body or
-   * hook past its timeout, is `CANCELLED`. Any other call outside a running
-   * test, hook, fixture, or `openHost()` session, such as one at collection,
-   * is `COLLECTION_ERROR`.
-   */
   step<T>(title: string, body: () => T | Promise<T>): Promise<T>;
-  /** Registers one focused local test. CI rejects focused tests. */
   only(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
-  /** Registers one setup test with statically declared session outputs. */
   setup(title: string, options: SetupOptions, fn: SetupFn<Fixtures & Worker>): TestCase;
-  /**
-   * Returns the same runtime `test`, typed with an engine's contributed
-   * fixtures. A pure type refinement, the fixtures still resolve from the
-   * target's engine at runtime, so a project types its device/desktop/web
-   * surface without a global `declare module` augmentation:
-   *
-   *   export const test = base.extend<{ device: Device }>();
-   */
   extend<Extra = {}, ExtraWorker = {}, Config extends InferredConfig<Config> = {}>(): TestAPI<
     ConfigBase<Fixtures, Config> & Extra & ConfigFixtures<Config, 'test'>,
     ConfigBase<Worker, Config> & ExtraWorker & ConfigFixtures<Config, 'worker'>
   >;
-  /**
-   * Returns a new `test` whose registrations extend fixtures it already
-   * has, built-in ones included. Inside the function the fixture's own name
-   * is the fixture it extends; the value it hands to `use` is what tests,
-   * hooks, and other fixtures receive under that name. It keeps the type of
-   * the fixture it extends. Its scope is the one it declares, else `test`:
-   *
-   *   export const test = base.extend({
-   *     app: async ({ app }, use) => {
-   *       await app.open('/dashboard');
-   *       await use(app);
-   *     },
-   *   });
-   */
   extend<const Overrides extends FixtureOverrides<Fixtures & Worker, Worker>>(
     overrides: Overrides,
   ): TestAPI<Fixtures & PickEach<Worker, TestOverrides<Overrides>>, OmitEach<Worker, TestOverrides<Overrides>>>;
-  /**
-   * Returns a new `test` whose registrations carry these fixture
-   * definitions on top of the ones it already had. Each attempt sets up the
-   * ones its body and its `beforeEach` and `afterEach` hooks name, and the
-   * ones those fixtures name, in declaration order with each after the
-   * fixtures it names; it runs the hooks and the body with them, and tears
-   * them down in reverse order after `afterEach`. A fixture nothing names is
-   * not set up:
-   *
-   *   export const test = base.extend<{ workspace: Workspace }>({
-   *     workspace: async ({ browser }, use) => {
-   *       const workspace = await createWorkspace();
-   *       await use(workspace);
-   *       await workspace.cleanup();
-   *     },
-   *   });
-   *
-   * A worker fixture (the second type argument, `[fn, { scope: 'worker' }]`)
-   * is set up once per worker and target, the first time a test or suite
-   * hook of the chain names it, and torn down when the worker ends:
-   *
-   *   export const test = base.extend<{}, { database: Database }>({
-   *     database: [async ({}, use) => {
-   *       const database = await startDatabase();
-   *       await use(database);
-   *       await database.stop();
-   *     }, { scope: 'worker' }],
-   *   });
-   *
-   * `auto: true` sets a fixture up whether or not anything names it: for
-   * every test (`[fn, { auto: true }]`), or once per worker
-   * (`[fn, { scope: 'worker', auto: true }]`). A suite hook sets up the auto
-   * worker fixtures of its chain, never a test fixture.
-   */
   extend<Extra = {}, ExtraWorker = {}, Config extends InferredConfig<Config> = {}>(
     fixtures: FixtureDefinitions<
       ConfigBase<Fixtures, Config> & ConfigBase<Worker, Config> & ConfigFixtures<Config, 'test'> & ConfigFixtures<Config, 'worker'>,
@@ -1536,15 +1334,10 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
     ConfigBase<Fixtures, Config> & Extra & ConfigFixtures<Config, 'test'>,
     ConfigBase<Worker, Config> & ExtraWorker & ConfigFixtures<Config, 'worker'>
   >;
-  /** Declares a group synchronously; `describe.fail` declares one whose tests are expected to fail, `describe.only` a focused one. */
   describe: DescribeAPI;
-  /** Registers a test-attempt setup hook: it runs after the test's fixtures are set up. */
   beforeEach(fn: TestHookFn<Fixtures & Worker>): void;
-  /** Registers a test-attempt teardown hook: it runs before the test's fixtures are torn down. */
   afterEach(fn: TestHookFn<Fixtures & Worker>): void;
-  /** Registers a suite setup hook, run once per describe between attempts, with the worker fixtures. */
   beforeAll(fn: TestHookFn<Worker>): void;
-  /** Registers a suite teardown hook, run once per describe between attempts, with the worker fixtures. */
   afterAll(fn: TestHookFn<Worker>): void;
 }
 
@@ -1560,75 +1353,31 @@ export const afterAll: TestAPI['afterAll'];
 
 ```ts
 export interface TestOptions {
-  /** Attempt deadline in milliseconds; defaults to `config.timeout`. Innermost wins. */
   timeout?: number;
-  /** Retries, 0 through 10; defaults to `config.retries`. Inside a serial group the group's value applies. */
   retries?: number;
-  /** Tags for `--tag`: distinct names, none blank, with no comma and no leading or trailing whitespace; every layer's tags are unioned. */
   tags?: readonly string[];
-  /** Skips the test; a string is the reason. Any truthy layer skips. */
   skip?: boolean | string;
-  /**
-   * Expects the test to fail; a string is the reason. A test failure then
-   * passes it, and a pass fails it with `UNEXPECTED_PASS`. A layer with `true`
-   * or any string marks; the innermost reason wins. Not allowed on, inside, or
-   * around a serial group.
-   */
   fail?: boolean | string;
-  /**
-   * Focuses the test locally; on a group, focuses every test in it, skipped
-   * ones included, unless a test or group inside it is focused too, which
-   * narrows the focus to that one. CI rejects it with `ONLY_IN_CI`. Not
-   * allowed inside a serial group; a serial group itself can be focused.
-   */
   only?: boolean;
-  /** Platforms the test runs on; other targets skip it. Innermost wins. */
   platforms?: readonly string[];
-  /** Session a setup test saved, restored before the body runs. */
   session?: string;
-  /** Extra context for agent steps; layers are concatenated outermost first. */
   agentContext?: string;
-  /**
-   * The configured agent (`agents.<name>`) this test or group runs with, in
-   * place of the run's agents. A list runs the test once per agent named, as
-   * one result each. Innermost wins; a call's own `agent` option wins over
-   * it. `--agent` narrows a list to the names both name and never overrides
-   * a pin the flag does not name.
-   */
   agent?: string | readonly string[];
-  /**
-   * Which of the test's attempts keep a trace, in place of the run's: the
-   * same modes as the config's `trace`. Innermost wins, over `--trace` too;
-   * inside a serial group the group's value applies, since the group runs as
-   * one unit.
-   */
   trace?: RecordingMode;
-  /**
-   * Which of the test's attempts record a video, in place of the run's:
-   * the same modes as the config's `video`. Innermost wins, over `--video`
-   * too; inside a serial group the group's value applies, since the group
-   * records as one unit. A mode set here is required of the target's engine.
-   */
   video?: RecordingMode;
 }
 
 export interface DescribeOptions extends TestOptions {
-  /** Runs the group as one ordered retry unit with shared app state. Nesting one serial group in another is a `COLLECTION_ERROR`. */
   serial?: boolean;
-  /** `true` runs the group's tests at the same time on separate workers; `false` keeps a group inside a parallel scope in order on one worker. */
   parallel?: boolean;
 }
 
-/** What `test.describe.configure()` sets on the scope it is called in. */
 export interface DescribeConfigureOptions {
-  /** The scope's `parallel`; at the top of a file it applies to the whole file. */
   parallel?: boolean;
 }
 
 export interface SetupOptions extends Omit<TestOptions, 'session' | 'only' | 'skip' | 'fail' | 'agent'> {
-  /** Session names this setup test MUST save. */
   sessions: readonly string[];
-  /** A setup test runs once per target, so it pins at most one agent. */
   agent?: string;
 }
 ```
@@ -1637,112 +1386,54 @@ export interface SetupOptions extends Omit<TestOptions, 'session' | 'only' | 'sk
 
 ```ts
 export interface TestFixtures {
-  /** Agent steps. Acquiring the built-in agent without a configured model is `MODEL_UNAVAILABLE`. */
   readonly agent: Agent;
-  /** App lifecycle: open, restart, clear state, back, screenshot, recording. */
   readonly app: App;
-  /** Semantic queries and the actions on their matches. */
   readonly screen: Screen;
-  /** The target's platform label: `web`, `ios`, `android`, or an engine's own string. */
   readonly platform: string;
-  /** HTTP calls, each one a step; a path resolves against the app URL. */
   readonly request: APIRequest;
-  /**
-   * Values yielded by the config's `services`, keyed by name. Each worker, each
-   * `e2e mcp` session, and each `openHost` host receives a copy of the data
-   * (sessions on one host share the same copy). Each function becomes an async
-   * function called in the process that started the services.
-   */
   readonly services: Readonly<Record<string, unknown>>;
 }
 
 export interface SetupFixtures extends TestFixtures {
-  /** Saves the sessions the setup test declared. */
   readonly session: SetupSession;
 }
 
-/**
- * How long one fixture instance lives. `test`, the default, is one instance
- * per test attempt that names it, shared by its `beforeEach` hooks, its
- * body, and its `afterEach` hooks. `worker` is one instance per worker and
- * target, set up the first time a test or suite hook names it and torn down
- * when the worker ends.
- */
 export type FixtureScope = 'test' | 'worker';
 
-/**
- * The fixtures that outlive a test: what `beforeAll`, `afterAll`, and a
- * worker-scoped `test.extend()` fixture receive. An engine whose state
- * outlives an attempt (a device keeps permissions and installed apps) adds
- * its own fixtures, `app`, and `screen` here; on an engine that gives each
- * attempt a fresh surface (a browser context) they are test fixtures.
- */
 export interface WorkerFixtures {
-  /** The target's platform label: `web`, `ios`, `android`, or an engine's own string. */
   readonly platform: string;
-  /**
-   * Values yielded by the config's `services`, keyed by name. Each worker, each
-   * `e2e mcp` session, and each `openHost` host receives a copy of the data
-   * (sessions on one host share the same copy). Each function becomes an async
-   * function called in the process that started the services.
-   */
   readonly services: Readonly<Record<string, unknown>>;
 }
 
-/** @deprecated `beforeAll` and `afterAll` receive the worker fixtures: use `WorkerFixtures`. */
 export type SuiteFixtures = WorkerFixtures;
 ```
+
+| Field | Description |
+| --- | --- |
+| `agent` | Agent steps. Acquiring the built-in agent without a configured model is `MODEL_UNAVAILABLE`. |
+| `app` | App lifecycle: open, restart, clear state, back, screenshot, recording. |
+| `screen` | Semantic queries and the actions on their matches. |
+| `platform` | The target's platform label: `web`, `ios`, `android`, or an engine's own string. |
+| `request` | HTTP calls, each one a step. A path resolves against the app URL. |
+| `services` | See [`services`](#services). Sessions on one `openHost` host share the same copy. |
+
+`SuiteFixtures` is deprecated: use `WorkerFixtures`.
 
 ### `FixtureDefinitions`
 
 ```ts
-/**
- * Defines one fixture: everything before `await use(value)` is its setup,
- * everything after is its teardown. The fixtures it destructures in its
- * first parameter are the ones it depends on, set up before it; one that
- * needs none writes `async ({}, use) => {}`. The body, its hooks, and the
- * fixtures that name it run while `use` is pending; it resolves once they
- * are done, whether or not the body failed.
- */
 export type FixtureFn<Fixtures, Value> = (
   fixtures: Fixtures,
   use: (value: Value) => Promise<void>,
 ) => Promise<void>;
 
-/**
- * A test fixture: its function, or the function and its options. With
- * `auto: true` it is set up for every test of its chain, whether or not
- * anything names it.
- */
 export type TestFixtureDefinition<Fixtures, Value> =
   | FixtureFn<Fixtures, Value>
   | readonly [FixtureFn<Fixtures, Value>, { readonly scope?: 'test'; readonly auto?: boolean }];
-/**
- * A worker fixture: its function and `{ scope: 'worker' }`. It sees worker
- * fixtures only. With `auto: true` it is set up once per worker, before the
- * first test or suite hook of its chain, whether or not anything names it.
- */
 export type WorkerFixtureDefinition<Worker, Value> = readonly [
   FixtureFn<Worker, Value>,
   { readonly scope: 'worker'; readonly auto?: boolean },
 ];
-/**
- * One definition per fixture `test.extend()` adds: `Extra` holds the test
- * fixtures, `ExtraWorker` the worker fixtures. A definition sees the fixtures
- * of the `test` it extends and the ones declared beside it, in any order: it
- * is set up after the ones it names. A test fixture sees every fixture a
- * test sees; a worker fixture sees worker fixtures only, since it outlives
- * every test fixture.
- *
- * A name the base already has is not a new fixture, so declaring it in
- * `Extra` or `ExtraWorker` is a type error. Defined beside them, it extends
- * that fixture, a built-in one included: inside its function its own name is
- * the fixture it extends, and it keeps that fixture's type. The override of
- * a worker fixture is declared with `scope: 'worker'` here, since the
- * fixtures this call returns keep it a worker fixture:
- *
- *   base.extend({ app: async ({ app }, use) => { await app.open('/'); await use(app); } })
- */
 export type FixtureDefinitions<Base, Extra, Worker = {}, ExtraWorker = {}> = {
   readonly [K in keyof Extra]: K extends keyof Base
     ? never
@@ -1759,87 +1450,51 @@ export type FixtureDefinitions<Base, Extra, Worker = {}, ExtraWorker = {}> = {
     ? WorkerFixtureDefinition<Worker & NoInfer<ExtraWorker>, Base[K]>
     : TestFixtureDefinition<Base & NoInfer<Extra> & NoInfer<ExtraWorker>, Base[K]>;
 };
-/**
- * Fixtures that extend ones the base already has, each optional. `Sees` and
- * `WorkerSees` are what an override's function receives: the base's
- * fixtures, and the ones declared beside it.
- */
 export type FixtureOverrides<Sees, WorkerSees, Base = Sees, Worker = WorkerSees> = {
   readonly [K in Extract<keyof Base, PropertyKey>]?: FixtureOverride<Base, Worker, K, Sees, WorkerSees>;
 };
-/**
- * A fixture that extends `K`, one the base already has: it hands over the
- * same type. Its scope is the one it declares, else `test`, and only the
- * override of a worker fixture can be a worker fixture.
- *
- * The override of a worker fixture with options receives worker fixtures
- * (`WorkerSees`) only, whatever its scope: TypeScript can't type the
- * function of a tuple by the `scope` beside it. A function without options
- * is a test fixture, so it receives every fixture (`Sees`).
- */
 export type FixtureOverride<Base, Worker, K extends keyof Base, Sees, WorkerSees> = K extends keyof Worker
   ? FixtureFn<Sees, Base[K]> | readonly [FixtureFn<WorkerSees, Base[K]>, { readonly scope?: FixtureScope; readonly auto?: boolean }]
   : TestFixtureDefinition<Sees, Base[K]>;
-/** The names in `Overrides` that are test fixtures: every override not declared with `scope: 'worker'`. */
 export type TestOverrides<Overrides> = {
   [K in keyof Overrides]-?: Overrides[K] extends readonly [unknown, { readonly scope: 'worker' }] ? never : K;
 }[keyof Overrides];
-/** `Worker` without the fixtures in `Names`, one target at a time. */
 export type OmitEach<Worker, Names extends PropertyKey> = Worker extends unknown ? Omit<Worker, Names> : never;
-/** The fixtures in `Names` that `Worker` has, and `platform`, one target at a time. */
 export type PickEach<Worker, Names extends PropertyKey> = Worker extends unknown ? Pick<Worker, Extract<Names | 'platform', keyof Worker>> : never;
 ```
 
 ### Function types
 
 ```ts
-/**
- * A test body. It names the fixtures it uses by destructuring its first
- * parameter (`async ({ app, screen }) => {}`), and the runner sets up only
- * those; a body that takes the whole object (`async (fixtures) => {}`) or a
- * rest property is a `COLLECTION_ERROR`. The same holds for a hook and for
- * the first parameter of a `test.extend()` fixture.
- */
 export type TestFn<Fixtures = TestFixtures> = (fixtures: Fixtures) => void | Promise<void>;
 
-/** A setup test body; `session.save` is the extra fixture. */
 export type SetupFn<Fixtures = TestFixtures> = (
   fixtures: Fixtures & SetupFixtures,
 ) => void | Promise<void>;
 
-/** A hook body: `beforeEach` and `afterEach` get the test's fixtures, `beforeAll` and `afterAll` its worker fixtures. */
 export type TestHookFn<Fixtures = TestFixtures> = (fixtures: Fixtures) => void | Promise<void>;
 
-/** @deprecated use `TestHookFn<WorkerFixtures>`. */
 export type SuiteHookFn = TestHookFn<WorkerFixtures>;
 
-/** A `describe` body. An async body is a type error. */
 export type SynchronousBody<Result> = Extract<Result, PromiseLike<unknown>> extends never
   ? () => Result
   : never;
 
-/**
- * The `test.each` body arguments for the rows' type: array rows spread, then
- * the fixtures. Rows that are not all arrays are passed whole. Not
- * distributive, so a mixed table is decided once, as at run time. An
- * `unknown` row may be either at run time, so only the fixtures, last, are known.
- */
 export type EachArgs<Row, Fixtures> = [Row] extends [readonly unknown[]]
   ? [...Row, Fixtures]
   : unknown extends Row
     ? [...unknown[], Fixtures]
     : [Row, Fixtures];
 
-/** A `test.each` or `test.for` body: the row's arguments, then the fixtures. */
 export type EachFn<Args extends readonly unknown[]> = (...args: Args) => void | Promise<void>;
 
-/** A `test.skipIf` or `test.runIf` condition. A Promise is a type error. */
 export type SynchronousCondition<Condition> = Extract<Condition, PromiseLike<unknown>> extends never
   ? Condition
   : never;
 
-/** Opaque handle of a registered test. */
 export interface TestCase {
   readonly [testCaseBrand]: true;
 }
 ```
+
+`SuiteHookFn` is deprecated: use `TestHookFn<WorkerFixtures>`.

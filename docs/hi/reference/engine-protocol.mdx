@@ -5,7 +5,7 @@ description: किसी इंजन को दूसरी प्रोसे
 
 इंजन प्रोटोकॉल [इंजन कॉन्ट्रैक्ट](/reference/engine) को JSON-RPC मैसेज के रूप
 में दिखाता है। रनर हर इंजन को इसी के ज़रिए चलाता है। किसी इंजन को दूसरी प्रोसेस,
-मशीन, या भाषा में चलाने के लिए [इंजन सर्वर](/engine-servers) देखें।
+मशीन, या भाषा में चलाने के लिए [इंजन सर्वर](/reference/engine-protocol) देखें।
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -84,7 +84,7 @@ export interface ConnectEngineOptions {
 [`resolveExpression`](/reference/engine#resolveexpression) से एक्सप्रेशन
 रिज़ॉल्व करता है। `fixtures`, `validateApp`, `secrets`, और `session` हुक क्लाइंट
 पर चलते हैं; `session` हुक सर्वर के उसी नाम वाले मेथड की जगह लेता है।
-[होस्ट का काम क्लाइंट पर रखें](/engine-servers#keep-host-work-on-the-client)
+[होस्ट का काम क्लाइंट पर रखें](/reference/engine-protocol)
 देखें।
 
 <Warning>
@@ -112,7 +112,7 @@ export function serveEngine(
 ```
 
 सर्वर की अपनी लॉगिंग stderr पर रखें: stdout पर प्रोटोकॉल चलता है।
-[TypeScript इंजन सर्व करें](/engine-servers#serve-a-typescript-engine) देखें।
+[TypeScript इंजन सर्व करें](/reference/engine-protocol) देखें।
 
 ### `describeEngine`
 
@@ -207,6 +207,8 @@ export interface EngineManifest {
   readonly tapModifiers?: boolean;
   /** Requires `lifecycle/prepare`: `prepare` binds the device `e2e run --device` names. */
   readonly selectsDevice?: boolean;
+  /** See `Engine.grantsAllPermissions`. */
+  readonly grantsAllPermissions?: boolean;
   /** The engine reads the object form of `app.launchArguments` from `EngineAppInfo.launchArgumentValues`. */
   readonly launchArgumentValues?: boolean;
   /** The engine opens an app whose `url` is a `file:` URL, read from the disk of the machine the harness runs on. */
@@ -255,6 +257,9 @@ export interface EngineManifest {
 जब सर्वर अटेम्प्ट की आर्टिफ़ैक्ट डायरेक्टरी में लिख न सके (जैसे डिवाइस पर चल रहा
 सर्वर), तब `artifacts/screenshot` `{ data, mediaType: 'image/png' }` लौटाता है,
 जहाँ इमेज base64 में होती है। क्लाइंट इसे `screenshots/` के अंदर लिख देता है।
+जिस अटेम्प्ट ने इमेज माँगी थी, उसके लिए `lifecycle/endAttempt` भेजे जाने के बाद
+या उस अटेम्प्ट के खत्म होने के बाद पहुँचे बाइट्स छोड़ दिए जाते हैं, और कॉल
+`INVALID_STATE` से फ़ेल होती है।
 ऑब्ज़र्वेशन के पिक्सल भी इसी तरह जाते हैं: `pixels.data` base64 होता है।
 `engine/perform` में फ़ाइल पेलोड बफ़र भी base64 की तरह जाते हैं; इंजन को वे
 `Uint8Array` बाइट्स के रूप में मिलते हैं।
@@ -314,7 +319,7 @@ export interface EngineManifest {
 ## टाइप
 
 ट्रांसपोर्ट एक कनेक्शन की बाइट स्ट्रीम खोलता है।
-[ट्रांसपोर्ट लिखें](/engine-servers#write-a-transport) देखें।
+[ट्रांसपोर्ट लिखें](/reference/engine-protocol) देखें।
 
 ```ts
 export interface EngineTransport {
@@ -347,5 +352,5 @@ export interface TransportConnection {
 
 [इंजन](/engines) इंजन बनाने के तरीकों की तुलना करता है।
 [`e2e/engine`](/reference/engine) वह कॉन्ट्रैक्ट है जिसे हर मैसेज लेकर चलता है।
-[इंजन सर्वर](/engine-servers) और [इंजन लिखें](/writing-an-engine) इसे बनाने की
+[इंजन सर्वर](/reference/engine-protocol) और [इंजन लिखें](/writing-an-engine) इसे बनाने की
 पूरी प्रक्रिया बताते हैं।

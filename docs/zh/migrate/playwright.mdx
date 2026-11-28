@@ -147,7 +147,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | Playwright | e2e |
 | --- | --- |
 | `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | `browser` 上的同名方法；模式是匹配完整 URL 的 `RegExp`、基于应用 URL 解析的 URL glob，或用 `{ method, url }` 指定一个 HTTP 方法 |
-| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | 相同，各方法接受的选项见 [`route`](/reference/web#route) |
+| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | 相同，各方法接受的选项见 [`route`](/reference/web) |
 | `page.waitForResponse(pattern)` | `browser.waitForResponse(pattern)`，使用相同的 URL glob |
 | `page.on('dialog')`, `page.waitForEvent('download')` | `browser.onDialog('accept')` 或处理函数；`browser.waitForDownload(() => trigger)` |
 | `page.waitForEvent('popup')` | `browser.waitForPopup(() => trigger)`，会激活新标签页，参阅[标签页](/reference/web#tabs) |
@@ -328,7 +328,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | 用于标签的 `--grep @smoke`、正则表达式位置参数、`file:line:column` | `--tag smoke`；glob 或单独的名称；`file:line` |
 | `getByTitle()` | `browser.locator('[title="Close"]')`。标题是 DOM 属性，因此没有对应的 `screen` 查询 |
 | `page.waitForLoadState()` | 对下一页面显示的内容进行断言。导航等待 `load`，每个操作和断言等待各自的节点 |
-| `npx playwright codegen`、Inspector | [`npx e2e mcp`](/mcp-server) 让编码智能体在编写测试时操作应用；`screen.debug()` 输出语义树 |
+| `npx playwright codegen`、Inspector | [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) 让编码智能体在编写测试时操作应用；`screen.debug()` 输出语义树 |
 | `{ force: true }`, `{ trial: true }` | `tap({ position })` 跳过可操作性检查；试运行使用 `toBeVisible()` 和 `toBeEnabled()` |
 | `ariaSnapshot()`, `toMatchAriaSnapshot()`, `toMatchSnapshot()` | `expect(await screen.tree()).toContain(...)`；测试夹具文件和 `toEqual` |
 | `keyboard.insertText()`、`<label>` 上的 `inputValue()` | `fill()`；通过 `getByLabel` 定位控件本身 |

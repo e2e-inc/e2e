@@ -275,7 +275,9 @@ the way a user would.
 - `packages/acp` — the published `@e2e-dev/acp` package: a `StepExecutor`
   (`acp()`, with `claudeCode()` and `codex()` presets) that runs
   `agent.act` and `agent.assert` on a coding agent over the Agent Client
-  Protocol. The step tools (`createGrammarTools`, `createVerdictTool` from
+  Protocol, answers `agent.waitFor` and `agent.extract` in a second,
+  tool-less session (`answer`), and takes `e2e explore`'s rules and
+  `report_finding` through `extend`. The step tools (`createGrammarTools`, `createVerdictTool` from
   `e2e/agent`) reach the agent as an MCP server on 127.0.0.1; permission
   requests for anything else are rejected, and a tool of the agent's own
   that runs without asking fails the step with `POLICY_DENIED`.
@@ -845,7 +847,8 @@ trees, on both platforms, without a device.
   params, the agent's context, and the current screen with its location. Without a model, the first `agent` acquisition in a run
   reports one run-level `MODEL_UNAVAILABLE` and stops the run (exit 2). A
   custom executor handles `act` and `assert` through `runStep` and needs no
-  model; its `waitFor` and `extract` still use the built-in judgments. No implicit target either: `targets` is required and
+  model; its `waitFor` and `extract` use the built-in judgments on the
+  agent's `judge` or `model`, else on the executor's own `answer`. No implicit target either: `targets` is required and
   each names its engine.
 - Security invariants (fail closed when one cannot be enforced):
   - Secret values never reach model input, digests, logs, reports, or

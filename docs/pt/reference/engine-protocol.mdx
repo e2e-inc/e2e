@@ -1,0 +1,365 @@
+---
+title: Protocolo de engine
+description: Rode uma engine em outro processo, em outra máquina ou em outra linguagem.
+---
+
+O protocolo de engine é o [contrato de engine](/reference/engine) em forma de
+mensagens JSON-RPC. O runner controla toda engine por meio dele. Para rodar
+uma engine em outro processo, em outra máquina ou em outra linguagem, veja
+[Servidores de engine](/reference/engine-protocol).
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { connectEngine, spawnTransport } from 'e2e/engine';
+
+export default {
+  targets: [
+    {
+      name: 'kiosk',
+      engine: connectEngine({
+        manifest: { name: 'kiosk', version: '1.0.0', spiVersion: 1, platform: 'kiosk', methods: ['engine/observe'] },
+        transport: spawnTransport({ command: './kiosk-engine' }),
+        resolveLocators: true,
+      }),
+    },
+  ],
+} satisfies E2EConfig;
+```
+
+## Referência
+
+| Função | Retorna |
+| --- | --- |
+| [`connectEngine`](#connectengine) | `EngineHandle` |
+| [`serveEngine`](#serveengine) | `Promise<void>` |
+| [`describeEngine`](#describeengine) | `EngineManifest` |
+| [`spawnTransport`](#spawntransport) | `EngineTransport` |
+| [`socketTransport`](#sockettransport) | `EngineTransport` |
+| [`loopbackTransport`](#loopbacktransport) | `EngineTransport` |
+
+### `connectEngine`
+
+Transforma um servidor de engine em um handle de engine, o valor que o
+`engine` de um alvo recebe.
+
+```ts
+export function connectEngine(options: ConnectEngineOptions): EngineHandle;
+
+export interface ConnectEngineOptions {
+  /** What the server is; the server's manifest from `initialize` must match it. */
+  readonly manifest: EngineManifest;
+  /** How to reach the server. */
+  readonly transport: EngineTransport;
+  /** Engine options the server receives in `initialize`, as JSON. */
+  readonly initializationOptions?: JsonValue;
+  /** The `secrets.get()` handles the server may resolve. */
+  readonly secrets?: readonly Secret[];
+  /** Fixtures that run on the client, beside the test. */
+  readonly fixtures?: Engine['fixtures'];
+  /** Checks the target's app at config load, on the client. */
+  readonly validateApp?: Engine['validateApp'];
+  /** Answers locators on the client from observations, for a server without `engine/locate`. */
+  readonly resolveLocators?: boolean;
+  /** Session hooks the client answers instead of the server. */
+  readonly session?: EngineSession;
+}
+```
+
+O runner lê o manifesto no carregamento da configuração, antes de qualquer
+servidor rodar. Um servidor cujo manifesto é diferente falha na primeira conexão.
+
+Um handle abre as próprias conexões onde o harness chama a engine. No runner,
+uma conexão por alvo vive de `prepare` até `finish`, e só abre quando o
+servidor atende `lifecycle/prepare` ou `lifecycle/finish`. Em cada worker,
+uma conexão vive de `init` até `dispose`. `e2e doctor` abre uma conexão
+`doctor` por alvo só para `lifecycle/doctor` e a fecha depois. Um transporte
+pode iniciar o servidor para essa conexão, como `spawnTransport` faz, mas não
+pode provisionar uma máquina, reservar um dispositivo nem instalar o app. Ao
+sinal do doctor, o servidor tem 5 segundos para responder antes de a conexão
+fechar. Uma chamada de operação fora de `init`..`dispose` falha com
+`INVALID_STATE`.
+Um worker que nunca rodou `init` não tem conexão, então o servidor não recebe
+nenhum `lifecycle/dispose` para ele.
+Cabe ao servidor decidir se duas conexões compartilham estado: um servidor
+iniciado como processo filho ganha um processo por conexão, e um servidor de
+loopback ou de socket pode atender todas elas com uma única engine.
+
+Com `resolveLocators`, cada `locate` observa e resolve a expressão com
+[`resolveExpression`](/reference/engine#resolveexpression).
+`fixtures`, `validateApp`, `secrets` e os hooks de `session` rodam no cliente;
+um hook de `session` substitui o método de mesmo nome do servidor. Veja
+[Mantenha o trabalho do host no cliente](/reference/engine-protocol).
+
+<Warning>
+`lifecycle/prepare`, `lifecycle/init`, `lifecycle/finish` e `lifecycle/doctor` levam o
+ambiente da execução, incluindo as chaves de modelo e os valores de
+`E2E_SECRET_*`, e `attempt/resolveSecret` responde com texto simples. Conecte-se
+apenas a um servidor em que você confia: `socketTransport` não criptografa.
+</Warning>
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_CONFIG` | O manifesto está malformado: um método desconhecido, um método listado duas vezes ou membros que `defineEngine` rejeita, como `keyboard/type` sem `keyboard/press`, `engine/perform` sem `actions` ou `engine/perform` sem `engine/observe`. |
+| `ENGINE_FAILURE` | O manifesto do servidor é diferente, ou a conexão fecha no meio de uma chamada. A mensagem traz os diagnósticos do transporte, como as últimas linhas de stderr do servidor. |
+
+### `serveEngine`
+
+Serve uma engine construída com `defineEngine` por uma única conexão, até o cliente
+enviar `exit` ou os streams fecharem.
+
+```ts
+export function serveEngine(
+  engine: EngineHandle | ((initializationOptions: unknown) => EngineHandle | Promise<EngineHandle>),
+  streams?: MessageStreams, // default: process.stdin and process.stdout
+): Promise<void>;
+```
+
+Mantenha os logs do próprio servidor no stderr: o stdout carrega o protocolo.
+Veja [Sirva uma engine TypeScript](/reference/engine-protocol).
+
+### `describeEngine`
+
+Retorna o manifesto que `serveEngine` anuncia para um handle de engine: os
+membros estáticos do handle, os métodos que os membros declarados atendem, e
+`lifecycle/startAttempt` e `lifecycle/endAttempt`, que `serveEngine` sempre
+atende. Use essa função para declarar o manifesto de uma engine TypeScript
+servida em outro lugar.
+
+```ts
+export function describeEngine(engine: EngineHandle): EngineManifest;
+```
+
+### `spawnTransport`
+
+Inicia o servidor como um processo filho por conexão e se comunica pelo stdin
+e pelo stdout desse processo, do jeito que um editor inicia um servidor de
+linguagem.
+
+```ts
+export function spawnTransport(options: {
+  readonly command: string;
+  readonly args?: readonly string[];
+  /** Added to the worker's environment. */
+  readonly env?: Readonly<Record<string, string>>;
+  readonly cwd?: string; // default: the project root
+}): EngineTransport;
+```
+
+Fechar uma conexão encerra o stdin, envia `SIGTERM` e envia `SIGKILL` quando
+o orçamento de limpeza se esgota.
+Quando o stdout do servidor termina, a conexão fecha assim que o servidor
+tiver encerrado e o stderr dele tiver fechado, ou 2 segundos depois.
+O erro informa o que o transporte viu até ali: o código de saída ou o sinal,
+e as últimas linhas de stderr.
+
+### `socketTransport`
+
+Conecta-se a um servidor que já escuta em uma porta TCP, nesta máquina ou em
+outra. Fechar uma conexão encerra o socket; o servidor continua rodando.
+
+```ts
+export function socketTransport(options: { readonly host: string; readonly port: number }): EngineTransport;
+```
+
+### `loopbackTransport`
+
+Serve uma engine neste processo por streams em memória. Mesmo assim, toda
+chamada atravessa o protocolo, serializada como em qualquer outro transporte.
+
+```ts
+export function loopbackTransport(engine: EngineHandle): EngineTransport;
+```
+
+## Mensagens
+
+O protocolo base é o do
+[Language Server Protocol](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#baseProtocol):
+mensagens JSON-RPC 2.0 em UTF-8, cada uma depois de um cabeçalho
+`Content-Length` e de uma linha em branco. Qualquer um dos lados pode enviar
+requisições e notificações.
+
+### Ciclo de vida
+
+Uma conexão abre e fecha como uma conexão LSP.
+
+| Mensagem | Direção | Parâmetros | Resultado |
+| --- | --- | --- | --- |
+| `initialize` | requisição, do cliente para o servidor | `{ protocolVersion: 1, clientInfo, role, initializationOptions? }` | `{ protocolVersion: 1, manifest }` |
+| `initialized` | notificação, do cliente para o servidor | `{}` | - |
+| `shutdown` | requisição, do cliente para o servidor | - | `null` |
+| `exit` | notificação, do cliente para o servidor | - | - |
+
+Cada lado recusa qualquer `protocolVersion` diferente de `1`. Depois de
+`shutdown`, cada lado deixa os próprios sinais como estão. Quando uma conexão
+fecha sem `shutdown`, cada lado aborta todo sinal que mantém.
+
+### Manifesto
+
+O JSON Schema do manifesto vem no pacote `e2e` como
+`schema/engine-manifest-v1.schema.json`.
+
+```ts
+export interface EngineManifest {
+  readonly name: string;
+  readonly version: string;
+  readonly spiVersion: 1;
+  readonly platform?: string;
+  readonly workers?: number;
+  /** The engine methods the server answers; one left out is a capability the engine lacks. */
+  readonly methods: readonly EngineMethod[];
+  /** Required with `engine/perform`. */
+  readonly actions?: readonly LocatorActionKind[];
+  /** Required with `engine/performAt`. */
+  readonly pointerActions?: readonly PointerActionKind[];
+  readonly tapModifiers?: boolean;
+  /** Requires `lifecycle/prepare`: `prepare` binds the device `e2e run --device` names. */
+  readonly selectsDevice?: boolean;
+  /** See `Engine.grantsAllPermissions`. */
+  readonly grantsAllPermissions?: boolean;
+  /** The engine reads the object form of `app.launchArguments` from `EngineAppInfo.launchArgumentValues`. */
+  readonly launchArgumentValues?: boolean;
+  /** The engine opens an app whose `url` is a `file:` URL, read from the disk of the machine the harness runs on. */
+  readonly fileApps?: boolean;
+  /** See `Engine.isolation`; left out for `attempt`. */
+  readonly isolation?: 'worker';
+}
+```
+
+### Métodos da engine
+
+Cada método é um membro da engine, uma requisição do cliente para o servidor.
+Os parâmetros do método são os argumentos do membro por nome, com todo
+`OperationContext` como `operation`. `ENGINE_METHODS` lista os métodos.
+
+| Método | Parâmetros | Resultado |
+| --- | --- | --- |
+| `engine/observe` | `{ operation, options? }` | `EngineSnapshot` |
+| `engine/readStyle` | `{ ref, properties, operation }` | `ComputedStyleValues` |
+| `engine/viewportIntersection` | `{ ref, operation }` | `ViewportIntersection`; deixe `ratio` de fora, nunca `null`, quando a plataforma não consegue medir esse valor |
+| `engine/locate` | `{ expression, operation }` | `SemanticNode[]` |
+| `engine/perform` | `{ ref, action, operation }` | `null` |
+| `engine/performAt` | `{ point, action, operation }` | `null` |
+| `keyboard/type` | `{ text, options: { replace }, operation }` | `null` |
+| `keyboard/press` | `{ key, operation }` | `null` |
+| `keyboard/dismiss` | `{ operation }` | `null` |
+| `state/capture` | `{ operation }` | `EngineState` |
+| `state/restore` | `{ state, operation }` | `null` |
+| `artifacts/screenshot` | `{ label?, operation }` | `{ path }` ou `{ data, mediaType }` |
+| `artifacts/startVideo` | `{ operation }` | `null` |
+| `artifacts/stopVideo` | `{ operation }` | `VideoSegment[]` |
+| `session/open` | `{ url, operation }` | `null` |
+| `session/openLink` | `{ url, operation }` | `null` |
+| `session/back`, `session/restart`, `session/reset` | `{ operation }` | `null` |
+| `session/resize` | `{ size: { width, height }, operation }` | `null` |
+| `session/switchTab` | `{ index, operation }` | `null` |
+| `session/closeTab` | `{ index, operation }` | `null` |
+| `lifecycle/prepare` | `EnginePrepareInfo` sem `log` | `EnginePrepareResult` ou `null` |
+| `lifecycle/finish` | `EngineFinishInfo` sem `log` | `null` |
+| `lifecycle/doctor` | `EngineDoctorInfo` sem `log` | `EngineDoctorCheck[]` |
+| `lifecycle/init` | `EngineInitInfo` sem `log` | `null` |
+| `lifecycle/startAttempt` | `{ attemptId, artifactsDir, signal, screens }` | `null` |
+| `lifecycle/settleAttempt`, `lifecycle/endAttempt` | `{ signal, timeoutMs }` | `null` |
+| `lifecycle/dispose` | `{ signal, timeoutMs, reuseSignal? }` | `null` |
+
+`artifacts/screenshot` retorna `{ data, mediaType: 'image/png' }`, a imagem
+em base64, quando o servidor não consegue escrever no diretório de artefatos
+da tentativa, como um servidor em um dispositivo. O cliente escreve a imagem
+sob `screenshots/`. Bytes que chegam depois que `lifecycle/endAttempt` foi
+enviado para a tentativa que pediu, ou depois que essa tentativa terminou, são
+descartados, e a chamada falha com `INVALID_STATE`.
+Os pixels das observações atravessam do mesmo jeito: `pixels.data` é base64. Os buffers de payload de arquivos também atravessam como base64 em `engine/perform`; as engines os recebem como bytes `Uint8Array`.
+
+`screens` em `lifecycle/startAttempt` diz se a tentativa mantém um trace, que
+é quando o servidor pode enviar `attempt/screen`.
+
+### Do servidor para o cliente
+
+O que uma engine chama de volta no harness atravessa como mensagens do
+servidor para o cliente. Cada mensagem `attempt/*` traz o `attemptId` da
+tentativa a que pertence; o cliente descarta uma mensagem de uma tentativa
+que já terminou.
+
+| Mensagem | Tipo | Parâmetros |
+| --- | --- | --- |
+| `engine/log` | notificação | `{ line }`, de `prepare`, `init` ou `finish` |
+| `attempt/appLog` | notificação | `{ attemptId, entry }` |
+| `attempt/navigation` | notificação | `{ attemptId, line }` |
+| `attempt/environment` | notificação | `{ attemptId, facts }` |
+| `attempt/screen` | notificação | `{ attemptId, snapshot }` |
+| `attempt/resolveSecret` | requisição | `{ attemptId, name, derivation? }`, resultado `{ value }` |
+
+Com `derivation`, o cliente pergunta de volta com `attempt/deriveSecret`
+`{ derivation, plaintext }` antes de responder. O servidor retorna
+`{ values }`, as formas que a engine deriva do valor, como um cabeçalho de
+basic auth, e o cliente oculta essas formas sob o nome do segredo.
+
+### Sinais
+
+Um `AbortSignal` atravessa como `{ id, aborted?, reason? }`. O cliente cria um
+id por sinal e envia `$/abort` com `{ id, reason? }` quando o sinal aborta.
+Um sinal que já está abortado quando é enviado traz `aborted: true`. `reason`
+é o motivo do aborto como um objeto de erro JSON-RPC, codificado como o
+[erro](#errors) de um método que falhou, quando o harness abortou com um erro
+próprio, como o tempo limite de um teste. O servidor aborta o sinal
+correspondente com esse erro, então uma engine que relança `signal.reason`
+lança o mesmo que lançaria rodando no mesmo processo. Sem `reason`, o sinal aborta
+com o `AbortError` da plataforma. Um servidor esquece um id assim que o sinal
+desse id aborta, e esquece todo id visto pela primeira vez durante uma
+tentativa assim que `lifecycle/endAttempt` se conclui. Um id enviado de novo
+depois disso é um novo sinal.
+
+### Erros
+
+Um método de engine que falha responde com o código de erro JSON-RPC
+`-32000` e o erro do e2e em `data`, então o harness classifica uma falha
+remota exatamente como uma local:
+
+| `data` | A engine lançou |
+| --- | --- |
+| `{ type: 'engine', code, retryable }` | Um [`EngineError`](/reference/engine#engineerror). Só `NODE_STALE` e `FRAME_NOT_FOUND` podem permitir nova tentativa. |
+| `{ type: 'e2e', category, code, retryable, details? }` | Um erro do runner, como `TestError` ou `ConfigurationError`. |
+
+Qualquer outro código de erro traz só a mensagem. O harness trata esse erro
+como uma falha de infraestrutura, como trata um `Error` simples de uma engine
+local. O `data` de qualquer erro também pode trazer `stack`, `errno` (um
+código de erro do Node, como `ECONNREFUSED`) e `cause`, um objeto de erro com
+o mesmo formato, para que os relatórios mostrem onde a engine falhou.
+
+## Tipos
+
+Um transporte abre os streams de bytes de uma conexão. Veja
+[Escreva um transporte](/reference/engine-protocol).
+
+```ts
+export interface EngineTransport {
+  /** For error messages: the command, or the address. */
+  readonly label: string;
+  open(context: TransportContext): Promise<TransportConnection>;
+}
+
+export interface TransportContext {
+  readonly role: 'run' | 'worker' | 'doctor';
+  readonly env: Readonly<Record<string, string | undefined>>;
+  /** The project root. */
+  readonly cwd: string;
+  readonly signal: AbortSignal;
+  /** The target's app, from `prepare`, `init`, or `doctor`: what a transport installs, since a server elsewhere cannot read the project's files. */
+  readonly app?: EngineAppInfo;
+}
+
+export interface TransportConnection {
+  readonly input: Readable;
+  readonly output: Writable;
+  /** Releases the process or socket, within `timeoutMs`. */
+  close(timeoutMs: number): Promise<void>;
+  /** What went wrong, for an error message. */
+  diagnostics?(): string;
+}
+```
+
+## Relacionados
+
+[Engines](/engines) compara as formas de construir uma.
+[`e2e/engine`](/reference/engine) é o contrato que cada mensagem carrega.
+[Servidores de engine](/reference/engine-protocol) e [Escrever uma engine](/writing-an-engine)
+mostram passo a passo como construir uma.

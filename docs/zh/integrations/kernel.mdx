@@ -6,7 +6,7 @@ description: 使用 @e2e-dev/kernel 的 kernel() 浏览器提供方，在 Kernel
 "twitter:image": "https://e2e.com/docs/images/og/integrations/kernel.png?v=c116b9983d"
 ---
 
-`@e2e-dev/kernel` 中的 `kernel()` 是 [Kernel](https://kernel.sh) 的[浏览器提供方](/browser#hosted-browsers)。每个工作进程槽位或每次尝试都会获得独立的托管 Chromium。测试无需更改，只需修改测试目标的 `browser`。
+`@e2e-dev/kernel` 中的 `kernel()` 是 [Kernel](https://kernel.sh) 的[浏览器提供方](/reference/web)。每个工作进程槽位或每次尝试都会获得独立的托管 Chromium。测试无需更改，只需修改测试目标的 `browser`。
 
 ## 配置
 
@@ -74,7 +74,7 @@ web({
 
 `scope: 'worker'` 在本次运行中为每个工作进程槽位保留一个浏览器。每次尝试都会在其中获得一个新的浏览器上下文，与本地运行相同，因此测试不会看到其他测试的 Cookie、存储或权限。Kernel 的第一个标签页会在后台保持打开。Kernel 的 `profile` 不会生效，因为它只适用于浏览器的默认上下文。
 
-`scope: 'attempt'` 为每次尝试租用一个新浏览器，包括重试。尝试在默认上下文的第一个标签页中运行，因此 `profile` 会生效，实时视图中也只显示一个标签页。每个测试都需要承担浏览器启动的开销，并受到[每次尝试租约的限制](/browser#hosted-browsers)，包括会话方面的限制。
+`scope: 'attempt'` 为每次尝试租用一个新浏览器，包括重试。尝试在默认上下文的第一个标签页中运行，因此 `profile` 会生效，实时视图中也只显示一个标签页。每个测试都需要承担浏览器启动的开销，并受到[每次尝试租约的限制](/reference/web)，包括会话方面的限制。
 
 ## 录制
 
@@ -97,7 +97,7 @@ Kernel 只支持以默认的有头模式运行的浏览器回放。设置 `headl
 ## 下一步
 
 <CardGroup cols={2}>
-  <Card title="托管浏览器" icon="globe" href="/browser#hosted-browsers">
+  <Card title="托管浏览器" icon="globe" href="/reference/web">
     浏览器提供方如何租用浏览器，以及 `'attempt'` 作用域的限制。
   </Card>
   <Card title="持续集成" icon="rotate" href="/ci">

@@ -5,12 +5,13 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { Transformer } from '@napi-rs/image';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { EngineAttemptContext, OperationContext } from '@e2e-dev/core/engine';
 import { AppProcess, type LaunchSetup } from '../../src/app-process.ts';
+import { Budget } from '../../src/budget.ts';
 import { screenshotFile, withPixels } from '../../src/capture.ts';
 import { DevTools } from '../../src/devtools.ts';
 import { ensureFfmpeg } from '../../src/ffmpeg.ts';
@@ -18,12 +19,19 @@ import { readWindow } from '../../src/locate.ts';
 import { resolveOptions } from '../../src/options.ts';
 import { Recorder } from '../../src/video.ts';
 import { DialogRouter } from '../../src/dialogs.ts';
-import { Windows } from '../../src/windows.ts';
+import { Windows, type AppWindow } from '../../src/windows.ts';
 import { electronBinary } from './electron-binary.ts';
 
 const LOADED = `new BrowserWindow({ show: false }).loadURL('data:text/html,<title>Loaded</title><h1>Loaded</h1>')`;
 /** Whether a window whose pixels a test reads is shown: Windows captures nothing of a hidden one, and Linux draws on a virtual display. Hidden on macOS, where a shown one would take the developer's screen. */
 const SHOWN = process.platform !== 'darwin';
+/**
+ * How long a test keeps a window on screen before the app hides it. A window
+ * hidden the moment it loaded can have drawn nothing yet, and a capture of
+ * one sometimes never returns on Windows and Linux: a gap of its own, which
+ * these tests leave out.
+ */
+const SHOWN_MS = 1000;
 const directories: string[] = [];
 const apps: AppProcess[] = [];
 
@@ -33,7 +41,8 @@ interface Launched {
   readonly dialogs: DialogRouter;
   readonly logs: string[];
   readonly directory: string;
-  launch(timeoutMs?: number, signal?: AbortSignal): Promise<void>;
+  /** Launches; with `spentMs`, after the operation spent that much of its time, as a restart's quit does. */
+  launch(timeoutMs?: number, signal?: AbortSignal, spentMs?: number): Promise<void>;
 }
 
 /** An app whose main script runs `body` once Electron is ready, with `electron`'s exports in scope. */
@@ -55,7 +64,13 @@ function appWith(body: string, launchArguments: readonly string[] = []): Launche
     dialogs,
     logs,
     directory,
-    launch: (timeoutMs = 20_000, signal = new AbortController().signal) => app.launch(setup, { signal, timeoutMs, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext),
+    launch: async (timeoutMs = 20_000, signal = new AbortController().signal, spentMs) => {
+      const operation = { signal, timeoutMs, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext;
+      if (spentMs === undefined) return await app.launch(setup, operation);
+      const budget = new Budget(operation, 'app.open');
+      await new Promise((resolve) => setTimeout(resolve, spentMs));
+      await app.launch(setup, operation, budget);
+    },
   };
 }
 
@@ -158,6 +173,22 @@ describe('launch', () => {
     const failure = await launch(2000).then(() => undefined, (error: unknown) => error);
     expect(String(failure)).toMatch(/opened no window that loaded a page within \d+ms: 1 window has loaded nothing yet/);
     expect(await gone(directory)).toBe(true);
+  });
+
+  it('says why a launch failed when the operation spent part of its time before it, as a restart\'s quit does', async () => {
+    const { launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: false }));`);
+    // The operation's signal ends with its time, as the runner's does; the quit before the launch spent half of it.
+    const failure = await launch(4000, AbortSignal.timeout(4000), 2000).then(() => undefined, (error: unknown) => error);
+    expect(failure).not.toMatchObject({ code: 'CANCELLED' });
+    expect(String(failure)).toMatch(/1 window has loaded nothing yet/);
+  });
+
+  it('starts no app when the operation spent all its time before the launch', async () => {
+    const { directory, launch } = appWith(`require('node:fs').writeFileSync(require('node:path').join(__dirname, 'started'), '1'); app.whenReady().then(() => { ${LOADED}; });`);
+    const failure = await launch(500, AbortSignal.timeout(5000), 700).then(() => undefined, (error: unknown) => error);
+    expect(failure).toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(existsSync(path.join(directory, 'started'))).toBe(false);
   });
 
   it('kills the whole app when its launch is cancelled', async () => {
@@ -312,6 +343,29 @@ describe('electron.evaluate', () => {
   });
 });
 
+describe('downloads', () => {
+  it.skipIf(process.platform === 'win32')('saves inside the attempt a download from a session the app made before any window used it', async () => {
+    const launched = appWith(`app.setPath('downloads', require('node:path').join(__dirname, 'outside'));
+      app.whenReady().then(() => {
+        require('electron').session.fromPartition('persist:later');
+        const server = require('node:http').createServer((request, response) => {
+          if (request.url !== '/file') return response.end('<title>Loaded</title>');
+          response.setHeader('Content-Disposition', 'attachment; filename="later.txt"');
+          response.end('later');
+        });
+        server.listen(0, '127.0.0.1', () => new BrowserWindow({ show: false }).loadURL('http://127.0.0.1:' + server.address().port + '/'));
+      });`);
+    await launched.launch();
+    const origin = new URL(launched.windows.require().page.url()).origin;
+    await launched.app.evaluate(({ BrowserWindow, session }, url) => {
+      new BrowserWindow({ show: false, webPreferences: { session: session.fromPartition('persist:later') } }).webContents.downloadURL(url);
+    }, `${origin}/file`);
+    const downloads = path.join(launched.directory, 'data', 'Downloads');
+    await expect.poll(() => (existsSync(downloads) ? readdirSync(downloads) : [])).toContain('later.txt');
+    expect(existsSync(path.join(launched.directory, 'outside', 'later.txt'))).toBe(false);
+  });
+});
+
 describe('an app with no inspector', () => {
   it.skipIf(process.platform === 'win32')('opens and saves a download inside the attempt', async () => {
     const launched = appWith(`app.whenReady().then(() => {
@@ -333,6 +387,29 @@ describe('an app with no inspector', () => {
     expect(await launched.app.evaluate(() => 1, undefined).then(() => undefined, (error: unknown) => error)).toMatchObject({ message: expect.stringMatching(/opened no inspector/) });
     await launched.windows.require().page.evaluate(() => document.querySelector('a')?.click());
     await expect.poll(() => (existsSync(path.join(data, 'Downloads')) ? readdirSync(path.join(data, 'Downloads')) : [])).toContain('saved.txt');
+  });
+
+  it.skipIf(process.platform === 'win32')('takes its own directory from the window the launch ends on, when the splash it waited for closes during setup', async () => {
+    const launched = appWith(`app.on('window-all-closed', () => {}); app.whenReady().then(() => {
+      const splash = new BrowserWindow({ show: false });
+      splash.webContents.once('did-finish-load', () => setTimeout(() => {
+        splash.destroy();
+        new BrowserWindow({ show: false }).loadFile(require('node:path').join(__dirname, 'bundle', 'ui', 'index.html'));
+      }, 150));
+      splash.loadFile(require('node:path').join(__dirname, 'bundle', 'splash', 'index.html'));
+    });`);
+    for (const part of ['splash', 'ui']) {
+      mkdirSync(path.join(launched.directory, 'bundle', part), { recursive: true });
+      writeFileSync(path.join(launched.directory, 'bundle', part, 'index.html'), `<title>${part}</title>`);
+    }
+    // A packaged app's binary: no app path on the command line, and no inspector to report one.
+    const wrapper = path.join(launched.directory, 'packaged');
+    writeFileSync(wrapper, `#!/bin/sh\nshift\nexec "${electronBinary()}" "${launched.directory}" "$@"\n`, { mode: 0o755 });
+    const attempt = { appLog: (entry: { readonly text: string }) => void launched.logs.push(entry.text), navigation: () => undefined, environment: () => undefined } as unknown as EngineAttemptContext;
+    const setup: LaunchSetup = { executable: wrapper, projectRoot: launched.directory, app: {}, env: process.env, userDataDir: path.join(launched.directory, 'data'), attempt };
+    await launched.app.launch(setup, { signal: new AbortController().signal, timeoutMs: 20_000, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext);
+    expect(await launched.windows.require().page.title()).toBe('ui');
+    expect(launched.app.appDirectory).toBe(realpathSync(path.join(launched.directory, 'bundle', 'ui')));
   });
 });
 
@@ -389,10 +466,33 @@ describe('pixels', () => {
     const refusal = async (reaction: string): Promise<string> => {
       const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(`<body style="margin:0">${RED_FRAME}${onMasks(reaction)}</body>`))}));`);
       await launch();
-      return String(await screenshotFile(new DevTools(), windows.require(), directory, 'shot.png').then(() => 'taken', (error: unknown) => error));
+      return String(await screenshotFile(new DevTools(), windows.require(), directory, 'shot.png', () => undefined).then(() => 'taken', (error: unknown) => error));
     };
     expect(await refusal(`const field = document.createElement('input'); field.type = 'password'; document.body.append(field);`)).toMatch(/appeared while the screenshot was taken/);
     expect(await refusal(`document.querySelector('iframe').style.marginLeft = '60px';`)).toMatch(/moved while the screenshot was taken/);
+  });
+
+  it('writes no screenshot of a window that left the app while it was captured', async () => {
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,<title>Loaded</title>'));`);
+    await launch();
+    // In the app when the screenshot is asked for, gone from it once the capture is done.
+    const answers = [undefined, 'the window left the app'];
+    const refused = await screenshotFile(new DevTools(), windows.require(), directory, 'left.png', () => answers.shift()).then(() => undefined, (error: unknown) => error);
+    expect(refused).toMatchObject({ code: 'POLICY_DENIED', message: expect.stringMatching(/left the app/) });
+    expect(existsSync(path.join(directory, 'screenshots', 'left.png'))).toBe(false);
+  });
+
+  it('writes no screenshot when the window loaded another document while it was captured', async () => {
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${process.platform === 'linux'}, width: 300, height: 200 }).loadURL('data:text/html,<title>Loaded</title>'));`);
+    await launch();
+    const window = windows.require();
+    // In the app at both checks, with another document loaded in between, as two navigations would leave it.
+    const refused = await screenshotFile(new DevTools(), window, directory, 'swapped.png', () => {
+      setTimeout(() => window.page.documentChanged(), 0);
+      return undefined;
+    }).then(() => undefined, (error: unknown) => error);
+    expect(refused).toMatchObject({ code: 'POLICY_DENIED', message: expect.stringMatching(/loaded another document/) });
+    expect(existsSync(path.join(directory, 'screenshots', 'swapped.png'))).toBe(false);
   });
 
   it('gives each of two captures taken at once its own masks', async () => {
@@ -426,6 +526,27 @@ describe('pixels', () => {
     const middle = (Math.floor(size.height / 2) * size.width + Math.floor(size.width / 2)) * channels;
     // Scrolled into the green half: the document's top, which a clip that ignored the scroll would show, is red.
     expect([rgba[middle], rgba[middle + 1], rgba[middle + 2]]).toEqual([0, 128, 0]);
+  });
+
+  it('captures a window the app showed and then hid, and one it opens and hides later', async () => {
+    const { app, windows, launch } = appWith(`const page = (colour) => 'data:text/html,<body style="margin:0;background:' + colour + '"></body>';
+      const open = async (url) => { const window = new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }); await window.loadURL(url); await new Promise((resolve) => setTimeout(resolve, ${SHOWN_MS})); window.hide(); };
+      app.whenReady().then(() => open(page('rgb(0,128,0)')));
+      globalThis.openSecond = () => setTimeout(() => open(page('rgb(0,0,255)')));`);
+    await launch();
+    const hidden = (): Promise<boolean[]> => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((window) => window.isVisible()), undefined);
+    const corner = async (window: AppWindow): Promise<number[]> => {
+      const raw = await readWindow(new DevTools(), window);
+      const { pixels } = await withPixels(new DevTools(), raw, { root: { ref: { id: 'window', revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } });
+      return [...new Transformer(pixels!.data).rawPixelsSync().subarray(0, 3)];
+    };
+    const first = windows.require();
+    await expect.poll(hidden, { timeout: 10_000 }).toEqual([false]);
+    expect(await corner(first)).toEqual([0, 128, 0]);
+    await app.evaluate(() => void (globalThis as unknown as { openSecond: () => unknown }).openSecond(), undefined);
+    await expect.poll(() => windows.open().length, { timeout: 10_000 }).toBe(2);
+    await expect.poll(hidden, { timeout: 10_000 }).toEqual([false, false]);
+    expect(await corner(windows.open().find((window) => window !== first)!)).toEqual([0, 0, 255]);
   });
 });
 
@@ -470,6 +591,23 @@ describe('video', () => {
     const last = frames.at(-1)!;
     expect(last[0]).toBeLessThan(80);
     expect(last[2]).toBeGreaterThan(180);
+  });
+
+  it('records a window the app hid', async () => {
+    const { app, windows, launch, directory } = appWith(`const blinking = '<body style="margin:0;background:rgb(255,0,0)"><script>let blue = false; setInterval(() => { blue = !blue; document.body.style.background = blue ? "rgb(0,0,255)" : "rgb(255,0,0)"; }, 100)</script>';
+      app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + encodeURIComponent(blinking)));`);
+    await launch();
+    const ffmpeg = await ensureFfmpeg(process.env, new AbortController().signal);
+    await new Promise((resolve) => setTimeout(resolve, SHOWN_MS));
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.hide(), undefined);
+    const recorder = new Recorder(ffmpeg, directory, 'video/hidden.webm', () => true);
+    recorder.follow(windows.require().page);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(await recorder.stop()).toHaveLength(1);
+    // The page turns blue and back while it is hidden: a recording of a window that stopped drawing would hold one colour.
+    const frames = frameColours(ffmpeg, path.join(directory, 'video', 'hidden.webm'));
+    expect(frames.some(([red, , blue]) => red > 180 && blue < 80)).toBe(true);
+    expect(frames.some(([red, , blue]) => red < 80 && blue > 180)).toBe(true);
   });
 
   it('keeps no frame of a window it may not show, and writes no file for a recording with none', async () => {

@@ -256,6 +256,7 @@ describe('e2e init', () => {
     { engine: 'none', ai: false },
     { engine: 'web', ai: true },
     { engine: 'mobile', ai: true },
+    { engine: 'electron', ai: false },
   ] as const)('matches imports and dependencies to engine=$engine, ai=$ai', async ({ engine, ai }) => {
     answers.engines = engine === 'none' ? [] : [engine];
     vi.mocked(clack.select).mockResolvedValueOnce(ai ? 'openrouter' : 'none');
@@ -267,7 +268,8 @@ describe('e2e init', () => {
       'e2e',
       ...(engine === 'web' ? ['@e2e-dev/web'] : []),
       ...(device ? ['@e2e-dev/mobile'] : []),
-      ...(engine === 'web' || device ? ['@e2e-dev/core'] : []),
+      ...(engine === 'electron' ? ['@e2e-dev/electron'] : []),
+      ...(engine === 'none' ? [] : ['@e2e-dev/core']),
       ...(ai ? ['ai', 'zod', '@openrouter/ai-sdk-provider'] : []),
     ]);
     expect(manifest.devDependencies.ai).toBe(ai ? '^7.0.0' : undefined);
@@ -282,8 +284,10 @@ describe('e2e init', () => {
     expect(read('tests/example.e2e.ts').includes('@e2e-dev/web')).toBe(engine === 'web');
     expect(read('e2e.config.ts').includes('@e2e-dev/mobile')).toBe(device);
     expect(read('tests/example.e2e.ts').includes('@e2e-dev/mobile')).toBe(device);
+    expect(read('e2e.config.ts').includes("engine: electron(), app: { appPath: '.' }")).toBe(engine === 'electron');
+    expect(read('tests/example.e2e.ts').includes("import { test } from '@e2e-dev/electron';")).toBe(engine === 'electron');
     expect(read('e2e.config.ts').includes('APP_URL')).toBe(engine === 'web');
-    expect(output()).toContain(`Next: npm install, then ${device ? '' : 'APP_URL=http://localhost:3000 '}npm run test:e2e`);
+    expect(output()).toContain(`Next: npm install, then ${device || engine === 'electron' ? '' : 'APP_URL=http://localhost:3000 '}npm run test:e2e`);
     expect(spawnSync).not.toHaveBeenCalled();
   });
 
@@ -305,6 +309,7 @@ describe('e2e init', () => {
       options: [
         expect.objectContaining({ value: 'web', label: 'Web', hint: 'Playwright' }),
         expect.objectContaining({ value: 'mobile', label: 'Mobile (iOS/Android)', hint: 'agent-device' }),
+        expect.objectContaining({ value: 'electron', label: 'Electron', hint: 'desktop app' }),
       ],
     }));
     expect(read('e2e.config.ts')).toContain(`engine: mobile({ platform: '${platform}' }), app: { bundleId: '${app}' }`);
@@ -1885,6 +1890,22 @@ export default {
       expect(read(workflow)).toContain('run: npx e2e run --reporter list,junit');
     });
 
+    it('leaves an Electron target out of the pipeline and says so, and writes none for Electron alone', async () => {
+      expect(await init(dir, { yes: true, engines: ['web', 'electron'], ci: 'github-actions' })).toMatchObject({ exitCode: 0, ci: 'github-actions' });
+      expect(read(workflow)).toContain('run: npx e2e run --target web --reporter list,junit');
+      expect(read(workflow)).not.toContain('electron');
+      expect(output()).toContain('No CI job runs electron: an Electron app needs a display');
+
+      const alone = mkdtempSync(path.join(os.tmpdir(), 'e2e-init-electron-'));
+      try {
+        expect(await init(alone, { yes: true, engines: ['electron'], ci: 'github-actions' })).toMatchObject({ exitCode: 0, ci: null });
+        expect(existsSync(path.join(alone, '.github'))).toBe(false);
+        expect(output()).toContain('Ignoring --ci: init writes a pipeline for web, iOS, and Android targets, and the project has none');
+      } finally {
+        rmSync(alone, { recursive: true, force: true });
+      }
+    });
+
     it('writes no pipeline for a project with neither engine', async () => {
       expect(await init(dir, { yes: true, engines: [], ci: 'github-actions' })).toMatchObject({ exitCode: 0, ci: null });
       expect(existsSync(path.join(dir, '.github'))).toBe(false);
@@ -2012,7 +2033,15 @@ export default {
       writeFileSync(path.join(dir, 'e2e.config.ts'), "import { mobile } from 'not-installed-engine';\nexport default { targets: [{ engine: mobile() }] };\n");
       await init(dir, { yes: true, ci: 'github-actions' });
       expect(existsSync(path.join(dir, workflow))).toBe(false);
-      expect(output()).toContain('No pipeline: the mobile jobs need the config\'s targets');
+      expect(output()).toContain('No pipeline: the jobs are split by the config\'s targets');
+    });
+
+    it('writes no pipeline when an existing web and Electron config does not load, rather than run the Electron target in the web job', async () => {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: '*', '@e2e-dev/web': '*', '@e2e-dev/electron': '*' } }));
+      writeFileSync(path.join(dir, 'e2e.config.ts'), "import { web } from 'not-installed-engine';\nexport default { targets: [{ engine: web() }] };\n");
+      await init(dir, { yes: true, ci: 'github-actions' });
+      expect(existsSync(path.join(dir, workflow))).toBe(false);
+      expect(output()).toContain('No pipeline: the jobs are split by the config\'s targets');
     });
 
     it('loads an existing config only after the changes are confirmed and the dependencies installed', async () => {

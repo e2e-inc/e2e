@@ -7,7 +7,7 @@ description: "@e2e-dev/kernel の kernel() ブラウザプロバイダーで、K
 ---
 
 `@e2e-dev/kernel` の `kernel()` は、[Kernel](https://kernel.sh) 用の
-[ブラウザプロバイダー](/browser#hosted-browsers) です。
+[ブラウザプロバイダー](/reference/web) です。
 ワーカースロットまたは試行ごとに、専用のホスト型 Chromium が割り当てられます。
 テストは変更せず、ターゲットの `browser` だけを変更します。
 
@@ -89,7 +89,7 @@ Kernel の `profile` が適用されるのはデフォルトコンテキスト�
 
 `scope: 'attempt'` は、リトライも含め、試行ごとに新しいブラウザを借ります。
 デフォルトコンテキストの最初のタブで実行するため、`profile` が適用され、ライブビューには 1 つのタブが表示されます。
-テストごとにブラウザ起動の負担が生じ、セッションを含む [試行単位の取得の制限](/browser#hosted-browsers) が適用されます。
+テストごとにブラウザ起動の負担が生じ、セッションを含む [試行単位の取得の制限](/reference/web) が適用されます。
 
 ## 録画
 
@@ -124,7 +124,7 @@ Kernel が各ブラウザを削除します。
 ## 次のステップ
 
 <CardGroup cols={2}>
-  <Card title="ホスト型ブラウザ" icon="globe" href="/browser#hosted-browsers">
+  <Card title="ホスト型ブラウザ" icon="globe" href="/reference/web">
     プロバイダーによるブラウザの取得と、`'attempt'` スコープの制限を確認します。
   </Card>
   <Card title="継続的インテグレーション" icon="rotate" href="/ci">

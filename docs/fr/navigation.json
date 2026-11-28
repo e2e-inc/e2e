@@ -17,7 +17,9 @@
     "Migrate": "Migrer",
     "Test API": "API de test",
     "Project": "Projet",
-    "Web": "Web",
-    "Mobile": "Mobile"
+    "Browsers": "Navigateurs",
+    "Devices": "Appareils",
+    "Browsers and devices": "Navigateurs et appareils",
+    "Ecosystem": "Écosystème"
   }
 }

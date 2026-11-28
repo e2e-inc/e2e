@@ -11,7 +11,7 @@ import { ensureElectronBinary, resolveExecutable } from '../../src/executable.ts
 const packageRoot = path.resolve(import.meta.dirname, '../..');
 
 export function electronBinary(): string {
-  return resolveExecutable(packageRoot, undefined);
+  return resolveExecutable(packageRoot, undefined, process.env);
 }
 
 /** The process's environment as a launch takes it, without what would start Electron as plain Node.js. */
@@ -22,5 +22,5 @@ export function launchEnvironment(): Record<string, string> {
 }
 
 export default async function setup(): Promise<void> {
-  await ensureElectronBinary(packageRoot, undefined, (line) => console.log(line), new AbortController().signal);
+  await ensureElectronBinary(packageRoot, undefined, process.env, (line) => console.log(line), new AbortController().signal);
 }

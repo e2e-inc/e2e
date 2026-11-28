@@ -1,6 +1,6 @@
 ---
 title: Custom executors
-description: Customize the agent loop or implement your own step executor.
+description: "Customize the agent loop that runs agent.act and agent.assert, or replace it with your own step executor when a system prompt and tools are not enough."
 "og:image": "https://e2e.com/docs/images/og/executors.png?v=283f7962bb"
 "twitter:image": "https://e2e.com/docs/images/og/executors.png?v=283f7962bb"
 ---
@@ -188,8 +188,27 @@ are invalid, and a missing tree doesn't prove a control is absent.
 the call fails with `UNSUPPORTED_CAPABILITY`. `screenshot` still attaches
 evidence after your verdict.
 
-`waitFor` and `extract` still use the built-in judgments. Without a
-configured model they fail with `MODEL_UNAVAILABLE`.
+`waitFor` and `extract` use the built-in judgments, on the agent's `judge`
+or `model`. With neither configured, they reach the executor's optional
+`answer(question)`: e2e sends the redacted screen and the instruction as
+text, plus the screenshot in `images` when the call asks for `vision`, and
+checks the JSON that comes back. Without `answer` they fail with `MODEL_UNAVAILABLE`.
+
+```ts
+const own: StepExecutor = {
+  name: 'house-brain',
+  runStep,
+  async answer({ system, prompt, signal }) {
+    return { text: await complete(system, prompt, signal) };
+  },
+};
+```
+
+[`e2e explore`](/explore) runs on an executor that has `extend(extension)`,
+which returns a copy that follows `extension.system` and offers
+`extension.tools`. `createProjectTools(ctx, tools)` from `e2e/agent` runs
+those tools under the step's accounting. Without `extend`, explore runs the
+built-in agent in the executor's place.
 
 ## The verdict
 
@@ -262,7 +281,7 @@ apply.
 ## Provider keys
 
 The run redacts the [provider keys](/reference/security#provider-keys) it
-finds in the environment from whatever an executor returns. Four functions
+finds in the environment from whatever an executor returns. Five functions
 from `e2e/agent` cover the rest:
 
 | Function | Use |
@@ -270,6 +289,7 @@ from `e2e/agent` cover the rest:
 | `registerProviderKey(name, value)` | A key your agent signs in with that no listed variable holds, such as one it reads from its own login file. Shows as `<secret:name>` from then on. `name` takes letters, digits, `_`, `.`, and `-`; a value shorter than 20 characters, longer than 8,192, or not a string is left alone. |
 | `registerProviderKeys(env)` | The listed variables of an environment you start an agent with, when it isn't the run's own. |
 | `redactSecrets(text)` | Text you cut short or keep before returning it. Redact first: half a key is no longer a match. |
+| `redactProviderKeys(text)` | Text the run already redacted, such as an `answer` question, right before it leaves: only the provider keys known now. |
 | `redactStepText(ctx, text)` | Text you send your agent that the run did not build, such as a prompt with your own `system`: the step's secrets and the provider keys known now, and no value an earlier test learned. Call it right before the text leaves. |
 
 A model built with a key in code can register it in `e2e.config.ts` too:

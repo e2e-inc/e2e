@@ -44,8 +44,18 @@ const HEADING = /^ {0,3}(#{1,4})\s+\S/;
 const ELEMENT = /<(Tab|Accordion)\b([^>]*)>/g;
 const ID = /\bid="([^"]*)"/g;
 
+/** A sidebar group; a group among its pages is a labelled run of pages inside it. */
+interface DocsGroup {
+  group: string;
+  pages?: (string | DocsGroup)[];
+}
+
+function groupNames(group: DocsGroup): string[] {
+  return [group.group, ...(group.pages ?? []).flatMap((entry) => (typeof entry === 'string' ? [] : groupNames(entry)))];
+}
+
 interface DocsJson {
-  navigation: { tabs: { tab: string; groups?: { group: string }[] }[] };
+  navigation: { tabs: { tab: string; groups?: DocsGroup[] }[] };
 }
 
 interface Navigation {
@@ -145,7 +155,7 @@ for (const language of DOCS_LANGUAGES) {
   }
   const navigation = JSON.parse(read(navigationFile)) as Navigation;
   const tabs = config.navigation.tabs.map((tab) => tab.tab);
-  const groups = [...new Set(config.navigation.tabs.flatMap((tab) => (tab.groups ?? []).map((group) => group.group)))];
+  const groups = [...new Set(config.navigation.tabs.flatMap((tab) => (tab.groups ?? []).flatMap(groupNames)))];
   for (const [kind, names, labels] of [
     ['tabs', tabs, navigation.tabs ?? {}],
     ['groups', groups, navigation.groups ?? {}],
