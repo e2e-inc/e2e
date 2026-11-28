@@ -89,7 +89,7 @@ export interface Launched {
 
 /**
  * What the driver can do: one function per native call, as the Rust code declares them. `native.ts` is written from
- * the crate on every build, so a call or an option the crate no longer takes fails the typecheck here.
+ * the crate by `pnpm build:native`, and CI fails when it is behind, so a call or an option the crate no longer takes fails the typecheck here.
  */
 export type DesktopDriver = Native & {
   /** The version of the package the driver came from, or `checkout build` for one built into this package's directory. */

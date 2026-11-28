@@ -19,7 +19,7 @@ export interface ActOptions {
   timeoutMs: number
 }
 
-/** Stops the call (`act`, `press`, `pointer`, `launch`) that was given `inputId`: it sends no input from then on, though what it sent stays sent. */
+/** Stops the call (`act`, `press`, `pointer`, `launch`, `focusWindow`, `closeWindow`) that was given `inputId`: it sends no input from then on, though what it sent stays sent. */
 export declare function cancelInput(inputId: number): void
 
 /**
@@ -38,7 +38,7 @@ export declare function focusWindow(pid: number, windowIdText: string, inputId?:
 export declare function forgetProcess(pid: number): void
 
 /**
- * A fresh id for one call's input (`act`, `press`, `pointer`, `launch`), unique in the process: every Node worker
+ * A fresh id for one call's input (`act`, `press`, `pointer`, `launch`, `focusWindow`, `closeWindow`), unique in the process: every Node worker
  * thread shares the addon, and with it the ids `cancelInput` reaches.
  */
 export declare function inputId(): number
@@ -116,7 +116,7 @@ export declare function processStarted(pid: number): number | null
 export declare function screenLocked(): boolean | null
 
 /** Captures a window into a PNG file; answers the display's scale. */
-export declare function screenshot(options: ScreenshotOptions): Promise<Envelope<{ readonly scale_factor?: number }>>
+export declare function screenshot(options: ScreenshotOptions): Promise<Envelope<{ readonly scale_factor: number }>>
 
 export interface ScreenshotOptions {
   windowId: string

@@ -200,7 +200,7 @@ export class FakeDriver implements DesktopDriver {
     return this.answer('pointer', [x, y, kind], ok({}));
   }
 
-  screenshot(options: Parameters<DesktopDriver['screenshot']>[0]): Promise<Envelope<{ readonly scale_factor?: number }>> {
+  screenshot(options: Parameters<DesktopDriver['screenshot']>[0]): Promise<Envelope<{ readonly scale_factor: number }>> {
     return this.answer('screenshot', [options], ok({ scale_factor: 1 }));
   }
 

@@ -46,6 +46,8 @@ if (typeDefs !== undefined) {
   // script when the second variable changes, which compiles the crate again.
   env.NAPI_TYPE_DEF_TMP_FOLDER = typeDefs;
   env[`NAPI_FORCE_BUILD_${addon.crate.replaceAll('-', '_').toUpperCase()}`] = String(Date.now());
+  // On exit, so a build that fails leaves no folder behind either.
+  process.on('exit', () => rmSync(typeDefs, { recursive: true, force: true }));
 }
 // A pinned toolchain installed before (another checkout's, or under a `RUSTUP_TOOLCHAIN` override) may lack this
 // target's standard library; adding one already there is a no-op.
@@ -58,7 +60,6 @@ if (typeDefs !== undefined) {
   const { generateTypeDef } = await import('@napi-rs/cli');
   const header = [`// Written by \`node scripts/native/build-native.ts ${addon.name} --types\` from crates/${addon.crate}. Do not edit.`, ...addon.typeImports, '', ''].join('\n');
   const { dts } = await generateTypeDef({ typeDefDir: typeDefs, cwd: crate, dtsHeader: header });
-  rmSync(typeDefs, { recursive: true, force: true });
   if (dts.trim() === header.trim()) throw new Error(`the build of ${addon.crate} wrote no types`);
   writeFileSync(path.join(addon.packageDir, addon.types), dts);
 }
