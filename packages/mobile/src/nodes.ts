@@ -652,6 +652,7 @@ export function projectSnapshot(
   });
 
   const keyboard = options.keyboard === undefined ? new Set<number>() : keyboardSide(raw, parents, roots, children, options.keyboard);
+  const pageFocus = pageFocusEchoes(raw, children);
   const index: ProjectedNode[] = [];
   const build = (position: number, parent: ProjectedNode | undefined, parentOnKeyboard: boolean): SemanticNode => {
     const source = raw[position] as RawNode;
@@ -692,11 +693,12 @@ export function projectSnapshot(
     };
     index.push(entry);
     const childNodes = kids.filter((child) => child !== folded?.child).map((child) => build(child, entry, onKeyboard));
-    const covered = !onKeyboard && source.focused !== true && underKeyboard(source.rect, options.keyboard) && childNodes.every((child) => child.states?.hidden === true);
+    const focused = source.focused === true && !pageFocus.has(position);
+    const covered = !onKeyboard && !focused && underKeyboard(source.rect, options.keyboard) && childNodes.every((child) => child.states?.hidden === true);
     const states = {
       ...(source.enabled === false ? { disabled: true } : {}),
       ...(source.selected === true ? { selected: true } : {}),
-      ...(source.focused === true ? { focused: true } : {}),
+      ...(focused ? { focused: true } : {}),
       ...(source.visibleToUser === false || covered ? { hidden: true } : {}),
       ...(secure ? { secure: true } : {}),
       ...(checked === undefined ? {} : { checked }),
@@ -781,6 +783,39 @@ function keyboardSide(
     }
   });
   return side;
+}
+
+/**
+ * The positions inside a web view whose `focused` flag is the page's focus,
+ * not their own. When the page holds the focus and none of its elements
+ * does, XCTest reports every element of the page as focused, siblings
+ * included; once a field takes the keyboard, that field is the only one.
+ *
+ * This is a stopgap heuristic, not the root cause: agent-device merges the
+ * AX server's `hasFocus` and `hasKeyboardFocus` into one `focused` flag, so
+ * the two cannot be told apart here. It assumes real focus is on one node, so
+ * a web view with more than one focused element below it has none. A page
+ * with a single echoed element still reads focused. The proper fix reports
+ * keyboard focus separately in agent-device. The web view nodes themselves
+ * are not counted: Android marks the host focused beside the field it holds.
+ */
+function pageFocusEchoes(
+  raw: readonly RawNode[],
+  children: ReadonlyMap<number, readonly number[]>,
+): Set<number> {
+  const echoes = new Set<number>();
+  const isWebView = (position: number): boolean => kindOf(raw[position] as RawNode) === 'web-view';
+  raw.forEach((_, position) => {
+    if (!isWebView(position)) return;
+    const focused: number[] = [];
+    const pending = [position];
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      if ((raw[next] as RawNode).focused === true && !isWebView(next)) focused.push(next);
+      for (const child of children.get(next) ?? []) pending.push(child);
+    }
+    if (focused.length > 1) for (const node of focused) echoes.add(node);
+  });
+  return echoes;
 }
 
 /** Quotes one selector term value the way agent-device's parser reads it back. */

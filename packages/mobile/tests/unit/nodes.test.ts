@@ -660,6 +660,47 @@ describe('snapshot projection', () => {
   });
 });
 
+describe('focus inside a web view', () => {
+  // The shape of the mobile benchmark's WebView scenario on an iOS 26 simulator: while the page holds
+  // the focus and none of its elements does, XCTest reports every element of the page as focused.
+  const page = (fieldOnly: boolean): RawNode[] => [
+    { ref: '@e0', index: 0, depth: 0, type: 'Application', label: 'Shop' },
+    { ref: '@e1', index: 1, parentIndex: 0, depth: 1, type: 'WebView' },
+    { ref: '@e2', index: 2, parentIndex: 1, depth: 2, type: 'Other', label: 'Checkout coupon', focused: !fieldOnly },
+    { ref: '@e3', index: 3, parentIndex: 2, depth: 3, type: 'StaticText', label: 'Checkout coupon', focused: !fieldOnly },
+    { ref: '@e4', index: 4, parentIndex: 1, depth: 2, type: 'TextField', label: 'Coupon code', focused: true },
+    { ref: '@e5', index: 5, parentIndex: 1, depth: 2, type: 'Button', label: 'Apply coupon', focused: !fieldOnly },
+  ];
+  const focusedNames = (nodes: readonly RawNode[]) =>
+    project(nodes)
+      .index.filter((entry) => entry.node.states?.focused === true)
+      .map((entry) => [entry.node.role, entry.node.name].filter((part) => part !== undefined).join(' '));
+
+  it('reads no element as focused when every element of the page reports the focus', () => {
+    expect(focusedNames(page(false))).toEqual([]);
+  });
+
+  it('keeps the focus on the one field that holds it', () => {
+    expect(focusedNames(page(true))).toEqual(['textbox Coupon code']);
+  });
+
+  it('keeps a focused native node outside the web view', () => {
+    const nodes = [...page(false), { ref: '@e6', index: 6, parentIndex: 0, depth: 1, type: 'SearchField', label: 'Search', focused: true }];
+    expect(focusedNames(nodes)).toEqual(['textbox Search']);
+  });
+
+  it('keeps the focused field of an Android web view whose host reports the focus too', () => {
+    const nodes: RawNode[] = [
+      { ref: '@e0', index: 0, depth: 0, type: 'android.widget.FrameLayout' },
+      { ref: '@e1', index: 1, parentIndex: 0, depth: 1, type: 'android.webkit.WebView', focused: true },
+      { ref: '@e2', index: 2, parentIndex: 1, depth: 2, type: 'android.widget.EditText', label: 'Coupon code', focused: true },
+      { ref: '@e3', index: 3, parentIndex: 1, depth: 2, type: 'android.widget.Button', label: 'Apply coupon' },
+    ];
+    expect(focusedNames(nodes)).toEqual(['document', 'textbox Coupon code']);
+    expect(focusedNames(nodes.map((node) => (node.index === 2 ? { ...node, focused: false } : node)))).toEqual(['document']);
+  });
+});
+
 describe('nodes under the soft keyboard', () => {
   const KEYBOARD = { x: 0, y: 566, width: 402, height: 308 };
   /**
