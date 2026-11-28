@@ -1,5 +1,15 @@
 # @e2e-dev/acp
 
+## 0.1.5
+
+### Patch Changes
+
+- [#2304](https://github.com/e2e-inc/e2e/pull/2304) [`342e95a`](https://github.com/e2e-inc/e2e/commit/342e95abebc188d7ee553b16643c9dac5cdcae50) Thanks [@okwasniewski](https://github.com/okwasniewski)! - Bump `agent-device`, `@agent-device/revyl`, and `@agent-device/testmu` to 0.21.43, `@vitest/expect` to 5.1.2, and `@agentclientprotocol/sdk` to 2.12.0.
+
+- [#2343](https://github.com/e2e-inc/e2e/pull/2343) [`27fd376`](https://github.com/e2e-inc/e2e/commit/27fd3763f9f2207c07c7c6a1ce4b719359e686cd) Thanks [@aloneangel45](https://github.com/aloneangel45)! - Pass `--disable <feature>` for every feature in `CODEX_FEATURES_OFF` when running `codex mcp list --json`, so MCP servers provided by disabled Codex plugins (such as `codex_app` or `cua_repl`) are not added to `mcp_servers` without a transport definition.
+
+- [#2441](https://github.com/e2e-inc/e2e/pull/2441) [`3834ab7`](https://github.com/e2e-inc/e2e/commit/3834ab7ca6975f95330e257b327a113993c626df) Thanks [@okwasniewski](https://github.com/okwasniewski)! - `agent.waitFor`, `agent.extract`, and `e2e explore` run on Claude Code or Codex through `@e2e-dev/acp` with no model configured, so an agents entry that is only `{ executor: claudeCode() }` covers every agent step. A `StepExecutor` gets two optional members for this: `answer(question)` answers a judgment when the entry has no `judge` or `model`, and `extend({ system, tools })` returns a copy with guidance and `defineTool` tools added, which explore uses for its rules and `report_finding`. An executor without `extend` is still replaced by the built-in agent in explore. `createProjectTools` from `e2e/agent` runs `defineTool` tools under a step's accounting. `redactProviderKeys` from `e2e/agent` redacts only provider keys from text the run already redacted. [Use your coding agent](https://e2e.com/docs/subscriptions#use-your-coding-agent)
+
 ## 0.1.4
 
 ### Patch Changes
