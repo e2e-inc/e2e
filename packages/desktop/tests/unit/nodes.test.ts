@@ -74,6 +74,7 @@ describe('projectSnapshot', () => {
             { role: 'heading', name: 'heading level 4', description: 'heading level 4' },
             { role: 'heading', name: 'Battery level 2', description: 'Battery level 2' },
             { role: 'heading', name: 'Charge', description: 'Battery level 2 of 5' },
+            { role: 'heading', name: 'Heading level 2: Settings', description: 'Heading level 2: Settings' },
           ],
         },
       },
@@ -86,6 +87,7 @@ describe('projectSnapshot', () => {
       ['heading level 4', 4],
       ['Battery level 2', undefined],
       ['Charge', undefined],
+      ['Heading level 2: Settings', 2],
     ]);
     const heading = (level: number) =>
       resolveExpression(
