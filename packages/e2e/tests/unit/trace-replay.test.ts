@@ -512,6 +512,33 @@ describe('replayTrace: bare-point taps', () => {
     expect(flat.calls).toEqual([]);
   });
 
+  it('waits for the node the point was placed in while it is listed but hidden, as the hit test that recorded the point skipped hidden nodes', async () => {
+    const within = { target: { role: 'img', name: 'Map' }, fx: 0.5, fy: 0.5 };
+    const shown: SemanticNode = { ref: { id: 'm', revision: 'r1' }, role: 'img', name: 'Map', rect: { x: 200, y: 0, width: 200, height: 200 } };
+    const covered: SemanticNode = { ...shown, rect: { x: 600, y: 0, width: 200, height: 200 }, states: { hidden: true } };
+    const points: unknown[] = [];
+    const host = makeHost({ onAction: (name, detail) => void (name === 'tapAt' && points.push(detail)) });
+    host.capture = async () => screen(host.looks.length < 3 ? [covered] : [shown]);
+    expect(await replayTrace(host, trace([{ ...pin, within }]))).toMatchObject({ completed: true, executed: 1 });
+    // Never the middle of the hidden box at (700, 100).
+    expect(points).toEqual([{ x: 300, y: 100 }]);
+
+    const stuck = makeHost({ nodes: [covered] });
+    expect(await replayTrace(stuck, trace([{ ...pin, within }]))).toMatchObject({ completed: false, executed: 0, stopReason: 'target-not-found' });
+    expect(stuck.calls).toEqual([]);
+    expect(stuck.looks.length).toBeGreaterThan(2);
+  });
+
+  it('never places the point from an earlier look once the node turns up hidden', async () => {
+    // Recorded as the first of two maps. Three show at first, the point inside the first; then two are left and the first is hidden.
+    const within = { target: { role: 'img', name: 'Map', position: { index: 0, of: 2 } }, fx: 0.5, fy: 0.5 };
+    const map = (id: string, x: number): SemanticNode => ({ ref: { id, revision: 'r1' }, role: 'img', name: 'Map', rect: { x, y: 0, width: 200, height: 200 } });
+    const host = makeHost({});
+    host.capture = async () => screen(host.looks.length === 1 ? [map('a', 200), map('b', 500), map('c', 800)] : [{ ...map('a', 200), states: { hidden: true } }, map('b', 500)]);
+    expect(await replayTrace(host, trace([{ ...pin, within }]))).toMatchObject({ completed: false, executed: 0, stopReason: 'target-not-found' });
+    expect(host.calls).toEqual([]);
+  });
+
   it('lets the recorded point pick among look-alikes when it lies inside exactly one of them', async () => {
     const left: SemanticNode = { ref: { id: 'a', revision: 'r1' }, role: 'img', name: 'Map', rect: { x: 0, y: 0, width: 200, height: 200 } };
     const right: SemanticNode = { ref: { id: 'b', revision: 'r1' }, role: 'img', name: 'Map', rect: { x: 200, y: 0, width: 200, height: 200 } };
@@ -875,6 +902,17 @@ describe('replayTrace: bare-point drags', () => {
         label: 'waits for a hidden destination when the source has no twin',
         looks: [[card], [card, hidden(at(lane, 900))], [card, lane]],
         dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'waits for a source that is listed but hidden',
+        looks: [[hidden(at(card, 300)), lane], [card, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'stops without a drag when the source stays hidden',
+        looks: [[hidden(card), lane]],
+        stops: 'target-not-found',
+        waitsOut: true,
       },
       {
         label: 'stops without a drag when the destination stays hidden',

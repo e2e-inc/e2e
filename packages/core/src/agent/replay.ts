@@ -440,11 +440,17 @@ const END_WAIT_POLL_MS = 1_000;
 /** Step clock kept back from that wait, so a hand-off still has room to act. */
 const END_WAIT_RESERVE_MS = 20_000;
 
-/** Relocates one descriptor against the settling screen, looking again while `retryable` says the failure may pass. */
+/**
+ * Relocates one descriptor against the settling screen, looking again while
+ * `retryable` says the failure may pass. A caller that needs more of the
+ * node than its id says so in `usable` (a point needs a visible box,
+ * `placePoint`): a node listed before it is usable is still loading.
+ */
 async function relocate(
   host: ReplayHost,
   descriptor: TraceTargetDescriptor,
   look: Look,
+  usable: (node: RedactedNode) => boolean = () => true,
 ): Promise<Relocated> {
   let last: Relocated = { kind: 'failed', failure: 'target-not-found' };
   let refused = false;
@@ -460,7 +466,10 @@ async function relocate(
       return retryable(failed, descriptor) ? undefined : last;
     }
     const node = screen.nodes.get(result.id);
-    return node === undefined ? undefined : { ...result, node };
+    if (node !== undefined && usable(node)) return { ...result, node };
+    // The look-alikes of an earlier look no longer stand for a node this one found.
+    if (!refused) last = { kind: 'failed', failure: 'target-not-found' };
+    return undefined;
   }, look);
   return settled ?? last;
 }
@@ -487,11 +496,11 @@ interface Ends {
  * its twin refusal on later looks, as `relocate` does.
  *
  * A drag between points passes `shouldWaitForDestination`, and needs a box
- * to place its drop point in: a destination listed before it shows (mounted
- * hidden, or with no box yet) is still loading, whichever look it turns up
- * on, and is waited for like one that is not listed. A source its point
- * can be placed in on this look lets such a destination wait. If the source
- * loses a candidate during that wait, or is re-found without a visible box,
+ * to place each point in: an end listed before it shows (mounted hidden, or
+ * with no box yet) is still loading, whichever look it turns up on, and is
+ * waited for like one that is not listed. A source whose look-alikes its
+ * point settles on this look lets such a destination wait. If that source
+ * loses a candidate during the wait, or is re-found without a visible box,
  * the drag stops.
  *
  * That guard is a count of the source's visible look-alikes, compared with
@@ -527,14 +536,16 @@ async function relocateEnds(
     return { relocated: marked.failure === 'target-ambiguous' ? { ...marked, screen } : marked, wait: retryable(marked, descriptor) };
   };
   const placesPoints = shouldWaitForDestination !== undefined;
+  const boxless = (judged: ReturnType<typeof judge> | undefined) =>
+    placesPoints && judged?.relocated.kind === 'found' && visibleBox(judged.relocated.node) === undefined;
   const settled = await pollSettled<Ends>(host, (screen) => {
-    const from = source === undefined ? undefined : judge(source, screen);
-    const listed = destination === undefined ? undefined : judge(destination, screen);
-    const to = placesPoints && listed?.relocated.kind === 'found' && visibleBox(listed.relocated.node) === undefined ? STILL_LOADING : listed;
+    const listedSource = source === undefined ? undefined : judge(source, screen);
+    const listedDestination = destination === undefined ? undefined : judge(destination, screen);
+    const from = boxless(listedSource) ? STILL_LOADING : listedSource;
+    const to = boxless(listedDestination) ? STILL_LOADING : listedDestination;
     if (countSources !== undefined) {
       const count = countSources(screen.nodes);
-      const unplaceableSource = from?.relocated.kind === 'found' && visibleBox(from.relocated.node) === undefined;
-      if (count < sourceCount || unplaceableSource) {
+      if (count < sourceCount || boxless(listedSource)) {
         // The source slot stays empty: `refused` names the failure, and a
         // source left in the slot would be placed and dragged.
         return { screen, ends: [undefined, to?.relocated], refused: true };
@@ -622,7 +633,7 @@ async function placePoint(
     }
     return { kind: 'placed', point: end.point };
   }
-  const relocated = await relocate(host, end.within.descriptor, look);
+  const relocated = await relocate(host, end.within.descriptor, look, (node) => visibleBox(node) !== undefined);
   const at = placeWithin(relocated, { ...end.within, point: end.point, viewport });
   if (at === undefined) return { kind: 'failed', failure: relocated.kind === 'failed' ? relocated.failure : 'target-not-found' };
   return { kind: 'placed', point: at };
@@ -672,11 +683,12 @@ async function placePoints(
 
 /**
  * Where a recorded point lands on the live screen: its place inside the
- * re-found node's box, or among the visible look-alikes inside the one that
- * contains the recorded point on a viewport of the recorded size, as the hit
- * test that recorded it skipped
- * hidden nodes. Undefined when the node is gone or has no box, or the point
- * settles nothing: tapping the bare point could press whatever now sits there.
+ * re-found node's visible box, or among the visible look-alikes inside the
+ * one that contains the recorded point on a viewport of the recorded size.
+ * Only a visible box holds a point, as the hit test that recorded it
+ * (`hitTest`) skipped hidden nodes. Undefined when the node is gone, hidden
+ * or has no box, or the point settles nothing: tapping the bare point could
+ * press whatever now sits there.
  */
 function placeWithin(
   relocated: Relocated,
@@ -684,7 +696,7 @@ function placeWithin(
 ): ViewportPoint | undefined {
   const inside = (box: Box): ViewportPoint => ({ x: box.x + planned.fx * box.width, y: box.y + planned.fy * box.height });
   if (relocated.kind === 'found') {
-    const box = usableBox(relocated.node.rect);
+    const box = visibleBox(relocated.node);
     return box === undefined ? undefined : inside(box);
   }
   // A named match refused as a twin of the recorded node is no choice to
@@ -721,7 +733,7 @@ function containsBox(outer: Box, inner: Box): boolean {
   );
 }
 
-/** The box an ambiguous point can land in. */
+/** The box a recorded point can land in: the node's own, while the node shows. */
 function visibleBox(node: RedactedNode | undefined): Box | undefined {
   return node?.states?.hidden === true ? undefined : usableBox(node?.rect);
 }
