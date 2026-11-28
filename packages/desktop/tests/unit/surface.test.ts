@@ -1050,6 +1050,14 @@ describe('desktop fixture: windows', () => {
     expect([runs, await controls.title()]).toEqual([1, 'Controls']);
   });
 
+  it('takes no window a read brings back after the wait ended', async () => {
+    const alone = windows(() => [mine]);
+    const late = windows(() => [mine, panel], 950);
+    const { surface } = await launched({ listWindows: [alone, alone, alone, late] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    await expect(desktop.waitForWindow(() => Promise.resolve(), { timeout: 1_000 })).rejects.toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/^no window opened within 1000ms/) });
+  });
+
   it('counts the read of the windows before the trigger toward the timeout', async () => {
     const stalled = failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer its window list in time', { retryable: true });
     const alone = windows(() => [mine]);

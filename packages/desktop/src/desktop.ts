@@ -101,33 +101,41 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
   };
   /**
    * Reads the open windows until `pick` finds what it looks for, or `waitMs`
-   * ends. Each read keeps the operation's own budget, so a wait with little
-   * time left still looks once. `timedOut` gets the last list read, and the
-   * failure of the last read when it read none.
+   * ends. Each read gets the time left in the wait, and a match it brings back
+   * after the wait ended is not taken. A wait with no time left (a trigger
+   * that took all of it) still looks once, with the operation's own budget.
+   * `timedOut` gets the last list read, and the failure of the last read when
+   * it read none.
    */
   const waitFor = async <T>(pick: (windows: readonly OpenWindow[]) => T | undefined, operation: OperationContext, waitMs: number, timedOut: (windows: readonly OpenWindow[], unread?: Error) => string): Promise<T> => {
     let windows: readonly OpenWindow[] = [];
     let unread: Error | undefined;
     let found: T | undefined;
+    // A little before the step's own end, so the wait reports what it waited for rather than a bare timeout.
+    const deadline = new Deadline(Math.max(1, waitMs - Math.min(WAIT_MARGIN_MS, waitMs / 10)));
+    const looksOnce = waitMs <= 0;
     await pollCondition({
-      // A little before the step's own end, so the wait reports what it waited for rather than a bare timeout.
-      deadline: new Deadline(Math.max(1, waitMs - Math.min(WAIT_MARGIN_MS, waitMs / 10))),
+      deadline,
       signal: operation.signal,
       negated: false,
       evaluate: async () => {
         try {
-          windows = await surface.windows(operation);
+          windows = await surface.windows(looksOnce ? operation : { ...operation, timeoutMs: Math.max(1, deadline.remaining()) });
           unread = undefined;
         } catch (cause) {
-          // An app busy opening its window, or a locked screen, does not answer its list: the next read may.
-          if (cause instanceof EngineError && cause.retryable) {
+          // An app busy opening its window, or a locked screen, does not answer its list: the next read may. A read the
+          // wait's end cut short saw nothing either: its budget was the time left, and its timer can fire a moment before
+          // this clock reads the deadline.
+          if (cause instanceof EngineError && (cause.retryable || (!looksOnce && (deadline.expired() || cause.code === 'OPERATION_TIMEOUT')))) {
             unread = cause;
             return false;
           }
           throw cause;
         }
-        found = pick(windows);
-        return found !== undefined;
+        const match = pick(windows);
+        if (match === undefined || (!looksOnce && deadline.expired())) return false;
+        found = match;
+        return true;
       },
       onTimeout: () => new TestError('ACTION_FAILED', timedOut(windows, unread), unread === undefined ? {} : { cause: unread }),
     });
