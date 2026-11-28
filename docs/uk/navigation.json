@@ -1,0 +1,24 @@
+{
+  "tabs": {
+    "Documentation": "Документація",
+    "Reference": "Довідник",
+    "Examples": "Приклади"
+  },
+  "groups": {
+    "Get started": "Початок роботи",
+    "Platforms": "Платформи",
+    "Frameworks": "Фреймворки",
+    "Features": "Можливості",
+    "Models and agents": "Моделі та агенти",
+    "Run in CI": "Запуск у CI",
+    "Hosted browsers and devices": "Хмарні браузери та пристрої",
+    "Extend": "Розширення",
+    "Engines": "Рушії",
+    "Deep dive": "Поглиблено",
+    "Migrate": "Міграція",
+    "Test API": "API тестів",
+    "Project": "Проєкт",
+    "Web": "Web",
+    "Mobile": "Mobile"
+  }
+}

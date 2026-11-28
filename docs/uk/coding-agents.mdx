@@ -1,0 +1,331 @@
+---
+title: Кодинг-агенти
+description: Надайте кодинг-агенту скіл, живу сесію в застосунку та звіти для написання й налагодження тестів.
+"og:image": "https://e2e.com/docs/images/og/coding-agents.png?v=c6990935d7"
+"twitter:image": "https://e2e.com/docs/images/og/coding-agents.png?v=c6990935d7"
+---
+
+Кодинг-агент, наприклад Claude Code, Codex або Cursor, може писати, запускати й
+налагоджувати тести e2e. Він вивчає e2e зі скілу, працює із застосунком через
+`e2e mcp` сервер і читає трейси тестів, які впали.
+
+## Встановлення скілу
+
+<CodeGroup>
+```bash npm
+npx e2e init
+```
+
+```bash pnpm
+pnpm dlx e2e init
+```
+
+```bash bun
+bunx e2e init
+```
+</CodeGroup>
+
+| Шлях | Хто використовує |
+| --- | --- |
+| `.agents/skills/e2e/` | Codex, Cursor, OpenCode та інші агенти, що читають `.agents/skills` |
+| `.claude/skills/e2e/` | Claude Code. Посилання на `.agents/skills/e2e/`, якщо встановлено обидва варіанти. |
+
+Команда `init` записує в ці директорії файл `SKILL.md` і тематичні довідки, а
+[`e2e upgrade`](/reference/cli#e2e-upgrade) підтримує їх в актуальному стані.
+Без `init` установіть скіл командою `npx skills add e2e-inc/e2e` або виведіть
+його зі встановленого пакета командою `npx e2e guide [topic]`. Плагін нижче
+встановлює всі три e2e скіли глобально для всіх проєктів.
+
+Команда `init` також додає коротку вказівку у файл `AGENTS.md` (і в `CLAUDE.md`
+зі шляхом `.claude/skills`), створюючи файл за потреби, щоб промпти на кшталт
+«додай тест для оформлення замовлення» одразу підхоплювали скіл. Якщо ви
+встановлювали скіл іншим способом, додайте цей рядок вручну:
+
+```md title="AGENTS.md"
+End-to-end tests use e2e; read .agents/skills/e2e/SKILL.md before writing or running one.
+```
+
+Пакет `e2e` також постачає цю документацію офлайн у `node_modules/e2e/docs/`,
+щоб агенти могли читати її локально.
+
+<Accordion title="Встановлення плагіна для Claude Code, Codex або Cursor">
+
+Плагін e2e доступний через маркетплейс у Claude Code та Codex, а також працює в
+Grok Build, який підхоплює файли Claude Code. Cursor завантажує плагін зі своєї
+локальної директорії плагінів:
+
+<CodeGroup>
+```bash Claude
+claude plugin marketplace add e2e-inc/e2e
+claude plugin install e2e@e2e
+```
+
+```bash Codex
+codex plugin marketplace add e2e-inc/e2e
+codex plugin add e2e@e2e
+```
+
+```bash Cursor
+repo=$(mktemp -d)
+git clone --depth 1 https://github.com/e2e-inc/e2e "$repo"
+mkdir -p ~/.cursor/plugins/local
+rm -rf ~/.cursor/plugins/local/e2e
+cp -R "$repo/plugins/e2e" ~/.cursor/plugins/local/
+```
+</CodeGroup>
+
+Почніть нову сесію. У Cursor виконайте **Developer: Reload Window**. На тарифах
+Cursor Teams та Enterprise локальні плагіни потребують налаштування
+адміністратора **Allow Local Plugin Imports**, або адміністратор має підключити
+`e2e-inc/e2e` як командний маркетплейс. Плагін додає скіли `e2e`,
+`create-verification-skill` і `migrate-to-e2e`, але не сам npm-пакет. У Codex і
+Cursor він також підключає [MCP сервер](/mcp-server). У Claude Code та Grok
+Build зареєструйте сервер у проєкті. Два інші скіли викликаються з префіксом
+плагіна: `/e2e:<skill>` у Claude Code, `$e2e:<skill>` у Codex і `/<skill>` у
+Cursor.
+
+Версія плагіна відповідає релізам e2e. Щоб оновити його, виконайте ці команди й
+почніть нову сесію. У Cursor просто повторіть наведені вище команди.
+
+<CodeGroup>
+```bash Claude
+claude plugin marketplace update e2e
+claude plugin update e2e@e2e
+```
+
+```bash Codex
+codex plugin marketplace upgrade e2e
+```
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="Встановлення в OpenClaw або Hermes Agent">
+
+Усі три скіли опубліковано на [ClawHub](https://clawhub.ai/) під `@e2e`. Hermes
+Agent підключає репозиторій як джерело tap:
+
+<CodeGroup>
+```bash OpenClaw
+openclaw skills install @e2e/e2e
+openclaw skills install @e2e/create-verification-skill
+openclaw skills install @e2e/migrate-to-e2e
+```
+
+```bash Hermes
+hermes skills tap add e2e-inc/e2e
+hermes skills install e2e-inc/e2e/e2e
+```
+</CodeGroup>
+
+</Accordion>
+
+<Accordion title="Як дозволити pnpm створювати посилання на скіл">
+
+Починаючи з версії 12.11, pnpm уміє посилатися на скіл безпосередньо зі
+встановленого пакета `e2e` замість копії, яку створює `init`. Доки ви не
+оберете варіант, кожен запуск `pnpm install` показуватиме `e2e skills` як
+такий, що очікує на підтвердження. Задайте свій вибір у файлі
+`pnpm-workspace.yaml` у корені воркспейсу, де pnpm створює посилання на скіли:
+
+- **Залишити копію.** Задайте `skills: false`, і рядок із запитом на
+  підтвердження зникне.
+- **Дозволити pnpm створювати посилання.** Використовуйте pnpm 12.18 або
+  новіший: старіші версії називають посилання `pnpm-e2e-e2e`, а не `e2e`, як
+  указано в `AGENTS.md`. Видаліть `.agents/skills/e2e` і `.claude/skills/e2e`,
+  а потім задайте `skills: true` або виконайте `pnpm approve`. Кожне
+  встановлення створюватиме посилання на скіл у кореневих директоріях скілів і
+  додаватиме його в їхній `.gitignore`, тож скіл оновлюватиметься разом із
+  кожним оновленням `e2e`. До першого встановлення залежностей скілу ще немає:
+  агент у свіжому клоні нічого не знайде за цим шляхом.
+
+```yaml title="pnpm-workspace.yaml"
+permissions:
+  e2e:
+    skills: true
+```
+
+Якщо копія ще залишається на місці, pnpm створить посилання поруч із нею під
+іменем `pnpm-e2e-e2e`, і агенти завантажать два `e2e` скіли. Команди `init` і
+`upgrade` попереджають про це: видаліть копію, а потім виконайте
+`pnpm install --force`, щоб перейменувати посилання на `e2e`. Обидві команди
+зберігають посилання pnpm. Командою `init` можна відновити відсутній `SKILL.md`
+у наявній копії в іншій директорії скілів. Якщо `init` виявляє посилання pnpm
+на скіл у проєкті або у знайденому корені воркспейсу, вона не створює нових
+копій.
+
+</Accordion>
+
+## Доступ агента до застосунку
+
+Команда `e2e mcp` надає агенту живу сесію у вашому застосунку. Він перевіряє
+свої локатори на екрані, перш ніж записати їх у код, і сам перевіряє внесені
+зміни в UI. Команда `init` реєструє сервер. Налаштування й приклади промптів
+описано на сторінці [MCP сервер](/mcp-server).
+
+## Як агент пише й запускає тест
+
+Скіл каже агенту спершу прочитати конфіг і наявний тест. За допомогою
+`e2e mcp` агент проходить сценарій у живій сесії й записує кожен крок під час
+виконання. Кожен тест перевіряє одну поведінку: підготовка початкового стану,
+виконання однієї цілі та перевірка результату наприкінці:
+
+```ts title="tests/shop.e2e.ts"
+import { test, expect } from 'e2e';
+
+test('filters the shop to items under $20', { session: 'customer' }, async ({ app, agent, screen }) => {
+  const results = screen.getByRole('status', 'Results');
+  const products = screen.getByRole('list', 'Products').getByRole('listitem');
+  await app.open('/shop');
+  await results.waitFor();
+  await products.filter({ hasText: 'Leather Backpack, $90' }).waitFor();
+
+  await agent.act('show only items under $20');
+
+  await expect(results).toHaveText('2 items under $20');
+  await expect(products).toHaveText(['Canvas Tote, $14', 'Steel Bottle, $18']);
+});
+```
+
+- **Одна поведінка й одна [ціль](/core-concepts#goals) на тест.** Передавайте в
+  `agent.act` конкретні кроки, потрібні для досягнення цієї цілі. Розбивайте
+  шлях на кілька викликів, коли наступному кроку потрібен відомий стан екрана,
+  коли довгий сценарій ризикує вичерпати ліміти `maxSteps` або `maxModelCalls`,
+  чи коли проміжний збій має бути окремим кроком. Поясніть поділ і дочекайтеся
+  проміжного стану екрана перед продовженням. Перевірте результат у кінці, щоб
+  підтвердити поведінку й зафіксувати
+  [запис](/cache#when-a-recording-is-written).
+- **Іменовані локатори.** Локатор, який використовується в тесті двічі,
+  наприклад `results`, виноситься в `const`, щоб у разі перейменування елемента
+  достатньо було однієї правки.
+- **Жодних пауз.** Локатори опитують екран самі, дії чекають на потрібний
+  елемент, а `expect` повторює перевірку до завершення тайм-ауту.
+- **Окрема сесія для кожного користувача.** [Підготовчий тест](/authentication)
+  виконує вхід через `credentials.user(name)` і зберігає сесію основного
+  користувача. Для сценаріїв на кшталт чату
+  [відкрийте другу сесію](/core#open-a-host-inside-a-test) і перевірте
+  результат у сесії отримувача. Ніколи не пишіть паролі чи інші секрети в коді
+  тесту: оголошуйте облікові дані ранера в конфігу, а секрети другого хоста
+  передавайте через `launch({ secrets })`.
+
+Під час допрацювання агент запускає лише той тест, який редагує (за номером
+рядка), із параметром `--action-timeout 5000`, щоб помилковий локатор падав за
+5 секунд замість 30:
+
+<CodeGroup>
+```bash npm
+npx e2e run tests/checkout.e2e.ts:3 --action-timeout 5000
+```
+
+```bash pnpm
+pnpm exec e2e run tests/checkout.e2e.ts:3 --action-timeout 5000
+```
+
+```bash bun
+bunx e2e run tests/checkout.e2e.ts:3 --action-timeout 5000
+```
+</CodeGroup>
+
+Агент залишає кеш відтворення увімкненим, щоб успішні цілі відтворювалися без
+викликів моделі, і вимикає повторні спроби (щоб не запускати кожну ціль
+наживо). Коли тест проходить, агент прибирає `--action-timeout` і запускає його
+один раз із `--no-cache`, щоб переконатися, що живий агент досягає кожної цілі.
+Див.
+[Повторний запуск тесту під час виправлення](/cache#rerun-a-test-while-you-fix-it).
+
+## Як агент аналізує збій
+
+За замовчуванням ([`trace`](/reference/config#trace)) e2e створює файл
+`trace.md` у `.e2e/results/` для кожного тесту, що впав, перевищив тайм-аут,
+був перерваний або виявився нестабільним (flaky). Термінал виводить шлях одразу
+під збоєм (`❯ trace .e2e/results/<test>/trace.md`).
+
+Ваш кодинг-агент читає `trace.md`, а не сирий `report.json`. У трейсі є рядок
+збою, елемент і результат кожного кроку, помилки консолі, невдалі мережеві
+запити, останні ходи агента й стан екрана на момент збою. Якщо агенту потрібно
+переглянути екран, якого немає в трейсі, він відкриває цей URL напряму в сесії
+MCP замість проходити весь сценарій з початку.
+
+Щоб перевірити окремі виклики моделі, передайте `--ai-trace --no-cache` і
+перегляньте вивід через [unbox-ai](/debugging#agent-steps). Не вставляйте сирий
+`ai-trace.json` у контекст агента: він дублює промпти між ходами й може займати
+кілька мегабайтів.
+
+## Генерація скілу перевірки для вашого застосунку
+
+`e2e` скіл пояснює, як працює фреймворк, але не знає вашого застосунку. Скіл
+`create-verification-skill` генерує в проєкті скіл
+`.agents/skills/verify-<app>/`, адаптований саме під ваш застосунок, і один раз
+перевіряє його перед завершенням.
+
+<CodeGroup>
+```bash npm
+npx skills add e2e-inc/e2e --skill create-verification-skill
+```
+
+```bash pnpm
+pnpm dlx skills add e2e-inc/e2e --skill create-verification-skill
+```
+
+```bash bun
+bunx skills add e2e-inc/e2e --skill create-verification-skill
+```
+</CodeGroup>
+
+Після цього попросіть агента виконати `/create-verification-skill`.
+
+<Accordion title="Що містить згенерований скіл">
+- Команди запуску та перевірки doctor із вашого конфігу.
+- Два способи керувати застосунком: жива сесія `e2e mcp` і тест.
+- Перелік доказів, які зберігає перевірка.
+- Мапу функцій з окремим планом `e2e explore` для кожної з них, щоб
+  [bug bash](/bug-bash) розгортався від цієї мапи.
+
+Згенерований скіл описує лише особливості вашого застосунку, а для решти
+посилається на e2e скіл. В його основі лежить
+[create-verification-skill](https://github.com/cursor/plugins/tree/main/pstack/skills/create-verification-skill)
+з pstack від poteto, але замість самописного харнесу використовується e2e.
+</Accordion>
+
+## Міграція наявного набору тестів
+
+Скіл `migrate-to-e2e` переносить набір тестів із Playwright, Cypress, Selenium,
+Appium, Detox, Maestro або TesterArmy на e2e по одній частині за сесію. Старий
+набір і далі працює поруч із новими тестами, тому ви можете зупинитися після
+будь-якої сесії.
+
+<CodeGroup>
+```bash npm
+npx skills add e2e-inc/e2e --skill migrate-to-e2e
+```
+
+```bash pnpm
+pnpm dlx skills add e2e-inc/e2e --skill migrate-to-e2e
+```
+
+```bash bun
+bunx skills add e2e-inc/e2e --skill migrate-to-e2e
+```
+</CodeGroup>
+
+Потім попросіть агента виконати `/migrate-to-e2e`. Він переносить обрану
+частину й запускає кожен перенесений тест тричі на кожному таргеті. Прогрес для
+наступної сесії записується у файл `MIGRATION.md`. За бажанням агент може
+тимчасово додати в застосунок баг, наприклад неправильну суму замовлення, і
+перевірити, чи падають на ньому обидва набори тестів. Старі тести агент видаляє
+лише після вашого підтвердження. Спершу він читає посібник із міграції для
+вашого ранера: [Playwright](/migrate/playwright), [Cypress](/migrate/cypress),
+[Selenium](/migrate/selenium), [Appium](/migrate/appium),
+[Detox](/migrate/detox), [Maestro](/migrate/maestro) або
+[TesterArmy](/migrate/testerarmy).
+
+## Що далі
+
+<CardGroup cols={2}>
+  <Card title="Довідник CLI" icon="terminal" href="/reference/cli">
+    init, guide, mcp і run, параметр за параметром.
+  </Card>
+  <Card title="Налагодження запуску" icon="bug" href="/debugging">
+    Звіт, артефакти й параметри для агента.
+  </Card>
+</CardGroup>
