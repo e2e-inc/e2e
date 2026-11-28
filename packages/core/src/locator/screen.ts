@@ -38,7 +38,7 @@ import type {
   TextMatchOptions,
 } from '../types.ts';
 import type { StepRecorder } from '../run/steps.ts';
-import { attributeOf, denySecureRead, isNodeVisible, locatorDetails, type LocatorEngine } from './engine.ts';
+import { attributeOf, denySecureRead, isNodeVisible, locatorDetails, staleReason, type LocatorEngine } from './engine.ts';
 import {
   describeExpression,
   filterExpression,
@@ -731,6 +731,9 @@ class LocatorImpl extends ScreenImpl implements Locator {
       const { engine } = this.context;
       const deadline = engine.deadline(options?.timeout);
       const samples = new SampleHistory('waitFor', (text) => engine.redact(text));
+      // The engine's failure for the newest read when it could not read: why the wait never saw an answer.
+      let unread: { readonly cause: unknown } | undefined;
+      const reasonOf = (cause: unknown): string => engine.redact(staleReason(cause) ?? 'the screen changed under the read');
       await samples.record(engine, () =>
         pollReads({
           deadline,
@@ -738,16 +741,24 @@ class LocatorImpl extends ScreenImpl implements Locator {
           signal: engine.signal,
           negated: false,
           evaluate: async (reads) => {
-            const { node, stale } = await engine.tryRead(this.expression, reads, ABSENCE_STATES.has(state) ? 'empty' : 'wait');
-            if (stale) return undefined;
+            const { node, stale, cause } = await engine.tryRead(this.expression, reads, ABSENCE_STATES.has(state) ? 'empty' : 'wait');
+            // A read the engine could not make is no answer: a node it could not read is not a detached or hidden one.
+            unread = stale ? { cause } : undefined;
+            if (unread !== undefined) {
+              samples.add(`not read: ${reasonOf(unread.cause)}`);
+              return undefined;
+            }
             samples.add(node === null ? 'absent' : isNodeVisible(node) ? 'visible' : 'hidden');
             return inWaitForState(node, state);
           },
-          onTimeout: (cause) =>
-            new TestError('LOCATOR_NOT_FOUND', `locator did not become ${state}: ${this.label}`, {
+          onTimeout: (cause) => {
+            const reason = cause ?? unread?.cause;
+            const notRead = unread === undefined ? '' : ` (no read until the deadline: ${reasonOf(unread.cause)})`;
+            return new TestError('LOCATOR_NOT_FOUND', `locator did not become ${state}: ${this.label}${notRead}`, {
               details: locatorDetails(this.expression, deadline.elapsed()),
-              ...(cause === undefined ? {} : { cause }),
-            }),
+              ...(reason === undefined ? {} : { cause: reason }),
+            });
+          },
         }),
       );
     }, { verifies: true });

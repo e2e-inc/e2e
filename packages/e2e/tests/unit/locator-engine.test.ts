@@ -132,7 +132,8 @@ describe('readViewport', () => {
   it('reads a ref superseded between the resolve and the read as stale, not as gone', async () => {
     const { engine } = makeEngine({ read: ['stale'] });
     const reads = engine.reads(engine.deadline(1_000));
-    expect(await engine.readViewport(EXPRESSION, reads)).toEqual({ node: null, count: 1, stale: true });
+    // The resolve found one match; its read never got through, and the engine's failure says why.
+    expect(await engine.readViewport(EXPRESSION, reads)).toEqual({ node: null, count: 1, stale: true, cause: expect.objectContaining({ code: 'NODE_STALE' }) });
     expect(await engine.readViewport(EXPRESSION, reads)).toEqual({
       node: NODE,
       count: 1,
@@ -533,7 +534,7 @@ describe('LocatorEngine read contract', () => {
   it('marks a stale read as a stale sample with no node so assertion polls re-resolve', async () => {
     const { engine } = makeEngine({ read: ['stale'] });
     const sample = await engine.tryRead(EXPRESSION, engine.reads(new Deadline(5_000)));
-    expect(sample).toEqual({ node: null, count: 1, stale: true });
+    expect(sample).toEqual({ node: null, count: 1, stale: true, cause: expect.objectContaining({ code: 'NODE_STALE' }) });
   });
 
   it('translates non-stale read failures', async () => {
@@ -542,6 +543,14 @@ describe('LocatorEngine read contract', () => {
       code: 'ENGINE_FAILURE',
       category: 'infrastructure',
     });
+  });
+
+  it('answers a resolve the engine found stale until the deadline as a stale sample, not a failure', async () => {
+    const { engine, calls } = makeEngine({ resolve: ['stale', 'stale', 'stale'] });
+    await expect(engine.tryRead(EXPRESSION, engine.reads(new Deadline(0)))).resolves.toEqual({ node: null, count: 0, stale: true, cause: expect.objectContaining({ code: 'NODE_STALE' }) });
+    expect(calls.resolve).toBeGreaterThan(0);
+    const failing = makeEngine({ resolve: ['failure'] });
+    await expect(failing.engine.tryRead(EXPRESSION, failing.engine.reads(new Deadline(5_000)))).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
   });
 
   it('direct read surfaces stale nodes as LOCATOR_NOT_FOUND', async () => {
@@ -814,6 +823,7 @@ describe('LocatorEngine retries a cross-realm driver failure', () => {
       node: null,
       count: 1,
       stale: true,
+      cause: expect.anything(),
     });
   });
 

@@ -24,7 +24,10 @@ export interface DesktopWindow {
   isClosed(): Promise<boolean>;
   /**
    * Makes this the active window, whichever window has focus, until it closes
-   * or the app quits. Rejects with `ACTION_FAILED` when it has closed.
+   * or the app quits. Rejects with `ACTION_FAILED` when it has closed. An
+   * agent step still follows a window its own actions open and that takes
+   * focus (Preferences, from a button it pressed) while that window is open;
+   * the test's next step is back on this window.
    */
   activate(): Promise<void>;
   /**

@@ -16,7 +16,7 @@ import {
 import { isValueControl } from '@e2e-dev/core/lib/internal/roles';
 import { pollReads, type ReadWindow } from '@e2e-dev/core/lib/internal/time';
 import { SampleHistory } from '@e2e-dev/core/lib/expect/samples';
-import { attributeOf, denySecureRead, isNodeVisible } from '@e2e-dev/core/lib/locator/engine';
+import { attributeOf, denySecureRead, isNodeVisible, isStaleRead, staleCause, staleReason } from '@e2e-dev/core/lib/locator/engine';
 import { canonicalRole, describeExpression } from '@e2e-dev/core/lib/locator/expression';
 import type { LocatorInternals } from '@e2e-dev/core/lib/locator/screen';
 import type {
@@ -45,6 +45,8 @@ interface Sample {
    * evaluated, negated or not: a node a race superseded is not a gone one.
    */
   readonly stale?: boolean;
+  /** The engine's failure that made the sample `stale`: why it could not read. */
+  readonly staleCause?: unknown;
 }
 
 interface MatcherSpec {
@@ -192,7 +194,10 @@ class AsyncExpectationImpl implements AsyncExpectation {
     const api = this.api(spec.name);
     await this.internals.context.steps.run('assertion', api, this.label, async () => {
       const deadline = engine.deadline(timeout ?? engine.assertionTimeout);
-      let lastSample: Sample = { count: 0, node: null, nodes: [] };
+      let lastSample: Sample | undefined;
+      // The engine's failure for the newest read when it could not read, after `lastSample` or with none before it.
+      let unread: { readonly cause: unknown; readonly count: number } | undefined;
+      const reasonOf = (cause: unknown): string => engine.redact(staleReason(cause) ?? 'the screen changed under the read');
       const samples = new SampleHistory('expect', (text) => engine.redact(text));
       await samples.record(engine, () =>
         pollReads({
@@ -204,29 +209,39 @@ class AsyncExpectationImpl implements AsyncExpectation {
             const sample = await this.sample(spec, reads).catch((error: unknown) => {
               throw labelAmbiguous(error, this.message);
             });
+            // A read the engine could not make says nothing about the node: the failure reports the last one that did, and why the newest could not.
+            unread = sample.stale === true ? { cause: sample.staleCause, count: sample.count } : undefined;
+            if (unread !== undefined) {
+              samples.add(`not read: ${reasonOf(unread.cause)}`);
+              return undefined;
+            }
             lastSample = sample;
             if (spec.readsWithheld === true) {
               denySecureRead(sample.node === null ? sample.nodes : [sample.node], this.label);
             }
-            samples.add(`${observedOf(spec, sample)} (${sample.count} ${sample.count === 1 ? 'match' : 'matches'})`);
+            samples.add(`${spec.observed(sample)} (${sample.count} ${sample.count === 1 ? 'match' : 'matches'})`);
             if (!this.conditionEvaluable(spec, sample)) return undefined;
             return spec.predicate(sample);
           },
           onTimeout: (cause) => {
             const expected = `${this.negated ? 'not ' : ''}${spec.describeExpected}`;
-            const observed = observedOf(spec, lastSample);
+            // With no read made, the count is the unread one's: a ref superseded before its read was one match.
+            const last = lastSample ?? { count: unread?.count ?? 0, node: null, nodes: [] };
+            const notRead = unread === undefined ? undefined : `no read until the deadline: ${reasonOf(unread.cause)}`;
+            const observed = notRead === undefined ? spec.observed(last) : lastSample === undefined ? notRead : `${spec.observed(last)}, then ${notRead}`;
+            const reason = cause ?? unread?.cause;
             return new TestError(
               'ASSERTION_FAILED',
               [
                 withMessage(this.message, `${api} failed`),
                 `locator: ${this.label}`,
                 `expected: ${expected}`,
-                `observed: ${observed} (match count ${lastSample.count})`,
+                `observed: ${observed} (match count ${last.count})`,
               ].join('\n'),
               {
                 // The same facts, one per field, for a reporter that lays them out.
-                details: { locator: this.label, expected, observed, matches: lastSample.count },
-                ...(cause === undefined ? {} : { cause }),
+                details: { locator: this.label, expected, observed, matches: last.count },
+                ...(reason === undefined ? {} : { cause: reason }),
               },
             );
           },
@@ -250,20 +265,33 @@ class AsyncExpectationImpl implements AsyncExpectation {
   private async sample(spec: MatcherSpec, reads: ReadWindow): Promise<Sample> {
     const { engine } = this.internals.context;
     if (spec.measuresViewport === true) {
-      const { node, count, stale, intersection } = await engine.readViewport(this.internals.expression, reads);
-      return { count, node, nodes: [], stale, ...(intersection === undefined ? {} : { intersection }) };
+      const { node, count, stale, cause, intersection } = await engine.readViewport(this.internals.expression, reads);
+      return { count, node, nodes: [], stale, ...(stale ? { staleCause: cause } : {}), ...(intersection === undefined ? {} : { intersection }) };
     }
+    // A set the engine found stale until the deadline is no count of it: the poll samples again, and times out on its own failure.
+    const staleSet = (cause: unknown): Sample => {
+      if (isStaleRead(cause)) return { count: 0, node: null, nodes: [], stale: true, staleCause: staleCause(cause) };
+      throw cause;
+    };
     if (spec.wholeSet === 'read') {
-      const nodes = await engine.readAllNow(this.internals.expression, reads);
-      return { count: nodes.length, node: null, nodes };
+      try {
+        const nodes = await engine.readAllNow(this.internals.expression, reads);
+        return { count: nodes.length, node: null, nodes };
+      } catch (cause) {
+        return staleSet(cause);
+      }
     }
     if (spec.wholeSet === true) {
-      const refs = await engine.resolveNow(this.internals.expression, reads);
-      return { count: refs.length, node: null, nodes: [] };
+      try {
+        const refs = await engine.resolveNow(this.internals.expression, reads);
+        return { count: refs.length, node: null, nodes: [] };
+      } catch (cause) {
+        return staleSet(cause);
+      }
     }
     const missingFrame = spec.evaluableWithoutNode === true ? 'empty' : 'wait';
-    const { node, count, stale } = await engine.tryRead(this.internals.expression, reads, missingFrame);
-    return { count, node, nodes: [], stale };
+    const { node, count, stale, cause } = await engine.tryRead(this.internals.expression, reads, missingFrame);
+    return { count, node, nodes: [], ...(stale ? { stale, staleCause: cause } : {}) };
   }
 
   /** A state matcher; its Playwright flag set to `false` expects the opposite state. */
@@ -681,12 +709,6 @@ function editState(node: SemanticNode): 'disabled' | 'read-only' | 'editable' | 
 }
 
 /** The node's true states for a state matcher's failure; `empty` is `toBeEmpty`'s alone and says nothing about the others. */
-/** What the failure and the poll readings say a sample saw; a stale one saw nothing of the node. */
-function observedOf(spec: MatcherSpec, sample: Sample): string {
-  if (sample.stale !== true) return spec.observed(sample);
-  return `a node that went stale before it was ${spec.measuresViewport === true ? 'measured' : 'read'}`;
-}
-
 function observedState(sample: Sample): string {
   if (sample.node === null) return 'no node';
   const states = sample.node.states ?? {};

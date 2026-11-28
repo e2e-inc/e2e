@@ -443,10 +443,13 @@ export function grammarTools(
   // tap_at gave it focus, and how a key reaches a screen with no node to aim at.
   const focused = verbs.has('typeText');
   if (verbs.has('type') || focused) {
+    // A model that read only "input node" tried clicks and arrow keys on a slider and gave up; a value control takes its number here.
+    const valueControls =
+      ' A slider or spin button (stepper) takes its new number the same way: type e.g. "18" into it with target rather than dragging it or stepping it with keys; step it with arrow keys only if the value it shows then is not that number.';
     tools['type'] = screenTool({
       description: focused
-        ? 'Type a plain-text value into one input node, or into whatever has focus when target is omitted. With target the value replaces the node\'s value. After tap_at on a field the screen does not list, call type with NO target (not the document or a container id): the value is inserted at the caret of the focused field; set replace to clear it first. Several fields can be typed in one turn.'
-        : 'Type a plain-text value into one input node, replacing its current value. Several fields can be typed in one turn.',
+        ? `Type a plain-text value into one input node, or into whatever has focus when target is omitted. With target the value replaces the node's value.${valueControls} After tap_at on a field the screen does not list, call type with NO target (not the document or a container id): the value is inserted at the caret of the focused field; set replace to clear it first. Several fields can be typed in one turn.`
+        : `Type a plain-text value into one input node, replacing its current value.${valueControls} Several fields can be typed in one turn.`,
       inputSchema: z.object({
         target: verbs.has('type') && focused ? target.optional() : verbs.has('type') ? target : z.undefined().optional(),
         value: z.string(),

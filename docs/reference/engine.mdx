@@ -431,6 +431,13 @@ export interface OperationContext {
    * transition to end first.
    */
   readonly origin: 'test' | 'agent';
+  /**
+   * The agent step this operation belongs to, an id unique within the
+   * attempt, on every operation of an `agent.act` step, replayed from the
+   * cache as well as live. Absent outside one. An engine may scope state to
+   * one agent step with it, since `origin` is `test` while a step replays.
+   */
+  readonly agentStep?: string;
 }
 ```
 

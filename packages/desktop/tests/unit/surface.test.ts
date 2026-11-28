@@ -639,6 +639,18 @@ describe('DesktopSurface: reading', () => {
     expect(username?.states?.hidden).toBe(true);
   });
 
+  it("answers a located list with the text of its rows, and leaves the agent's observation as it read it", async () => {
+    const rows = [
+      { role: 'row', ref_id: '@s:e2', children: [{ role: 'statictext', value: 'Buy milk' }, { role: 'statictext', value: 'Medium' }] },
+      { role: 'row', ref_id: '@s:e3', children: [{ role: 'statictext', value: 'Call the bank' }] },
+    ];
+    const { surface } = await launched({ snapshot: [screen('w-mine', { name: 'Inbox', children: [{ role: 'outline', ref_id: '@s:e1', native_id: { kind: 'ax_identifier', value: 'tasks' }, children: rows }] })] }, { observe: false });
+    const [tasks] = await surface.locate(testId('tasks'), operation());
+    expect(tasks?.text).toBe('Buy milk\nMedium\nCall the bank');
+    const observed = await surface.observe(operation(), undefined);
+    expect(observed.root.children?.[0]?.text).toBeUndefined();
+  });
+
   it('reads an app with no window as an empty screen', async () => {
     const { surface } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }]), ok([])] }, { observe: false });
     expect(await surface.locate(testId('username'), operation())).toEqual([]);
@@ -686,6 +698,120 @@ describe('DesktopSurface: reading', () => {
     expect(fake.of('snapshot').map((call) => (call.args[0] as { windowId: string }).windowId)).not.toContain('w-siri');
     const alone = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }]), windows(() => [{ id: 'w-siri', is_focused: true, system: true }])] }, { observe: false });
     await expect(alone.surface.observe(operation(), undefined)).rejects.toMatchObject({ code: 'NODE_STALE', message: expect.stringMatching(/system dialog/) });
+  });
+
+  describe('a window the agent opens while the test made one active', () => {
+    /** A driver whose window list is `list` at each call, and whose snapshot of a window holds one button named after it. */
+    const app = (list: { current: readonly Record<string, unknown>[] }) =>
+      fakeDriver({
+        listWindows: [(fake) => ok(list.current.map((window) => ({ pid: fake.pid, ...window })))],
+        snapshot: [(_fake, args) => screen((args[0] as { windowId: string }).windowId, { name: (args[0] as { windowId: string }).windowId, children: [{ role: 'button', name: `In ${(args[0] as { windowId: string }).windowId}`, ref_id: `@s:${(args[0] as { windowId: string }).windowId}` }] })],
+      });
+    const read = (fake: FakeDriver) => (last(fake, 'snapshot') as { windowId: string }).windowId;
+    const main = { id: 'w-main', title: 'Inbox' };
+    /** An operation of agent step `id`: the agent's own, or the test's while the step replays from the cache. */
+    const step = (id: string, origin: 'agent' | 'test' = 'agent') => ({ ...operation(origin), agentStep: id });
+
+    it("follows a window that opened and took focus after the agent's read, and leaves the test on the active one", async () => {
+      const list = { current: [{ ...main, is_focused: true }] as readonly Record<string, unknown>[] };
+      const fake = app(list);
+      const { surface } = await launched(fake, { observe: false });
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(step('1'), undefined);
+      expect(read(fake)).toBe('w-main');
+      list.current = [main, { id: 'w-prefs', title: 'Preferences', is_focused: true }];
+      const observed = await surface.observe(step('1'), undefined);
+      expect(read(fake)).toBe('w-prefs');
+      // The agent acts on what it reads there, and a key it presses goes to that window.
+      await surface.perform(observed.root.children![0]!.ref, { kind: 'tap' }, step('1'));
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:w-prefs', action: 'click' });
+      await surface.pressKey('Enter', step('1'));
+      expect(last(fake, 'press')).toMatchObject({ windowId: 'w-prefs' });
+      // The test's own read stays on the active window, and the next agent step starts from it again.
+      await surface.locate(testId('nowhere'), operation('test'));
+      expect(read(fake)).toBe('w-main');
+      await surface.observe(step('2'), undefined);
+      expect(read(fake)).toBe('w-main');
+    });
+
+    it('never follows a window that was there before, one not in focus, or a dialog macOS put over the app', async () => {
+      const list = { current: [{ ...main, is_focused: true }, { id: 'w-old', title: 'Old' }] as readonly Record<string, unknown>[] };
+      const fake = app(list);
+      const { surface } = await launched(fake, { observe: false });
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(step('1'), undefined);
+      list.current = [main, { id: 'w-old', title: 'Old', is_focused: true }, { id: 'w-panel', title: 'Panel' }];
+      await surface.observe(step('1'), undefined);
+      expect(read(fake)).toBe('w-main');
+      list.current = [main, { id: 'w-siri', is_focused: true, system: true }];
+      await surface.observe(step('1'), undefined);
+      expect(read(fake)).toBe('w-main');
+    });
+
+    it('goes back to the active window once the one it followed closes, and follows nothing without an active window', async () => {
+      const list = { current: [{ ...main, is_focused: true }] as readonly Record<string, unknown>[] };
+      const fake = app(list);
+      const { surface } = await launched(fake, { observe: false });
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(step('1'), undefined);
+      list.current = [main, { id: 'w-prefs', is_focused: true }];
+      await surface.observe(step('1'), undefined);
+      expect(read(fake)).toBe('w-prefs');
+      list.current = [{ ...main, is_focused: true }];
+      await surface.observe(step('1'), undefined);
+      expect(read(fake)).toBe('w-main');
+      // activate() ends the following too.
+      list.current = [main, { id: 'w-prefs', is_focused: true }];
+      await surface.observe(step('1'), undefined);
+      expect(read(fake)).toBe('w-prefs');
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(step('1'), undefined);
+      expect(read(fake)).toBe('w-main');
+    });
+
+    it('follows the window in a step replayed from the cache, whose operations are the test\'s', async () => {
+      const list = { current: [{ ...main, is_focused: true }] as readonly Record<string, unknown>[] };
+      const fake = app(list);
+      const { surface } = await launched(fake, { observe: false });
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(step('1', 'test'), undefined);
+      list.current = [main, { id: 'w-prefs', title: 'Preferences', is_focused: true }];
+      await surface.observe(step('1', 'test'), undefined);
+      expect(read(fake)).toBe('w-prefs');
+    });
+
+    it('starts each agent step from the active window, with no test read between them', async () => {
+      const list = { current: [{ ...main, is_focused: true }] as readonly Record<string, unknown>[] };
+      const fake = app(list);
+      const { surface } = await launched(fake, { observe: false });
+      await surface.activateWindow('w-main', { signal, timeoutMs: 5_000 });
+      await surface.observe(step('1'), undefined);
+      list.current = [main, { id: 'w-prefs', title: 'Preferences', is_focused: true }];
+      await surface.observe(step('1'), undefined);
+      expect(read(fake)).toBe('w-prefs');
+      await surface.observe(step('2'), undefined);
+      expect(read(fake)).toBe('w-main');
+    });
+  });
+
+  it('opens an app in the foreground only once it has a key window, so the first keys reach it', async () => {
+    const unfocused = windows(() => [{ id: 'w-mine', title: 'Spike Form' }]);
+    const focused = windows(() => [{ id: 'w-mine', title: 'Spike Form', is_focused: true }]);
+    const fake = fakeDriver({ listWindows: [unfocused, unfocused, unfocused, unfocused, focused] });
+    await launched(fake, { observe: false, runHeaded: true });
+    expect(fake.of('listWindows')).toHaveLength(5);
+    // In the background the keys go to the app's own queue, which the driver sends only while the window is key: nothing to wait for.
+    const background = fakeDriver({ listWindows: [unfocused, unfocused, unfocused, unfocused, focused] });
+    await launched(background, { observe: false });
+    expect(background.of('listWindows')).toHaveLength(1);
+  });
+
+  it('opens an app in the foreground that names no key window once the wait for one is over', async () => {
+    const fake = fakeDriver({ listWindows: [windows(() => [{ id: 'w-mine', title: 'Spike Form' }, { id: 'w-siri', is_focused: true, system: true }])] });
+    const started = Date.now();
+    await launched(fake, { observe: false, runHeaded: true });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_900);
+    expect(Date.now() - started).toBeLessThan(5_000);
   });
 
   it('reads the main window before the first one listed when the app in the background has none focused', async () => {
@@ -1295,6 +1421,73 @@ describe('DesktopSurface: acting', () => {
     expect(scrolls.fake.acted()).toEqual(['scrollTo']);
   });
 
+  describe('a press on text or an image', () => {
+    const text = (value: string, extra: Record<string, unknown> = {}) => ({ role: 'statictext', value, native_id: { kind: 'ax_identifier', value }, ...extra });
+    const read = screen('w-mine', {
+      name: 'Tasks',
+      children: [
+        {
+          role: 'outline',
+          ref_id: '@s:list',
+          available_actions: ['Scroll'],
+          children: [
+            { role: 'row', ref_id: '@s:row', available_actions: ['RightClick'], children: [{ role: 'cell', ref_id: '@s:cell', available_actions: ['ScrollTo'], children: [{ role: 'group', children: [text('Medium')] }] }] },
+            { role: 'row', ref_id: '@s:row2', available_actions: ['RightClick'], children: [{ role: 'cell', ref_id: '@s:cell2', available_actions: ['Click'], children: [text('High')] }] },
+            { role: 'button', ref_id: '@s:button', name: 'Archive', available_actions: ['Click'], children: [{ role: 'image', native_id: { kind: 'ax_identifier', value: 'icon' } }] },
+            text('Loose'),
+            {
+              role: 'row',
+              ref_id: '@s:far-row',
+              children: [{ role: 'group', name: 'One', children: [{ role: 'group', name: 'Two', children: [{ role: 'group', name: 'Three', children: [text('Deep')] }] }] }],
+            },
+          ],
+        },
+        { role: 'textfield', ref_id: '@s:field', name: 'Note', available_actions: ['SetValue', 'Click'], children: [text('Hint')] },
+        text('Status'),
+      ],
+    });
+
+    it('taps the row the text is in, through a cell that takes no click of its own', async () => {
+      const { surface, fake } = await launched({ snapshot: [read] }, { observe: false });
+      const [medium] = await surface.locate(testId('Medium'), operation());
+      await surface.perform(medium!.ref, { kind: 'tap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:row', action: 'click' });
+    });
+
+    it("taps the button an image is in, and opens the row's menu from text in it", async () => {
+      const { surface, fake } = await launched({ snapshot: [read] }, { observe: false });
+      const [icon] = await surface.locate(testId('icon'), operation());
+      await surface.perform(icon!.ref, { kind: 'tap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:button', action: 'click' });
+      const [medium] = await surface.locate(testId('Medium'), operation());
+      await surface.perform(medium!.ref, { kind: 'secondaryTap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:row', action: 'rightClick' });
+    });
+
+    it("taps a cell's own click from its text, and still opens the row's menu past it", async () => {
+      const { surface, fake } = await launched({ snapshot: [read] }, { observe: false });
+      const [high] = await surface.locate(testId('High'), operation());
+      await surface.perform(high!.ref, { kind: 'tap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:cell2', action: 'click' });
+      const [again] = await surface.locate(testId('High'), operation());
+      await surface.perform(again!.ref, { kind: 'secondaryTap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:row2', action: 'rightClick' });
+    });
+
+    it('refuses text with no row or button around it, never the list, the window, or past three levels, and taps the field a hint is in', async () => {
+      const { surface, fake } = await launched({ snapshot: [read] }, { observe: false });
+      for (const id of ['Loose', 'Status', 'Deep']) {
+        const [node] = await surface.locate(testId(id), operation());
+        await expect(surface.perform(node!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/no row, cell, or button around it takes one/) });
+      }
+      // Text a field shows inside it (a hint) is the field's: a tap on it focuses the field, as a click there does.
+      const [hint] = await surface.locate(testId('Hint'), operation());
+      await surface.perform(hint!.ref, { kind: 'tap' }, operation());
+      expect(last(fake, 'act')).toMatchObject({ ref: '@s:field', action: 'click' });
+      expect(fake.acted().filter((action) => action === 'click')).toHaveLength(1);
+    });
+  });
+
   it('scrolls a control into view through the driver when it is hidden and has a ref', async () => {
     const read = screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'button', name: 'Far', ref_id: '@s:e1', states: ['offscreen'], bounds: { x: 10, y: 900, width: 50, height: 20 } }] });
     const { surface, fake } = await launched({ snapshot: [read] }, { observe: false });
@@ -1674,7 +1867,8 @@ describe('DesktopSurface: points', () => {
 
   it('refuses a tap at a point when a sheet took focus as the window came forward, and taps one on a sheet already open', async () => {
     const at = (sheet: boolean) => windows(() => [{ id: 'w-mine', is_focused: true, ...(sheet ? { sheet_focused: true, sheet_id: 's-1' } : {}), bounds: { x: 100, y: 100, width: 400, height: 300 } }]);
-    const opened = await launched({ listWindows: [at(false), at(false), at(true)] }, { observe: false, options: { physicalInput: true } });
+    // The launch's read, its wait for a key window in the foreground, the tap's first read, then the window as it came forward.
+    const opened = await launched({ listWindows: [at(false), at(false), at(false), at(true)] }, { observe: false, options: { physicalInput: true } });
     await expect(opened.surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/sheet opened/) });
     expect(opened.fake.of('pointer')).toHaveLength(0);
     const open = await launched({ listWindows: [at(true)] }, { observe: false, options: { physicalInput: true } });
@@ -1699,8 +1893,8 @@ describe('DesktopSurface: points', () => {
       { before: 's-1', now: 's-2', message: /another sheet took the place/ },
     ];
     for (const { before, now, message } of cases) {
-      // The launch, the observation, then the tap's two reads of the window.
-      const { surface, fake } = await launched({ listWindows: [at(before), at(before), at(now), at(now)] }, { observe: false, options: { physicalInput: true } });
+      // The launch, its wait for a key window in the foreground, the observation, then the tap's two reads of the window.
+      const { surface, fake } = await launched({ listWindows: [at(before), at(before), at(before), at(now), at(now)] }, { observe: false, options: { physicalInput: true } });
       await surface.observe(operation(), undefined);
       await expect(surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(message) });
       expect(fake.of('pointer')).toHaveLength(0);

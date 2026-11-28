@@ -65,7 +65,7 @@ describe('a read superseded by a concurrent lookup', () => {
       message(expectFixture(locator).toBeHidden()),
       message(expectFixture(locator).toBeHidden()),
     ]);
-    expect(first).toContain('observed: a node that went stale before it was read (match count 1)');
+    expect(first).toMatch(/observed: no read until the deadline: .+ \(match count 1\)/);
     expect(second).toContain('observed: visible (match count 1)');
   });
 

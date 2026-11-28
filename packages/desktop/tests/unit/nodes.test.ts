@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { type LocatorExpression, resolveExpression, type SemanticNode } from '@e2e-dev/core/engine';
 import { describe, expect, it } from 'vitest';
-import { locatable, projectSnapshot, type RawSnapshot } from '../../src/nodes.ts';
+import { locatable, projectSnapshot, withContainerText, type RawSnapshot } from '../../src/nodes.ts';
 
 function load(name: string): RawSnapshot {
   return JSON.parse(readFileSync(new URL(`../fixtures/snapshots/${name}.json`, import.meta.url), 'utf8')) as RawSnapshot;
@@ -511,5 +511,112 @@ describe('projectSnapshot', () => {
     expect(screen.secureRects).toEqual([{ x: 19, y: 110, width: 262, height: 26 }]);
     expect(screen.windowId).toBeDefined();
     expect(byTestId(screen.root, 'status')).toMatchObject({ role: 'text', name: 'Not signed in', text: 'Not signed in', rect: { x: 19, y: 230 } });
+  });
+});
+
+describe('withContainerText', () => {
+  /** A SwiftUI list as the driver reads it: rows of a checkbox, a priority label, and a button, under wrappers that are dropped. */
+  const list = (): SemanticNode => {
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Inbox',
+          children: [
+            {
+              role: 'outline',
+              ref_id: '@s:e1',
+              native_id: { kind: 'ax_identifier', value: 'tasks' },
+              children: [
+                {
+                  role: 'row',
+                  ref_id: '@s:e2',
+                  children: [
+                    {
+                      role: 'cell',
+                      children: [
+                        { role: 'checkbox', ref_id: '@s:e3', name: 'Buy milk', available_actions: ['Click'] },
+                        { role: 'group', children: [{ role: 'statictext', value: 'Medium' }] },
+                        { role: 'button', ref_id: '@s:e4', name: 'Delete Buy milk', available_actions: ['Click'] },
+                      ],
+                    },
+                  ],
+                },
+                { role: 'row', ref_id: '@s:e5', children: [{ role: 'cell', children: [{ role: 'statictext', value: 'Call the bank' }, { role: 'textfield', ref_id: '@s:e6', name: 'Note', value: 'typed' }] }] },
+              ],
+            },
+            { role: 'group', native_id: { kind: 'ax_identifier', value: 'empty' }, name: 'Empty pane', children: [{ role: 'image', ref_id: '@s:e7' }] },
+            { role: 'statictext', value: 'Ready', native_id: { kind: 'ax_identifier', value: 'status' }, children: [{ role: 'statictext', value: 'Rea' }] },
+          ],
+        },
+      },
+      minter(),
+    );
+    return root;
+  };
+
+  it('gives a list, and each row, the text its rows and labels show, one line each', () => {
+    const root = list();
+    const tasks = withContainerText(byTestId(root, 'tasks')!);
+    expect(byTestId(root, 'tasks')?.text).toBeUndefined();
+    expect(tasks.text).toBe('Buy milk\nMedium\nDelete Buy milk\nCall the bank');
+    const [first] = resolveExpression({ kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'row', exact: true } } }, [root]);
+    expect(withContainerText(first!).text).toBe('Buy milk\nMedium\nDelete Buy milk');
+  });
+
+  it('reads the rows in view of a list with folded rows, and not the line that counts the rest', () => {
+    const screen = projectSnapshot(
+      {
+        snapshot_id: 's',
+        complete: true,
+        tree: {
+          role: 'window',
+          name: 'Inbox',
+          children: [
+            {
+              role: 'outline',
+              ref_id: '@s:e1',
+              native_id: { kind: 'ax_identifier', value: 'tasks' },
+              children: [{ role: 'row', ref_id: '@s:e2', children: [{ role: 'statictext', value: 'Buy milk' }] }, { role: 'folded', folded: 182 }],
+            },
+          ],
+        },
+      },
+      minter(),
+    );
+    const [tasks] = resolveExpression({ kind: 'query', query: { kind: 'testId', value: { kind: 'string', value: 'tasks', exact: true } } }, [locatable(screen)]);
+    expect(withContainerText(tasks!).text).toBe('Buy milk');
+    // Taken from the whole tree, the fold line is there, hidden, and adds nothing either.
+    expect(withContainerText(byTestId(screen.root, 'tasks')!).text).toBe('Buy milk');
+  });
+
+  it("keeps a field's own text, whatever hint the app lists under it", () => {
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'Inbox',
+          children: [{ role: 'textfield', ref_id: '@s:e1', name: 'Note', native_id: { kind: 'ax_identifier', value: 'note' }, value: 'typed', children: [{ role: 'statictext', value: 'Hint' }] }],
+        },
+      },
+      minter(),
+    );
+    const note = byTestId(root, 'note')!;
+    expect(withContainerText(note).text).toBe(note.text);
+    expect(withContainerText(note).text ?? '').not.toContain('Hint');
+  });
+
+  it("leaves out a field's value, as an input's text content on the web is empty", () => {
+    expect(withContainerText(byTestId(list(), 'tasks')!).text).not.toContain('typed');
+  });
+
+  it('keeps the own text of static text, of a leaf, and of a container with no text under it', () => {
+    const root = list();
+    expect(withContainerText(byTestId(root, 'status')!).text).toBe('Ready');
+    const checkbox = all(root).find((node) => node.name === 'Buy milk')!;
+    expect(withContainerText(checkbox)).toBe(checkbox);
+    expect(withContainerText(byTestId(root, 'empty')!).text).toBe('Empty pane');
   });
 });

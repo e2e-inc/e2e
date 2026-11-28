@@ -97,7 +97,18 @@ export interface NodeBinding {
    * window, under a hidden ancestor, or with no size stays hidden whatever scrolls.
    */
   readonly scrolledOut?: true;
+  /**
+   * The nodes around this one a press on it can go to, nearest first: at most
+   * `MAX_PRESS_LEVELS` levels up, ending at the first one with a ref of its own
+   * (a row, a button, a list, a scroll area), which is the last a press may
+   * reach, and never the window. A cell with no press of its own passes the
+   * press on to its row. Empty for a child of the window.
+   */
+  readonly around?: readonly NodeBinding[];
 }
+
+/** How many levels up a press on text or an image looks for the row or button it sits in. */
+const MAX_PRESS_LEVELS = 3;
 
 /** A snapshot as the engine keeps it: the tree the harness sees, and a binding for every node in it. */
 export interface ProjectedScreen {
@@ -282,7 +293,8 @@ export function projectSnapshot(
 
   // `hiddenAbove`: an ancestor is hidden, a wrapper left out included, so nothing under it is on screen; the resolver reads each node's own state only. `scrolled` when a scroll area is all that hides it, which a scroll into view of the node can undo, else `other`.
   // `prior`: the id the node held before, which a cut gave it a fresh one in place of; look-alikes under it are reported against that id, which their identities are kept under.
-  const project = (node: RawNode, id: string, stable: boolean, likeness: string, hiddenAbove: false | 'scrolled' | 'other', prior: string | undefined): SemanticNode => {
+  // `around`: what a press on this node can go to, nearest first (see `NodeBinding.around`).
+  const project = (node: RawNode, id: string, stable: boolean, likeness: string, hiddenAbove: false | 'scrolled' | 'other', prior: string | undefined, around: readonly NodeBinding[]): SemanticNode => {
     if (node.folded !== undefined && node.folded > 0) return fold(node.folded, id, likeness);
     const rawStates = new Set(node.states ?? []);
     const role = ROLE_MAP[node.role] ?? (node.role === 'unknown' ? undefined : node.role);
@@ -336,7 +348,7 @@ export function projectSnapshot(
       if (scrollTargets.vertical === undefined && axes.includes('vertical')) scrollTargets.vertical = id;
       if (scrollTargets.horizontal === undefined && axes.includes('horizontal')) scrollTargets.horizontal = id;
     }
-    bindings.set(id, {
+    const binding: NodeBinding = {
       id,
       ...(node.ref_id === undefined ? {} : { ref: node.ref_id }),
       ...(role === undefined ? {} : { role }),
@@ -350,7 +362,15 @@ export function projectSnapshot(
       interactive,
       ...(scrolledOut ? { scrolledOut } : {}),
       ...(node.native_id === undefined || node.native_id.value === '' ? {} : { testId: node.native_id.value }),
-    });
+      ...(around.length === 0 ? {} : { around }),
+    };
+    bindings.set(id, binding);
+    // A press on a child can go to this node, and on through it to what is around it only while it has no ref of its own: a
+    // row, a button, a list, or a scroll area ends the way up. A cell that does not take both a click and a right click
+    // passes it on to its row: the press goes to the first node up that takes it, so a tap still stops at a cell's own click.
+    const cellActions = node.available_actions ?? [];
+    const passes = node.ref_id === undefined || (node.role === 'cell' && !(cellActions.includes('Click') && cellActions.includes('RightClick')));
+    const aroundChildren = id === ROOT_ID ? [] : (passes ? [binding, ...around] : [binding]).slice(0, MAX_PRESS_LEVELS);
     const kept: RawNode[] = [];
     const underHidden = new Map<RawNode, 'scrolled' | 'other'>();
     // Whether a wrapper left out had children the read cut off: its unread children are this node's, and one could be a twin of a listed one.
@@ -391,7 +411,7 @@ export function projectSnapshot(
       const childPrior = childStable ? childId : prior !== undefined && seen !== undefined ? priorIdOf?.(`${prior}/${seen}`) : undefined;
       const above = states.hidden === true ? (scrolledOut ? 'scrolled' : 'other') : (underHidden.get(child) ?? false);
       // An open menu or popover floats above the window, so a scroll that took its trigger out of view does not hide it (the driver reads it as on screen).
-      return project(child, childId, childStable, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, above === 'scrolled' && FLOATING_ROLES.has(child.role) ? false : above, childPrior);
+      return project(child, childId, childStable, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, above === 'scrolled' && FLOATING_ROLES.has(child.role) ? false : above, childPrior, aroundChildren);
     });
     return {
       ref: { id, revision: '' },
@@ -420,7 +440,7 @@ export function projectSnapshot(
     return { ref: { id, revision: '' }, text: `${count} ${count === 1 ? 'row' : 'rows'} out of view`, states };
   };
 
-  const root = project(raw.tree, ROOT_ID, true, '', false, ROOT_ID);
+  const root = project(raw.tree, ROOT_ID, true, '', false, ROOT_ID, []);
   const title = label(raw.tree.name) ?? label(raw.window?.title);
   return {
     root,
@@ -452,6 +472,38 @@ export function locatable(screen: ProjectedScreen): SemanticNode {
   const prune = (node: SemanticNode): SemanticNode =>
     node.children === undefined ? node : { ...node, children: node.children.filter((child) => !folds.has(child.ref.id)).map(prune) };
   return prune(screen.root);
+}
+
+/** Roles whose own text is what they show, whatever nodes the app lists under them: static text and a heading. */
+const OWN_TEXT_ROLES = new Set(['text', 'heading']);
+
+/** Roles of fields, which show a value, not text: their own text stands, whatever nodes the app lists under them. */
+const FIELD_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'spinbutton', 'slider']);
+
+/**
+ * A located node with the text its descendants show as its own, as a web
+ * element's text content is its children's: `textContent()`, `toHaveText`,
+ * and `toContainText` on a list, a tree, a group, or a row read what the
+ * rows and labels in it show, one line each. A node with no children, static
+ * text, and a heading keep their own text, and so does a container none of
+ * whose descendants shows text. A field keeps its own text: it shows its
+ * value, not text, as an input's text content on the web is empty, and a
+ * hint the app lists under it is not its text. A hidden node, such as the
+ * line that counts a list's folded rows, adds nothing. Only `locate` answers it: an
+ * observation would list every line twice, and a text query still matches the
+ * innermost node that shows the text.
+ */
+export function withContainerText(node: SemanticNode): SemanticNode {
+  const text = shownText(node);
+  return text === node.text || text === undefined ? node : { ...node, text };
+}
+
+/** The text a node shows: its descendants', a line each, else its own. */
+function shownText(node: SemanticNode): string | undefined {
+  const children = (node.children ?? []).filter((child) => child.states?.hidden !== true);
+  if (children.length === 0 || OWN_TEXT_ROLES.has(node.role ?? '') || FIELD_ROLES.has(node.role ?? '')) return node.text;
+  const lines = children.map(shownText).filter((line): line is string => line !== undefined && line.trim() !== '');
+  return lines.length === 0 ? node.text : lines.join('\n');
 }
 
 /** A heading's level: the one the app reports, else one its description names (`heading level 2`). */

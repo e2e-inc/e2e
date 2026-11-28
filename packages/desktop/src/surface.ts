@@ -41,11 +41,11 @@ import {
 } from '@e2e-dev/core/engine';
 import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
 import { toCombo } from './keys.ts';
-import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
+import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_POLL_MS, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
 import { launchArgumentList } from './launch-arguments.ts';
 import { handOffClause, type WindowsRead } from './launch-report.ts';
 import { LAUNCH_READY_MS, QUIT, windowReadable } from './launch-wait.ts';
-import { ROOT_ID, locatable, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
+import { ROOT_ID, locatable, projectSnapshot, withContainerText, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
 import { AppState, installedApp, nativeStateHost, type OwnedBuild, type StateHost } from './state.ts';
@@ -62,6 +62,14 @@ const LATE_APP_MS = 2_000;
 
 /** How often it looks. */
 const LATE_APP_POLL_MS = 100;
+
+/**
+ * How long an open in the foreground waits, once the window can be read, for
+ * the app to have a key window: an app coming forward takes the keyboard a
+ * moment after its window shows, and keys typed before then miss it. An app
+ * that names no key window by then is left as it is.
+ */
+const KEY_WINDOW_MS = 2_000;
 
 /** How far a swipe scrolls, in screens of the scrolled area, by its momentum: the web engine's strides, so a momentum means the same on every engine. */
 const SWIPE_PAGES = { slow: 0.75, none: 0.5, fast: 1.5 } as const;
@@ -229,6 +237,12 @@ export class DesktopSurface {
   private lifecycle: Promise<unknown> = Promise.resolve();
   /** The window a test made active with `window.activate()`, which every read and command then uses until it closes or the app quits. */
   private chosenWindow: string | undefined;
+  /** A window the agent's own step opened while the test had one chosen, which the agent reads and acts in while it is open (see `follow`). */
+  private followed: string | undefined;
+  /** The agent step `followed` and `agentSeen` belong to: another step starts from the chosen window again. */
+  private followStep: string | undefined;
+  /** The windows the agent's newest read listed while a window was chosen; none before its first read, and after a read of the test's own. */
+  private agentSeen: ReadonlySet<string> | undefined;
   /**
    * The window of the newest screen handed to the harness, by observe or locate: the one a point is measured in, the
    * agent's as core hit-tests it, against the newest observation. `sheet` says whether a sheet held its focus then: one
@@ -435,6 +449,8 @@ export class DesktopSurface {
     // The process and when it started, so a later run can quit it, and never a later process given the same id.
     await this.writeRecord({ token, pid: launched.pid, ...(this.started === undefined ? {} : { started: this.started }) });
     this.forget();
+    // The readiness wait's own deadline, which the key-window wait after it never passes.
+    const readyBy = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
     await windowReadable(operation, {
       app: this.appName,
       foreground: this.foreground,
@@ -450,6 +466,7 @@ export class DesktopSurface {
       },
       screenLocked: () => driver.screenLocked(),
     });
+    await this.keyWindow(operation, readyBy);
   }
 
   /** The engine error for a failed launch, naming what to fix where the driver says what went wrong. */
@@ -472,6 +489,31 @@ export class DesktopSurface {
     await rename(`${file}.partial`, file);
   }
 
+  /**
+   * After a launch in the foreground, waits up to `KEY_WINDOW_MS` (and never
+   * past `deadline`) until a window of the app, not a dialog macOS put over
+   * it, is its key window: with `physicalInput` the keys of the test's first
+   * `pressSequentially` go through the real keyboard, and keys typed while
+   * the app is still coming forward could miss it. In the background the
+   * app's keys go to its own event queue, which the driver sends only while
+   * the window is key, so there is nothing to wait for. An app that names no
+   * key window in time is read as it is; the open fails only when it was
+   * cancelled (`CANCELLED`) or the app quit while it was waited for.
+   */
+  private async keyWindow(operation: OperationContext, deadline: number): Promise<void> {
+    if (!this.foreground) return;
+    const until = Math.min(deadline, Date.now() + KEY_WINDOW_MS);
+    while (Date.now() < until) {
+      if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
+      const windows = await this.ownWindows(withDeadline({ ...operation, timeoutMs: Math.max(until - Date.now(), 0) })).catch(() => []);
+      if (windows.some((window) => window.is_focused === true && window.system !== true)) return;
+      await sleep(Math.min(LAUNCH_POLL_MS, Math.max(until - Date.now(), 0)), operation.signal);
+    }
+    // A cancel during the last read or sleep, or an app that quit while it was waited for, is no app opened, as for `windowReadable`.
+    if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${this.appName ?? 'the app'} was cancelled`, { retryable: false });
+    await this.requireRunning();
+  }
+
   /** The windows of the app the engine launched, for the `desktop` fixture; none while it is not running. */
   async windows(operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<readonly OpenWindow[]> {
     const windows = await this.ownWindows(operation);
@@ -487,6 +529,9 @@ export class DesktopSurface {
     const windows = await this.ownWindows(operation);
     if (!windows.some((window) => window.id === id)) throw notActionable('the window has closed; desktop.windows() lists the open ones');
     this.chosenWindow = id;
+    this.followed = undefined;
+    this.agentSeen = undefined;
+    this.followStep = undefined;
     // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
     this.pointWindow = undefined;
     // The video records what `screen` reads, from now on, not from the next read.
@@ -535,6 +580,42 @@ export class DesktopSurface {
   private activeWindow(windows: readonly RawWindow[]): RawWindow | undefined {
     const chosen = this.activeChoice(windows);
     return chosen === undefined ? byPreference(windows)[0] : windows.find((window) => window.id === chosen);
+  }
+
+  /**
+   * The window a read or command with none named goes to: the active one
+   * (`activeChoice`), else none, which reads the windows `byPreference`.
+   * While a window is active, the agent follows a window its own step opened
+   * (Preferences, from a button it pressed): one its previous read did not
+   * list, that is the app's key window now, and that is not a dialog macOS
+   * put over the app. It reads and acts there while that window is open, for
+   * the rest of that step: an operation's `agentStep` names the step,
+   * replayed from the cache too, where `origin` is the test's. The test's own
+   * steps stay on the active window, and the next agent step starts from it
+   * again.
+   */
+  private follow(windows: readonly RawWindow[], operation: Pick<OperationContext, 'agentStep'>): string | undefined {
+    const active = this.activeChoice(windows);
+    const step = operation.agentStep;
+    if (active === undefined || step === undefined || step !== this.followStep) {
+      this.followed = undefined;
+      this.agentSeen = undefined;
+      this.followStep = step;
+      if (active === undefined || step === undefined) return active;
+    }
+    const listed = new Set(windows.map((window) => window.id));
+    if (this.followed !== undefined && !listed.has(this.followed)) this.followed = undefined;
+    const seen = this.agentSeen;
+    this.agentSeen = listed;
+    const opened = seen === undefined ? undefined : windows.find((window) => !seen.has(window.id) && window.is_focused === true && window.system !== true && window.accessible !== false && window.minimized !== true);
+    if (opened !== undefined) this.followed = opened.id;
+    return this.followed ?? active;
+  }
+
+  /** The window `follow` answers for an operation, from the windows listed now. */
+  private inUse(windows: readonly RawWindow[], operation: OperationContext): RawWindow | undefined {
+    const id = this.follow(windows, operation);
+    return id === undefined ? byPreference(windows)[0] : windows.find((window) => window.id === id);
   }
 
   /** `desktop.closeApp()`: the app quit, as at the end of every test. */
@@ -675,6 +756,9 @@ export class DesktopSurface {
   private forget(): void {
     this.pointWindow = undefined;
     this.chosenWindow = undefined;
+    this.followed = undefined;
+    this.agentSeen = undefined;
+    this.followStep = undefined;
     this.bindings.clear();
     this.ids.clear();
   }
@@ -758,7 +842,7 @@ export class DesktopSurface {
   /** One read for `capture`: the app's windows, and the first of those asked for that accessibility can read. */
   private async readWindows(operation: OperationContext, windowId?: string, forMask = false, whole = false): Promise<WindowsRead> {
     const windows = await this.ownWindows(operation, true);
-    const target = windowId ?? this.activeChoice(windows);
+    const target = windowId ?? this.follow(windows, operation);
     if (windows.length === 0 && this.pid !== undefined) this.unlessLocked();
     // A window the list no longer has is closed: its identities go, so windows opened and closed one after another do not pile them up.
     const open = new Set(windows.map((window) => window.id));
@@ -841,9 +925,9 @@ export class DesktopSurface {
     }
   }
 
-  /** The window of the launched process a command reads or acts in. */
+  /** The window of the launched process a command reads or acts in: the active one (or one the agent followed from it, see `follow`), else the first by `byPreference`. */
   private async ownWindow(operation: OperationContext): Promise<RawWindow | undefined> {
-    return this.activeWindow(await this.ownWindows(operation));
+    return this.inUse(await this.ownWindows(operation), operation);
   }
 
   async observe(context: OperationContext, options: EngineObserveOptions | undefined): Promise<EngineSnapshot> {
@@ -912,7 +996,8 @@ export class DesktopSurface {
     this.pointWindow = pointIn(screen);
     await this.video.follow(this.pointWindow?.id, operation);
     this.remember(matches.flatMap((match) => screen.bindings.get(match.ref.id) ?? []));
-    return matches;
+    // A container's text is what the rows and labels in it show, for textContent() and toHaveText; the matching above read each node's own.
+    return matches.map(withContainerText);
   }
 
   // --- acting ---
@@ -921,7 +1006,8 @@ export class DesktopSurface {
     const binding = this.bindings.get(ref.id);
     if (binding === undefined) throw new EngineError('NODE_STALE', `node ${ref.id} is not on the screen`, { retryable: true });
     // A node read before a test made another window active is not on the screen in use: the harness locates it again there.
-    if (this.chosenWindow !== undefined && binding.windowId !== this.chosenWindow) {
+    // One in a window the agent followed from the active one is the agent's screen.
+    if (this.chosenWindow !== undefined && binding.windowId !== this.chosenWindow && (this.followed === undefined || binding.windowId !== this.followed)) {
       throw new EngineError('NODE_STALE', `node ${ref.id} is in another window than the active one`, { retryable: true });
     }
     return binding;
@@ -948,7 +1034,10 @@ export class DesktopSurface {
   }
 
   private refOf(binding: NodeBinding, action: string): string {
-    if (binding.ref === undefined) throw notActionable(`node ${binding.id} (${binding.role ?? 'unknown'}) is not a control the engine can ${action}`);
+    if (binding.ref === undefined) {
+      const around = action === 'click' || action === 'rightClick' ? ', and no row, cell, or button around it takes one' : '';
+      throw notActionable(`node ${binding.id} (${binding.role ?? 'unknown'}) is not a control the engine can ${action}${around}`);
+    }
     return binding.ref;
   }
 
@@ -975,8 +1064,10 @@ export class DesktopSurface {
     const binding = this.binding(ref);
     switch (action.kind) {
       case 'tap': {
-        const scrolled = await this.shown(binding, 'tap', operation);
-        const click = (): Promise<void> => this.refCommand('click', binding, operation);
+        // Text or an image in a row or a button takes no click of its own: the click goes to the row or button, as a click on text does on the web.
+        const target = pressTarget(binding, 'tap');
+        const scrolled = await this.shown(target, 'tap', operation);
+        const click = (): Promise<void> => this.refCommand('click', target, operation);
         if (scrolled) await afterChange('click', click);
         else await click();
         break;
@@ -984,8 +1075,8 @@ export class DesktopSurface {
       case 'secondaryTap':
         // The driver checks the control offers a context menu, live, before it scrolls one out of view into view (or
         // refuses one it cannot reach), and counts a failure after that scroll as delivered: the observed actions may be
-        // from a read that stalled, which proves no menu absent.
-        await this.refCommand('rightClick', binding, operation);
+        // from a read that stalled, which proves no menu absent. Text in a row opens the row's menu.
+        await this.refCommand('rightClick', pressTarget(binding, 'secondaryTap'), operation);
         break;
       case 'doubleTap':
         // A double click needs the real pointer; declared with `physicalInput` alone. A node with no ref (a plain view, text) takes it at its center.
@@ -1423,11 +1514,12 @@ export class DesktopSurface {
    * Makes sure a menu bar command goes to the window `screen` reads: the menu bar acts on the app's key window, so with
    * an active window that is not the key window, the command would act on another one. Without `physicalInput` that is
    * refused, nothing sent, as a key to a window that is not the key window is; with it, the active window comes forward
-   * first. With no window active, `screen` reads the focused window, which is the key window.
+   * first. With no window active, `screen` reads the focused window, which is the key window. An agent step's window
+   * is the one it followed, if any (`follow`).
    */
   private async keyWindowForMenu(pid: number, label: string, operation: OperationContext): Promise<void> {
     const windows = await this.ownWindows(operation);
-    const active = this.activeChoice(windows);
+    const active = this.follow(windows, operation);
     if (active === undefined || windows.find((window) => window.id === active)?.is_focused === true) return;
     if (!this.options.physicalInput) {
       throw notActionable(`${label}: the active window is not the app's key window, and the menu bar acts on the key window, so nothing was pressed; activate the key window, or set desktop({ physicalInput: true }) to bring the active one forward`);
@@ -1630,6 +1722,27 @@ async function settleWithin<T>(promise: Promise<T>, ms: number, signal: AbortSig
 
 /** Roles whose `Click` may be a selection (`AXSelected`), not a press of their own. */
 const SELECTED_BY_CLICK = new Set(['row', 'cell', 'treeitem', 'option', 'tab']);
+
+/** Roles that show content and take no press of their own: a press on one goes to the row or button around it. */
+const CONTENT_ROLES = new Set(['text', 'heading', 'image', 'paragraph']);
+
+/** Roles the driver clicks by selecting them through their list, whatever actions they list; a cell that lists no click passes it on to its row. */
+const CLICKED_BY_SELECTION = new Set(['row', 'treeitem']);
+
+/**
+ * The node a tap or a secondary tap on `binding` goes to: the node itself,
+ * unless it is content (text, an image) that takes no such press, or has no
+ * ref at all; then the nearest node around it that takes the press, within the
+ * levels `around` holds, which never pass the first row, button, list, or
+ * scroll area above it, nor the window. With none, the node itself, which the
+ * driver refuses.
+ */
+function pressTarget(binding: NodeBinding, kind: 'tap' | 'secondaryTap'): NodeBinding {
+  const takes = (node: NodeBinding): boolean =>
+    node.ref !== undefined && (kind === 'tap' ? node.actions.includes('Click') || CLICKED_BY_SELECTION.has(node.role ?? '') : node.actions.includes('RightClick'));
+  if (binding.ref !== undefined && (takes(binding) || !CONTENT_ROLES.has(binding.role ?? ''))) return binding;
+  return binding.around?.find(takes) ?? binding;
+}
 
 /** Whether a node takes a press of its own, as the driver's hit test judges an element under the pointer. */
 function pressable(binding: NodeBinding): boolean {

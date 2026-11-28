@@ -173,6 +173,7 @@ export interface WireOperation {
   readonly runId: string;
   readonly attemptId: string;
   readonly origin: 'test' | 'agent';
+  readonly agentStep?: string;
 }
 
 /** `EngineCleanupContext` on the wire. */

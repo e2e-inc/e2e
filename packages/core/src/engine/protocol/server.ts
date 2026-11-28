@@ -274,6 +274,7 @@ class EngineServer {
       runId: wire.runId,
       attemptId: wire.attemptId,
       origin: wire.origin,
+      ...(typeof wire.agentStep === 'string' ? { agentStep: wire.agentStep } : {}),
     };
   }
 
