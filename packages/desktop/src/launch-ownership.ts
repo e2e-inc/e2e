@@ -38,6 +38,9 @@ export const APP_FILE = 'app.json';
 /** How old a state directory with no owner file must be before a sweep removes it. */
 const ORPHAN_AGE_MS = 24 * 60 * 60 * 1000;
 
+/** How long after a launch record of the token alone was written the app it launched may still start: LaunchServices can take this long on a slow or busy Mac. */
+const LAUNCH_SETTLE_MS = 60_000;
+
 /**
  * The variables of the run's environment the app under test gets, and
  * nothing else: the run's secrets, model keys, and CI tokens never reach a
@@ -93,7 +96,8 @@ export function inheritedEnv(env: Readonly<Record<string, string | undefined>>):
  * is a day old. One still in use is never touched. A process shown to be
  * the launch's by neither is left alone. When the processes cannot be
  * looked up, or one does not exit, the record stays for the next run to try
- * again. The agent-desktop engine's directories, which hold the text of
+ * again, and so does a record of the token alone that no process carries yet
+ * while the launch it was written for could still start its app. The agent-desktop engine's directories, which hold the text of
  * fields, are swept the same way.
  */
 export async function sweepStateDirectories(driver: DesktopDriver): Promise<void> {
@@ -129,7 +133,20 @@ export async function sweepStateDirectories(driver: DesktopDriver): Promise<void
       if (same === undefined) known = false;
       else if (same && !owned.includes(pid)) owned.push(pid);
     }
-    const settled = known && (await killed(owned, Date.now() + 2_000, AbortSignal.timeout(5_000)));
+    // A record of the token alone is a launch its worker was killed in the middle of: the app may start a moment after
+    // this look. Until the launch could have settled, a look that finds none keeps the record for the next sweep.
+    const settling =
+      entry.startsWith(STATE_PREFIX) &&
+      typeof launched.token === 'string' &&
+      typeof pid !== 'number' &&
+      owned.length === 0 &&
+      (await stat(path.join(directory, APP_FILE)).then((info) => Date.now() - info.mtimeMs < LAUNCH_SETTLE_MS, () => false));
+    const token = typeof launched.token === 'string' && launched.token !== '' ? launched.token : undefined;
+    const settled =
+      known &&
+      !settling &&
+      // A sweep that runs out of its time is one whose processes may still run: the record stays, and the run goes on.
+      (await killedCarriers(owned, token, (carried) => driver.processesCarrying(carried), Date.now() + 2_000, AbortSignal.timeout(5_000)).catch(() => 'running' as const)) === 'gone';
     await (settled ? rm(directory, { recursive: true, force: true }) : keepOnlyRecord(directory)).catch(() => undefined);
   }
 }
@@ -189,7 +206,7 @@ async function keepOnlyRecord(directory: string): Promise<void> {
  * Kills each process and waits until all of them exited; false when one still runs at `until`. A quit cancelled, or out
  * of time, before the kill sends none: the caller gave the app up as running, and keeps it to quit again.
  */
-export async function killed(pids: readonly number[], until: number, signal: AbortSignal): Promise<boolean> {
+async function killed(pids: readonly number[], until: number, signal: AbortSignal): Promise<boolean> {
   if (pids.length > 0 && signal.aborted) throw new EngineError('CANCELLED', 'quitting the app was cancelled before it was killed', { retryable: false });
   if (pids.length > 0 && Date.now() >= until) throw new EngineError('OPERATION_TIMEOUT', 'quitting the app ran out of time before it was killed', { retryable: false });
   for (const pid of pids) {
@@ -204,6 +221,29 @@ export async function killed(pids: readonly number[], until: number, signal: Abo
     await sleep(LAUNCH_POLL_MS, signal);
   }
   return true;
+}
+
+/**
+ * Kills `pids`, then looks again for processes carrying `token` and kills those, until a look finds none: each may have
+ * started another as the processes were listed, and only once all are gone can none start more. `running` when one
+ * did not exit by `until`, `unknown` when a look failed.
+ */
+export async function killedCarriers(
+  pids: readonly number[],
+  token: string | undefined,
+  lookup: (token: string) => Promise<readonly number[] | null>,
+  until: number,
+  signal: AbortSignal,
+): Promise<'gone' | 'running' | 'unknown'> {
+  let batch = pids;
+  while (batch.length > 0) {
+    if (!(await killed(batch, until, signal))) return 'running';
+    if (token === undefined) return 'gone';
+    const late = await lookup(token);
+    if (late === null) return 'unknown';
+    batch = late;
+  }
+  return 'gone';
 }
 
 /** Whether a process still runs: it answers signal 0, or exists but belongs to another user. */

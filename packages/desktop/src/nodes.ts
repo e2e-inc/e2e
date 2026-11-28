@@ -105,6 +105,8 @@ export interface ProjectedScreen {
   readonly truncated: boolean;
   /** The read was cut short by its deadline, a stall, or the node budget (`complete: false`, `truncated`), which the next read may not be; a tree cut only at its depth limit is cut the same way every time. */
   readonly cutShort: boolean;
+  /** The read stopped at the elements a snapshot reads (`truncated`): cut the same way every time, as at the depth limit. */
+  readonly nodeLimit: boolean;
   /** The deadline stopped the read: the caller's time ran out before the window was read whole. */
   readonly timedOut: boolean;
   /** The app did not answer for the window itself (`root_unread`). */
@@ -284,7 +286,7 @@ export function projectSnapshot(
     // A mixed checkbox is neither checked nor unchecked: no state, so check() and uncheck() always reach the control.
     if (CHECKABLE_ROLES.has(node.role) && !rawStates.has('indeterminate')) states.checked = rawStates.has('checked') || node.value === '1';
     else if (rawStates.has('checked')) states.checked = true;
-    if (node.role === 'combobox' || node.role === 'disclosure' || node.role === 'menubutton') {
+    if (node.role === 'combobox' || node.role === 'disclosure' || node.role === 'menubutton' || node.role === 'treeitem') {
       if (node.available_actions?.includes('Expand') === true || node.available_actions?.includes('Collapse') === true) states.expanded = rawStates.has('expanded');
     }
     // The driver marks a text field whose value cannot be set `readonly`, and offers SetValue on one whose value can. A combo box takes text only when its value can be set; a pop-up menu takes none, which is not read-only, so it gets no state, as on a device.
@@ -404,6 +406,7 @@ export function projectSnapshot(
     secureRects: unmaskable ? undefined : secureRects,
     truncated: raw.complete === false || raw.truncated === true || hasTruncatedSubtree(raw.tree),
     cutShort: raw.complete === false || raw.truncated === true,
+    nodeLimit: raw.truncated === true,
     timedOut: raw.timed_out === true,
     rootUnread: raw.root_unread === true,
     ...(raw.window === undefined ? {} : { windowId: raw.window.id }),
@@ -413,10 +416,15 @@ export function projectSnapshot(
   };
 }
 
-/** A heading's level: the one the app reports, else one its description names (`heading level 2`). */
+/**
+ * A heading's level: the one the app reports, else one its description names (`heading level 2`). Other words with a
+ * number (`Battery level 2 of 5`) name no level, and a description that is also the heading's name is the heading's
+ * own text unless it starts with the level (`Heading level 2: Settings`).
+ */
 function headingLevel(node: RawNode): { level?: number } {
   if (node.level !== undefined) return { level: node.level };
-  const match = /\blevel (\d)\b/i.exec(node.description ?? '');
+  const description = node.description ?? '';
+  const match = (description === node.name ? /^heading level ([1-6])\b/i : /\bheading level ([1-6])\b/i).exec(description);
   return match === null ? {} : { level: Number(match[1]) };
 }
 

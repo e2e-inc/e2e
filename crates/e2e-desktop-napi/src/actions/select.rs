@@ -5,7 +5,7 @@ use super::*;
 /// The first of `options` (the items of one title) that is enabled, waited for within the action's budget, as
 /// `enabled` waits for one control; refused, naming the option, when none is enabled in time.
 pub(super) fn enabled_of(options: &[Element], deadline: Instant, label: &str) -> Outcome<Element> {
-    let refuse_at = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
+    let give_up = refuse_at().unwrap_or_else(|| refusal_cutoff(Instant::now(), deadline));
     loop {
         // An option the menu dropped since the scan is skipped: a live one of the title may still be enabled. With every
         // one gone, the menu changed under the select.
@@ -21,7 +21,7 @@ pub(super) fn enabled_of(options: &[Element], deadline: Instant, label: &str) ->
         if live == 0 {
             return Err(unread(ax::AX_INVALID_ELEMENT, "select"));
         }
-        if Instant::now() + POLL >= refuse_at {
+        if Instant::now() + POLL >= give_up {
             return Err(Failure::refused(codes::ACTION_FAILED, format!("the option \"{label}\" is disabled")));
         }
         go("select")?;
@@ -307,6 +307,8 @@ pub(super) fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<(
             }
             return Ok(());
         }
+        // A row the app shows disabled may still take a written selection, which the user could not make.
+        enabled(&row, deadline, "select")?;
         if choose_row(Some(element), &row, deadline, &format!("\"{label}\" did not become selected"))? {
             return Ok(());
         }

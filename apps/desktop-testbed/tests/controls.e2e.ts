@@ -49,6 +49,31 @@ test.describe('controls window', () => {
     await expect(note).toHaveValue('ada');
   });
 
+  test('reads a heading level from the description of a heading that reports none', async ({ screen }) => {
+    await expect(screen.getByRole('heading', { level: 2 })).toBeVisible();
+    await expect(screen.getByRole('heading', { level: 1 })).toHaveCount(0);
+  });
+
+  test('reads which outline rows are expanded', async ({ screen }) => {
+    await expect(screen.getByRole('treeitem', 'Fruits', { expanded: true })).toBeVisible();
+    await expect(screen.getByRole('treeitem', 'Vegetables', { expanded: false })).toBeVisible();
+    await expect(screen.getByRole('treeitem', { expanded: true })).toHaveCount(1);
+  });
+
+  test('swipes a scroll area whose rows are its children by half its height', async ({ screen }) => {
+    await screen.getByTestId('lines').swipe({ direction: 'down' });
+    // Half of a 100-point view is two or three lines, not a share of all 100.
+    await expect(screen.getByText('Line 1', { exact: true })).toBeHidden();
+    await expect(screen.getByText('Line 5', { exact: true })).toBeVisible();
+  });
+
+  test('scrolls a scroll area that lists its scroll bar after more than 16 children', async ({ screen }) => {
+    const last = screen.getByText('Line 30');
+    await expect(last).toBeHidden();
+    await screen.getByTestId('lines').scrollUntilVisible(last, { direction: 'down' });
+    await expect(last).toBeVisible();
+  });
+
   test('scrolls a list until an item shows, and selects it', async ({ screen }) => {
     const last = screen.getByText('Item 40');
     await expect(last).toBeHidden();
@@ -205,9 +230,12 @@ test.describe('controls window', () => {
     ['Cancel', 'Kept the draft'],
     ['Delete', 'Deleted the draft'],
   ] as const) {
-    test(`taps ${button} in a SwiftUI alert, which closes it`, async ({ screen }) => {
+    test(`taps ${button} in a SwiftUI alert, which closes it`, async ({ screen, desktop }) => {
       await screen.getByRole('button', 'Delete draft…').tap();
       await expect(screen.getByText('Delete draft?')).toBeVisible();
+      // The alert is a sheet on the Controls window, not a window of its own.
+      const titles = await Promise.all((await desktop.windows()).map((window) => window.title()));
+      expect(titles.toSorted()).toEqual(['Controls', 'Sign In']);
       // SwiftUI answers the press with an error once it closed the alert: the tap still passes, as it landed.
       await screen.getByRole('button', button).tap();
       await expect(screen.getByTestId('controls-status')).toHaveText(effect);

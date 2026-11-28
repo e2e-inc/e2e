@@ -132,7 +132,7 @@ export interface DesktopDriver {
   /** Fails as `press` would for a combo this Mac's keyboard layout cannot type, and sends nothing. */
   checkCombo(combo: string): Promise<Envelope<unknown>>;
   /** `inputId` names the call, so `cancelInput` stops it before it changes the focus. */
-  focusWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
+  focusWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number, keyboard?: boolean): Promise<Envelope<unknown>>;
   /** Closes a window as its close button does, and answers once it left the app's windows. `inputId` names the call, so `cancelInput` stops it before the button is pressed. */
   closeWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
   /**

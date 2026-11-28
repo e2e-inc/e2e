@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { EngineAppInfo, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
@@ -246,6 +246,92 @@ describe('DesktopSurface: launching', () => {
     expect(await gone(pid)).toBe(true);
   });
 
+  it('quits the processes the app started, which carry its launch token, with the app', async () => {
+    const { surface, fake } = await launched({}, { observe: false });
+    const { token } = last<{ token: string }>(fake, 'launch')!;
+    const helper = standIn();
+    fake.carriers.set(helper, token);
+    const theirs = standIn();
+    fake.carriers.set(theirs, 'another-token');
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(helper)).toBe(true);
+    expect(await gone(theirs, 300)).toBe(false);
+  });
+
+  it('kills no app a launch started after the quit queued behind it ran out of time', async () => {
+    const slow = windows(() => [{ id: 'w-mine', is_focused: true }], 600);
+    const { surface, fake } = await initialized({ listWindows: [slow] });
+    const opening = surface.restart({ ...operation(), timeoutMs: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await expect(surface.closeApp(signal, 300)).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    await opening;
+    expect(await gone(fake.pid, 300)).toBe(false);
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+  });
+
+  it('quits a process the app started as its processes were listed', async () => {
+    const { surface, fake } = await launched({}, { observe: false });
+    const { token } = last<{ token: string }>(fake, 'launch')!;
+    const late = standIn();
+    const list = fake.processesCarrying.bind(fake);
+    let looks = 0;
+    fake.processesCarrying = async (carried: string) => {
+      const found = await list(carried);
+      looks += 1;
+      // Started just after the first list was taken.
+      if (looks === 1) fake.carriers.set(late, token);
+      return found;
+    };
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(late)).toBe(true);
+  });
+
+  it('quits a chain of processes each started as the last was listed', async () => {
+    const { surface, fake } = await launched({}, { observe: false });
+    const { token } = last<{ token: string }>(fake, 'launch')!;
+    const chain = [standIn(), standIn()];
+    const list = fake.processesCarrying.bind(fake);
+    let looks = 0;
+    fake.processesCarrying = async (carried: string) => {
+      const found = await list(carried);
+      const next = chain[looks];
+      looks += 1;
+      if (next !== undefined) fake.carriers.set(next, token);
+      return found;
+    };
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await Promise.all(chain.map((pid) => gone(pid)))).toEqual([true, true]);
+  });
+
+  it('keeps the app to quit again when the processes it started cannot be looked up', async () => {
+    const { surface, fake } = await launched({}, { observe: false });
+    const app = fake.pid;
+    fake.lookupFails = true;
+    await expect(surface.endAttempt({ signal, timeoutMs: 5_000 })).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringMatching(/looking for its token/) });
+    fake.lookupFails = false;
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(app)).toBe(true);
+  });
+
+  it("quits a process a failed launch's app started as the quit listed the processes", async () => {
+    const { surface, fake } = await initialized({ launch: [failure('TIMEOUT', 'delivered_unverified', 'no new process carries the token', { kind: 'unclaimed' })] });
+    await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    const { token } = last<{ token: string }>(fake, 'launch')!;
+    const app = standIn();
+    const late = standIn();
+    fake.carriers.set(app, token);
+    const list = fake.processesCarrying.bind(fake);
+    let looks = 0;
+    fake.processesCarrying = async (carried: string) => {
+      const found = await list(carried);
+      looks += 1;
+      if (looks === 1) fake.carriers.set(late, token);
+      return found;
+    };
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect([await gone(app), await gone(late)]).toEqual([true, true]);
+  });
+
   it('quits the process carrying the token of a launch that failed after it may have started the app', async () => {
     const theirs = standIn();
     const { surface, fake } = await initialized({ launch: [spawnApp({ answer: failure('TIMEOUT', 'delivered_unverified') })] });
@@ -284,6 +370,19 @@ describe('DesktopSurface: launching', () => {
     fake.carriers.set(late, token);
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
     expect(await gone(late)).toBe(true);
+  });
+
+  it('stops at once a quit cancelled while it waited behind a launch still running', async () => {
+    const { surface } = await initialized({ launch: [spawnApp({ sleepMs: 4_000 })] });
+    const opening = surface.restart({ ...operation(), timeoutMs: 600 }).catch(() => undefined);
+    const controller = new AbortController();
+    const closing = surface.closeApp(controller.signal, 10_000);
+    setTimeout(() => controller.abort(), 100);
+    await opening;
+    const started = Date.now();
+    await expect(closing).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    await surface.endAttempt({ signal, timeoutMs: 10_000 });
   });
 
   it('keeps a launch pending when the look for its late app is cancelled, so the next quit still finds it', async () => {
@@ -397,6 +496,15 @@ describe('DesktopSurface: launching', () => {
     const started = Date.now();
     await expect(launched({ launch: [spawnApp({ exits: true })], listWindows: [ok([])] }, { observe: false })).rejects.toThrow(/quit right after it launched/);
     expect(Date.now() - started).toBeLessThan(3_000);
+  });
+
+  it('quits a process an app started before it quit right after its launch', async () => {
+    const { surface, fake } = await initialized({ launch: [spawnApp({ exits: true })], listWindows: [ok([])] });
+    await expect(surface.restart(operation())).rejects.toThrow(/quit right after it launched/);
+    const helper = standIn();
+    fake.carriers.set(helper, last<{ token: string }>(fake, 'launch')!.token);
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(helper)).toBe(true);
   });
 
   it('says a copy that was already running took the launch, when the launched process quit beside one', async () => {
@@ -715,6 +823,15 @@ describe('DesktopSurface: reading', () => {
     await expect(surface.observe(operation(), undefined)).rejects.toMatchObject({ code: 'NODE_STALE' });
   });
 
+  it('reads no empty screen from an app that quit while its windows were listed', async () => {
+    const quits = (driver: FakeDriver): Answer => {
+      process.kill(driver.pid, 'SIGKILL');
+      return { ok: true, data: [], sleepMs: 300 };
+    };
+    const { surface } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }]), quits] }, { observe: false });
+    await expect(surface.locate(testId('nowhere'), operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/quit/) });
+  });
+
   it('reads no empty screen from an app that quit', async () => {
     const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }]), ok([])] }, { observe: false });
     process.kill(fake.pid, 'SIGKILL');
@@ -725,7 +842,9 @@ describe('DesktopSurface: reading', () => {
   it('takes a process whose start time changed as the app quit, as when another process took its id, and kills nothing', async () => {
     const { surface, fake } = await launched({}, { observe: false });
     const pid = fake.pid;
+    // Another process: it started at another time, and its environment carries no launch token.
     fake.startTimes.set(pid, 42);
+    fake.carriers.delete(pid);
     await expect(surface.locate(testId('nowhere'), operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/quit/) });
     await expect(surface.windows({ signal, timeoutMs: 5_000 })).resolves.toEqual([]);
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
@@ -917,13 +1036,86 @@ describe('desktop fixture: windows', () => {
     await expect(closed.activate()).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/has closed/) });
   });
 
+  it('presses a key into the window screen reads, not one accessibility cannot read that ranks first', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-doc', visible: false }, { id: 'w-raw', visible: true, accessible: false }])] }, { observe: false });
+    await surface.pressKey('Enter', operation());
+    expect(last(fake, 'press')).toMatchObject({ windowId: 'w-doc' });
+  });
+
+  it('marks as active the window screen reads, not a focused one accessibility cannot read', async () => {
+    const { surface } = await launched({ listWindows: [windows(() => [{ ...mine, accessible: false }, panel])] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const [first, second] = await desktop.windows();
+    expect(await Promise.all([first!.isActive(), second!.isActive()])).toEqual([false, true]);
+  });
+
+  it("takes a window list that answers within the read's whole budget", async () => {
+    const { surface } = await launched({ listWindows: [windows(() => [mine, panel]), windows(() => [mine, panel]), windows(() => [mine, panel], 900)] });
+    const desktop = createDesktopFixture(surface, fixtureContext(1_000));
+    expect(await desktop.windows()).toHaveLength(2);
+  });
+
+  it('reads no window as closed when the list fails as no app while the app still runs', async () => {
+    const both = windows(() => [mine, panel]);
+    const { surface } = await launched({ listWindows: [both, both, both, failure('APP_NOT_FOUND', 'not_delivered', 'the app is no longer running'), both] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const controls = (await desktop.windows())[1]!;
+    expect(await controls.isClosed()).toBe(false);
+  });
+
+  it('reads no window as closed while the screen is locked, which lists none, and reads again until it unlocks', async () => {
+    const { surface, fake } = await launched({ listWindows: [(driver) => windows(() => (driver.locked === true ? [] : [mine, panel]))(driver)] });
+    const desktop = createDesktopFixture(surface, fixtureContext(1_000));
+    const controls = (await desktop.windows())[1]!;
+    fake.locked = true;
+    await expect(controls.isClosed()).rejects.toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/^the app's windows could not be read: .*screen is locked/) });
+    const closed = controls.isClosed();
+    setTimeout(() => (fake.locked = false), 300);
+    expect(await closed).toBe(false);
+  });
+
+  it('reads no window as closed while the screen is locked and lists only windows accessibility cannot read', async () => {
+    const { surface, fake } = await launched({ listWindows: [(driver) => windows(() => (driver.locked === true ? [{ ...mine, accessible: false }] : [mine, panel]))(driver)] });
+    const desktop = createDesktopFixture(surface, fixtureContext(500));
+    const controls = (await desktop.windows())[1]!;
+    fake.locked = true;
+    await expect(controls.isClosed()).rejects.toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/screen is locked/) });
+  });
+
   it('closes a window through its handle, and leaves one that already closed alone', async () => {
-    const { surface, fake } = await launched({ listWindows: [windows(() => [mine, panel])], closeWindow: [ok({}), failure('WINDOW_NOT_FOUND', 'not_delivered', 'the app has no window')] });
+    const appGone = failure('APP_NOT_FOUND', 'not_delivered', 'no process is running');
+    const quits = (driver: FakeDriver): Answer => {
+      process.kill(driver.pid, 'SIGKILL');
+      return { ...appGone, sleepMs: 200 };
+    };
+    const { surface, fake } = await launched({ listWindows: [windows(() => [mine, panel])], closeWindow: [ok({}), failure('WINDOW_NOT_FOUND', 'not_delivered', 'the app has no window'), appGone, quits] });
     const desktop = createDesktopFixture(surface, fixtureContext());
     const controls = (await desktop.windows())[1]!;
     await controls.close();
     expect(fake.of('closeWindow').map((call) => call.args)).toEqual([[fake.pid, 'w-panel']]);
     await controls.close();
+    // Accessibility lost the app while it runs: no proof the window closed.
+    await expect(controls.close()).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true });
+    // The app quit with the window between the engine's check and the driver's call.
+    await controls.close();
+  });
+
+  it('closes no window the driver did not find while the screen is locked, which hides it', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [mine, panel])], closeWindow: [failure('WINDOW_NOT_FOUND', 'not_delivered', 'the app has no window')] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const controls = (await desktop.windows())[1]!;
+    fake.locked = true;
+    await expect(controls.close()).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
+  });
+
+  it('leaves a window alone once the app quit with it, as an app does when its last window closes', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [mine])], closeWindow: [failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer')] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const only = (await desktop.windows())[0]!;
+    process.kill(fake.pid, 'SIGKILL');
+    expect(await gone(fake.pid)).toBe(true);
+    await only.close();
+    expect(fake.of('closeWindow')).toHaveLength(0);
   });
 
   it('reports a window that stayed open as a close that may have landed, and refuses one with no close button or that accessibility cannot read', async () => {
@@ -938,14 +1130,26 @@ describe('desktop fixture: windows', () => {
 
   it('waits for a window by its title, a string exactly or a RegExp, and leaves the active window as it is', async () => {
     const alone = windows(() => [mine]);
-    const { surface, fake } = await launched({ listWindows: [alone, alone, alone, windows(() => [mine, panel])] });
+    const archive = { id: 'w-archive', title: 'Archive Controls' };
+    let archived = false;
+    const { surface, fake } = await launched({ listWindows: [alone, alone, alone, windows(() => (archived ? [mine, archive, panel] : [mine, panel]))] });
     const desktop = createDesktopFixture(surface, fixtureContext());
     const found = await desktop.window({ title: 'Controls' });
     expect(await found.title()).toBe('Controls');
     expect(await desktop.window({ title: /^contr/i })).toBe(found);
+    // Sticky and global flags hold as on a string's own match: /y only at the start, /g from the start of each title.
+    archived = true;
+    expect(await desktop.window({ title: /Controls/y })).toBe(found);
+    expect(await desktop.window({ title: /Controls/g })).not.toBe(found);
     expect(await found.isActive()).toBe(false);
     await surface.observe(operation(), undefined);
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
+  });
+
+  it('takes a window by its title from a read that answers within the whole timeout', async () => {
+    const { surface } = await launched({ listWindows: [windows(() => [mine]), windows(() => [mine]), windows(() => [mine, panel], 900)] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    expect(await (await desktop.window({ title: 'Controls' }, { timeout: 1_000 })).title()).toBe('Controls');
   });
 
   it('names the open windows when none gets the title in time, and refuses a matcher with no title', async () => {
@@ -953,6 +1157,84 @@ describe('desktop fixture: windows', () => {
     const desktop = createDesktopFixture(surface, fixtureContext());
     await expect(desktop.window({ title: 'Controls' }, { timeout: 300 })).rejects.toMatchObject({ code: 'ACTION_FAILED', message: 'no window has the title "Controls"; open: "Sign In"' });
     await expect(desktop.window({} as { title: string })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+  });
+
+  it('reads the windows before the trigger again while the app does not answer, and runs the trigger once', async () => {
+    const stalled = failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer its window list in time', { retryable: true });
+    let opened = false;
+    const list = (driver: FakeDriver) => windows(() => (opened ? [mine, panel] : [mine]))(driver);
+    const { surface } = await launched({ listWindows: [list, list, stalled, stalled, list] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    let runs = 0;
+    const controls = await desktop.waitForWindow(async () => {
+      runs += 1;
+      opened = true;
+    });
+    expect([runs, await controls.title()]).toEqual([1, 'Controls']);
+  });
+
+  it('gives a quick trigger no extra look when the reads took the wait', async () => {
+    const alone = windows(() => [mine]);
+    const { surface } = await launched({ listWindows: [alone, alone, windows(() => [mine], 80), windows(() => [mine, panel], 180)] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    await expect(desktop.waitForWindow(() => Promise.resolve(), { timeout: 225 })).rejects.toMatchObject({ code: 'ACTION_FAILED' });
+  });
+
+  it('still looks once when the trigger left too little of the wait for a read', async () => {
+    const alone = windows(() => [mine]);
+    const { surface } = await launched({ listWindows: [alone, alone, alone, windows(() => [mine, panel], 50)] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const opened = await desktop.waitForWindow(() => new Promise((resolve) => setTimeout(resolve, 285)), { timeout: 300 });
+    expect(await opened.title()).toBe('Controls');
+  });
+
+  it('takes a window a read brings back within the timeout', async () => {
+    const alone = windows(() => [mine]);
+    const { surface } = await launched({ listWindows: [alone, alone, alone, windows(() => [mine, panel], 930), windows(() => [mine, panel])] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const started = Date.now();
+    const opened = await desktop.waitForWindow(() => Promise.resolve(), { timeout: 1_000 });
+    // Found within the last tenth of the timeout, which a margin before the end would refuse.
+    expect(Date.now() - started).toBeGreaterThan(900);
+    expect(await opened.title()).toBe('Controls');
+  });
+
+  it('takes no window a read brings back after the wait ended', async () => {
+    const alone = windows(() => [mine]);
+    const late = windows(() => [mine, panel], 1_050);
+    const { surface } = await launched({ listWindows: [alone, alone, alone, late] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    await expect(desktop.waitForWindow(() => Promise.resolve(), { timeout: 1_000 })).rejects.toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/^no window opened within 1000ms/) });
+  });
+
+  it('activates the window the trigger opened though the app stalls once on the list that activates it', async () => {
+    const stalled = failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer its window list in time', { retryable: true });
+    const alone = windows(() => [mine]);
+    const both = windows(() => [mine, panel]);
+    const { surface } = await launched({ listWindows: [alone, alone, alone, both, stalled, both] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const opened = await desktop.waitForWindow(() => Promise.resolve());
+    expect(await opened.isActive()).toBe(true);
+  });
+
+  it('activates the window it found within what is left of the timeout', async () => {
+    const alone = windows(() => [mine]);
+    const both = windows(() => [mine, panel]);
+    const { surface } = await launched({ listWindows: [alone, alone, alone, both, windows(() => [mine, panel], 700)] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const started = Date.now();
+    await expect(desktop.waitForWindow(() => new Promise((resolve) => setTimeout(resolve, 300)), { timeout: 800 })).rejects.toBeDefined();
+    expect(Date.now() - started).toBeLessThan(950);
+  });
+
+  it('counts the read of the windows before the trigger toward the timeout', async () => {
+    const stalled = failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer its window list in time', { retryable: true });
+    const alone = windows(() => [mine]);
+    const { surface } = await launched({ listWindows: [alone, alone, { ...stalled, sleepMs: 500 }, alone] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const started = Date.now();
+    await expect(desktop.waitForWindow(() => Promise.resolve(), { timeout: 800 })).rejects.toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/^no window opened within 800ms/) });
+    expect(Date.now() - started).toBeLessThan(1_100);
   });
 
   it('runs a trigger, waits for the window it opens, and makes that window active', async () => {
@@ -1059,6 +1341,19 @@ describe('DesktopSurface: acting', () => {
     const [shown] = (await still.surface.observe(operation(), undefined)).root.children!;
     await still.surface.perform(shown!.ref, { kind: 'doubleTap' }, operation());
     expect(inputs(still.fake)).toEqual(['focusWindow', 'pointer']);
+  });
+
+  it('waits for a disabled node with no ref before it double-clicks it, and refuses one that stays disabled', async () => {
+    const form = (states: string[]) => screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'statictext', value: 'Hello', states, bounds: { x: 10, y: 10, width: 50, height: 20 } }] });
+    const placed = windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x: 0, y: 0, width: 200, height: 200 } }]);
+    const stays = await launched({ snapshot: [form(['disabled'])], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
+    const [off] = (await stays.surface.observe(operation(), undefined)).root.children!;
+    await expect(stays.surface.perform(off!.ref, { kind: 'doubleTap' }, { ...operation(), timeoutMs: 400 })).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/is disabled/) });
+    expect(inputs(stays.fake)).toEqual([]);
+    const later = await launched({ snapshot: [form(['disabled']), form(['disabled']), form([])], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
+    const [on] = (await later.surface.observe(operation(), undefined)).root.children!;
+    await later.surface.perform(on!.ref, { kind: 'doubleTap' }, operation());
+    expect(inputs(later.fake)).toEqual(['focusWindow', 'pointer']);
   });
 
   it('refuses a tap on a control the read found off screen, and scrolls one into view first when it can', async () => {
@@ -1476,6 +1771,12 @@ describe('DesktopSurface: keys', () => {
     await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/lost keyboard focus/) });
   });
 
+  it('refuses the key as nothing sent when the control already held the keyboard, so the focus sent nothing either', async () => {
+    const lost = failure('ACTION_FAILED', 'not_delivered', 'the control lost keyboard focus before the key was sent, so nothing was sent');
+    const { surface, byTestId } = await launched({ snapshot: [renamed('macos/sign-in-form', 'w-8321', 'w-mine')], act: [ok({ moved: false })], press: [lost] });
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/lost keyboard focus/) });
+  });
+
   it('presses a key into one of two look-alike fields by its own element, whatever box it has once focused', async () => {
     // A look-alike has no identity a later read could find it by, and a field can grow as it takes focus: the driver holds its element.
     const field = (ref: string, y: number) => ({ role: 'textfield', name: 'Item', ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 } });
@@ -1521,6 +1822,20 @@ describe('DesktopSurface: typing', () => {
     expect(last(physical.fake, 'act')).toMatchObject({ action: 'type', physical: true });
   });
 
+  it('names the depth limit when a window swipe finds nothing that scrolls in a read cut at it', async () => {
+    const deep = screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'group', name: 'Row', bounds: { x: 10, y: 10, width: 100, height: 50 }, children_count: 3 }] });
+    const { surface, fake } = await launched({ snapshot: [deep] }, { observe: false });
+    await expect(surface.perform({ id: 'root', revision: '' }, { kind: 'swipe', direction: 'down' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/deeper than the \d+ levels a snapshot reads/) });
+    expect(inputs(fake)).toEqual([]);
+  });
+
+  it('names the depth limit when no field read has focus and the read stopped at it', async () => {
+    const deep = screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'group', name: 'Row', bounds: { x: 10, y: 10, width: 100, height: 50 }, children_count: 1 }] });
+    const { surface, fake } = await launched({ snapshot: [deep] }, { observe: false });
+    await expect(surface.typeText('ada', { replace: false }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/deeper than the \d+ levels a snapshot reads, which desktop\(\{ maxDepth \}\) raises/) });
+    expect(inputs(fake)).toEqual([]);
+  });
+
   it('stops the text still to type once the call is cut off, so no key lands after the step gave up', async () => {
     const { surface, fake } = await launched({ act: [{ ok: true, data: {}, sleepMs: 2_000 }] });
     const controller = new AbortController();
@@ -1552,6 +1867,13 @@ describe('DesktopSurface: typing', () => {
     const { inputId, timeoutMs } = last(fake, 'press') as { inputId: number; timeoutMs: number };
     expect(timeoutMs).toBeGreaterThan(0);
     expect(fake.of('cancelInput').map((entry) => entry.args)).toEqual([[inputId]]);
+  });
+
+  it('reports a locator press cancelled after its focus moved as cancelled', async () => {
+    const { surface, byTestId } = await launched({ snapshot: [renamed('macos/sign-in-form', 'w-8321', 'w-mine')], press: [{ ok: true, data: {}, sleepMs: 2_000 }] });
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 100);
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, { ...operation(), signal: controller.signal })).rejects.toMatchObject({ code: 'CANCELLED' });
   });
 
   it('replaces the focused field as a keyboard does, select all and delete, and never by an accessibility clear', async () => {
@@ -1674,7 +1996,7 @@ describe('DesktopSurface: points', () => {
     await open.surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation());
     expect(open.fake.of('pointer').at(-1)?.args).toEqual([110, 150, 'tap']);
     // Bringing the window forward is input too: the call names it, so a cut-off cancels it.
-    expect(open.fake.focusOptions.at(-1)).toEqual({ inputId: expect.any(Number), timeoutMs: expect.any(Number) });
+    expect(open.fake.focusOptions.at(-1)).toEqual({ inputId: expect.any(Number), timeoutMs: expect.any(Number), keyboard: true });
     // The driver checks the window again after the move: it is told which window, and that its sheet was there.
     expect(open.fake.pointerOptions.at(-1)?.target).toEqual({ pid: open.fake.pid, windowId: 'w-mine', sheet: true, sheetId: 's-1' });
     // A sheet the driver gave no key is never known to be the one the point was taken on.
@@ -1770,6 +2092,15 @@ describe('DesktopSurface: points', () => {
     expect(fake.of('pointer')).toHaveLength(0);
   });
 
+  it('hovers a point when a panel took focus as the window came forward, which the driver checks is not on top there', async () => {
+    const list = (panel: boolean) => windows(() => [{ id: 'w-mine', is_focused: !panel, bounds: { x: 100, y: 100, width: 400, height: 300 } }, ...(panel ? [{ id: 'w-panel', is_focused: true, bounds: { x: 100, y: 120, width: 400, height: 200 } }] : [])]);
+    const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [list(false), list(false), list(false), list(true)] }, { options: { physicalInput: true } });
+    await surface.performAt({ x: 10, y: 250 }, { kind: 'hover' }, operation());
+    // The driver brings the app forward without waiting for the window to take the focus the panel holds.
+    expect(fake.focusOptions.at(-1)?.keyboard).toBe(false);
+    expect(fake.of('pointer').at(-1)?.args).toEqual([110, 350, 'hover']);
+  });
+
   it('measures a point from where the window is once it was brought forward', async () => {
     const at = (x: number) => windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x, y: 200, width: 400, height: 300 } }]);
     const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [at(100), at(100), at(100), at(500)] }, { options: { physicalInput: true } });
@@ -1833,6 +2164,12 @@ describe('DesktopSurface: pixels', () => {
     await startAttempt(surface);
     await expect(surface.screenshot('deep', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED', message: expect.stringMatching(/deeper than desktop\(\{ maxDepth \}\) reads \(24 levels\)/) });
     expect((await surface.observe(operation(), { pixels: true })).maskedRegionCount).toBe(0);
+    // A read that stopped at the elements a snapshot takes is cut the same way every time, as one at the depth limit.
+    const full = { ...window, data: { ...window.data, truncated: true } };
+    const capped = await launched({ screenshot: [capture(window)], snapshot: [window, full] }, { observe: false });
+    const withheld = await capped.surface.observe(operation(), { pixels: true });
+    expect(withheld.pixels).toBeUndefined();
+    expect(withheld.maskedRegionCount).toBe(0);
   });
 
   it('reports a capture that failed as no screenshot, not as masking it could not prove', async () => {
@@ -2018,7 +2355,7 @@ describe('DesktopSurface: sweeping what killed workers left', () => {
     fake.carriers.set(leaked, 'token-1');
     // Written before the launch: the token alone, since the worker may be killed before it learns the process id.
     const first = leftDirectory(String(dead), { token: 'token-1' });
-    const second = leftDirectory(String(dead), { pid: theirs, token: 'token-1' });
+    const second = leftDirectory(String(dead), { pid: theirs, token: 'token-2' });
     try {
       await initialized(fake);
       expect(await gone(leaked)).toBe(true);
@@ -2027,6 +2364,78 @@ describe('DesktopSurface: sweeping what killed workers left', () => {
       expect(existsSync(second)).toBe(false);
     } finally {
       for (const directory of [first, second]) rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the record of a left app whose processes the sweep ran out of time for, and starts', async () => {
+    const dead = await deadPid();
+    const fake = fakeDriver();
+    const leaked = standIn();
+    const late = standIn();
+    fake.carriers.set(leaked, 'token-slow');
+    const left = leftDirectory(String(dead), { token: 'token-slow' });
+    const list = fake.processesCarrying.bind(fake);
+    let looks = 0;
+    fake.processesCarrying = async (carried: string) => {
+      looks += 1;
+      if (looks === 2) {
+        // The second look comes back after the sweep's time ran out, with a process it has to kill.
+        await new Promise((resolve) => setTimeout(resolve, 2_100));
+        fake.carriers.set(late, 'token-slow');
+      }
+      return list(carried);
+    };
+    try {
+      await initialized(fake);
+      expect(existsSync(path.join(left, 'app.json'))).toBe(true);
+    } finally {
+      rmSync(left, { recursive: true, force: true });
+    }
+  });
+
+  it('quits a process the left app started as the sweep listed the processes', async () => {
+    const dead = await deadPid();
+    const fake = fakeDriver();
+    const leaked = standIn();
+    const late = standIn();
+    fake.carriers.set(leaked, 'token-busy');
+    const left = leftDirectory(String(dead), { token: 'token-busy' });
+    const list = fake.processesCarrying.bind(fake);
+    let looks = 0;
+    fake.processesCarrying = async (carried: string) => {
+      const found = await list(carried);
+      looks += 1;
+      if (looks === 1) fake.carriers.set(late, 'token-busy');
+      return found;
+    };
+    try {
+      await initialized(fake);
+      expect([await gone(leaked), await gone(late)]).toEqual([true, true]);
+      expect(existsSync(left)).toBe(false);
+    } finally {
+      rmSync(left, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the record of a launch its worker was killed in, until its app could have started, and quits the app that starts late', async () => {
+    const dead = await deadPid();
+    const fresh = leftDirectory(String(dead), { token: 'token-late' });
+    const old = leftDirectory(String(dead), { token: 'token-never' });
+    const minutesAgo = new Date(Date.now() - 5 * 60_000);
+    utimesSync(path.join(old, 'app.json'), minutesAgo, minutesAgo);
+    try {
+      const fake = fakeDriver();
+      await initialized(fake);
+      // No process carries either token yet: the fresh launch may still start its app, the old one never will.
+      expect([existsSync(path.join(fresh, 'app.json')), existsSync(old)]).toEqual([true, false]);
+      const late = standIn();
+      const next = fakeDriver();
+      next.carriers.set(late, 'token-late');
+      await initialized(next);
+      expect(await gone(late)).toBe(true);
+      expect(existsSync(fresh)).toBe(false);
+    } finally {
+      for (const directory of [fresh, old]) rmSync(directory, { recursive: true, force: true });
     }
   });
 

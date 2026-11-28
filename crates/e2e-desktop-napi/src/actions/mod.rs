@@ -20,8 +20,8 @@ mod values;
 
 use pointer::*;
 pub use pointer::{PointTarget, Sheet, pointer_at};
-pub use scroll::scroll_bar;
 use scroll::*;
+pub use scroll::{bar_enabled, scroll_bar};
 use select::*;
 use typing::*;
 use values::*;
@@ -46,7 +46,6 @@ pub enum Action {
     Click,
     DoubleClick,
     RightClick,
-    Focus,
     Clear,
     Check(bool),
     ScrollTo,
@@ -78,26 +77,44 @@ fn write_failed(error: AXError, what: &str) -> Failure {
 }
 
 thread_local! {
-    /// The action this thread runs: its input run, which a cancel marks, and its deadline.
-    static CURRENT: std::cell::RefCell<Option<(input::TypingRun, Instant)>> = const { std::cell::RefCell::new(None) };
+    /// The action this thread runs: its input run, which a cancel marks, its deadline, and the last moment a wait that
+    /// ends in a refusal may run to (`refusal_cutoff`).
+    static CURRENT: std::cell::RefCell<Option<(input::TypingRun, Instant, Instant)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Refuses to send input once the caller gave up on the action: it was cancelled, or its deadline passed. The reads
 /// before an input can take long on a slow app, and input sent after the caller moved on would land unasked.
 fn go(what: &str) -> Outcome<()> {
     CURRENT.with(|current| match current.borrow().as_ref() {
-        Some((run, _)) if run.cancelled() => Err(Failure::refused(codes::TIMEOUT, format!("{what}: the action was cancelled before its input was sent"))),
-        Some((_, deadline)) if Instant::now() >= *deadline => {
+        Some((run, ..)) if run.cancelled() => Err(Failure::refused(codes::TIMEOUT, format!("{what}: the action was cancelled before its input was sent"))),
+        Some((_, deadline, _)) if Instant::now() >= *deadline => {
             Err(Failure::refused(codes::TIMEOUT, format!("{what}: the action's time ran out before its input was sent")))
         }
         _ => Ok(()),
     })
 }
 
+/// The least time the engine gives an input call before it cuts it off, however little of the action's budget was left
+/// (`MIN_INPUT_MS` in the engine's `driver.ts`).
+const INPUT_FLOOR: Duration = Duration::from_millis(500);
+
+/// The last moment a wait that ends in a refusal may run to in an action that starts at `now` with `deadline`:
+/// `ANSWER_MARGIN` before the engine cuts the call off, and never past the deadline. A short budget still waits to its
+/// deadline, since the engine waits `INPUT_FLOOR` for the answer.
+fn refusal_cutoff(now: Instant, deadline: Instant) -> Instant {
+    let cut = deadline.max(now + INPUT_FLOOR);
+    cut.checked_sub(ANSWER_MARGIN).unwrap_or(cut).min(deadline)
+}
+
+/// The last moment a wait that ends in a refusal may run to in the running action (`refusal_cutoff` at its start).
+fn refuse_at() -> Option<Instant> {
+    CURRENT.with(|current| current.borrow().as_ref().map(|(_, _, refuse)| *refuse))
+}
+
 /// Whether the caller cancelled the running action. Unlike `go`, a deadline that passed does not count: cleanup such as
 /// closing a menu runs past it, but never past a cancel, after which the caller has moved on.
 fn cancelled() -> bool {
-    CURRENT.with(|current| current.borrow().as_ref().is_some_and(|(run, _)| run.cancelled()))
+    CURRENT.with(|current| current.borrow().as_ref().is_some_and(|(run, ..)| run.cancelled()))
 }
 
 /// The failure for a read that failed before anything was sent: nothing reached the app. A read the app did not answer
@@ -182,8 +199,13 @@ fn resolve(reference: &str) -> Outcome<Entry> {
 }
 
 /// Polls `check` until it holds or the effect wait (bounded by the deadline) ends.
-fn until(deadline: Instant, mut check: impl FnMut() -> bool) -> bool {
-    let end = (Instant::now() + EFFECT_WAIT).min(deadline);
+fn until(deadline: Instant, check: impl FnMut() -> bool) -> bool {
+    until_by((Instant::now() + EFFECT_WAIT).min(deadline), check)
+}
+
+/// Polls `check` until it holds or `end` passes, however far off: for a wait that runs to its own end, not the effect
+/// wait's.
+fn until_by(end: Instant, mut check: impl FnMut() -> bool) -> bool {
     loop {
         if check() {
             return true;
@@ -225,7 +247,7 @@ fn perform(element: &Element, action: &str, what: &str) -> Outcome<()> {
                 ax::AX_CANNOT_COMPLETE => element.attribute("AXRole").err(),
                 // A press that closes what holds its element (a dismissed alert) can leave it readable a moment more.
                 _ => {
-                    let deadline = CURRENT.with(|current| current.borrow().as_ref().map(|(_, deadline)| *deadline));
+                    let deadline = CURRENT.with(|current| current.borrow().as_ref().map(|(_, deadline, _)| *deadline));
                     let end = gone_wait_end(Instant::now(), deadline);
                     loop {
                         let then = element.attribute("AXRole").err();
@@ -303,15 +325,22 @@ fn value_text(element: &Element) -> Option<String> {
 
 /// The element's center on screen.
 fn center(element: &Element) -> Outcome<(f64, f64)> {
-    let (x, y, width, height) = element.frame().ok_or_else(|| Failure::refused(codes::ACTION_FAILED, "the element has no frame on screen"))?;
+    // A read the app did not answer in time, or of an element gone since, is no proof it has no frame: retried, before any
+    // pointer input.
+    let (x, y, width, height) = element
+        .read_frame()
+        .map_err(|error| unread(error, "read the element's frame"))?
+        .ok_or_else(|| Failure::refused(codes::ACTION_FAILED, "the element has no frame on screen"))?;
     if width <= 0.0 || height <= 0.0 {
         return Err(Failure::refused(codes::ACTION_FAILED, "the element has no area on screen"));
     }
     Ok((x + width / 2.0, y + height / 2.0))
 }
 
-/// Brings the window forward and the app with it, for physical input. A sheet or an alert on it may take focus.
-pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
+/// Brings the window forward and the app with it, for physical input. A sheet or an alert on it may take focus. With
+/// `keyboard`, the window must then hold the app's focus, as keys and clicks need; a hover needs the app in front only,
+/// and checks what is on top at the point itself.
+pub fn raise(pid: i32, window: &Element, keyboard: bool) -> Outcome<()> {
     let app = Element::application(pid);
     // Each write moves the focus: none goes once the caller gave up.
     go("bring the window forward")?;
@@ -320,10 +349,12 @@ pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
     let _ = window.perform("AXRaise");
     go("bring the window forward")?;
     let _ = window.set_bool("AXMain", true);
-    let deadline = Instant::now() + Duration::from_millis(1_500);
+    // A window that does not come forward is refused before the action's deadline, not cut off at it.
+    let soon = Instant::now() + Duration::from_millis(1_500);
+    let deadline = refuse_at().map_or(soon, |at| at.min(soon));
     let mut last = Ok(false);
-    until(deadline, || {
-        last = forward(&app, window);
+    until_by(deadline, || {
+        last = forward(&app, window, keyboard);
         last == Ok(true)
     });
     match last {
@@ -334,10 +365,13 @@ pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
     }
 }
 
-/// Whether the app is frontmost with `window` holding its focus. A stall fails as `AX_CANNOT_COMPLETE`.
-fn forward(app: &Element, window: &Element) -> Result<bool, AXError> {
+/// Whether the app is frontmost, with `window` holding its focus when `keyboard`. A stall fails as `AX_CANNOT_COMPLETE`.
+fn forward(app: &Element, window: &Element, keyboard: bool) -> Result<bool, AXError> {
     if stalled(app.attribute("AXFrontmost"))?.and_then(|value| value.boolean()) != Some(true) {
         return Ok(false);
+    }
+    if !keyboard {
+        return Ok(true);
     }
     match stalled(app.attribute("AXFocusedWindow"))?.and_then(|value| value.element().cloned()) {
         Some(focused) => windows::holds_focus(&focused, window),
@@ -354,11 +388,11 @@ fn menu_shown(pid: i32, before: usize, deadline: Instant) {
 /// stays disabled: a disabled AppKit control may still offer AXPress and acknowledge it while ignoring it. A control
 /// with no enabled state goes at once.
 fn enabled(element: &Element, deadline: Instant, what: &str) -> Outcome<()> {
-    let refuse_at = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
+    let give_up = refuse_at().unwrap_or_else(|| refusal_cutoff(Instant::now(), deadline));
     loop {
         match element.attribute("AXEnabled") {
             Ok(value) if value.boolean() == Some(false) => {
-                if Instant::now() + POLL >= refuse_at {
+                if Instant::now() + POLL >= give_up {
                     return Err(Failure::refused(codes::ACTION_FAILED, "the control is disabled"));
                 }
                 go(what)?;
@@ -428,7 +462,7 @@ fn click_shown(entry: &Entry, deadline: Instant) -> Outcome<()> {
     // A tap on a text field puts the keyboard there. AppKit's password field also offers AXConfirm, which the action
     // choice below would send in its place, leaving the keyboard in the field before.
     if role == "textfield" && settable(element, "AXFocused", "click")? {
-        return focus(element, deadline);
+        return focus(element, deadline).map(|_moved| ());
     }
     let names = action_names(element, "click")?;
     if let Some(action) = ["AXPress", "AXOpen", "AXConfirm"].into_iter().find(|name| names.iter().any(|candidate| candidate == name)) {
@@ -462,12 +496,13 @@ fn click_shown(entry: &Entry, deadline: Instant) -> Outcome<()> {
         return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the element did not become selected"));
     }
     if roles::takes_text(role) && settable(element, "AXFocused", "click")? {
-        return focus(element, deadline);
+        return focus(element, deadline).map(|_moved| ());
     }
     Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("this {role} takes no click through accessibility")))
 }
 
-fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
+/// Puts the keyboard on `element`, and says whether it moved it there: one that already held it was sent nothing.
+fn focus(element: &Element, deadline: Instant) -> Outcome<bool> {
     // The app's focused element is the one source, as the snapshot reads it: a table's cell reports the table's focus as
     // its own `AXFocused`.
     let holds = || -> Result<bool, AXError> {
@@ -480,7 +515,7 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
     };
     // A stall before the write is no proof the element lacks focus: nothing is sent, and a retry may get past it.
     if holds().map_err(|error| unread(error, "focus"))? {
-        return Ok(());
+        return Ok(false);
     }
     go("focus")?;
     // A focus write that failed after the app took it (a focus handler that replaced the element) may have run its
@@ -492,7 +527,7 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
         last == Ok(true)
     });
     match last {
-        Ok(true) => Ok(()),
+        Ok(true) => Ok(true),
         Err(_) => Err(Failure::unconfirmed(codes::APP_UNRESPONSIVE, "focus: the app did not answer in time after the element was focused")),
         Ok(false) => Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus")),
     }
@@ -501,10 +536,33 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
 /// Runs `work` as the action `input_id` names: until it returns, every input it sends first checks that the action was
 /// not cancelled and is still in time (`go`).
 fn guarded<T>(input_id: Option<u32>, deadline: Instant, work: impl FnOnce() -> Outcome<T>) -> Outcome<T> {
-    CURRENT.with(|current| *current.borrow_mut() = Some((input::TypingRun::start(input_id), deadline)));
+    CURRENT.with(|current| *current.borrow_mut() = Some((input::TypingRun::start(input_id), deadline, refusal_cutoff(Instant::now(), deadline))));
     let outcome = work();
     CURRENT.with(|current| current.borrow_mut().take());
     outcome
+}
+
+/// Puts the keyboard on the element `reference` names, as `focus` does.
+pub fn focus_on(reference: &str, input_id: Option<u32>, deadline: Instant) -> Outcome<bool> {
+    guarded(input_id, deadline, || {
+        let entry = resolve(reference)?;
+        // A disabled control takes the focus write and ignores it: wait for it to be enabled, as a fill does.
+        enabled(&entry.element, deadline, "focus")?;
+        // A control a scroll area holds out of view is scrolled to first, as a tap's is; one the user cannot reach (in a
+        // minimized window) is refused. A scroll moved the screen, so the step changed the app.
+        let scrolled = reveal(&entry.element, deadline, "focus")?;
+        after_scroll(scrolled, focus(&entry.element, deadline)).map(|moved| moved || scrolled)
+    })
+}
+
+/// Writes a value as `set_value` does, once the control is enabled and in the user's reach: scrolled into view as a
+/// tap's is, or refused in a minimized window. A failure after the scroll moved the screen.
+fn fill(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
+    enabled(element, deadline, "set value")?;
+    // A value the control can never take is refused before the scroll, which would move the list for nothing.
+    takes_value(element, text)?;
+    let scrolled = reveal(element, deadline, "set value")?;
+    after_scroll(scrolled, set_value(element, text, deadline))
 }
 
 /// Runs one action on the element `reference` names.
@@ -536,11 +594,10 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
             menu_shown(entry.pid, before, deadline);
             Ok(())
         }
-        Action::Focus => focus(element, deadline),
-        Action::Clear => set_value(element, "", deadline),
+        Action::Clear => fill(element, "", deadline),
         Action::Check(wanted) => check(element, wanted, deadline),
         Action::ScrollTo => reveal(element, deadline, "scroll into view").map(|_| ()),
-        Action::SetValue(text) => set_value(element, &text, deadline),
+        Action::SetValue(text) => fill(element, &text, deadline),
         Action::SelectAll => select_all(element, deadline),
         Action::Select(label) => select(&entry, &label, deadline),
         Action::Scroll { direction, pages } => scroll(element, &direction, pages),
@@ -559,7 +616,7 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option
     guarded(input_id, deadline, || {
         let element = windows::find(pid, window)?;
         let route = if physical {
-            raise(pid, &element)?;
+            raise(pid, &element, true)?;
             Route::Physical
         } else {
             key_window(pid, &element)?;
@@ -588,7 +645,8 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option
             return Err(Failure::refused(codes::ACTION_FAILED, "another app came forward before the key was sent, so nothing was sent"));
         }
         go("press")?;
-        input::press(&combo, route).map_err(Failure::delivered)
+        // `press` makes both events before it posts either: a failure is one that sent nothing.
+        input::press(&combo, route)
     })
 }
 
@@ -615,12 +673,12 @@ fn key_window(pid: i32, window: &Element) -> Outcome<()> {
 
 /// Brings a window of `pid` forward, only while `input_id` is not cancelled and `deadline` has not passed: finding the
 /// window can wait on the app, and the caller may have moved on by then.
-pub fn focus_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
+pub fn focus_window(pid: i32, window: u32, keyboard: bool, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
     guarded(input_id, deadline, || {
         // A call given up on before it began reads nothing either.
         go("bring the window forward")?;
         let element = windows::find(pid, window)?;
-        raise(pid, &element)
+        raise(pid, &element, keyboard)
     })
 }
 
@@ -631,20 +689,42 @@ pub fn close_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Inst
         // A call given up on before it began reads nothing either.
         go("close the window")?;
         let element = windows::find(pid, window)?;
-        let Some(button) = element.element("AXCloseButton") else {
+        // A read the app did not answer in time is no proof the window lacks the button, or that it is enabled.
+        let Some(button) = element_attribute(&element, "AXCloseButton", "close the window")? else {
             return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "the window has no close button"));
         };
-        if button.boolean("AXEnabled") == Some(false) {
+        if stalled(button.attribute("AXEnabled")).map_err(|error| unread(error, "close the window"))?.and_then(|value| value.boolean()) == Some(false) {
             return Err(Failure::refused(codes::ACTION_FAILED, "the window's close button is disabled, as it is while a sheet is open on the window"));
         }
         // A press that closes its own window may answer with an error: the window lists tell whether it closed.
         let pressed = perform(&button, "AXPress", "close the window");
-        if until(deadline, || windows::closed(pid, window)) {
+        if let Err(failure) = &pressed
+            && failure.delivery == Delivery::NotDelivered
+        {
+            return pressed;
+        }
+        // A window can take a while to close (it saves first), up to the action's deadline, less the time to answer. One
+        // that asks about unsaved changes shows a sheet and stays open until the user answers: that ends the wait.
+        let mut asks = false;
+        let closed = until_by(refuse_at().unwrap_or(deadline), || {
+            if windows::closed(pid, window) {
+                return true;
+            }
+            asks = holds_sheet(&element);
+            asks
+        });
+        if closed && !asks {
             return Ok(());
         }
         pressed?;
         Err(Failure::unconfirmed(codes::ACTION_FAILED, "the window stayed open after its close button was pressed; it may be asking to save its changes"))
     })
+}
+
+/// Whether a window holds a sheet, as one that asks before it closes does. A read that fails is no sheet: the close
+/// waits on.
+fn holds_sheet(window: &Element) -> bool {
+    windows::window_sheets(window).is_ok_and(|sheets| !sheets.is_empty())
 }
 
 #[cfg(test)]
@@ -798,8 +878,9 @@ mod tests {
     #[test]
     fn sends_no_input_once_the_action_was_cancelled_or_ran_out_of_time() {
         // Ids near the input tests' ids: tests share one registry, and a run 4096 ids past another drops that one's mark.
-        let set =
-            |id: u32, deadline: Instant| super::CURRENT.with(|current| *current.borrow_mut() = Some((crate::input::TypingRun::start(Some(id)), deadline)));
+        let set = |id: u32, deadline: Instant| {
+            super::CURRENT.with(|current| *current.borrow_mut() = Some((crate::input::TypingRun::start(Some(id)), deadline, deadline)))
+        };
         crate::input::cancel_input(1_000_031);
         set(1_000_031, later());
         assert!(super::go("press").is_err());
@@ -843,9 +924,9 @@ mod tests {
     fn brings_no_window_forward_once_the_call_was_cancelled() {
         crate::input::cancel_input(1_000_039);
         // No such process: past the guard, the window lookup would answer APP_NOT_FOUND or WINDOW_NOT_FOUND instead.
-        let failure = super::focus_window(-1, 1, Some(1_000_039), later()).expect_err("cancelled first");
+        let failure = super::focus_window(-1, 1, true, Some(1_000_039), later()).expect_err("cancelled first");
         assert_eq!((failure.code, failure.delivery), (crate::failure::codes::TIMEOUT, crate::failure::Delivery::NotDelivered));
-        let late = super::focus_window(-1, 1, Some(1_000_040), Instant::now()).expect_err("out of time");
+        let late = super::focus_window(-1, 1, true, Some(1_000_040), Instant::now()).expect_err("out of time");
         assert_eq!(late.code, crate::failure::codes::TIMEOUT);
     }
 
@@ -978,6 +1059,9 @@ mod tests {
         // A click refuses the control, a hover does not; a stall is a retryable stall, not a covering element.
         assert_eq!(aimed(Ok(Aim::Control), true, "after the move").expect_err("the click would press the button").code, codes::ACTION_FAILED);
         assert!(aimed(Ok(Aim::Control), false, "before the move").is_ok());
+        // A covered hover says it did not move the pointer, not that it sent no click.
+        assert!(aimed(Ok(Aim::Other), false, "before the move").expect_err("covered").message.ends_with("so the pointer was not moved there"));
+        assert!(aimed(Ok(Aim::Other), true, "before the move").expect_err("covered").message.ends_with("so no click was sent there"));
         let stall = aimed(Err(crate::ax::AX_CANNOT_COMPLETE), true, "after the move").expect_err("the app did not answer");
         assert_eq!((stall.code, stall.delivery), (codes::APP_UNRESPONSIVE, crate::failure::Delivery::NotDelivered));
     }
@@ -1179,6 +1263,18 @@ mod tests {
         assert_eq!(gone_wait_end(now, Some(now + Duration::from_secs(5))), now + GONE_WAIT);
         let soon = now + ANSWER_MARGIN + Duration::from_millis(40);
         assert_eq!(gone_wait_end(now, Some(soon)), now + Duration::from_millis(40));
+    }
+
+    #[test]
+    fn gives_a_wait_that_ends_in_a_refusal_the_time_the_engine_waits_for_its_answer() {
+        use super::refusal_cutoff;
+        let now = Instant::now();
+        let ms = Duration::from_millis;
+        // A long budget: the answer comes a margin before its end.
+        assert_eq!(refusal_cutoff(now, now + ms(2_000)), now + ms(1_800));
+        // A short one: the engine waits 500 ms for the answer, so the wait runs to its deadline, or a margin before 500 ms.
+        assert_eq!(refusal_cutoff(now, now + ms(200)), now + ms(200));
+        assert_eq!(refusal_cutoff(now, now + ms(400)), now + ms(300));
     }
 
     #[test]

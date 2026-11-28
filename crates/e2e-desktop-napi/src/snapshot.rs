@@ -133,8 +133,8 @@ struct Walk {
     /// The app did not answer which element holds its focus in time: no node reads as focused, and the read is
     /// incomplete, never filled in from each element's own `AXFocused` (a table's cells report the table's focus).
     focus_unknown: bool,
-    /// The window's own title-bar buttons, as it names them (`AXCloseButton`, ...); `None` when it names none.
-    chrome: Option<Vec<Element>>,
+    /// The window's own title-bar buttons, as it names them (`AXCloseButton`, ...).
+    chrome: Vec<Element>,
     nodes: usize,
     complete: bool,
     /// Whether the deadline stopped the read.
@@ -179,9 +179,9 @@ struct Read {
     help: Option<String>,
     title_element: Option<Element>,
     /// A vertical scroll bar, listed as an attribute.
-    vertical_bar: bool,
+    vertical_bar: Option<Element>,
     /// A horizontal scroll bar, listed as an attribute.
-    horizontal_bar: bool,
+    horizontal_bar: Option<Element>,
     heading_level: Option<u32>,
 }
 
@@ -206,8 +206,8 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
     let help = label(take(13).and_then(|value| value.text().map(str::to_owned)));
     let title_element = take(14).and_then(|value| value.element().cloned());
     // Only an element is a scroll bar: macOS may answer an attribute the area does not support with null.
-    let vertical_bar = matches!(take(15), Some(Value::Element(_)));
-    let horizontal_bar = matches!(take(16), Some(Value::Element(_)));
+    let vertical_bar = take(15).and_then(|value| value.element().cloned());
+    let horizontal_bar = take(16).and_then(|value| value.element().cloned());
     let heading_level = level_of(take(17));
     // An outline row says it is expanded with AXDisclosing, not AXExpanded.
     let expanded = expanded.or_else(|| take(18).and_then(|value| value.boolean()));
@@ -428,6 +428,20 @@ impl Walk {
         })
     }
 
+    /// Whether a scroll area has an enabled scroll bar for the axis: the one the batch read listed (`listed`), else one
+    /// among its children. A stall leaves a hole in the read: an area the app did not answer about is not one that cannot
+    /// scroll.
+    fn scroll_bar(&mut self, element: &Element, vertical: bool, listed: Option<&Element>) -> bool {
+        let found = match listed {
+            Some(bar) => crate::actions::bar_enabled(bar),
+            None => crate::actions::scroll_bar(element, vertical).map(|bar| bar.is_some()),
+        };
+        found.unwrap_or_else(|_| {
+            self.lose();
+            false
+        })
+    }
+
     /// The actions a control takes, in the raw vocabulary, and the axes it scrolls along when it takes `Scroll`.
     fn actions(&mut self, element: &Element, read: &Read) -> (Vec<&'static str>, Vec<&'static str>) {
         let mut out = Vec::new();
@@ -462,10 +476,7 @@ impl Walk {
         // SwiftUI gives every scroll area the page actions, also one whose content fits: only a scroll bar says a scroll
         // area scrolls. A viewport swipe goes to the first node offered Scroll, so one that cannot scroll must not be.
         let (vertical, horizontal) = if role == "scrollarea" {
-            (
-                read.vertical_bar || crate::actions::scroll_bar(element, true).is_some(),
-                read.horizontal_bar || crate::actions::scroll_bar(element, false).is_some(),
-            )
+            (self.scroll_bar(element, true, read.vertical_bar.as_ref()), self.scroll_bar(element, false, read.horizontal_bar.as_ref()))
         } else {
             (has("AXScrollDownByPage") || has("AXScrollUpByPage"), has("AXScrollLeftByPage") || has("AXScrollRightByPage"))
         };
@@ -497,7 +508,11 @@ impl Walk {
         if roles::takes_text(role) && ((secure && value_settable) || self.settable(element, "AXSelectedText")) {
             push(&mut out, "TypeText");
         }
-        if (roles::expandable(role) && self.settable(element, "AXExpanded")) || (has("AXPress") && roles::expandable(role)) {
+        // An outline row that can expand says so by a settable AXDisclosing, which a leaf row has but cannot set.
+        if (roles::expandable(role) && self.settable(element, "AXExpanded"))
+            || (has("AXPress") && roles::expandable(role))
+            || (role == "treeitem" && self.settable(element, "AXDisclosing"))
+        {
             push(&mut out, "Expand");
             push(&mut out, "Collapse");
         }
@@ -582,20 +597,16 @@ impl Walk {
                     placeholder: None,
                     help: None,
                     title_element: None,
-                    vertical_bar: false,
-                    horizontal_bar: false,
+                    vertical_bar: None,
+                    horizontal_bar: None,
                     heading_level: None,
                 }
             }
         };
         // The window's own title-bar buttons are window chrome, never the app's controls: the window names them
         // (`chrome`), so a button of the app's content with the same subrole (a tab's close button) stays. A window that
-        // names none falls back to the subrole.
-        let chrome = match &self.chrome {
-            Some(chrome) => chrome.contains(element),
-            None => roles::window_control_name(read.subrole.as_deref()).is_some(),
-        };
-        if !root && chrome {
+        // names none has none: AppKit names every title-bar button it draws.
+        if !root && self.chrome.contains(element) {
             return None;
         }
         let role = if root && read.role == "unknown" { "window" } else { read.role };
@@ -781,11 +792,13 @@ pub(crate) fn content_name(texts: &[String]) -> Option<String> {
     label(Some(texts.iter().map(|text| text.trim()).filter(|text| !text.is_empty()).collect::<Vec<_>>().join(" ")))
 }
 
-/// The title-bar buttons a window names as its own; `None` when it names none, so the walk falls back to their subrole.
-fn window_chrome(window: &Element) -> Option<Vec<Element>> {
-    let buttons: Vec<Element> =
-        ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"].iter().filter_map(|name| window.element(name)).collect();
-    (!buttons.is_empty()).then_some(buttons)
+/// The title-bar buttons a window names as its own. A read the app did not answer in time fails as a stall: a button it
+/// held back would read as one of the app's controls.
+fn window_chrome(window: &Element) -> Outcome<Vec<Element>> {
+    ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"]
+        .iter()
+        .filter_map(|name| crate::actions::element_attribute(window, name, "read the window's title bar").transpose())
+        .collect()
 }
 
 /// Reads one window of a process.
@@ -808,7 +821,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         deadline: request.deadline,
         focused,
         focus_unknown,
-        chrome: window_chrome(&window),
+        chrome: window_chrome(&window)?,
         nodes: 0,
         complete: !focus_unknown,
         timed_out: false,

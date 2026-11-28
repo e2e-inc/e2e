@@ -105,6 +105,9 @@ pub(super) fn aimed(aim: Result<Aim, AXError>, clicks: bool, when: &str) -> Outc
         Ok(Aim::Control) => {
             Err(Failure::refused(codes::ACTION_FAILED, format!("{when}, a control inside this element is under the pointer, so the click would press it")))
         }
+        Ok(Aim::Other) if !clicks => {
+            Err(Failure::refused(codes::ACTION_FAILED, format!("{when}, another element is under the pointer, so the pointer was not moved there")))
+        }
         Ok(Aim::Other) => Err(Failure::refused(codes::ACTION_FAILED, format!("{when}, another element is under the pointer, so no click was sent there"))),
         Err(error) => Err(unread(error, "find the element under the pointer")),
     }
@@ -114,7 +117,7 @@ pub(super) fn aimed(aim: Result<Aim, AXError>, clicks: bool, when: &str) -> Outc
 pub(super) fn physical(entry: &Entry, action: Pointer) -> Outcome<()> {
     let window = windows::find(entry.pid, entry.window)?;
     go("pointer")?;
-    raise(entry.pid, &window)?;
+    raise(entry.pid, &window, !matches!(action, Pointer::Move))?;
     let (x, y) = center(&entry.element)?;
     let clicks = matches!(action, Pointer::Click { .. });
     aimed(aim_at(&entry.element, x, y), clicks, "before the move")?;

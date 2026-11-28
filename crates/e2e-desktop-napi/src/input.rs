@@ -249,6 +249,9 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
             // key that types the character on this Mac's layout, in its Command layer for a Command shortcut. Text and
             // Shift keys carry their characters, as typed.
             let shortcut = flags.intersects(CGEventFlags::CGEventFlagCommand | CGEventFlags::CGEventFlagControl | CGEventFlags::CGEventFlagAlternate);
+            // The key that types the character on this Mac's layout without a modifier, when there is one.
+            let on_layout =
+                if shortcut { None } else { crate::layout::characters(crate::layout::Layer::Plain).and_then(|table| crate::layout::code_for(lower, &table)) };
             let code = if shortcut {
                 let layer = if flags.contains(CGEventFlags::CGEventFlagCommand) { crate::layout::Layer::Command } else { crate::layout::Layer::Plain };
                 let table = crate::layout::characters(layer)
@@ -260,10 +263,22 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
                     )
                 })?
             } else {
-                us
+                // The key carries its character, but an app that reads the key code must see the key a person would
+                // press on this layout, as typed text does; a layout with no key for it keeps the US one.
+                on_layout.unwrap_or(us)
             };
-            // With Shift the key types its shifted character; one with none on the US layout is left to the app to work out.
-            let typed = if flags.contains(CGEventFlags::CGEventFlagShift) { shifted(lower) } else { Some(lower) };
+            // With Shift the key types its shifted character: on this Mac's layout when the layout gave the key (Shift-3 is £
+            // on a British one), else the US one, since the US key's Shift layer on another layout types something
+            // unrelated; one with neither is left to the app to work out.
+            let typed = if flags.contains(CGEventFlags::CGEventFlagShift) {
+                on_layout
+                    .and_then(|key| {
+                        crate::layout::characters(crate::layout::Layer::Shift)?.iter().find(|(code, _)| *code == key).map(|(_, character)| *character)
+                    })
+                    .or_else(|| shifted(lower))
+            } else {
+                Some(lower)
+            };
             Key { code, character: typed }
         }
         _ => {
@@ -290,14 +305,20 @@ fn post(event: &CGEvent, route: Route) {
 pub fn press(combo: &Combo, route: Route) -> Outcome<()> {
     let source = source()?;
     let plain = !combo.flags.intersects(CGEventFlags::CGEventFlagCommand | CGEventFlags::CGEventFlagControl | CGEventFlags::CGEventFlagAlternate);
-    for down in [true, false] {
+    // Both events are made before either goes: a key-up that could not be made after the key-down went would be refused
+    // as nothing sent.
+    let event = |down: bool| -> Outcome<CGEvent> {
         let event =
             CGEvent::new_keyboard_event(source.clone(), combo.key.code, down).map_err(|_| Failure::refused(codes::INTERNAL, "could not create a key event"))?;
         event.set_flags(combo.flags);
         if let (true, Some(character)) = (plain, combo.key.character) {
             event.set_string(&character.to_string());
         }
-        post(&event, route);
+        Ok(event)
+    };
+    let events = [event(true)?, event(false)?];
+    for event in &events {
+        post(event, route);
         sleep(Duration::from_millis(4));
     }
     Ok(())
@@ -369,16 +390,21 @@ pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time:
             }
             Piece::Text(units) => units,
         };
-        sent = true;
         let (code, shift) = key_code(&units, &plain, &shifted);
-        for down in [true, false] {
-            let event =
-                CGEvent::new_keyboard_event(source.clone(), code, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
+        // Both events are made before either goes, as for `press`: a key-down never goes without its key-up.
+        let event = |down: bool| -> Outcome<CGEvent> {
+            let event = CGEvent::new_keyboard_event(source.clone(), code, down)
+                .map_err(|_| stopped(Failure::refused(codes::INTERNAL, "could not create a key event"), sent))?;
             // Only the Shift the character takes: a key the user holds would otherwise ride along on an HID-state event and
             // turn text into a shortcut.
             event.set_flags(if shift { CGEventFlags::CGEventFlagShift } else { CGEventFlags::CGEventFlagNull });
             event.set_string_from_utf16_unchecked(&units);
-            post(&event, route);
+            Ok(event)
+        };
+        let events = [event(true)?, event(false)?];
+        sent = true;
+        for event in &events {
+            post(event, route);
         }
         sleep(Duration::from_millis(1));
     }
@@ -518,9 +544,11 @@ mod tests {
 
     #[test]
     fn keeps_the_cancel_of_a_live_run_however_many_runs_start_after_it() {
-        let live = TypingRun::start(Some(2_000_000));
-        cancel_input(2_000_000);
-        let _later = TypingRun::start(Some(2_000_000 + super::STALE_IDS * 2));
+        // Ids below every other test's: the later run drops the marks far behind it, and a test running beside this one
+        // may hold a cancel whose run has not started yet.
+        let live = TypingRun::start(Some(100));
+        cancel_input(100);
+        let _later = TypingRun::start(Some(100 + super::STALE_IDS * 2));
         assert!(live.cancelled());
     }
 

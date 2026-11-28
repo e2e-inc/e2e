@@ -43,6 +43,22 @@ describe('projectSnapshot', () => {
     expect(bindings.get(signIn.ref.id)).toMatchObject({ ref: '@s1y1hxmo5pexrl:e5', actions: ['Click', 'SetFocus'] });
   });
 
+  it('reads an outline row that can expand as expanded or collapsed, and a leaf row as neither', () => {
+    const row = (name: string, actions: string[], states: string[] = []) => ({ role: 'treeitem', name, available_actions: actions, states });
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: { role: 'window', name: 'W', children: [row('Fruits', ['Click', 'Expand', 'Collapse'], ['expanded']), row('Apple', ['Click']), row('Vegetables', ['Click', 'Expand', 'Collapse'])] },
+      },
+      minter(),
+    );
+    expect(all(root).filter((node) => node.role === 'treeitem').map((node) => [node.name, node.states?.expanded])).toEqual([
+      ['Fruits', true],
+      ['Apple', undefined],
+      ['Vegetables', false],
+    ]);
+  });
+
   it("reads a heading's level from the app, else from its description", () => {
     const { root } = projectSnapshot(
       {
@@ -54,6 +70,11 @@ describe('projectSnapshot', () => {
             { role: 'heading', name: 'Summary', level: 2 },
             { role: 'heading', name: 'Notes', description: 'heading level 3' },
             { role: 'heading', name: 'Plain' },
+            // Named by the description alone: a level only when it reads as one and nothing else.
+            { role: 'heading', name: 'heading level 4', description: 'heading level 4' },
+            { role: 'heading', name: 'Battery level 2', description: 'Battery level 2' },
+            { role: 'heading', name: 'Charge', description: 'Battery level 2 of 5' },
+            { role: 'heading', name: 'Heading level 2: Settings', description: 'Heading level 2: Settings' },
           ],
         },
       },
@@ -63,6 +84,10 @@ describe('projectSnapshot', () => {
       ['Summary', 2],
       ['Notes', 3],
       ['Plain', undefined],
+      ['heading level 4', 4],
+      ['Battery level 2', undefined],
+      ['Charge', undefined],
+      ['Heading level 2: Settings', 2],
     ]);
     const heading = (level: number) =>
       resolveExpression(

@@ -92,6 +92,47 @@ struct DraftAlert: View {
   }
 }
 
+/// A scroll area that names no `AXVerticalScrollBar` and lists its 100 lines, then its scroll bar, as its own children, as
+/// an app's own scroll view can: no child is the whole content.
+final class FlatScroll: NSScrollView {
+  let lines = (1...100).map { NSTextField(labelWithString: "Line \($0)") }
+  override func accessibilityVerticalScrollBar() -> Any? { nil }
+  override func accessibilityChildren() -> [Any]? { lines + [verticalScroller].compactMap { $0 } }
+}
+
+/// A stack whose first view is at the top of a scroll view, which starts scrolled to it.
+final class FlippedStack: NSStackView {
+  override var isFlipped: Bool { true }
+}
+
+/// A heading with no `AXHeadingLevel`, named only by a description that gives its level, as a web view's heading can be.
+final class LevelHeading: NSTextField {
+  override func accessibilityRole() -> NSAccessibility.Role? { NSAccessibility.Role(rawValue: "AXHeading") }
+  override func accessibilityLabel() -> String? { "heading level 2" }
+}
+
+/// An outline with one parent expanded and one collapsed: a row says which through `AXDisclosing`.
+final class Groups: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
+  let parents: [NSString] = ["Fruits", "Vegetables"]
+  let children: [NSString: [NSString]] = ["Fruits": ["Apple", "Pear"], "Vegetables": ["Leek"]]
+
+  func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
+    guard let item = item as? NSString else { return parents.count }
+    return children[item]?.count ?? 0
+  }
+
+  func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
+    guard let item = item as? NSString else { return parents[index] }
+    return children[item]![index]
+  }
+
+  func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool { children[item as! NSString] != nil }
+
+  func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+    NSTextField(labelWithString: item as! String)
+  }
+}
+
 /// A view that reports the pointer entering it, for `hover`.
 final class HoverTarget: NSView {
   var onHover: () -> Void = {}
@@ -159,10 +200,12 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
   let volume = NSSlider(value: 50, minValue: 0, maxValue: 100, target: nil, action: nil)
   let size = NSPopUpButton()
   let agree = NSButton(checkboxWithTitle: "Agree", target: nil, action: nil)
+  let groups = Groups()
+  let outline = NSOutlineView()
 
   func show() {
     if let window { window.makeKeyAndOrderFront(nil); return }
-    let window = NSWindow(contentRect: NSRect(x: 660, y: 200, width: 360, height: 930),
+    let window = NSWindow(contentRect: NSRect(x: 660, y: 200, width: 640, height: 930),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.title = "Controls"
     window.isReleasedWhenClosed = false
@@ -295,7 +338,44 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
     stack.alignment = .leading
     stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)
     status.widthAnchor.constraint(equalToConstant: 320).isActive = true
-    window.contentView = stack
+
+    // A second column for what the engine reads rather than drives: a heading, an outline, and a long SwiftUI list.
+    let heading = LevelHeading(labelWithString: "Shipping")
+    heading.setAccessibilityIdentifier("level-heading")
+    let groupColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("group"))
+    groupColumn.width = 180
+    outline.addTableColumn(groupColumn)
+    outline.outlineTableColumn = groupColumn
+    outline.headerView = nil
+    outline.dataSource = groups
+    outline.delegate = groups
+    outline.setAccessibilityLabel("Groups")
+    outline.setAccessibilityIdentifier("groups")
+    outline.expandItem(groups.parents[0])
+    let outlineScroll = NSScrollView()
+    outlineScroll.documentView = outline
+    outlineScroll.heightAnchor.constraint(equalToConstant: 110).isActive = true
+    outlineScroll.widthAnchor.constraint(equalToConstant: 200).isActive = true
+    let flat = FlatScroll()
+    let lines = FlippedStack(views: flat.lines)
+    lines.orientation = .vertical
+    lines.alignment = .leading
+    lines.translatesAutoresizingMaskIntoConstraints = false
+    flat.documentView = lines
+    flat.hasVerticalScroller = true
+    flat.setAccessibilityIdentifier("lines")
+    lines.widthAnchor.constraint(equalTo: flat.contentView.widthAnchor).isActive = true
+    flat.heightAnchor.constraint(equalToConstant: 100).isActive = true
+    flat.widthAnchor.constraint(equalToConstant: 200).isActive = true
+    let reads = NSStackView(views: [heading, outlineScroll, flat])
+    reads.orientation = .vertical
+    reads.alignment = .leading
+    reads.edgeInsets = NSEdgeInsets(top: 20, left: 0, bottom: 20, right: 20)
+
+    let columns = NSStackView(views: [stack, reads])
+    columns.orientation = .horizontal
+    columns.alignment = .top
+    window.contentView = columns
     self.window = window
     window.makeKeyAndOrderFront(nil)
   }
