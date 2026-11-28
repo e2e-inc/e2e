@@ -199,8 +199,13 @@ fn resolve(reference: &str) -> Outcome<Entry> {
 }
 
 /// Polls `check` until it holds or the effect wait (bounded by the deadline) ends.
-fn until(deadline: Instant, mut check: impl FnMut() -> bool) -> bool {
-    let end = (Instant::now() + EFFECT_WAIT).min(deadline);
+fn until(deadline: Instant, check: impl FnMut() -> bool) -> bool {
+    until_by((Instant::now() + EFFECT_WAIT).min(deadline), check)
+}
+
+/// Polls `check` until it holds or `end` passes, however far off: for a wait that runs to its own end, not the effect
+/// wait's.
+fn until_by(end: Instant, mut check: impl FnMut() -> bool) -> bool {
     loop {
         if check() {
             return true;
@@ -343,7 +348,7 @@ pub fn raise(pid: i32, window: &Element, keyboard: bool) -> Outcome<()> {
     let soon = Instant::now() + Duration::from_millis(1_500);
     let deadline = refuse_at().map_or(soon, |at| at.min(soon));
     let mut last = Ok(false);
-    until(deadline, || {
+    until_by(deadline, || {
         last = forward(&app, window, keyboard);
         last == Ok(true)
     });
@@ -670,13 +675,32 @@ pub fn close_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Inst
         }
         // A press that closes its own window may answer with an error: the window lists tell whether it closed.
         let pressed = perform(&button, "AXPress", "close the window");
-        // A press the button refused is answered before the deadline, not cut off at it.
-        if until(refuse_at().unwrap_or(deadline), || windows::closed(pid, window)) {
+        if let Err(failure) = &pressed
+            && failure.delivery == Delivery::NotDelivered
+        {
+            return pressed;
+        }
+        // A window can take a while to close (it saves first), up to the action's deadline, less the time to answer. One
+        // that asks about unsaved changes shows a sheet and stays open until the user answers: that ends the wait.
+        let mut asks = false;
+        let closed = until_by(refuse_at().unwrap_or(deadline), || {
+            if windows::closed(pid, window) {
+                return true;
+            }
+            asks = holds_sheet(&element);
+            asks
+        });
+        if closed && !asks {
             return Ok(());
         }
         pressed?;
         Err(Failure::unconfirmed(codes::ACTION_FAILED, "the window stayed open after its close button was pressed; it may be asking to save its changes"))
     })
+}
+
+/// Whether a window holds a sheet, as one that asks before it closes does. A read that fails is no sheet.
+fn holds_sheet(window: &Element) -> bool {
+    window.elements("AXChildren", 64).is_ok_and(|children| children.iter().any(|child| child.text("AXRole").as_deref() == Some("AXSheet")))
 }
 
 #[cfg(test)]
