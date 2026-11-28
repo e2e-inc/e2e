@@ -803,10 +803,12 @@ await device.enrollBiometrics('touchid', true);
 
 ```ts
 /**
- * Installs a build (an iOS `.app` bundle or an Android `.apk`, resolved
- * against the project root) on the device; without a path, the target's
- * `app.appPath`. The engine installs nothing on its own, so a suite that runs
- * against a build calls this once per device, in a fixture or a test.
+ * Installs an iOS `.app` bundle or Android `.apk` on the device. Relative paths
+ * resolve against the project root. With no path, installs the target's
+ * `app.appPath`. With a remote agent-device daemon from a device provider,
+ * a path absolute on the runner can also name a build on that daemon.
+ * The engine installs nothing on its own, so call this once per device in a
+ * fixture or test.
  * `reinstall: true` removes the app first so it starts with no data; a
  * plain install replaces the binary and keeps its data. Resolves to the
  * identity to `openApp` it by, which becomes the app `app.open()` launches
@@ -823,13 +825,17 @@ await device.openApp(app);
 
 - Use-o para o build da execução ou para outro build em um caminho de
   atualização.
+- Um daemon remoto recebe um upload quando o build existe no runner. Caso
+  contrário, ele verifica o caminho absoluto no próprio sistema de arquivos e
+  informa o erro de instalação se o build não existir. O runner usa o próprio
+  sistema operacional para resolver os caminhos antes de enviá-los.
 - O id resolvido é o bundle id ou pacote que o agent-device leu do build, ou
   o `app` passado.
 
 | Lança | Quando |
 | --- | --- |
 | `INVALID_STATE` | Nenhum caminho foi passado e o alvo não tem `app.appPath`; ou `reinstall: true` sem `app` passado e sem app fixado (sem `app.bundleId`, build ainda não instalado). |
-| `INVALID_ARGUMENT` | Um caminho foi passado e não existe nada nele na máquina que roda o e2e, resolvido em relação à raiz do projeto. Falha antes de qualquer comando no dispositivo. |
+| `INVALID_ARGUMENT` | O caminho explícito está vazio ou em branco, ou falta um build que precisa estar no runner. Caminhos relativos são resolvidos em relação à raiz do projeto. Falha antes de qualquer comando no dispositivo. |
 | `ENGINE_FAILURE` | O agent-device não informou nenhum id e nenhum `app` foi passado; a engine falha em vez de aceitar um caminho de arquivo disfarçado de id. Veja [Solução de problemas](/mobile#troubleshooting). |
 
 #### `uninstallApp`

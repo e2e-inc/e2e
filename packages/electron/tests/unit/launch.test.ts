@@ -6,11 +6,20 @@ import { engineArguments } from '../../src/launcher.ts';
 describe('launchEnv', () => {
   it('gives the app what a process needs to start and draw, never the rest of the run\'s environment', () => {
     const run = { PATH: '/bin', HOME: '/home/ada', DISPLAY: ':99', LC_ALL: 'C', SystemRoot: 'C:\\Windows', OPENAI_API_KEY: 'sk-secret', AI_GATEWAY_API_KEY: 'secret', GITHUB_TOKEN: 'ghs', MODE: 'run', UNSET: undefined };
-    expect(launchEnv(run, {})).toEqual({ PATH: '/bin', HOME: '/home/ada', DISPLAY: ':99', LC_ALL: 'C', SystemRoot: 'C:\\Windows' });
+    expect(launchEnv(run, [])).toEqual({ PATH: '/bin', HOME: '/home/ada', DISPLAY: ':99', LC_ALL: 'C', SystemRoot: 'C:\\Windows' });
   });
 
   it('adds the engine\'s env option over it, and never ELECTRON_RUN_AS_NODE or NODE_OPTIONS in any case', () => {
-    expect(launchEnv({ PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect' }, { PATH: '/app/bin', API_URL: 'http://localhost', electron_run_as_node: '1', Node_Options: '--x' })).toEqual({ PATH: '/app/bin', API_URL: 'http://localhost' });
+    expect(launchEnv({ PATH: '/bin', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--inspect' }, [{ PATH: '/app/bin', API_URL: 'http://localhost', electron_run_as_node: '1', Node_Options: '--x' }])).toEqual({ PATH: '/app/bin', API_URL: 'http://localhost' });
+  });
+
+  it('lays a test\'s variables over the engine\'s, by name in any case on Windows', () => {
+    const layers = [{ TESTBED_MODE: 'engine', KEPT: '1' }, { testbed_mode: 'test' }];
+    expect(launchEnv({ Path: 'C:\\bin' }, layers, 'win32')).toEqual({ Path: 'C:\\bin', KEPT: '1', testbed_mode: 'test' });
+    expect(launchEnv({ Path: 'C:\\bin' }, [{ PATH: 'C:\\app' }], 'win32')).toEqual({ PATH: 'C:\\app' });
+    // Elsewhere the two names are two variables.
+    expect(launchEnv({}, layers, 'linux')).toEqual({ TESTBED_MODE: 'engine', KEPT: '1', testbed_mode: 'test' });
+    expect(launchEnv({}, [{ MODE: 'engine' }, { MODE: 'test' }], 'linux')).toEqual({ MODE: 'test' });
   });
 });
 

@@ -1,6 +1,6 @@
 ---
 title: Environment variables
-description: Every variable the runner and the first-party engines read, and what each one does.
+description: "Reference for every environment variable the e2e runner and the first-party engines read, and what each one does."
 "og:image": "https://e2e.com/docs/images/og/reference/environment.png?v=67a4d71e70"
 "twitter:image": "https://e2e.com/docs/images/og/reference/environment.png?v=67a4d71e70"
 ---
@@ -67,16 +67,12 @@ of the stored `opencode-console` login. OpenCode reads the same variable.
 - `<NAME>` is the name uppercased with every character outside `A-Z0-9`
   replaced by `_`, so `power-user` becomes `E2E_USER_POWER_USER_USERNAME`.
 - Two credentials, or two secrets, whose names map to one `<NAME>` are
-  `INVALID_CONFIG` at config load, set or not. So one rotation never
-  replaces two entries. The message names the entries and the variables.
-  For example, `api-key` and `api_key` both read `E2E_SECRET_API_KEY`;
-  `svc-a` and `svc_a` both read `E2E_USER_SVC_A_USERNAME` and `_PASSWORD`.
+  `INVALID_CONFIG` at config load, set or not. For example, `api-key` and
+  `api_key` both read `E2E_SECRET_API_KEY`.
 - A credential and a secret may share a name, since their prefixes differ.
 - A variable for a name absent from the config is ignored.
 - An empty password or secret is `INVALID_CONFIG`, and so is one shorter
-  than 6 characters (code points). Redaction rewrites every occurrence of a
-  value, and one that short would take ordinary text with it. An empty
-  username is accepted.
+  than 6 characters (code points). An empty username is accepted.
 
 ### Run mode
 
@@ -166,7 +162,7 @@ What is sent and how to read it is on the [Telemetry](/telemetry) page.
 | Variable | Example | Reading | Effect |
 | --- | --- | --- | --- |
 | `GITHUB_ACTIONS` | `GITHUB_ACTIONS=true` | value | Without it the reporter posts nothing and says so |
-| `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `GITHUB_EVENT_NAME`, `GITHUB_WORKFLOW`, `GITHUB_JOB` | `GITHUB_REPOSITORY=acme/shop` | value | Always set by the runner. A missing one fails the reporter, naming the variable. The repository and run id build the artifacts link. The event name shows in the "not a pull request" row. The workflow and job join the marker a rerun finds its own comment by |
+| `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `GITHUB_EVENT_NAME`, `GITHUB_WORKFLOW`, `GITHUB_JOB` | `GITHUB_REPOSITORY=acme/shop` | value | Always set by the runner. A missing one fails the reporter, naming the variable |
 | `GITHUB_TOKEN`, `GH_TOKEN` | `GITHUB_TOKEN=<token>` | value | Posts the comment; the first one set wins. Unset, the job summary is still written. A fork's `pull_request` token is read-only and cannot post; see [When nothing is posted](/github#when-nothing-is-posted) |
 | `GITHUB_EVENT_PATH`, `GITHUB_REF` | `GITHUB_REF=refs/pull/42/merge` | value | The pull request number and head commit from the event payload, or the number from `refs/pull/N/merge` |
 | `GITHUB_SHA` | `GITHUB_SHA=<commit>` | value | The commit source links point at when the event is not about a pull request |
@@ -199,8 +195,8 @@ What is sent and how to read it is on the [Telemetry](/telemetry) page.
 | `E2B_DOMAIN` | `E2B_DOMAIN=e2b.example.com` | value | The E2B domain the providers create sandboxes on. Default `e2b.app`. Set it for a dedicated E2B cluster |
 | `E2B_API_URL` | `E2B_API_URL=<url>` | value | The E2B API URL the providers call. Default `https://api.<E2B_DOMAIN>` |
 | `E2B_SANDBOX_URL` | `E2B_SANDBOX_URL=<url>` | value | The URL the providers send sandbox commands and uploads to. Default: the E2B SDK builds it from `E2B_DOMAIN`. If the shell that starts e2e sets it, the run's environment must set the same value, or the lease fails with `INVALID_CONFIG` |
-| `E2E_WEB_BROWSERS_<TARGET>_<digest>` | - | value | `@e2e-dev/web` writes it in `prepare`; each worker reads it to find its leased browser. Don't set it by hand |
-| `E2E_AGENT_DEVICE_POOL_<TARGET>_<digest>` | - | value | `@e2e-dev/mobile` writes it in `prepare`; each worker reads it to find its booted device. Don't set it by hand |
+| `E2E_WEB_BROWSERS_<TARGET>_<digest>` | - | value | Set by `@e2e-dev/web` for its workers. Don't set it by hand |
+| `E2E_AGENT_DEVICE_POOL_<TARGET>_<digest>` | - | value | Set by `@e2e-dev/mobile` for its workers. Don't set it by hand |
 
 #### `EXPO_TOKEN`
 

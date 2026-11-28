@@ -1,6 +1,6 @@
 ---
 title: From Cypress
-description: Replace Cypress command chains with async tests and keep your data-cy attributes.
+description: "Migrate from Cypress to e2e by replacing command chains with async TypeScript tests, keeping your data-cy attributes, and mapping each Cypress command."
 "og:image": "https://e2e.com/docs/images/og/migrate/cypress.png?v=e4e71f42dc"
 "twitter:image": "https://e2e.com/docs/images/og/migrate/cypress.png?v=e4e71f42dc"
 ---
@@ -30,7 +30,7 @@ Node. Both suites can stay in the project while you move one spec at a time.
 
 </SetupPrompt>
 
-For a migration that spans several sessions, the [`migrate-to-e2e` skill](/coding-agents#migrate-an-existing-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
+For a migration that spans several sessions, the [`migrate-to-e2e` skill](/migrate#let-an-agent-migrate-the-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
 
 ## Port the config
 
@@ -180,7 +180,7 @@ Planned gaps are on the roadmap, and Not yet gaps have no date. Not planned gaps
   <Card title="Core concepts" icon="pen-to-square" href="/core-concepts">
     Goals, assertions, and locators instead of scripted selectors.
   </Card>
-  <Card title="Working with the browser" icon="globe" href="/browser">
+  <Card title="Web engine reference" icon="globe" href="/reference/web#the-browser-fixture">
     Routes, dialogs, downloads, iframes, and page evaluation.
   </Card>
 </CardGroup>

@@ -57,7 +57,7 @@ export interface NodeOps {
   isNativeRadio(): boolean;
   /** Whether the node is a file input, which takes files itself. */
   isFileInput(): boolean;
-  /** Whether the node, the focused element, takes typed text, or typed keys as a widget's typeahead. */
+  /** Whether the node, the focused element, takes typed text, typed keys as a widget's typeahead, or keys the app handles itself. */
   takesText(): boolean;
   /** The element's computed value of each named CSS property. */
   readStyle(names: readonly string[]): Record<string, string>;
@@ -107,8 +107,23 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
     if (control?.matches(':disabled') === true) return true;
     return above(target, '[aria-disabled]')?.getAttribute('aria-disabled')?.toLowerCase() === 'true';
   };
-  /** Whether the element, or anything above it, is inert. */
-  const isInert = (target: Element): boolean => above(target, '[inert]') !== null;
+  /**
+   * Whether an `inert` element holds the element in the tree as rendered:
+   * through the slot it is assigned to and the shadow host of each root it
+   * sits in. An open modal dialog is in the top layer, out of reach of an
+   * `inert` above it, though not of its own. What a modal dialog makes inert
+   * has no attribute to show it, and only Chromium orders the top layer:
+   * `waitReady` asks it.
+   */
+  const isInert = (target: Element): boolean => {
+    for (let at: Element | null = target; at !== null; ) {
+      if (at.hasAttribute('inert')) return true;
+      if (at.matches('dialog:modal')) return false;
+      const root = at.getRootNode();
+      at = at.assignedSlot ?? at.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
+    }
+    return false;
+  };
   /** Whether the element holds focus within its own document or shadow root. */
   const holdsFocus = (target: Element): boolean => {
     const root = target.getRootNode();
@@ -194,6 +209,11 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       if (target instanceof HTMLElement || target instanceof SVGElement) target.focus();
       target.removeEventListener('focus', onFocus);
       if (holdsFocus(target)) return 'held';
+      // A composite widget hands focus to a part of itself (a grid row to its editor): the element holds it through
+      // that part, and what is typed next goes where a person who tabbed here would type.
+      const root = target.getRootNode();
+      const active = root instanceof Document || root instanceof ShadowRoot ? root.activeElement : null;
+      if (took && active !== null && target.contains(active)) return 'held';
       return took ? 'moved' : 'none';
     },
     blur() {
@@ -280,6 +300,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       const element = live();
       if (!(element instanceof HTMLInputElement) || element.type !== 'file') return { ok: false, reason: 'it is not a file input' };
       if (isDisabled(element)) return { ok: false, reason: 'it is disabled' };
+      if (isInert(element)) return { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
       return { ok: true };
     },
     takesFiles(count) {
@@ -340,7 +361,10 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       if (TYPEAHEAD_ROLES.has(active.getAttribute('role') ?? '')) return true;
       // A date or time input takes typed digits; a range or color picker takes none.
       if (active instanceof HTMLInputElement) return (TEXT_INPUT_TYPES.has(typeOf(active)) || TYPED_PICKER_TYPES.has(typeOf(active))) && !active.readOnly && !active.disabled;
-      return false;
+      // Keys to the page itself, a select, a button, or a link (HTML or SVG) are lost or click. Any other element the app made
+      // focusable (a canvas, a widget with a tabindex and key handlers of its own) opted into keys, as on the web.
+      if (active === active.ownerDocument.body || active === active.ownerDocument.documentElement) return false;
+      return !(active instanceof HTMLSelectElement || active instanceof HTMLButtonElement || active instanceof HTMLAnchorElement || active instanceof SVGAElement);
     },
   };
   // TypeScript cannot tie `args` to the method `name` picks; `NodeOps` holds the two together for callers.

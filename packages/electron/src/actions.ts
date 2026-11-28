@@ -146,7 +146,17 @@ export async function typeText(context: ActionContext, window: AppWindow, text: 
     await withModifiers(budget, window, ['ControlOrMeta'], () => keyboard.press('A'));
     await budget.send(() => keyboard.press('Delete'));
   }
-  for (const character of text) await budget.send(() => keyboard.type(character));
+  await typeKeys(window, text, 0, budget);
+}
+
+/** Types text into whatever holds focus, key by key, `delayMs` apart: each character's key, or the character inserted when the layout has none. */
+export async function typeKeys(window: AppWindow, text: string, delayMs: number, budget: Budget): Promise<void> {
+  let first = true;
+  for (const character of text) {
+    if (!first && delayMs > 0) await sleep(delayMs, budget.operation.signal);
+    first = false;
+    await budget.send(() => window.page.keyboard.type(character));
+  }
 }
 
 /** Presses a key in the shown window, wherever focus is. */
@@ -421,6 +431,8 @@ export async function withModifiers(budget: Budget, window: AppWindow, modifiers
   const held: string[] = [];
   try {
     for (const modifier of modifiers) {
+      // One the test already holds (`electron.keyboard.down('Shift')`) stays the test's to release.
+      if (keyboard.holds(modifier)) continue;
       await budget.send(() => {
         held.push(modifier);
         return keyboard.down(modifier);

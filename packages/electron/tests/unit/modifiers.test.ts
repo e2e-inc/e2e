@@ -34,6 +34,17 @@ describe('withModifiers', () => {
     expect(events).toEqual(['rawKeyDown Control', 'rawKeyDown Shift', 'rawKeyDown Enter', 'keyUp Enter', 'keyUp Shift', 'keyUp Control']);
   });
 
+  it('leaves a modifier the test already holds held, and releases only its own', async () => {
+    const { window, events, answer } = slowWindow();
+    const answering = setInterval(answer, 1);
+    await window.page.keyboard.down('Shift');
+    await withModifiers(new Budget(operation(new AbortController().signal), 'press'), window, ['Shift', 'Control'], () => window.page.keyboard.press('Enter'));
+    expect(window.page.keyboard.holds('Shift')).toBe(true);
+    await window.page.keyboard.up('Shift');
+    clearInterval(answering);
+    expect(events).toEqual(['rawKeyDown Shift', 'rawKeyDown Control', 'rawKeyDown Enter', 'keyUp Enter', 'keyUp Control', 'keyUp Shift']);
+  });
+
   it('sends no key after a modifier the app took too long to answer, and releases the modifier', async () => {
     const { window, events, answer } = slowWindow();
     const cancel = new AbortController();

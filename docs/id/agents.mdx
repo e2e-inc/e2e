@@ -1,0 +1,196 @@
+---
+title: Agent dan persona
+description: Konfigurasikan beberapa agent dalam satu rangkaian tes, tetapkan agent untuk tes tertentu, dan jalankan satu alur dengan setiap persona.
+"og:image": "https://e2e.com/docs/images/og/agents.png?v=94dc88725f"
+"twitter:image": "https://e2e.com/docs/images/og/agents.png?v=94dc88725f"
+---
+
+import { Video } from '../snippets/video.jsx';
+
+Agent adalah entri bernama di `agents` dengan model, instruksi, dan tool
+sendiri. Tes menggunakan `default` kecuali Anda memilih agent lain. Tambahkan
+nama agent untuk membandingkan model atau menjalankan satu alur sebagai
+beberapa persona.
+
+## Tentukan agent bernama
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { gateway } from 'ai';
+
+const vocabulary = 'Plans are called tiers. Billing lives under Settings. "Approve" on an order refunds it.';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+  agents: {
+    default: { model: gateway('openai/gpt-6-luna-fast'), context: vocabulary },
+    thorough: {
+      model: gateway('anthropic/claude-opus-5'),
+      system: 'Verify every claim on screen before concluding a step.',
+      context: vocabulary,
+    },
+    buyer: { model: gateway('openai/gpt-6-luna-fast'), system: 'You are a first-time buyer.', context: vocabulary },
+    admin: { model: gateway('openai/gpt-6-luna-fast'), system: 'You manage orders and approve refunds.', context: vocabulary },
+  },
+} satisfies E2EConfig;
+```
+
+Entri dapat berisi `model`, [`judge`](/models#a-judge-of-its-own) opsional,
+`system`, `context`, [tool](/tools), anggaran, dan `providerOptions`.
+`maxSteps` membatasi jumlah tindakan dalam satu langkah dan `maxModelCalls`
+membatasi pemanggilan model: default-nya 25, maksimum 100. Lihat
+[referensi konfigurasi](/reference/config#agents).
+
+Entri tidak mewarisi nilai dari `default`. Berikan model dan konteks yang
+dibutuhkan ke setiap entri, misalnya dengan konstanta bersama seperti di atas.
+
+[Executor khusus](/executors) diletakkan di bawah `executor`. Model, judge,
+konteks, dan anggaran tetap berlaku. `system` dan `tools` ditolak karena
+executor menyediakan prompt dan tool sendiri.
+
+## Instruksi dan kosakata
+
+| | `system` | `context` |
+|---|---|---|
+| Menjawab pertanyaan | Bagaimana agent yang bertindak harus bekerja? | Istilah apa yang digunakan aplikasi ini? |
+| Dibaca oleh | Hanya loop act | Setiap pemanggilan model: giliran act dan judge di balik `assert`, `waitFor`, dan `extract` |
+| Isi yang sesuai | Persona, kehati-hatian, hal yang harus diverifikasi sebelum selesai, cara menangani dialog tak terduga | Nama layar dan menu, lokasi fitur, tombol untuk mengirim formulir, istilah domain |
+| Diatur pada | `agents.<name>.system` | `agents.<name>.context`, maksimal 16 KiB kecuali `maxContextBytes` menaikkannya |
+
+Judge tidak pernah melihat `system`, sehingga instruksi "langkah selesai
+setelah formulir ditutup" tidak dapat menurunkan standar penilaian. Aturan
+sederhananya: fakta yang berlaku bagi tester mana pun di aplikasi ini masuk
+ke `context`; hal yang berlaku bagi tester ini di aplikasi mana pun masuk ke
+`system`.
+
+Tes atau grup dapat menambahkan kosakatanya sendiri ke `context` melalui
+`agentContext`. Gunakan untuk fakta yang hanya diketahui tes tersebut,
+seperti data awal atau feature flag yang mengubah label:
+
+```ts title="tests/billing.e2e.ts"
+import { describe, test } from 'e2e';
+
+describe('billing', { agentContext: 'The seeded workspace is called "Acme Trial".' }, () => {
+  test('upgrades the tier', async ({ agent }) => { /* ... */ });
+});
+```
+
+Jangan masukkan instruksi ke `agentContext`: konten itu juga dibaca oleh judge.
+
+Saat memakai `e2e run`, setiap prompt juga menyertakan jalur judul tes,
+seperti `Test: billing > upgrades the tier`. Judge juga membacanya, jadi beri
+nama tes berdasarkan cakupannya, bukan hasil yang Anda harapkan.
+
+## Pilih agent untuk setiap eksekusi
+
+`--agent` memilih agent untuk tes yang tidak menetapkan agent sendiri.
+Berikan daftar nama yang dipisahkan koma untuk menjalankan setiap tes satu
+kali per agent:
+
+<CodeGroup>
+```bash npm
+npx e2e run --agent thorough tests/checkout.e2e.ts
+npx e2e run --agent buyer,admin
+```
+
+```bash pnpm
+pnpm exec e2e run --agent thorough tests/checkout.e2e.ts
+pnpm exec e2e run --agent buyer,admin
+```
+
+```bash bun
+bunx e2e run --agent thorough tests/checkout.e2e.ts
+bunx e2e run --agent buyer,admin
+```
+</CodeGroup>
+
+## Tetapkan agent dalam rangkaian tes
+
+Tes, blok describe, atau satu pemanggilan dapat memilih agent. Pengaturan
+terdekat yang berlaku: pemanggilan, tes, grup yang menaunginya, lalu eksekusi.
+
+```ts title="tests/checkout.e2e.ts"
+import { describe, test } from 'e2e';
+
+describe('checkout as a first-time buyer', { agent: 'buyer' }, () => {
+  test('pays for one item', async ({ app, agent }) => { /* ... */ });
+
+  describe('refunds', { agent: 'admin' }, () => {
+    test('refunds the order', async ({ agent }) => { /* ... */ });
+  });
+
+  test('reorders, and the admin approves', async ({ app, agent }) => {
+    await app.open('/orders');
+    await agent.act('reorder the most recent order');
+    // The admin's act call sees what the earlier steps of this test did.
+    await agent.act('approve the pending reorder', { agent: 'admin' });
+    await agent.assert('the reorder shows as approved');
+  });
+});
+```
+
+`--agent` tidak menimpa agent yang sudah ditetapkan pada tes. Nama agent yang
+tidak dikenal menggagalkan pengumpulan tes atau grup; jika diberikan pada
+pemanggilan, langkahnya yang gagal. Laporan mencatat agent yang menjalankan
+setiap langkah.
+
+## Satu alur, beberapa persona
+
+<Video>
+  <video src="/images/personas.mp4" aria-label="Empat agent, masing-masing persona yang membaca satu bahasa, menjalankan tes lokalisasi yang sama. Eksekusi bahasa Arab gagal karena sebuah tombol masih berbahasa Inggris." muted loop playsInline controls />
+
+  Empat persona, masing-masing untuk satu bahasa, menjalankan rangkaian tes lokalisasi yang sama.
+</Video>
+
+Berikan array agent untuk menjalankan tes yang sama satu kali dengan setiap
+persona:
+
+```ts title="tests/checkout.e2e.ts"
+import { describe, test } from 'e2e';
+
+describe('checkout', { agent: ['buyer', 'admin'] }, () => {
+  test('pays for one item', async ({ app, agent }) => { /* runs once per persona */ });
+  test('applies a promo code', async ({ app, agent }) => { /* ... */ });
+});
+```
+
+Setiap agent mendapatkan hasil dan direktori artefaknya sendiri. Nama tes di
+terminal dan JUnit menyertakan nama agent, seperti `[admin]`.
+
+`--agent` memilih di antara agent yang sudah ditetapkan dan tidak menambahkan
+agent baru. Di contoh ini, `--agent admin` hanya menjalankan `admin`.
+`--agent thorough` tidak cocok dengan keduanya, jadi keduanya tetap dijalankan.
+
+Grup serial dijalankan sebagai satu unit untuk setiap agent, dan anggotanya
+mewarisi agent yang ditetapkan pada grup. Tes penyiapan hanya dapat menetapkan
+satu agent.
+
+Setiap agent memiliki entri [cache replay](/cache) sendiri yang menggunakan
+nama dan konteksnya sebagai kunci. `buyer` tidak pernah memutar ulang langkah
+milik `admin`, dan perubahan pada `agentContext` akan memicu perekaman ulang.
+
+Agent bukan pengguna yang sudah masuk. Untuk persona yang sudah masuk,
+pasangkan setiap agent dengan `session` di blok describe terpisah. Lihat
+[Autentikasi](/authentication#several-signed-in-users).
+
+## Sesuaikan agent
+
+Jika langkah gagal atau memakai terlalu banyak pemanggilan, buka laporannya
+atau jalankan dengan `--debug` untuk melihat transkrip. Perbaiki instruksi
+terlebih dahulu dengan memakai label di layar. Jika masalah memengaruhi
+beberapa tes, perbaiki konfigurasi agent: kosakata di `context`, instruksi di
+`system`, atau [tool](/tools) untuk operasi seperti mengisi keranjang melalui
+API tes. Untuk membandingkan model atau `providerOptions`, jalankan tes yang
+sama dengan `--agent <name>`.
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Tool proyek" icon="wrench" href="/tools">
+    Berikan agent API tes atau toolkit perangkat.
+  </Card>
+  <Card title="Executor khusus" icon="gears" href="/executors">
+    Ubah cara agent memilih dan menjalankan tindakan.
+  </Card>
+</CardGroup>

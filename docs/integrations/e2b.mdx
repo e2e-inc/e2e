@@ -1,13 +1,13 @@
 ---
 title: E2B
 sidebarTitle: E2B
-description: Run Android targets and web targets in E2B sandboxes with the e2b() and e2bBrowsers() providers from @e2e-dev/e2b.
+description: "Run e2e Android tests and web tests in E2B sandboxes with the e2b() device provider and the e2bBrowsers() browser provider from @e2e-dev/e2b."
 ---
 
 `@e2e-dev/e2b` runs your targets in [E2B](https://e2b.dev) sandboxes:
 Android 16 with `e2b()`, a [device provider](/mobile#hosted-devices), and
 Chromium with `e2bBrowsers()` from `@e2e-dev/e2b/web`, a
-[browser provider](/browser#hosted-browsers). Your tests stay the same.
+[browser provider](/reference/web#hosted-browsers). Your tests stay the same.
 
 ## Authenticate
 
@@ -69,7 +69,7 @@ agent-device reports for the `.apk`.
 Each worker gets its own Chromium sandbox, and every attempt gets a new
 browser context in it, as in a local run. With `scope: 'attempt'`, every
 attempt gets a new sandbox instead
-([limits of that scope](/browser#pick-a-lease-scope)).
+([limits of that scope](/reference/web#pick-a-lease-scope)).
 
 Install the integration alongside the web engine:
 
@@ -171,7 +171,7 @@ holds the lease.
   <Card title="Hosted devices" icon="mobile" href="/mobile#hosted-devices">
     How a device provider leases devices.
   </Card>
-  <Card title="Hosted browsers" icon="globe" href="/browser#hosted-browsers">
+  <Card title="Hosted browsers" icon="globe" href="/reference/web#hosted-browsers">
     How a browser provider leases browsers.
   </Card>
 </CardGroup>

@@ -1,0 +1,784 @@
+---
+title: Electron
+description: "API reference for @e2e-dev/electron, the engine for Electron apps, with its options, launch arguments and environment, and the electron fixture and its windows."
+keywords: [desktop app, Chromium]
+---
+
+`@e2e-dev/electron` is the engine for Electron apps. It starts the app, reads
+each window's accessibility tree, and drives it with trusted input. It
+contributes the `electron` fixture.
+`agent`, `app`, `screen`, and `expect` work as they do everywhere; this page
+covers what is specific to an Electron target.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { electron } from '@e2e-dev/electron';
+
+export default {
+  targets: [{ name: 'electron', engine: electron(), app: { appPath: '.' } }],
+} satisfies E2EConfig;
+```
+
+Import `test` from the package to have `electron` typed:
+
+```ts title="tests/settings.e2e.ts"
+import { expect } from 'e2e';
+import { test } from '@e2e-dev/electron';
+
+test('opens settings in its own window', async ({ app, electron, screen }) => {
+  await app.open();
+  const settings = await electron.waitForWindow(() =>
+    screen.getByRole('button', 'Open settings').tap(),
+  );
+  await expect(screen.getByRole('heading', 'Settings')).toBeVisible();
+  await settings.close();
+});
+```
+
+## Reference
+
+### Options
+
+`electron(options)` sets how the engine starts Electron and reads its windows.
+The app itself is the target's `app`; see
+[The app under test](#the-app-under-test).
+
+```ts
+electron({ executablePath: 'dist/mac/MyApp.app/Contents/MacOS/MyApp', env: { APP_ENV: 'test' } });
+```
+
+| Option | Type | Default |
+| --- | --- | --- |
+| [`executablePath`](#executablepath) | `string` | the project's `electron` |
+| [`env`](#env) | `Record<string, string>` | `{}` |
+| [`cwd`](#cwd) | `string` | the project root |
+| [`testIdAttribute`](#testidattribute) | `string` | `'data-testid'` |
+| [`settle`](#settle) | `number \| false` | `100` |
+
+Every optional value also accepts `undefined`, so an unset `process.env`
+value needs no conditional spread. Parse a set one for `settle` first: a
+string there is `INVALID_CONFIG`.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_CONFIG` | The options are not an object, or name an option `electron()` does not take. |
+| `INVALID_CONFIG` | `executablePath` is not a non-empty string. |
+| `INVALID_CONFIG` | `env` is not an object of variable name to string value, or sets `ELECTRON_RUN_AS_NODE` or `NODE_OPTIONS`, in any letter case. |
+| `INVALID_CONFIG` | `cwd` is not a non-empty string, or, when the worker starts, names a path that is not a directory. |
+| `INVALID_CONFIG` | `testIdAttribute` is not an attribute name such as `data-testid`. |
+| `INVALID_CONFIG` | `settle` is not a non-negative whole number of milliseconds or `false`. |
+
+#### `executablePath`
+
+```ts
+readonly executablePath?: string | undefined;
+```
+
+```ts
+electron(); // default: the project's electron package
+electron({ executablePath: 'dist/win-unpacked/MyApp.exe' });
+```
+
+- A packaged app's binary, or an Electron binary of your own. A relative
+  path resolves from the project root.
+- On macOS, name the binary inside the bundle, not the `.app` directory.
+- On Windows, name the app's `.exe`, not its folder or a shortcut. An app
+  installed by a Squirrel installer (`electron-winstaller`, Electron Forge's
+  default) keeps a launcher of the same name beside its `app-<version>`
+  folders: name the `.exe` inside the version folder.
+- With the default, the engine downloads the `electron` package's binary
+  before the first test when it is missing, as it is on Electron 45 and newer
+  until first use. Packaged apps work back to Electron 22.
+- [Test a packaged app](/electron#test-a-packaged-app) has the recipe.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_CONFIG` | The path names no executable the engine can start. The message says what is wrong with it. |
+| `ELECTRON_INSTALL_FAILED` | The `electron` package's binary is missing and its download failed, or the package has no `install.js` to download it with. |
+
+#### `env`
+
+```ts
+readonly env?: Readonly<Record<string, string>> | undefined;
+```
+
+```ts
+electron({ env: { APP_ENV: 'test' } }); // default: {}
+```
+
+[Environment](#environment) lists what the app is started with besides these.
+
+#### `cwd`
+
+```ts
+readonly cwd?: string | undefined;
+```
+
+```ts
+electron({ cwd: 'apps/desktop' }); // default: the project root
+```
+
+The directory the app's process starts in: absolute, or relative to the
+project root.
+
+#### `testIdAttribute`
+
+```ts
+readonly testIdAttribute?: string | undefined;
+```
+
+```ts
+electron({ testIdAttribute: 'data-qa' }); // default: 'data-testid'
+```
+
+The attribute `getByTestId` reads.
+
+#### `settle`
+
+```ts
+readonly settle?: number | false | undefined;
+```
+
+```ts
+electron({ settle: 250 }); // default: 100
+```
+
+How long the engine waits, in milliseconds, after an action the agent took
+before the agent observes again. `false` skips the wait. A test's own steps
+never wait: `expect` polls their outcome.
+
+#### The app under test
+
+The app is the target's `app`, documented under
+[the app under test](/reference/config#the-app-under-test).
+
+```ts title="e2e.config.ts"
+export default {
+  targets: [
+    {
+      name: 'electron',
+      engine: electron(),
+      app: { appPath: '.', launchArguments: ['--no-update-check'] },
+    },
+  ],
+} satisfies E2EConfig;
+```
+
+- [`app.appPath`](/reference/config#apppath) is the app's directory or main
+  script, relative to the project root. Leave it out when `executablePath`
+  names a packaged app, which knows its own.
+- [`app.launchArguments`](/reference/config#launcharguments) holds the
+  switches every launch gets: your app's own, and Electron's or Chromium's,
+  such as `--lang=en-US`.
+- `app.open()` launches the app and waits for a window to load. Any window
+  counts, so a splash screen may close first. `screen` then reads the window
+  that loaded.
+- Every test starts on an empty user-data directory of its own and ends with
+  the app quit. `app.restart()` relaunches on the same data, and
+  `app.clearState()` relaunches on empty data.
+- `app.back()` goes to the active window's previous history entry, and fails
+  with `ACTION_FAILED` when it has none.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_CONFIG` | At config load: an `app.url`, an `app.bundleId`, or `app.permissions`; neither `app.appPath` nor `executablePath`; or an `app.launchArguments` entry the engine owns (see [Launch arguments](#launch-arguments)). |
+| `INVALID_CONFIG` | When the worker starts: `app.appPath` does not name an app the binary can run. The message says what is wrong with the path. |
+| `APP_NOT_OPEN` | The app quit before it opened a window, or right after it opened its first one. The message quotes the last lines the app wrote to stderr. |
+| `ENGINE_FAILURE` | The operating system refused to start the binary. |
+
+#### Launch arguments
+
+The engine starts every app with switches of its own, before the target's
+`app.launchArguments` and a test's
+[`launch({ launchArguments })`](#launch). An app with a strict argument parser must allow
+them.
+
+| Switch | Why |
+| --- | --- |
+| `--inspect=0` | The main process's inspector, on a port it chooses, for [`evaluate`](#evaluate). |
+| `--remote-debugging-pipe` | Window automation, on a private pipe with no port. |
+| `--force-color-profile=srgb` | The same pixels on every display. Left out when your arguments set `--force-color-profile`. |
+| `--disable-backgrounding-occluded-windows`, `--disable-renderer-backgrounding`, `--disable-background-timer-throttling` | A covered or hidden window keeps drawing and running its timers. |
+| `--disable-features=CalculateNativeWinOcclusion` | The same. Left out when your arguments set `--disable-features`. |
+| `--no-sandbox` | On Linux only. |
+| `--user-data-dir=<directory>` | The test's own [user-data directory](#userdatadir). |
+
+`app.launchArguments` and `launch({ launchArguments })` must not set `--user-data-dir`,
+`--inspect`, `--inspect-brk`, `--remote-debugging-port`, or
+`--remote-debugging-pipe`: the engine owns them.
+
+#### Environment
+
+The app does not inherit the runner's environment, so model keys and CI tokens
+stay out of it. It is started with these variables of the run's environment,
+then the engine's [`env`](#env), then a test's
+[`launch({ env })`](#launch):
+
+| Kind | Variables |
+| --- | --- |
+| Shell and locale | `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TMPDIR`, `TMP`, `TEMP`, `__CF_USER_TEXT_ENCODING` |
+| Display | `DISPLAY`, `XAUTHORITY`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`, `XDG_SESSION_TYPE`, `XDG_CURRENT_DESKTOP`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `DBUS_SESSION_BUS_ADDRESS` |
+| Windows | `SYSTEMROOT`, `SYSTEMDRIVE`, `WINDIR`, `COMSPEC`, `PATHEXT`, `USERPROFILE`, `USERNAME`, `HOMEDRIVE`, `HOMEPATH`, `APPDATA`, `LOCALAPPDATA`, `PROGRAMDATA`, `PROGRAMFILES`, `PROGRAMFILES(X86)` |
+
+Neither layer can set `ELECTRON_RUN_AS_NODE` or `NODE_OPTIONS`.
+
+#### Capabilities
+
+| Contract member | On Electron |
+| --- | --- |
+| `observe` | The active window's accessibility tree. Nothing is observed in a window that shows a `file:` page outside the app's directory; see [Security](#security). |
+| `perform` | `tap`, `doubleTap`, `multiTap`, `secondaryTap`, `longPress`, `fill`, `clear`, `press`, `check`, `uncheck`, `focus`, `blur`, `hover`, `scrollIntoView`, `selectOption`, `setInputFiles` with paths or in-memory files, `dragTo`, and `swipe`, with tap `modifiers`. `scrollTo` is `UNSUPPORTED_CAPABILITY`. `press` takes the named keys and the characters of a US keyboard; any other character is `UNSUPPORTED_CAPABILITY`. |
+| `performAt` | `tap`, `doubleTap`, `secondaryTap`, `longPress`, `hover`, `dragTo`, `swipe`, and `swipeTo` at a point of the window. |
+| `keyboard` | `type` and `press` into whatever has focus in the active window. |
+| `locate` | Every `screen` query, and CSS selectors through [`electron.locator`](#locator). |
+| `readStyle`, `viewportIntersection` | Declared: computed CSS values of a node, and [`toBeInViewport`](/reference/expect#tobeinviewport). |
+| `validateApp` | See [The app under test](#the-app-under-test). |
+| `session` | `back`, `restart`, `reset`, and the agent's tab verbs, which switch between and close windows. No `open`: `app.open()` is served with `restart`, a fresh launch. The agent cannot close the app's only window. |
+| `artifacts` | Screenshots, with password fields painted black, and video as `video/video.webm`. A recording a test starts later in the same attempt is `video/video-part<n>.webm`. |
+| `state` | Not declared. `test.setup` and `session:` are unavailable. |
+
+### The electron fixture
+
+`electron` is what a test asks of the app itself, not of a control in a
+window.
+
+```ts
+test('opens on saved settings', async ({ electron, screen }) => {
+  await electron.launch({ launchArguments: ['--skip-onboarding'] });
+  await expect(screen.getByRole('heading', 'Projects')).toBeVisible();
+});
+```
+
+| Member | Returns |
+| --- | --- |
+| [`userDataDir`](#userdatadir) | `string` |
+| [`launch`](#launch) | `Promise<void>` |
+| [`evaluate`](#evaluate) | `Promise<R>` |
+| [`windows`](#windows) | `readonly ElectronWindow[]` |
+| [`activeWindow`](#activewindow) | `ElectronWindow` |
+| [`waitForWindow`](#waitforwindow) | `Promise<ElectronWindow>` |
+| [`window`](#window) | `Promise<ElectronWindow>` |
+| [`waitForDownload`](#waitfordownload) | `Promise<{ path, absolutePath, … }>` |
+| [`onDialog`](#ondialog) | `Promise<() => Promise<void>>` |
+| [`locator`](#locator) | `Locator` |
+| [`keyboard`](#keyboard) | `ElectronKeyboard` |
+| [`mouse`](#mouse) | `ElectronMouse` |
+
+Every async member is a recorded step named `electron.<method>`. The
+[config](/reference/config) sets each member's budget:
+
+- `launch`: the test's [`timeout`](/reference/config#timeout), or its own
+  `timeout` option.
+- `waitForWindow`, `window`, and `waitForDownload`:
+  [`actionTimeout`](/reference/config#actiontimeout), or their own `timeout`
+  option.
+- `keyboard.type`: `actionTimeout` plus `delay` for each character.
+- Every other async member: `actionTimeout`.
+- `userDataDir`, `windows`, `activeWindow`, and `locator` are not steps.
+- Every `timeout` option is in milliseconds.
+
+The types the entries use are under [Types](#types).
+
+| Throws | When |
+| --- | --- |
+| `APP_NOT_OPEN` | The app is not running, has no open window, or quit on its own. Open it with `app.open()`. |
+| `APP_NOT_OPEN` | The step follows a dialog that no handler answered. See [`onDialog`](#ondialog). |
+| `ACTION_FAILED` | The member's budget expired. |
+
+#### `userDataDir`
+
+```ts
+readonly userDataDir: string;
+```
+
+```ts
+writeFileSync(path.join(electron.userDataDir, 'settings.json'), '{"theme":"dark"}');
+```
+
+- It exists before the app is launched and is empty until the app writes to
+  it, so a test can put data in it first, or pass it on with
+  [`launch({ env })`](#launch).
+- Each attempt gets a new directory under the OS temp directory, named
+  `e2e-electron-<random>`. It is deleted when the attempt ends.
+- `app.restart()` keeps it. `app.clearState()` empties it.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_STATE` | It is read outside a test. |
+
+#### `launch`
+
+```ts
+launch(options?: ElectronLaunchOptions): Promise<void>;
+```
+
+```ts
+await electron.launch({
+  launchArguments: ['--skip-onboarding'],
+  env: { APP_DATA_PATH: electron.userDataDir },
+});
+```
+
+| Option | Type | Default |
+| --- | --- | --- |
+| `launchArguments` | `readonly string[]` | `[]` |
+| `env` | `Record<string, string>` | `{}` |
+| `cwd` | `string` | the engine's `cwd` |
+| `timeout` | `number` | the test's `timeout` |
+
+- `launchArguments` go after the target's `app.launchArguments`.
+- `env` goes over the engine's [`env`](#env). `cwd` replaces the engine's
+  [`cwd`](#cwd), absolute or relative to the project root.
+- A running app is quit first, and the app launches fresh, as `app.open()`
+  does.
+- The options stay for the rest of the test: `app.open()`, `app.restart()`,
+  and `app.clearState()` launch with them too. Another `launch()` replaces
+  them; it does not add to them.
+
+| Throws | When |
+| --- | --- |
+| `POLICY_DENIED` | A secret anywhere in the options. |
+| `INVALID_ARGUMENT` | The options are not an object, or name an option other than these four. |
+| `INVALID_ARGUMENT` | `launchArguments` is not a list of strings, or sets a switch the engine owns (see [Launch arguments](#launch-arguments)). |
+| `INVALID_ARGUMENT` | `env` is not an object of variable name to string value, or sets `ELECTRON_RUN_AS_NODE` or `NODE_OPTIONS`. |
+| `INVALID_ARGUMENT` | `cwd` is not a non-empty string, or names a path that is not a directory. |
+
+A launch that fails throws what `app.open()` does; see
+[The app under test](#the-app-under-test).
+
+#### `evaluate`
+
+```ts
+evaluate<R>(fn: (electron: ElectronMainModule) => R | Promise<R>): Promise<R>;
+evaluate<R, A>(fn: (electron: ElectronMainModule, arg: A) => R | Promise<R>, arg: A): Promise<R>;
+```
+
+```ts
+const userData = await electron.evaluate(({ app }) => app.getPath('userData'));
+await electron.evaluate(({ dialog }, filePath) => {
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
+}, '/tmp/report.csv');
+```
+
+- `fn` runs in the app's main process and receives its `electron` module,
+  typed by the project's own `electron` package.
+- `fn` is sent as source text: it cannot close over the test's variables, so
+  pass them as `arg`.
+- `require` is not in scope inside `fn`. Use the `electron` argument or
+  `process.getBuiltinModule('node:fs')`.
+- `arg` must be plain JSON.
+- A promise is awaited. The result comes back as plain data: a function or a
+  symbol is left out, as is a reference back to an object that holds it and
+  anything nested more than 32 levels deep. A `bigint` comes back as a string
+  and a `Date` as its JSON string.
+
+| Throws | When |
+| --- | --- |
+| `POLICY_DENIED` | `arg` is or holds a secret. |
+| `INVALID_ARGUMENT` | `arg` is not JSON, `fn` is not a function, or `fn` cannot be sent as source text. Pass an arrow function or a function expression. |
+| `EVALUATE_FAILED` | `fn` threw. The error carries its message. |
+| `UNSUPPORTED_CAPABILITY` | The main process opened no inspector, as a packaged app built with the `EnableNodeCliInspectArguments` fuse off does. |
+| `APP_NOT_OPEN` | The app is not running, or quit while `fn` ran. |
+
+#### `windows`
+
+```ts
+windows(): readonly ElectronWindow[];
+```
+
+```ts
+const [main] = electron.windows();
+await main.activate();
+```
+
+- Windows are listed in the order they opened.
+- A window is a `BrowserWindow`, a `WebContentsView`, or a `<webview>` guest.
+  A DevTools window the app opens is not listed.
+- The same window is the same object for as long as the app runs.
+- [Windows](#windows-and-the-active-window) lists what a window can do.
+
+#### `activeWindow`
+
+```ts
+activeWindow(): ElectronWindow;
+```
+
+```ts
+const window = electron.activeWindow();
+```
+
+| Throws | When |
+| --- | --- |
+| `INVALID_STATE` | The app is not running or has no open window. |
+
+#### `waitForWindow`
+
+```ts
+waitForWindow(trigger: () => Promise<void>, options?: { readonly timeout?: number }): Promise<ElectronWindow>;
+```
+
+```ts
+const settings = await electron.waitForWindow(() =>
+  screen.getByRole('button', 'Open settings').tap(),
+);
+```
+
+- It takes the first window that was not open before the trigger ran.
+- The wait includes the trigger's own time. A trigger that throws fails with
+  its own error.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | `trigger` is not a function. |
+| `ACTION_FAILED` | No window opened in time. The message is `no window opened within <n>ms; the trigger resolved after <m>ms`. |
+
+#### `window`
+
+```ts
+window(which: WindowMatcher, options?: { readonly timeout?: number }): Promise<ElectronWindow>;
+```
+
+```ts
+const main = await electron.window({ title: 'My App' });
+await main.activate();
+const docs = await electron.window({ url: /\/docs\// });
+```
+
+- `title` and `url` each take an exact string or a `RegExp`. With both, a
+  window must match both. The first open window that matches wins.
+- The window does not become active: call `activate()`.
+- `title` matches the document's title or the OS window's.
+- When the main process opened no inspector, `title` matches document titles
+  only.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | `which` has neither `title` nor `url`. |
+| `ACTION_FAILED` | No window matched in time. The message lists the titles of the open windows. |
+
+#### `waitForDownload`
+
+```ts
+waitForDownload(trigger: () => Promise<void>, options?: { readonly timeout?: number }): Promise<{ readonly path: string; readonly absolutePath: string; readonly suggestedFilename: string }>;
+```
+
+```ts
+const file = await electron.waitForDownload(() => screen.getByRole('link', 'Export').tap());
+expect(file.suggestedFilename).toBe('report.csv');
+```
+
+- It registers the file as a `download` artifact, saved as
+  `downloads/<NNN>-<name>`, and returns that relative `path`, the
+  `absolutePath` of the saved copy, and `suggestedFilename`.
+- Downloads never land in your own Downloads folder: the app saves them in
+  the `Downloads` folder of the test's [user-data directory](#userdatadir).
+- A trigger that throws fails with its own error.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | `trigger` is not a function. |
+| `ACTION_FAILED` | No download finished in time. The message is `no download finished within <n>ms of the trigger`. |
+| `ENGINE_FAILURE` | The download ended without completing, such as one the app cancelled. |
+
+#### `onDialog`
+
+```ts
+onDialog(handler: DialogHandler): Promise<() => Promise<void>>;
+```
+
+```ts
+const off = await electron.onDialog('accept');
+await screen.getByRole('button', 'Delete').tap();
+await off();
+
+await electron.onDialog(async (dialog) => {
+  expect(dialog.message).toBe('Discard changes?');
+  await dialog.dismiss();
+});
+```
+
+- It answers the `alert` and `confirm` dialogs the app opens from then on.
+  The newest handler wins.
+- It resolves with a function that removes the handler.
+- A dismissed `confirm()` returns `false` in the page.
+- A function handler that returns without calling `accept` or `dismiss` has
+  its dialog dismissed, as an unhandled dialog does.
+- A handler that throws fails the next step with its error, or the attempt at
+  its end when no step follows. One that throws before answering has its
+  dialog dismissed.
+- Handlers last until the test ends.
+- Electron does not implement `window.prompt()`, so there is no `prompt`
+  dialog to answer.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | `handler` is not `'accept'`, `'dismiss'`, or a function. |
+
+The other errors surface on the next step, not on `onDialog`:
+
+| Throws | When |
+| --- | --- |
+| `APP_NOT_OPEN` | No handler took the dialog, or a function handler answered neither way. |
+| `ASSERTION_FAILED` | The handler's `expect` failed. |
+| `ENGINE_FAILURE` | The handler threw an unclassified error. |
+
+#### `locator`
+
+```ts
+locator(selector: string): Locator;
+```
+
+```ts
+await electron.locator('.toolbar [data-action="export"]').tap();
+```
+
+- The selector matches in the window `screen` reads: in its document and in
+  each open shadow root, one root at a time. It never enters a frame.
+- Use it for an element no role, label, text, or test id names.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | `selector` is not a string, or is blank. |
+| `INVALID_LOCATOR` | The selector is not valid CSS. Thrown when the locator is used. |
+
+#### `keyboard`
+
+```ts
+readonly keyboard: ElectronKeyboard;
+```
+
+```ts
+await electron.keyboard.press('Escape');
+await electron.keyboard.press('ControlOrMeta+P');
+await electron.keyboard.type('hello', { delay: 20 });
+```
+
+| Method | Returns |
+| --- | --- |
+| `press(key)` | `Promise<void>` |
+| `down(key)` | `Promise<void>` |
+| `up(key)` | `Promise<void>` |
+| `type(text, { delay }?)` | `Promise<void>` |
+| `insertText(text)` | `Promise<void>` |
+
+- Input goes to whatever holds focus in the active window. Prefer
+  `locator.press()` and `locator.fill()` when there is an element to name.
+- `press` takes one key with its modifiers. `down` holds one key until `up`
+  releases it; each takes one key without modifiers, and a held modifier
+  applies to the keys and mouse events after it.
+- `type` types plain text key by key, `delay` milliseconds apart (default
+  `0`). `insertText` sends input events and no key events, as an input
+  method's commit does.
+- A shortcut the page handles works. A menu accelerator does not, and
+  `before-input-event` never receives the keys. Trigger a menu item with
+  [`evaluate`](#evaluate).
+- [`ElectronKeyboard`](#types) has the declaration.
+
+| Throws | When |
+| --- | --- |
+| `POLICY_DENIED` | A secret. Fill one with `locator.fill()`. |
+| `INVALID_ARGUMENT` | The key or text is not a string, or `delay` is not a non-negative number. |
+| `UNSUPPORTED_CAPABILITY` | The keyboard has no such key: only named keys and the characters of a US keyboard have one. |
+
+#### `mouse`
+
+```ts
+readonly mouse: ElectronMouse;
+```
+
+```ts
+await electron.mouse.move(120, 240);
+await electron.mouse.down();
+await electron.mouse.move(320, 240);
+await electron.mouse.up();
+```
+
+| Method | Returns |
+| --- | --- |
+| `move(x, y)` | `Promise<void>` |
+| `down({ button }?)` | `Promise<void>` |
+| `up({ button }?)` | `Promise<void>` |
+| `wheel(deltaX, deltaY)` | `Promise<void>` |
+
+- Points are in viewport CSS pixels. `down`, `up`, and `wheel` act where the
+  pointer is.
+- `button` is `'left'`, `'right'`, or `'middle'`. Default: `'left'`.
+- [`ElectronMouse`](#types) has the declaration.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | `move` or `wheel` is given anything but two finite numbers, or `button` is not one of the three names. |
+
+#### Windows and the active window
+
+Windows work like [tabs in a browser test](/reference/web#tabs). `screen`,
+`expect`, and the agent act on one active window, starting with the window
+that loaded when the app launched. A window the app opens does not become
+active on its own: [`waitForWindow`](#waitforwindow) or `activate()` makes it
+so.
+
+```ts
+const window = electron.activeWindow();
+const theme = await window.evaluate((key) => localStorage.getItem(key), 'theme');
+await window.reload();
+```
+
+| Method | Returns |
+| --- | --- |
+| `title()` | `Promise<string>` |
+| `url()` | `Promise<string>` |
+| `isActive()` | `boolean` |
+| `isClosed()` | `boolean` |
+| `activate()` | `Promise<void>` |
+| `evaluate(fn, arg?)` | `Promise<R>` |
+| `reload()` | `Promise<void>` |
+| `close()` | `Promise<void>` |
+
+- `title()` returns the document's title, or the OS window's when the
+  document has none or does not answer.
+- `evaluate()` runs `fn` in the window's page, where the app's own globals
+  are. It follows the rules of [`electron.evaluate`](#evaluate): `fn` is sent
+  as text, and `arg` and the result are plain JSON.
+- `reload()` resolves once the document has loaded again.
+- `close()` closes the window past any `beforeunload` guard, the app's last
+  window too. Closing a window that already closed does nothing.
+- When the active window closes, the window that opened it is active again,
+  else the one active before it that is still open, else the newest.
+- The agent sees windows as tabs and switches between them on its own.
+- The async methods are recorded steps named `window.<method>`, bounded by
+  `actionTimeout`.
+- [`ElectronWindow`](#types) has the declaration.
+
+| Throws | When |
+| --- | --- |
+| `ACTION_FAILED` | `activate`, `evaluate`, or `reload` on a window that has closed. |
+| `POLICY_DENIED` | `evaluate` with an `arg` that is or holds a secret. |
+| `INVALID_ARGUMENT` | `evaluate` with an `arg` that is not JSON, or an `fn` that is not a function or cannot be sent as source text. |
+| `EVALUATE_FAILED` | The function `evaluate` ran threw. |
+
+## Behavior on Electron
+
+These hold on an Electron target and differ from a web target.
+
+| Area | On Electron |
+| --- | --- |
+| Finding elements | An element inside an `inert` subtree, such as the page behind a modal, has no role or label: `getByRole` and `getByLabel` don't find it. `getByText`, `getByTestId`, and [`electron.locator()`](#locator) do, and input to it, such as `tap()` or `fill()`, fails with `it is inert`. |
+| `aria-owns` | An element `aria-owns` names reads under its owner, so query results, `.or()`, and `first()` order it there, not in document order. |
+| Parallel workers | Each test gets its own user-data directory, so tests run in parallel. If your app overrides `app.setPath('userData', ...)`, set `workers: 1`. |
+| Clipboard | The app uses your OS clipboard, so a test's copy overwrites yours. Set `workers: 1` for clipboard tests. |
+| Theme and locale | `prefers-color-scheme` follows `nativeTheme` and the OS. Chromium UI strings follow the OS locale; add `--lang=en-US` to `app.launchArguments` to pin English. |
+| Long press | Holds for 800 ms by default, compared to 500 ms on the web. |
+| Upload | `setInputFiles` attaches files by path, resolved from the project root, or from memory. It works on a file `<input>` and on a button that opens a file chooser, and `[]` clears an input. A path that names no file is `INVALID_ARGUMENT`, and so are several files for a chooser that takes one. |
+| Crashed renderers | A crashed window fails reads with `APP_NOT_OPEN` until you reload it with `electron.evaluate()` or restart the app. |
+| Video | The recording follows the active window, through `app.restart()` too, and is saved as one `.webm`. Encoding needs ffmpeg with VP9: the one `E2E_FFMPEG_PATH` names, else the one on your `PATH`, else one the engine downloads on the first recording and keeps in the e2e cache. On a platform with no build to download, recording fails with `UNSUPPORTED_CAPABILITY` until you set `E2E_FFMPEG_PATH`. |
+| Headless mode | Electron always opens windows unless your app hides them, and `--headed` has no effect. On Linux CI, run under `xvfb-run`. |
+
+### Not supported yet
+
+- Content inside an `iframe` or `webview`. A `webview` guest is listed as a
+  window, so [`electron.window()`](#window) reaches it.
+- Routes and cookies. Use `session.defaultSession` in
+  [`electron.evaluate()`](#evaluate) instead.
+- Session save and restore.
+- Reading the app's console from a test.
+
+## Security
+
+- **Isolated environment:** the app gets only the variables under
+  [Environment](#environment). Pass anything your app needs with
+  [`env`](#env).
+- **Password fields:** password values can't be read and are painted black in
+  screenshots. If a password field sits inside a closed shadow root where
+  masks can't reach, screenshots of that window are withheld with
+  `POLICY_DENIED`.
+- **Local file boundary:** if a window navigates to a `file:` path outside
+  your app's directory, the agent gets no observation and screenshots and
+  video frames of it are refused. The app's directory is what the main
+  process reports, else `app.appPath`, else the directory or `.asar` archive
+  of the first local page the app showed. When `app.appPath` names a main
+  script, it is the script's package inside the project. When none is known,
+  every `file:` page is outside.
+- **Inspector port:** window automation runs over a private pipe, while the
+  main process listens on an unauthenticated loopback port for
+  [`electron.evaluate()`](#evaluate) during each test.
+- **Secrets:** `launch`, `evaluate`, `keyboard`, and a window's `evaluate`
+  refuse a secret with `POLICY_DENIED`. Fill one into a field with
+  `locator.fill()`.
+
+## Types
+
+`ElectronEngine`, `ElectronOptions`, `Electron`, `ElectronFixtures`,
+`ElectronWindow`, `ElectronKeyboard`, `ElectronMouse`,
+`ElectronLaunchOptions`, `ElectronMainModule`, `WindowMatcher`, `Dialog`, and
+`DialogHandler` are exported from `@e2e-dev/electron`. The runtime exports
+are `electron`, also the default export, and `test`, `describe`,
+`beforeEach`, `afterEach`, `beforeAll`, and `afterAll`, typed with the
+`electron` fixture.
+
+`@e2e-dev/electron/engine` exports `electron` and the types without `test`,
+for a program that drives an Electron app with
+[`@e2e-dev/core`](/reference/core). Without `e2e` installed, `electron()`
+still loads, and `test` from the main entry throws `RUNNER_NOT_INSTALLED`
+when used.
+
+Each `ElectronOptions` member is declared in its
+[Options](#options) entry, and each `Electron` member in its
+[fixture](#the-electron-fixture) entry.
+
+```ts
+export interface ElectronWindow {
+  title(): Promise<string>;
+  url(): Promise<string>;
+  isActive(): boolean;
+  isClosed(): boolean;
+  activate(): Promise<void>;
+  evaluate<R>(fn: () => R | Promise<R>): Promise<R>;
+  evaluate<R, A>(fn: (arg: A) => R | Promise<R>, arg: A): Promise<R>;
+  reload(): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface WindowMatcher {
+  readonly title?: string | RegExp;
+  readonly url?: string | RegExp;
+}
+
+export type ElectronMainModule = typeof import('electron');
+
+export interface ElectronLaunchOptions {
+  readonly launchArguments?: readonly string[] | undefined;
+  readonly env?: Readonly<Record<string, string>> | undefined;
+  readonly cwd?: string | undefined;
+  readonly timeout?: number | undefined;
+}
+
+export interface ElectronKeyboard {
+  press(key: string): Promise<void>;
+  down(key: string): Promise<void>;
+  up(key: string): Promise<void>;
+  type(text: string, options?: { readonly delay?: number }): Promise<void>;
+  insertText(text: string): Promise<void>;
+}
+
+export interface ElectronMouse {
+  move(x: number, y: number): Promise<void>;
+  down(options?: { readonly button?: 'left' | 'right' | 'middle' }): Promise<void>;
+  up(options?: { readonly button?: 'left' | 'right' | 'middle' }): Promise<void>;
+  wheel(deltaX: number, deltaY: number): Promise<void>;
+}
+
+export interface Dialog {
+  readonly type: 'alert' | 'confirm';
+  readonly message: string;
+  accept(): Promise<void>;
+  dismiss(): Promise<void>;
+}
+
+export type DialogHandler = 'accept' | 'dismiss' | ((dialog: Dialog) => void | Promise<void>);
+```
+
+## Related
+
+The [Electron](/electron) guide covers setup, recipes for each fixture member,
+packaged apps, and Linux CI. The portable lifecycle methods are on
+[`app`](/reference/app).

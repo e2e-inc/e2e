@@ -2010,7 +2010,7 @@ export interface VideoLink {
 
 #### 提供方录制
 
-从托管服务租用浏览器或设备的引擎，可以让服务录制尝试，而不自行捕获。这就是 [`BrowserProvider.record`](/browser#recording-on-the-provider) 和 [`DeviceProvider.record`](/mobile#hosted-devices) 的工作方式。`e2e/engine` 导出共享结构和 `stopProviderRecording`，让所有引擎都以相同方式将提供方的录制转换为 `VideoSegment`。
+从托管服务租用浏览器或设备的引擎，可以让服务录制尝试，而不自行捕获。这就是 [`BrowserProvider.record`](/reference/web) 和 [`DeviceProvider.record`](/mobile#hosted-devices) 的工作方式。`e2e/engine` 导出共享结构和 `stopProviderRecording`，让所有引擎都以相同方式将提供方的录制转换为 `VideoSegment`。
 
 ```ts
 async stopVideo(context) {
@@ -2417,4 +2417,4 @@ export type QueryKind = 'role' | 'label' | 'placeholder' | 'text' | 'displayValu
 
 ## 相关内容
 
-[引擎](/engines)比较了构建引擎的不同方式。[编写引擎](/writing-an-engine)逐步介绍 `defineEngine`，[引擎服务器](/engine-servers)则介绍如何在其他进程、机器中运行引擎，或使用其他语言实现引擎。`@e2e-dev/web`（[参考](/reference/web)）和 `@e2e-dev/mobile`（[参考](/reference/mobile)）都使用同一个公共 `defineEngine` 实现此契约。
+[引擎](/engines)比较了构建引擎的不同方式。[编写引擎](/writing-an-engine)逐步介绍 `defineEngine`，[引擎服务器](/reference/engine-protocol)则介绍如何在其他进程、机器中运行引擎，或使用其他语言实现引擎。`@e2e-dev/web`（[参考](/reference/web)）和 `@e2e-dev/mobile`（[参考](/reference/mobile)）都使用同一个公共 `defineEngine` 实现此契约。

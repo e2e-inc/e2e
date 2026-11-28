@@ -1,14 +1,14 @@
 ---
 title: Test apps and websites on Revyl
 sidebarTitle: Revyl
-description: Run mobile app tests on Revyl's hosted iOS simulators and Android emulators, and web tests in Revyl's hosted Chrome, with @e2e-dev/revyl.
+description: "Run e2e mobile app tests on Revyl's hosted iOS simulators and Android emulators, and web tests in Revyl's hosted Chrome, with @e2e-dev/revyl."
 ---
 
 `@e2e-dev/revyl` is a hosted device provider for the mobile engine.
 It starts a Revyl device for each worker, installs your app on it, and releases the device when the run ends.
 Use the standard `app`, `screen`, and `expect` APIs to test your app's user flows.
 For websites, `revylBrowsers()` from `@e2e-dev/revyl/web` is a
-[browser provider](/browser#hosted-browsers) that runs each test in Chrome on
+[browser provider](/reference/web#hosted-browsers) that runs each test in Chrome on
 Revyl ([Run web targets in browsers](#run-web-targets-in-browsers)).
 
 ## Install and authenticate
@@ -223,7 +223,7 @@ Revyl sign-in. With `REVYL_API_URL` set, it logs `session <id>` alone.
 | --- | --- | --- |
 | `app` | required | Id of the Revyl Web app the sessions run under. |
 | `url` | required | `http(s)` URL each session opens on, without credentials in it. Revyl must be able to load it. |
-| `viewport` | Revyl's default | `{ width, height }` in CSS pixels, 320 to 3840 by 240 to 2160. The browser keeps it for the whole session. |
+| `viewport` | `{ width: 1280, height: 800 }` | `{ width, height }` in CSS pixels, 320 to 3840 by 240 to 2160. The browser keeps it for the whole session. |
 | `idleTimeoutSeconds` | `600` | Seconds without activity before Revyl ends a session the run left open, at least 60. |
 
 Unknown or invalid options fail config load with `INVALID_CONFIG`.
@@ -232,9 +232,10 @@ Unknown or invalid options fail config load with `INVALID_CONFIG`.
 
 - Every attempt, retries included, starts a new session, on the session's
   one browser context and its first tab. Each test pays for a session start,
-  and the [limits of a per-attempt lease](/browser#pick-a-lease-scope) apply.
+  and the [limits of a per-attempt lease](/reference/web#pick-a-lease-scope) apply.
 - The web engine's `viewport` must be `null`. Revyl refuses to resize the
-  browser, so `browser.setViewport` and a set `viewport` fail.
+  browser: `browser.setViewport` fails at once, and a set engine `viewport`
+  leaves the attempt waiting until the test times out.
 - The CDP URL works once. A dropped connection is not reattached, and the
   attempt fails; a retry starts a new session.
 - An attempt that records video, such as with `--video`, gets Revyl's own
@@ -247,7 +248,8 @@ Unknown or invalid options fail config load with `INVALID_CONFIG`.
 - The site runs on Revyl's network, so point `url` and `app.url` at a
   deployed URL, not `localhost`.
 - When an attempt ends, on every exit path, the provider stops its session.
-  If the run itself dies, Revyl ends each session after
+  When the run ends, it stops the session of any worker that died before it
+  could. If the run itself dies, Revyl ends each session after
   `idleTimeoutSeconds` without activity.
 
 ## Next

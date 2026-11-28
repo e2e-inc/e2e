@@ -54,6 +54,12 @@ export class Keyboard {
     return this.heldModifiers;
   }
 
+  /** Whether a modifier is held now, by any name it is pressed by (`ControlOrMeta` too). */
+  holds(modifier: string): boolean {
+    const key = platformKey(modifier);
+    return isModifier(key) && this.heldModifiers.has(key);
+  }
+
   /** Forgets what is held: the renderer that held it is gone. */
   reset(): void {
     this.heldModifiers.clear();

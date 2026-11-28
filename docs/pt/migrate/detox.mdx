@@ -43,6 +43,7 @@ Para uma migração que se estende por várias sessões, a [skill `migrate-to-e2
 | `devices.<name>.device.type` | `mobile({ device: 'iPhone 17' })` |
 | `configurations` | `targets`, uma engine por plataforma |
 | `maxWorkers` do Jest | `workers`, um por dispositivo |
+| `globalSetup`, `globalTeardown` do Jest | [Serviços](/services), ou inicie as dependências antes da execução |
 | `apps.<name>.launchArgs` | `app.launchArguments` no alvo. Use um objeto com as mesmas chaves ou uma lista de strings para cada plataforma. No Android, cada chave é um extra tipado separado na intent de inicialização. O Detox coloca todas as chaves como strings em um único extra de bundle `launchArgs`, então mude o código que lê `getIntent().getBundleExtra("launchArgs")`. No iOS, cada chave é um argumento de `UserDefaults`: `false` vira `NO`, e uma string como `a b` ou `-1` ganha aspas. Se o app lê `ProcessInfo.processInfo.arguments`, use o formato de lista. Objetos aninhados não são suportados |
 | `launchApp({ permissions })` | `app.permissions` no alvo: `grant`, `deny`, `reset` para `YES`, `NO`, `unset`. Mais nomes estão [planejados](#planned) |
 
@@ -122,6 +123,7 @@ test('shows the home screen', async ({ agent, app, screen }) => {
 | `.swipe('up', 'fast')` | `.swipe({ direction: 'down', momentum: 'fast' })`. O Detox nomeia a direção do dedo, e o e2e, a do conteúdo |
 | `list.scroll(200, 'down')` | `list.swipe({ direction: 'down' })`, sem deslocamento |
 | `waitFor(el).toBeVisible().whileElement(list).scroll(...)` | `list.scrollUntilVisible(el)`, com `{ direction: 'up' }` quando o Detox rola para cima |
+| `list.scrollTo('bottom')`, `scrollTo('top')` | `list.scrollTo('bottom')`, `list.scrollTo('top')` |
 
 ### Expectativas
 
@@ -169,15 +171,13 @@ deixado de fora de propósito.
 | `by.id('x').and(by.text('y'))` | `.filter({ hasText })` ou `device.locator('id=x label="y"')` |
 | `system.element(by.system.label('Allow'))` | `device.alert('accept' \| 'dismiss')`, ou `app.permissions` para que nenhum prompt apareça |
 | `.longPressAndDrag()`, deslocamento de `.swipe()` | `.dragTo(target)`, `screen.swipe({ from, to })` |
-| `.scrollTo('bottom')` | `list.scrollUntilVisible(lastRow)`, ou a primeira linha com `{ direction: 'up' }` |
 | `.tapBackspaceKey()` | `.fill(t)` com o texto mais curto |
 | `.setDatePickerDate()`, `.setColumnToValue()`, `.adjustSliderToPosition()` | Um objetivo `agent.act`, ou `screen.swipe({ from, to })` em um slider |
 | `permissions` para `health`, `homekit`, `speech`, `faceid`, `userTracking`; valores `always`, `inuse`, `limited` | Toque no botão do prompt ou use `device.alert('accept')` |
 | `device.sendUserNotification()`, `.pinch()` | `client.apps.push()`, `client.interactions.pinch()` em [`unstable_raw`](/reference/mobile#unstable_raw) |
 | `launchApp({ languageAndLocale })` | No iOS, `app.launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' }`, veja [Rode o app em outro idioma](/mobile#run-the-app-in-another-language) |
-| `globalSetup`, `globalTeardown` do Jest | Inicie as dependências antes da execução |
 | `device.reverseTcpPort()` | Rode `adb reverse` em um step da CI |
-| `.getAttributes()` | `.textContent()`, `.inputValue()`, `.isEnabled()`, `.isVisible()`, `.isChecked()`, `.boundingBox()` |
+| `.getAttributes()` | `.textContent()`, `.inputValue()`, `.getAttribute()`, `.isEnabled()`, `.isVisible()`, `.isChecked()`, `.boundingBox()` |
 | `device.setStatusBar()` | `xcrun simctl status_bar`. `toHaveScreenshot` mantém a barra de status fixa |
 
 ### Ainda não

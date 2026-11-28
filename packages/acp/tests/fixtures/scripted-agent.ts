@@ -3,14 +3,15 @@
  * with one entry per prompt turn, or an object keyed by text the prompt
  * contains, each a list of moves: call one of the client's MCP tools or several at once,
  * ask permission for a tool of the agent's own, run one
- * without asking, say something, fail the turn with a message in the error's
+ * without asking, say something, refuse the turn, fail the turn with a message in the error's
  * data, or hang until cancelled or for good. Every prompt and tool result is appended to `ACP_LOG` as JSON
  * lines, with the tool list the session saw, the names of the `E2E_`
  * variables it started with, the fields of `CODEX_CONFIG` the tests read,
  * a hash of `DEFAULT_AUTH_REQUEST`, and whether each Codex sign-in variable
  * is unset, empty, or set, and whether `NODE_DEBUG` is: never a credential. `ACP_USAGE` is the usage
  * each turn reports. With `ACP_HANG_INIT` set, the agent never answers
- * `initialize`; with `ACP_AUTH_REQUIRED=1` it refuses `session/new` as
+ * `initialize`; with `ACP_IMAGES=1` it takes images in a prompt and logs
+ * their types; with `ACP_AUTH_REQUIRED=1` it refuses `session/new` as
  * not signed in, and with `ACP_PROMPT_AUTH_REQUIRED=1` every prompt.
  */
 
@@ -48,6 +49,7 @@ type Move =
   | { readonly ran: string; readonly kind?: string; readonly status?: 'completed' | 'failed' | 'in_progress' }
   | { readonly say: string }
   | { readonly fail: string }
+  | { readonly refuse: true }
   /** `thenRan` runs a tool of the agent's own without asking once the turn is cancelled, before the turn ends. */
   | { readonly hang: true; readonly thenRan?: string }
   | { readonly ignoreCancel: true };
@@ -201,7 +203,7 @@ agent()
     process.env['ACP_HANG_INIT'] === undefined
       ? {
           protocolVersion: PROTOCOL_VERSION,
-          agentCapabilities: { mcpCapabilities: { http: true }, sessionCapabilities: { close: {} } },
+          agentCapabilities: { mcpCapabilities: { http: true }, sessionCapabilities: { close: {} }, ...(process.env['ACP_IMAGES'] === '1' ? { promptCapabilities: { image: true } } : {}) },
           agentInfo: { name: 'scripted-agent', version: '1' },
           authMethods: [],
         }
@@ -260,6 +262,8 @@ agent()
     if (process.env['ACP_PROMPT_AUTH_REQUIRED'] === '1') throw new RequestError(-32000, 'Authentication required');
     const text = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('\n');
     log({ prompt: text });
+    const images = params.prompt.filter((block) => block.type === 'image').map((block) => (block.type === 'image' ? block.mimeType : ''));
+    if (images.length > 0) log({ images });
     screen = text;
     cancelRequested = false;
     for (const move of movesFor(text, turn++)) {
@@ -301,6 +305,8 @@ agent()
         await Promise.all(
           move.batch.map(async ({ call, args }) => log({ call, result: await mcp!.callTool({ name: call, arguments: { ...args } }) })),
         );
+      } else if ('refuse' in move) {
+        return { stopReason: 'refusal' };
       } else if ('ignoreCancel' in move) {
         await new Promise<never>(() => undefined);
       } else if ('hang' in move) {

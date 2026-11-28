@@ -197,7 +197,7 @@ test('asks for the email', async ({ app, agent, screen }) => {
 | `retryTapIfNoChange` | 結果を検証し、テスト内で再度タップ。無条件の 2 回目のタップは、コントロールを二重に実行するおそれがあります |
 | `waitToSettleTimeoutMs` | 操作の後に、独自の `timeout` を指定したアサーション。そのアサーションが待機を担います |
 | `toggleAirplaneMode`, `toggleDarkMode` | 目的の状態を指定: `device.setAirplaneMode(true)`、`device.setAppearance('dark')` |
-| Maestro Studio | [`npx e2e mcp`](/mcp-server) 経由のコーディングエージェント、または `screen.debug()` と `npx e2e run --watch` や `--step` |
+| Maestro Studio | [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) 経由のコーディングエージェント、または `screen.debug()` と `npx e2e run --watch` や `--step` |
 | `waitForAnimationToEnd` | アニメーション終了時に現れる要素への `await expect(locator).toBeVisible()` |
 | `below`, `above`, `leftOf`, `rightOf` | `getByLabel`、テスト ID、共通コンテナーの `filter({ has })`、または `agent.act` のゴール |
 

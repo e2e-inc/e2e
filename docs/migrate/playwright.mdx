@@ -1,6 +1,6 @@
 ---
 title: From Playwright
-description: Run e2e alongside Playwright and migrate tests one file at a time.
+description: "Migrate from Playwright to e2e by running both side by side, porting the config, and moving tests one file at a time with a map of each Playwright API."
 "og:image": "https://e2e.com/docs/images/og/migrate/playwright.png?v=e01f34cedb"
 "twitter:image": "https://e2e.com/docs/images/og/migrate/playwright.png?v=e01f34cedb"
 ---
@@ -32,7 +32,7 @@ at a time. `@e2e-dev/web` brings its own pinned `playwright-core`, so your
 
 </SetupPrompt>
 
-For a migration that spans several sessions, the [`migrate-to-e2e` skill](/coding-agents#migrate-an-existing-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
+For a migration that spans several sessions, the [`migrate-to-e2e` skill](/migrate#let-an-agent-migrate-the-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
 
 ## Port the config
 
@@ -355,7 +355,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | `locator.locator(selector)` | A `screen` query inside the scope, such as `card.getByRole('button', { name: 'Close' })`, or one `browser.locator` selector, such as `'.card >> .close'` |
 | `getByTitle()` | `browser.locator('[title="Close"]')`. A title is a DOM attribute, so it has no `screen` query |
 | `page.waitForLoadState()` | An assertion on what the next page shows. A navigation waits for `load`, and each action and assertion waits for its node |
-| `npx playwright codegen`, the Inspector | [`npx e2e mcp`](/mcp-server) lets a coding agent drive the app while it writes the test; `screen.debug()` prints the tree |
+| `npx playwright codegen`, the Inspector | [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) lets a coding agent drive the app while it writes the test; `screen.debug()` prints the tree |
 | `{ force: true }`, `{ trial: true }` | `tap({ position })` skips the actionability checks; `toBeVisible()` and `toBeEnabled()` for a trial |
 | `ariaSnapshot()`, `toMatchAriaSnapshot()`, `toMatchSnapshot()` | `expect(await screen.tree()).toContain(...)`; a fixture file and `toEqual` |
 | `keyboard.insertText()`, `inputValue()` on a `<label>` | `fill()`; the control itself, located with `getByLabel` |
@@ -415,19 +415,23 @@ purpose. Use the workaround, or keep the test in Playwright.
 A suite that drives an Electron app with Playwright's `_electron` moves to the
 [Electron engine](/electron), not the web one: a target with
 `engine: electron()` and `app: { appPath: '.' }`, and `test` from
-`@e2e-dev/electron`. `e2e init` has no Electron preset yet, so write the
-config by hand.
+`@e2e-dev/electron`. `npx e2e init --yes --engine electron` writes that config and
+an example test.
 
 | Playwright | e2e |
 | --- | --- |
 | `_electron.launch({ args })` in a fixture, `electronApp.firstWindow()` | `await app.open()` in `beforeEach`. Arguments the app reads, and Chromium switches, go in the target's `app.launchArguments`, the same for every test |
+| `_electron.launch({ args, env })` with values of one test, a data directory filled before the launch | `await electron.launch({ launchArguments, env })` and `electron.userDataDir`, see [per-test arguments](/electron#launch-with-per-test-arguments). The app doesn't inherit the runner's environment: name a variable it reads, such as `PLAYWRIGHT_TEST`, in `electron({ env })` |
 | `electronApp.evaluate(fn, arg)` | `electron.evaluate(fn, arg)` |
-| `page.evaluate(fn)` in the renderer | `electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.executeJavaScript('…'))`. Pick the window by title: `getAllWindows()` is not in the order `electron.windows()` lists |
+| `page.evaluate(fn, arg)` in the renderer, `page.reload()`, `page.url()` | `electron.activeWindow().evaluate(fn, arg)`, `reload()`, `url()` |
+| `page.keyboard`, `page.mouse` | `electron.keyboard`, `electron.mouse` |
+| `page.waitForURL(re)`, `page.waitForFunction(fn)` | `await expect.poll(() => window.url()).toMatch(re)`, `await expect.poll(() => window.evaluate(fn)).toBeTruthy()` |
 | `electronApp.waitForEvent('window')` | `await electron.waitForWindow(() => screen.getByRole('button', 'Open').tap())`, which makes the new window active. For a window the app opens on its own, `await electron.window({ title: 'Settings' })` |
 | `page.on('dialog')` | `await electron.onDialog('accept')`, `'dismiss'`, or a handler |
 | `page.waitForEvent('close')` | `await expect.poll(() => window.isClosed()).toBe(true)` |
 | `expect(page).toHaveTitle(title)` | `await expect.poll(() => window.title()).toBe(title)` |
-| `page.getByRole`, `getByLabel`, `getByTestId`, `locator(css)` | `screen.getByRole`, `getByLabel`, `getByTestId`, and `electron.locator(css)`, which takes CSS only |
+| `page.getByRole`, `getByLabel`, `getByTestId`, `locator(css)` | `screen.getByRole`, `getByLabel`, `getByTestId`, and `electron.locator(css)`, which takes CSS only: no `text=`, `:has-text()`, `:visible`, or `>>`. Use `.filter({ hasText })` and `.filter({ has })` |
+| A query for an element behind an open modal | `getByText`, `getByTestId`, or `electron.locator(css)`: the page behind a modal is `inert`, and `getByRole` and `getByLabel` leave an inert subtree out. It can be read, and `tap()` or `fill()` on it fails |
 | `page.on('console')`, `electronApp.on('console')` | Recorded in the test's trace under App log, main-process lines prefixed `[main]`. A test cannot read them |
 | `electronApp.close()` | Nothing: every test ends with the app quit |
 

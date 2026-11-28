@@ -6,7 +6,7 @@ description: Arahkan engine web ke aplikasi Anda atau minta runner menjalankanny
 ---
 
 `@e2e-dev/web` menjalankan tes di browser pada URL aplikasi Anda. Untuk route,
-cookie, dialog, dan unduhan, lihat [Bekerja dengan browser](/browser).
+cookie, dialog, dan unduhan, lihat [Bekerja dengan browser](/reference/web).
 
 ## Mulai aplikasi Anda
 
@@ -57,7 +57,7 @@ folder sementara, `inheritEnv`, dan `env`.
 
 | Opsi | Kegunaan |
 | --- | --- |
-| `reuseExisting: true` | Gunakan server yang sudah berjalan, misalnya server yang dijalankan oleh [sesi MCP](/mcp-server#run-tests-next-to-a-session). Di CI, e2e mengabaikan opsi ini. Jika server sudah merespons, hasilnya `APP_ALREADY_RUNNING`. |
+| `reuseExisting: true` | Gunakan server yang sudah berjalan, misalnya server yang dijalankan oleh [sesi MCP](/coding-agents). Di CI, e2e mengabaikan opsi ini. Jika server sudah merespons, hasilnya `APP_ALREADY_RUNNING`. |
 | `log` | Simpan stdout dan stderr aplikasi ke file relatif terhadap proyek. Error startup atau proses yang berhenti tanpa diduga selama `e2e run` akan menampilkan baris yang ditambahkan proses ke file sejak perintah dimulai. Log hingga 40 baris dan 8 KiB ditampilkan seluruhnya. Jika lebih panjang, kutipan memuat hingga 20 baris dari awal dan akhir, dengan `[startup output omitted]` di antaranya. Untuk log di atas 8 KiB, baris tersebut diambil dari 4 KiB pertama dan terakhir. Nilai `command.env` dan `inheritEnv` yang panjangnya minimal empat karakter disamarkan dalam kutipan. File lognya sendiri tidak disamarkan. |
 | `env` | Variabel environment untuk aplikasi. |
 | `inheritEnv` | Variabel host yang diteruskan jika ditetapkan, berdasarkan nama atau awalan: `['DATABASE_URL', 'STRIPE_*']`. Nilai `env` memiliki prioritas lebih tinggi. |
@@ -287,7 +287,7 @@ Viewport sempit hanya menguji tata letak responsif. Browser tetap browser
 desktop: faktor skala 1, pointer desktop, dan user agent biasanya. Browser
 tidak meniru sentuhan. Untuk menguji simulator atau emulator, gunakan
 [engine mobile](/mobile). Untuk mode gelap dan pengurangan gerakan, lihat
-[Tiru mode gelap dan pengurangan gerakan](/browser#emulate-dark-mode-and-reduced-motion).
+[Tiru mode gelap dan pengurangan gerakan](/reference/web).
 
 Video mempertahankan ukuran halaman saat perekaman dimulai. Tetapkan
 `web({ screencast: { size } })` untuk menggunakan satu ukuran tetap. Provider
@@ -319,9 +319,6 @@ dapat menggunakan clipboard, berikan izin pada target:
 ## Berikutnya
 
 <CardGroup cols={2}>
-  <Card title="Bekerja dengan browser" icon="globe" href="/browser">
-    Mock route, atur cookie, tangani dialog, dan unduh file.
-  </Card>
   <Card title="Referensi engine web" icon="masks-theater" href="/reference/web">
     Semua opsi `web()` dan setiap method `browser`.
   </Card>

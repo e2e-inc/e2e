@@ -1,6 +1,7 @@
 ---
 title: Electron
-description: Test an Electron app through Chromium's accessibility tree, window by window.
+description: "Test an Electron app end to end with @e2e-dev/electron, which launches the app, drives each window through Chromium's accessibility tree, and runs code in the main process."
+keywords: [desktop app, Chromium]
 ---
 
 `@e2e-dev/electron` tests Electron apps. It launches your app, reads each
@@ -25,6 +26,9 @@ pnpm add --save-dev e2e @e2e-dev/electron electron
 bun add --dev e2e @e2e-dev/electron electron
 ```
 </CodeGroup>
+
+In a project with no e2e config yet, `npx e2e init --yes --engine electron`
+writes the config and an example test for you.
 
 The engine launches the `electron` package installed in your project. On
 Electron 45 and newer, it downloads the binary once per run before the first
@@ -58,6 +62,12 @@ export default {
 The `credentials` block is the test user for the sign-in test below. See
 [Credentials](/authentication#credentials).
 
+The app doesn't inherit the runner's environment, so model keys and CI tokens
+stay out of it. Pass anything your app needs with `electron({ env })`. The
+reference lists every [option](/reference/electron#options), the
+[variables the app starts with](/reference/electron#environment), and the
+[switches the engine adds](/reference/electron#launch-arguments).
+
 ## Write a test
 
 Import `test` from `@e2e-dev/electron`. `app.open()` launches the app and
@@ -87,15 +97,39 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
 
 ## The electron fixture
 
-| Method | What it does |
-| --- | --- |
-| `evaluate(fn, arg?)` | Runs `fn` in the main process with the `electron` module and returns its JSON-serializable result |
-| `windows()` | The open windows, in the order they opened |
-| `waitForWindow(trigger, { timeout }?)` | Runs `trigger`, waits for the window it opens, and makes that window active |
-| `window({ title, url }, { timeout }?)` | Waits for a window by title or URL and returns it, without making it active |
-| `waitForDownload(trigger, { timeout }?)` | Runs `trigger` and waits for the [download](#downloads) it starts |
-| `onDialog(handler)` | Answers the app's [`alert()` and `confirm()` dialogs](#handle-alert-and-confirm-dialogs) |
-| `locator(selector)` | Queries the current window by CSS selector |
+`electron` is what a test asks of the app itself: launch it with arguments of
+its own, find and switch windows, run code in the main process, send keys,
+answer dialogs, and wait for downloads. The sections below show each one. The
+[Electron engine reference](/reference/electron#the-electron-fixture) lists
+every member with its parameters, defaults, and errors.
+
+## Launch with per-test arguments
+
+`electron.launch()` launches the app as `app.open()` does, and adds arguments
+and environment variables for this test to the target's. `cwd` sets the
+directory the process starts in. `app.open()`, `app.restart()`, and
+`app.clearState()` keep them until the test ends. Another `launch()` replaces
+them.
+
+`electron.userDataDir` exists before the app is launched, so a test can put
+data in it first:
+
+```ts
+import { writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+test('opens on saved settings', async ({ electron, screen }) => {
+  writeFileSync(path.join(electron.userDataDir, 'settings.json'), '{"theme":"dark"}');
+  await electron.launch({
+    launchArguments: ['--skip-onboarding'],
+    env: { APP_DATA_PATH: electron.userDataDir },
+  });
+  await expect(screen.getByRole('heading', 'Projects')).toBeVisible();
+});
+```
+
+To launch this way in every test, call `electron.launch()` from a
+[fixture](/fixtures).
 
 ## Work with several windows
 
@@ -116,19 +150,18 @@ await main.activate();
 await settings.close();
 ```
 
-A window has `title()`, `url()`, `isActive()`, `isClosed()`, `activate()`, and
-`close()`. For a window the app opens by itself, such as the main window after
-a splash screen, find it with `electron.window()`:
+For a window the app opens by itself, such as the main window after a splash
+screen, find it with `electron.window()`:
 
 ```ts
 const main = await electron.window({ title: 'My App' });
 await main.activate();
 ```
 
-`title` and `url` take an exact string or a `RegExp`. `title` matches the
-document's title or the OS window's, and `window.title()` returns the
-document's, or the OS window's when the document has none. The agent sees windows as tabs and
-switches between them on its own.
+`title` and `url` take an exact string or a `RegExp`. The agent sees windows
+as tabs and switches between them on its own. See
+[Windows and the active window](/reference/electron#windows-and-the-active-window)
+for every window method, including [`evaluate()`](#run-code-in-a-window).
 
 ## Run code in the main process
 
@@ -152,6 +185,39 @@ values as `arg` (plain JSON only; secrets are refused) and return plain data.
 `require` isn't in scope inside `fn`; use the `electron` argument or
 `process.getBuiltinModule('node:fs')`.
 
+## Run code in a window
+
+`window.evaluate()` runs a function in the window's page, where the app's own
+globals are. It follows the same rules as `electron.evaluate()`: `fn` is sent
+as text, and `arg` and the result are plain JSON.
+
+```ts
+const window = electron.activeWindow();
+const theme = await window.evaluate((key) => localStorage.getItem(key), 'theme');
+await window.reload();
+```
+
+## Keyboard and mouse
+
+`electron.keyboard` and `electron.mouse` send input to the active window,
+wherever its focus and pointer are. Prefer `locator.press()` and
+`locator.fill()` when there is an element to name.
+
+```ts
+await electron.keyboard.press('Escape');
+await electron.keyboard.press('ControlOrMeta+P');
+await electron.keyboard.type('hello', { delay: 20 });
+await electron.mouse.move(0, 0);
+```
+
+- `keyboard` has `press`, `down`, `up`, `type`, and `insertText`. `mouse` has
+  `move`, `down`, `up`, and `wheel`. See
+  [`keyboard`](/reference/electron#keyboard) and
+  [`mouse`](/reference/electron#mouse).
+- A shortcut the page handles works. A menu accelerator doesn't: see
+  [Limits](#limits).
+- `type` never takes a secret. Fill one with `locator.fill()`.
+
 ## Handle alert and confirm dialogs
 
 `electron.onDialog()` answers the dialogs the app opens from then on, the
@@ -171,7 +237,7 @@ await electron.onDialog(async (dialog) => {
 
 A function handler must call `accept()` or `dismiss()`. A dialog no handler
 takes is dismissed (`confirm()` returns `false`) and fails the test's next
-step.
+step, or the test when its last step opened it.
 
 ## Upload files
 
@@ -202,7 +268,10 @@ expect(file.suggestedFilename).toBe('report.csv');
 ```
 
 Downloads never land in your own Downloads folder: the app saves them inside
-the test's user-data directory.
+the test's user-data directory. A name a file there had at launch, or another
+download took, gets a number, as `note (1).txt`; a file the app writes there
+itself is not counted. A download that starts before the app's first window
+loads goes where the app would save it.
 
 ## Record video
 
@@ -228,9 +297,26 @@ To test a packaged build, point `executablePath` at the binary (not the
 }
 ```
 
+On Windows, name the app's `.exe`, not its folder or a shortcut:
+
+```ts title="e2e.config.ts"
+{
+  name: 'electron-packaged',
+  engine: electron({
+    executablePath: 'dist/win-unpacked/MyApp.exe',
+  }),
+}
+```
+
+An app installed by a Squirrel installer (`electron-winstaller`, Electron
+Forge's default) keeps a launcher of the same name beside its `app-<version>`
+folders. Name the `.exe` inside the version folder.
+
 - If the build disables the `EnableNodeCliInspectArguments` fuse, `screen`,
   `expect`, and the agent still work, but `electron.evaluate()` fails and
-  `electron.window({ title })` matches document titles only.
+  `electron.window({ title })` matches document titles only. On Windows and
+  Linux, a screenshot of a window the app hid with `hide()` also times out,
+  and a recording of one has no frames.
 - On macOS, an unsigned build that reads the keychain (`safeStorage`) can
   hang on a system prompt. Add `--use-mock-keychain` to `app.launchArguments`.
 
@@ -259,7 +345,8 @@ The engine adds `--no-sandbox` on Linux automatically.
 
 | Area | On Electron |
 | --- | --- |
-| Launch arguments | The engine adds `--inspect=0`, `--remote-debugging-pipe`, `--force-color-profile=srgb`, `--user-data-dir=...`, switches that keep a covered or hidden window drawing, and `--no-sandbox` on Linux. Strict argument parsers must allow them |
+| Finding elements | An element inside an `inert` subtree, such as the page behind a modal, has no role or label: `getByRole` and `getByLabel` don't find it. `getByText`, `getByTestId`, and `electron.locator()` do, and input to it, such as `tap()` or `fill()`, fails with `it is inert` |
+| Launch arguments | The engine adds [switches of its own](/reference/electron#launch-arguments), such as `--inspect=0` and `--user-data-dir=...`. Strict argument parsers must allow them |
 | Parallel workers | Each test gets its own user-data directory, so tests run in parallel. If your app overrides `app.setPath('userData', ...)`, set `workers: 1` |
 | Clipboard | The app uses your OS clipboard, so a test's copy overwrites yours. Set `workers: 1` for clipboard tests |
 | Theme and locale | `prefers-color-scheme` follows `nativeTheme` and the OS. Chromium UI strings follow the OS locale; add `--lang=en-US` to `app.launchArguments` to pin English |
@@ -267,21 +354,17 @@ The engine adds `--no-sandbox` on Linux automatically.
 | CSS selectors | `electron.locator()` searches the window document and open shadow roots one root at a time, and never enters frames |
 | Crashed renderers | A crashed window fails reads until you reload it with `electron.evaluate()` or restart the app |
 
+[Behavior on Electron](/reference/electron#behavior-on-electron) has the full
+list.
+
 ## Security
 
-- **Isolated environment:** the app doesn't inherit the runner's environment,
-  so model keys and CI tokens stay out. It only gets minimal OS variables
-  (`PATH`, `HOME`, locale, temp, display); pass anything your app needs with
-  `electron({ env })`.
-- **Password fields:** password values can't be read and are painted black in
-  screenshots. If a password field sits inside a closed shadow root where
-  masks can't reach, screenshots of that window are withheld.
-- **Local file boundary:** if a window navigates to a `file:` path outside
-  your app's directory, the agent gets no observation and screenshots are
-  refused.
-- **Inspector port:** window automation runs over a private pipe, while the
-  main process listens on an unauthenticated loopback port for
-  `electron.evaluate()` during each test.
+The app runs in an isolated environment, password fields are never read and
+are painted black in screenshots, and a window that leaves your app's
+directory for another local file is not observed or captured. During each
+test the main process listens on an unauthenticated loopback port for
+`electron.evaluate()`. See [Security](/reference/electron#security) for the
+details.
 
 ## Limits
 
@@ -300,21 +383,14 @@ The engine adds `--no-sandbox` on Linux automatically.
 - Content inside an `iframe` or `webview` (a `webview` guest is listed as a window, so `electron.window()` reaches it)
 - Routes and cookies (use `session.defaultSession` in `electron.evaluate()` instead)
 - Session save and restore
-- A `keyboard` fixture to hold a key down
 - Reading the app's console from a test
-
-## Options
-
-| Option | Type | Default | What it sets |
-| --- | --- | --- | --- |
-| `executablePath` | `string` | project's `electron` | Binary to start, such as a [packaged app](#test-a-packaged-app) |
-| `env` | `Record<string, string>` | `{}` | Extra environment variables for the app (not `ELECTRON_RUN_AS_NODE` or `NODE_OPTIONS`); see [Security](#security) |
-| `testIdAttribute` | `string` | `'data-testid'` | Attribute `getByTestId` reads |
-| `settle` | `number \| false` | `100` | Wait time in milliseconds after an agent action before the next read (`false` skips it) |
 
 ## Next
 
 <CardGroup cols={2}>
+  <Card title="Electron engine reference" icon="book" href="/reference/electron">
+    Every option and `electron` fixture member, with defaults and errors.
+  </Card>
   <Card title="Agent steps" icon="robot" href="/agent-steps">
     Let the agent fill a form or check the screen.
   </Card>

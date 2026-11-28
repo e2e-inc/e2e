@@ -1,6 +1,6 @@
 # @e2e-dev/acp
 
-Run `agent.act` and `agent.assert` on Claude Code or Codex over the
+Run every agent step and `e2e explore` on Claude Code or Codex over the
 [Agent Client Protocol](https://agentclientprotocol.com). The agent signs in
 with its own login or API key (`ANTHROPIC_API_KEY` for Claude Code;
 `OPENAI_API_KEY` for Codex, which saves it as its login when it has none),

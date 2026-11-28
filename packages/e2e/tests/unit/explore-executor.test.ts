@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { ToolExecutionOptions } from 'ai';
 import { BASE_RULES } from '@e2e-dev/core/lib/agent/default-agent';
-import { type DefinedTool, withToolContext } from '@e2e-dev/core/lib/agent/tool';
-import { explorerAgent, FINDING_TOOL_NAME, withFindingTool } from '../../src/explore/executor.ts';
+import { withToolContext } from '@e2e-dev/core/lib/agent/tool';
+import { createFindingTool, resolveExplorer } from '../../src/explore/executor.ts';
+import { installFakeModel } from '../helpers/fake-model.ts';
 import { ExploreState } from '../../src/explore/state.ts';
 
 describe('the explorer agent', () => {
   it('puts its own charter over the built-in commit rule: submitting twice and revisiting after a save are deliberate', () => {
-    const explorer = explorerAgent({ state: {} as never, agentName: 'default', entry: { system: 'Be careful.' }, resolved: {} as never, notice: () => {} });
+    const model = installFakeModel(() => ({}));
+    const explorer = resolveExplorer({ state: {} as never, agentName: 'default', entry: { system: 'Be careful.', model }, resolved: {} as never, notice: () => {} });
     // The built-in rules come first in the system prompt; the explorer's guidance follows them and says it wins.
     expect(BASE_RULES).toContain('Never repeat a commit');
     expect(explorer.system).toContain('Be careful.');
@@ -22,7 +24,7 @@ describe('the finding tool', () => {
 
   /** Starts a report that waits in `pending`, its observation or its evidence screenshot's save, until `release`. */
   function reporting(state: ExploreState, pending: 'observe' | 'attachScreenshot') {
-    const { tool } = withFindingTool({ tools: {} } as never, state).tools[FINDING_TOOL_NAME] as DefinedTool;
+    const { tool } = createFindingTool(state);
     let release!: () => void;
     const released = new Promise<void>((resolve) => (release = resolve));
     const attached: string[] = [];

@@ -18,7 +18,9 @@
     "Migrate": "Migrasi",
     "Test API": "API tes",
     "Project": "Proyek",
-    "Web": "Web",
-    "Mobile": "Mobile"
+    "Browsers": "Browser",
+    "Devices": "Perangkat",
+    "Browsers and devices": "Browser dan perangkat",
+    "Ecosystem": "Ekosistem"
   }
 }

@@ -101,7 +101,7 @@ every `startAttempt` and releases it in `endAttempt`, reattaching through the
 lease's `reconnectEndpoint` after a transport drop, with the limits of
 `connect.reconnectEndpoint`. A provider implies chromium and excludes
 `connect`; no vendor ships in the package. See
-[Hosted browsers](../../docs/browser.mdx#hosted-browsers) for the contract
+[Hosted browsers](../../docs/reference/web.mdx#hosted-browsers) for the contract
 and an example against a generic session API.
 
 ```ts

@@ -29,8 +29,8 @@ export type {
 } from '../types.ts';
 // What a custom executor is written against, as the `e2e` entry has it.
 export type {
-  ExecutorActions, ExecutorAttempt, ExecutorBudgets, ExecutorModelCall, ExecutorNode, ExecutorObservation, ExecutorObserveOptions,
-  ExecutorPixels, ExecutorReadOptions, ExecutorReadResult, ExecutorStep, ExecutorTarget, ExecutorVerb, PointDragResult, PointHit,
+  ExecutorActions, ExecutorAnswer, ExecutorAttempt, ExecutorBudgets, ExecutorExtension, ExecutorImage, ExecutorModelCall, ExecutorNode, ExecutorObservation, ExecutorObserveOptions,
+  ExecutorPixels, ExecutorQuestion, ExecutorReadOptions, ExecutorReadResult, ExecutorStep, ExecutorTarget, ExecutorVerb, PointDragResult, PointHit,
   PointTapResult, ReplayedPrefix, ReplayHandOffReason, StepExecutor, StepExecutorContext, StepVerdict, StepVerdictStatus,
 } from '../agent/executor.ts';
 export type { StepCacheInfo } from '../run/steps.ts';
@@ -125,7 +125,7 @@ export function createAgent(session: Session, options: CreateAgentOptions): Cach
     config: resolved,
     executor: resolved.executor ?? lazyBuiltInAgent(resolved),
     customExecutor: resolved.executor !== undefined,
-    judge: lazily(() => models.build(resolved.judge, AGENT_NAME)),
+    judge: lazily(() => models.judge(resolved, AGENT_NAME, attempt.agentRuntime.attempt)),
     agentContext: resolved.context,
   };
   const base: AgentContext = {

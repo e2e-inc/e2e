@@ -1,19 +1,24 @@
 /**
- * The explorer: the built-in agent with exploration guidance appended to the
- * project's and one tool added to the project's vocabulary,
- * `report_finding`. Nothing else changes: budgets, loop guards, wind-down,
+ * The explorer: the project's agent with exploration guidance appended to
+ * its own and one tool added to its vocabulary, `report_finding`. That is
+ * the built-in agent, or a custom executor that takes an extension. Nothing
+ * else changes: budgets, loop guards, wind-down,
  * secrets, origin policy, and the transcript are the harness's, and each
  * exploration step runs as one ordinary `agent.act` step.
  */
 
 import type { ToolExecutionOptions } from 'ai';
 import { z } from 'zod';
-import type { ResolvedAgentConfig } from '@e2e-dev/core/lib/config/agent';
+import { answeringExecutor } from '@e2e-dev/core/lib/agent/model/executor-judge';
+import { missingModelError, resolveAgentConfig, type ResolvedAgentConfig } from '@e2e-dev/core/lib/config/agent';
 import { defineTool, getToolContext, type DefinedTool } from '@e2e-dev/core/lib/agent/tool';
+import type { StepExecutor } from '@e2e-dev/core/lib/agent/executor';
 import type { AgentConfig } from '@e2e-dev/core/lib/types';
 import type { ExploreState } from './state.ts';
 
 export const FINDING_TOOL_NAME = 'report_finding';
+/** Each step's action and model-call budget when the config sets none: a charter is longer than a scripted step. */
+const DEFAULT_STEP_BUDGET = 40;
 
 /** Appended to the project's own guidance; the goal itself travels as the test's title. */
 const EXPLORE_RULES = `Exploration mode: this run has no scripted test. Each step is an exploration charter the planner wrote toward the goal on the Test: line.
@@ -40,16 +45,40 @@ export interface ExplorerOptions {
 }
 
 /**
- * The agents entry the exploration runs as: the project's own options, its
- * guidance and tools included, with the exploration rules added. A custom
- * executor has no readable vocabulary and is replaced, with a notice,
- * keeping the models it brought. The finding tool joins once the entry is
- * resolved (`withFindingTool`): its name is reserved, so a project tool can
- * never take it.
+ * The agent the exploration runs as, resolved: the project's own entry with
+ * the exploration rules and the finding tool added. A custom executor that
+ * takes an extension (`extend`) keeps running; one that takes none has no
+ * readable vocabulary and is replaced by the built-in agent, with a notice.
+ * Either way a missing model fails here, before anything starts, not as a
+ * run-level failure once the first step asks.
  */
-export function explorerAgent(options: ExplorerOptions): AgentConfig {
+export function resolveExplorer(options: ExplorerOptions): ResolvedAgentConfig {
   const entry: AgentConfig = options.entry ?? {};
-  const { executor, system, tools, ...shared } = entry;
+  const { executor } = entry;
+  if (typeof executor?.extend !== 'function') return builtInExplorer(options, entry);
+  const extension = { system: EXPLORE_RULES, tools: { [FINDING_TOOL_NAME]: createFindingTool(options.state) } };
+  return extendedExecutor(options, entry, executor.extend(extension));
+}
+
+/** The project's executor, extended, for the steps; the planner between them asks the judge, or the executor when it answers. */
+function extendedExecutor(options: ExplorerOptions, entry: AgentConfig, executor: StepExecutor): ResolvedAgentConfig {
+  // `system` and `tools` are the built-in agent's options, which an entry with an executor never holds: named so the rest is the executor's side of the union.
+  const { executor: _own, system: _system, tools: _tools, ...shared } = entry;
+  const explorer = resolve(options, { ...shared, executor });
+  if (explorer.judge === undefined && answeringExecutor(explorer) === undefined) {
+    throw missingModelError(options.agentName, `explore plans each step with a model, which the executor ${JSON.stringify(executor.name)} does not answer for`);
+  }
+  return explorer;
+}
+
+/**
+ * The built-in agent with the project's guidance and tools, in place of an
+ * executor that takes no extension, keeping the models that one brought. The
+ * finding tool joins once the entry is resolved: its name is reserved, so a
+ * project tool can never take it.
+ */
+function builtInExplorer(options: ExplorerOptions, entry: AgentConfig): ResolvedAgentConfig {
+  const { executor, system, ...shared } = entry;
   let models: Pick<AgentConfig, 'model' | 'judge'> = {};
   if (executor !== undefined) {
     const { model, judge } = options.resolved;
@@ -62,17 +91,21 @@ export function explorerAgent(options: ExplorerOptions): AgentConfig {
       ...(judge === undefined ? {} : { judge: judge.model }),
     };
   }
-  return {
+  const explorer = resolve(options, {
     ...shared,
     ...models,
     system: [system, EXPLORE_RULES].filter((part): part is string => part !== undefined && part.trim() !== '').join('\n\n'),
-    ...(tools === undefined ? {} : { tools }),
-  };
+  });
+  if (explorer.model === undefined) throw missingModelError(options.agentName, 'explore runs the built-in agent, which requires a model');
+  return { ...explorer, tools: { ...explorer.tools, [FINDING_TOOL_NAME]: createFindingTool(options.state) } };
 }
 
-/** The resolved explorer with the finding tool beside the project's tools. */
-export function withFindingTool(explorer: ResolvedAgentConfig, state: ExploreState): ResolvedAgentConfig {
-  return { ...explorer, tools: { ...explorer.tools, [FINDING_TOOL_NAME]: createFindingTool(state) } };
+/** Resolves the explorer's entry with per-step budgets that default higher than a scripted step's. */
+function resolve(options: ExplorerOptions, explorer: AgentConfig): ResolvedAgentConfig {
+  return resolveAgentConfig(
+    { ...explorer, maxSteps: explorer.maxSteps ?? DEFAULT_STEP_BUDGET, maxModelCalls: explorer.maxModelCalls ?? DEFAULT_STEP_BUDGET },
+    `agents.${options.agentName}`,
+  );
 }
 
 const FINDING_SCHEMA = z.object({
@@ -108,7 +141,7 @@ type FindingReport = z.output<typeof FINDING_SCHEMA>;
  * keeps the pixels as a screenshot artifact of the step, and answers the
  * model with the finding's number so it is not reported twice.
  */
-function createFindingTool(state: ExploreState): DefinedTool {
+export function createFindingTool(state: ExploreState): DefinedTool {
   // Numbered as the calls arrive, before any await: a model may report two
   // findings in one turn, and read-only tools run in parallel, so the
   // finding's own index is not known until its screenshot is saved.

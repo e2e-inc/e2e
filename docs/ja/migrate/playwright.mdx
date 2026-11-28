@@ -147,7 +147,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | Playwright | e2e |
 | --- | --- |
 | `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | `browser` の同名メソッド。パターンは URL 全体に対する `RegExp`、アプリの URL を基準に解決される URL glob、または 1 つの HTTP メソッドを指定する `{ method, url }` |
-| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | 同じ。各オプションは [`route`](/reference/web#route) を参照 |
+| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | 同じ。各オプションは [`route`](/reference/web) を参照 |
 | `page.waitForResponse(pattern)` | `browser.waitForResponse(pattern)`。同じ URL グロブを使います |
 | `page.on('dialog')`, `page.waitForEvent('download')` | `browser.onDialog('accept')` またはハンドラー。`browser.waitForDownload(() => trigger)` |
 | `page.waitForEvent('popup')` | 新しいタブをアクティブにする `browser.waitForPopup(() => trigger)`。[タブ](/reference/web#tabs)を参照 |
@@ -328,7 +328,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | タグの `--grep @smoke`、位置引数の正規表現、`file:line:column` | `--tag smoke`。glob または単独の名前。`file:line` |
 | `getByTitle()` | `browser.locator('[title="Close"]')`。title は DOM 属性なので `screen` のクエリはなし |
 | `page.waitForLoadState()` | 次のページの表示内容へのアサーション。ページ遷移は `load` を待ち、各アクションとアサーションは対象のノードを待つ |
-| `npx playwright codegen`、Inspector | [`npx e2e mcp`](/mcp-server) でコーディングエージェントがアプリを操作しながらテストを作成。`screen.debug()` でツリーを表示 |
+| `npx playwright codegen`、Inspector | [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) でコーディングエージェントがアプリを操作しながらテストを作成。`screen.debug()` でツリーを表示 |
 | `{ force: true }`, `{ trial: true }` | `tap({ position })` は操作可能性の検証を省略。試行的な確認には `toBeVisible()` と `toBeEnabled()` |
 | `ariaSnapshot()`, `toMatchAriaSnapshot()`, `toMatchSnapshot()` | `expect(await screen.tree()).toContain(...)`。フィクスチャのファイルと `toEqual` |
 | `keyboard.insertText()`、`<label>` に対する `inputValue()` | `fill()`。`getByLabel` でコントロール自身を取得 |

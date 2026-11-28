@@ -17,10 +17,10 @@ const captured = JSON.parse(readFileSync(new URL('../fixtures/sign-in.json', imp
   metrics: { layoutViewport: { clientWidth: number }; cssLayoutViewport: { clientWidth: number }; cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } };
 };
 
-function project(mode: ProjectionMode, extra: { maxNodes?: number; keep?: ReadonlySet<number> } = {}) {
+function project(mode: ProjectionMode, extra: { maxNodes?: number; keep?: ReadonlySet<number> } = {}, ax: AXNode[] = captured.ax) {
   const { metrics } = captured;
   return projectTree(
-    captured.ax,
+    ax,
     new DomSnapshot(captured.snapshot.documents[0]!, captured.snapshot.strings),
     {
       scale: metrics.layoutViewport.clientWidth / metrics.cssLayoutViewport.clientWidth,
@@ -310,5 +310,14 @@ describe('unmaskableCount', () => {
     expect(new DomSnapshot(documentWith({ name: 3, attributes: [4, 5] }), strings).unmaskableCount()).toBe(0);
     expect(new DomSnapshot(documentWith({ name: 3, attributes: [4, 5], shadow: 6, rendered: false }), strings).unmaskableCount()).toBe(0);
     expect(new DomSnapshot(documentWith({ name: 3, attributes: [4, 9], shadow: 6 }), strings).unmaskableCount()).toBe(0);
+  });
+
+  it('names a control by its text, not its icon font\'s glyph, and keeps a name of glyphs alone', () => {
+    const renamed = (from: string, to: string): AXNode[] => captured.ax.map((node) => (node.name?.value === from && node.role?.value === 'button' ? { ...node, name: { ...node.name, value: to } } : node));
+    for (const mode of ['tree', 'node'] as const) {
+      expect(all(project(mode, {}, renamed('Sign in', '\uf090 Sign in')).root).filter((node) => node.role === 'button').map((node) => node.name)).toContain('Sign in');
+      expect(all(project(mode, {}, renamed('Sign in', 'Save\uf00c  all')).root).filter((node) => node.role === 'button').map((node) => node.name)).toContain('Save all');
+      expect(all(project(mode, {}, renamed('Sign in', '\uf1f8')).root).filter((node) => node.role === 'button').map((node) => node.name)).toContain('\uf1f8');
+    }
   });
 });

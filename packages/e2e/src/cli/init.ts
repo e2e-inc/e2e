@@ -49,6 +49,7 @@ import {
   detectMobileBuilds,
   findNodeVersionFile,
   findRepositoryRoot,
+  targetsWithoutJob,
   gatewaysInConfig,
   getCiService,
   GITLAB_PIPELINE,
@@ -459,8 +460,9 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
 
   const repositoryRoot = findRepositoryRoot(cwd, root);
   // A new config's engines are the ones just chosen; an existing config's are the ones its package.json declares, those this run adds for its imports included.
+  // Only engines a pipeline has a job for: an Electron target needs a display, so init writes no job for it.
   const engineInstalled = existingConfig === undefined
-    ? engines.length > 0
+    ? engines.some((id) => id !== 'electron')
     : declaresDependency(manifest, '@e2e-dev/web') || declaresDependency(manifest, '@e2e-dev/mobile');
   // Asked once: a later run finds e2e already running in some service's pipeline and leaves the question out.
   const setUp = CI_SERVICES.some((service) => service.locate(repositoryRoot).existing);
@@ -765,12 +767,16 @@ async function writePipeline(input: {
   let jobs: CiJobs;
   if (targets !== undefined) {
     jobs = ciJobs(targets, detectMobileBuilds(cwd, input.dependsOn));
-  } else if (input.dependsOn('@e2e-dev/web') && !input.dependsOn('@e2e-dev/mobile')) {
+  } else if (input.dependsOn('@e2e-dev/web') && !input.dependsOn('@e2e-dev/mobile') && !input.dependsOn('@e2e-dev/electron')) {
     clack.log.warn(`The pipeline runs every target in one web job; run e2e init again once ${input.existingConfig} loads to split them`);
     jobs = { web: 'all' };
   } else {
-    clack.log.warn(`No pipeline: the mobile jobs need the config's targets; run e2e init again once ${input.existingConfig} loads`);
+    clack.log.warn(`No pipeline: the jobs are split by the config's targets; run e2e init again once ${input.existingConfig} loads`);
     return;
+  }
+  const unrun = targets === undefined ? [] : targetsWithoutJob(targets);
+  if (unrun.length > 0) {
+    clack.log.warn(`No CI job runs ${unrun.map((target) => target.name).join(', ')}: an Electron app needs a display, so run it under xvfb-run on Linux; see ${DOCS_URL}/electron#run-in-ci-on-linux`);
   }
   if (jobs.web === undefined && jobs.ios === undefined && jobs.android === undefined) {
     clack.log.warn(`No web, iOS, or Android target to run in CI, so no pipeline; see ${DOCS_URL}/ci`);
@@ -861,6 +867,7 @@ function continueSteps(engines: readonly EngineId[], model: ScaffoldModel | unde
     ...(keys.length > 0 && !keys.some((key) => process.env[key] !== undefined) ? [`set ${keys[0]}`] : []),
     ...(engines.length === 0 ? ['add an engine target to e2e.config.ts'] : []),
     ...(engines.includes('mobile') ? ['point the mobile target in e2e.config.ts at your app'] : []),
+    ...(engines.includes('electron') ? ['point app.appPath in e2e.config.ts at your Electron app'] : []),
   ];
 }
 

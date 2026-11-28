@@ -136,7 +136,7 @@ await expect(screen.getByRole('status')).toHaveText('2 remaining');
 - 如果查询匹配到多个节点，操作、读取或单节点断言都会失败。使用 `.filter()`、`.first()` 或 `.nth()` 定位到一个节点。
 - `textContent()` 等直接读取会等待匹配项，然后只读取一次，不会为获取某个值而重试。
 
-参阅 [screen 参考](/reference/screen)和 [expect 参考](/reference/expect#locator-matchers)。关于路由、Cookie、对话框和下载，参阅[使用浏览器](/browser)。
+参阅 [screen 参考](/reference/screen)和 [expect 参考](/reference/expect#locator-matchers)。关于路由、Cookie、对话框和下载，参阅[使用浏览器](/reference/web)。
 
 ## 组织测试
 

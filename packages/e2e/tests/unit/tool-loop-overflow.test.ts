@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createToolLoopExecutor } from '@e2e-dev/core/lib/agent/tool-loop';
-import { projectTools } from '@e2e-dev/core/lib/agent/default-agent';
+import { createProjectTools } from '@e2e-dev/core/lib/agent/default-agent';
 import { defineTool } from '@e2e-dev/core/lib/agent/tool';
 import { resolveConfig } from '../../src/config/resolve-run.ts';
 import { defineEngine, type EngineHandle } from '@e2e-dev/core/lib/engine/index';
@@ -87,7 +87,7 @@ describe('tool loop context overflow', () => {
       if (turn === 2) throw new Error(OVERFLOW);
       return [{ toolName: 'complete_step', input: { status: 'passed', summary: 'read the rows' } }];
     });
-    const executor = kind === 'assert' ? createToolLoopExecutor({ name: 'custom-loop', tools: context => projectTools(context, { peek }), buildPrompt: async context => (await context.observe()).text }) : undefined;
+    const executor = kind === 'assert' ? createToolLoopExecutor({ name: 'custom-loop', tools: context => createProjectTools(context, { peek }), buildPrompt: async context => (await context.observe()).text }) : undefined;
     const { fixtures, steps } = runtime(bigScreen(), { agents: { default: executor === undefined ? { tools: { peek }, model } : { executor, model } } });
 
     await fixtures.agent[kind]('read the big output');

@@ -1,6 +1,6 @@
 ---
 title: "@e2e-dev/core"
-description: launch, hosts, sessions, saved state, and createAgent, the API of a program that drives a browser or a device without the test runner.
+description: "API reference for @e2e-dev/core, with launch, hosts, sessions, saved state, and createAgent, for a program that drives a browser or a device without the test runner."
 ---
 
 `@e2e-dev/core` is the API of a program that drives a browser or a device
@@ -175,9 +175,7 @@ is also disposable: `await using` closes it. A cleanup that fails throws an
 | `close` | `Promise<void>` |
 
 `close` ends the session, as `await using` does. A call still running fails
-with `CANCELLED`. An action, a wait, or an `app` or agent call names itself
-in the message: `the session closed while app.open "/" was running`. After
-`close`, every operation fails with `CANCELLED`.
+with `CANCELLED`, and so does every operation after `close`.
 
 <Note>
   Await every call. One that nothing awaits rejects unhandled when its
