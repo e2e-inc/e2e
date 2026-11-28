@@ -3,5 +3,3 @@
 ---
 
 Cached coordinate drags wait for the drop target when the recorded point identifies the source among same-named controls. During that wait, replay stops if the matching group of visible, placeable controls shrinks, even when the original source stays in place. A source or drop target recovered during the wait must have a visible, usable box.
-
-Some drags recorded with a source position previously replayed when the group settled back to its recorded count. If the group shrinks while the drop target is still loading, these drags now stop in strict-cache mode and hand off to the live agent when fallback is available.

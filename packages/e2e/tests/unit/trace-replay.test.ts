@@ -805,10 +805,31 @@ describe('replayTrace: bare-point drags', () => {
         stops: 'target-ambiguous',
       },
       {
-        label: 'refuses a positioned source when the group drops to its recorded count',
+        label: 'drags a positioned source once the group settles to its recorded count while the destination loads',
+        source: firstOfTwo,
+        looks: [[card, twin, third], [moved, twin, lane]],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'picks a positioned source by order, whichever control left',
         source: firstOfTwo,
         looks: [[card, twin, third], [twinInPlace, third, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'stops when the source group grows to three and drops back to two',
+        looks: [[card, twin], [card, twin, third], [moved, twin, lane]],
         stops: 'target-ambiguous',
+      },
+      {
+        label: 'stops when a twin stays listed but goes hidden',
+        looks: [[card, twin], [moved, hidden(twin), lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'drags the control under the recorded point when the source and its twin swap places',
+        looks: [[card, twin], [at(as(card, 'twin'), 0), at(as(card, 'c'), 220), lane]],
+        dragsFrom: { x: 100, y: 50 },
       },
       {
         label: 'keeps waiting for a positioned source when its destination is already visible',

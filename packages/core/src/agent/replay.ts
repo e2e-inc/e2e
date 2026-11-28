@@ -532,8 +532,10 @@ async function relocateEnds(
     if (from?.relocated.kind === 'failed') {
       const waitingForDestination = to?.wait === true && shouldWaitForDestination?.(from.relocated, to.relocated) === true;
       if (from.wait || waitingForDestination) {
+        // A recorded position already says which twin the source is once the
+        // count catches up (`retryable`), so its group is not held to a count.
         if (waitingForDestination && sourceGroup === undefined && source !== undefined
-          && from.relocated.failure === 'target-ambiguous') {
+          && source.position === undefined && from.relocated.failure === 'target-ambiguous') {
           sourceGroup = trackRelocationGroup(source, screen.nodes, (node) => visibleBox(node) !== undefined);
         }
         return undefined;
