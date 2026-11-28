@@ -1,0 +1,328 @@
+---
+title: Швидкий старт
+description: "Встановіть e2e й запустіть перший end-to-end тест за кілька хвилин одним промптом для кодинг-агента, такого як Claude Code чи Cursor, або крок за кроком через npx e2e init."
+"og:image": "https://e2e.com/docs/images/og/quickstart.png?v=4a3569d569"
+"twitter:image": "https://e2e.com/docs/images/og/quickstart.png?v=4a3569d569"
+---
+
+import { ModelProvider } from '../snippets/model-provider.jsx';
+import { SetupPrompt } from '../snippets/setup-prompt-card.jsx';
+import { Video } from '../snippets/video.jsx';
+import { VideoCard } from '../snippets/video-card.jsx';
+
+export const setupPrompt = `Налаштуй end-to-end тести e2e у цьому проєкті. Документація: \`https://e2e.com/docs/quickstart.md\`
+
+1. Запусти \`npx e2e init --yes\` (або відповідну команду pnpm чи bun для цього проєкту). Вона створить вебконфіг із Vercel AI Gateway, приклад тесту, e2e скіл, рядок у файлах \`AGENTS.md\` і \`CLAUDE.md\`, який вказує на скіл, і конфіг MCP. Залежності команда ще не встановлює.
+2. Прочитай e2e скіл (\`npx e2e guide\` виводить його повністю, \`npx e2e guide <topic>\` виводить окрему тему) і дотримуйся його на кожному кроці нижче.
+3. Налаштуй таргет для цього застосунку. Для вебзастосунку вкажи його URL і команду запуску dev-сервера. Для застосунку на iOS або Android заміни @e2e-dev/web на @e2e-dev/mobile і перепиши приклад тесту під мобільний рушій.
+4. Запитай мене, яку модель використовувати для агента: підписку ChatGPT, GitHub Copilot, OpenCode Console або SuperGrok, ключ API чи локальну модель. Налаштуй її за допомогою пакета відповідного провайдера. Якщо потрібно увійти в акаунт, дай мені команду \`npx e2e login\` і зачекай на моє підтвердження.
+5. Встанови залежності, запусти приклад тесту й виправляй помилки налаштування, доки він не пройде.
+6. Напиши один тест для найважливішого сценарію користувача в цьому застосунку, запусти його й допрацьовуй, доки він не пройде.`;
+
+<VideoCard
+  id="4_9z6QWShLc"
+  title="Швидкий старт з агентним e2e за 4 хвилини"
+  subtitle="Налаштування простого застосунку Next.js з нуля до робочого набору агентних тестів у відео з Kacper."
+/>
+
+## Налаштування з кодинг-агентом
+
+Вставте цей промпт у Claude Code, Codex, Cursor або інший кодинг-агент у
+директорії вашого застосунку:
+
+<SetupPrompt>
+
+<Prompt description={setupPrompt} children={setupPrompt} actions={["copy", "cursor"]} />
+
+</SetupPrompt>
+
+Агент встановить [e2e скіл](/coding-agents), тож для наступних промптів на
+кшталт «додай тест для оформлення замовлення» додаткові налаштування не
+знадобляться.
+
+<Note>
+Потрібен Node.js 24.8 або новіший (22.22.3 або новіший на Node.js 22), а для вебтестів також підійде [Bun](/reference/cli#bun) 1.4.3 або новіший. У Windows запускайте все у WSL. Для мобільних тестів також потрібні Xcode із середовищем виконання симулятора iOS або Android SDK з емулятором.
+</Note>
+
+## Налаштування вручну
+
+### Запуск першого тесту
+
+<Steps>
+  <Step title="Створіть тестовий проєкт">
+  У директорії вашого застосунку виконайте:
+
+  <CodeGroup>
+  ```bash npm
+  npx e2e init
+  ```
+
+  ```bash pnpm
+  pnpm dlx e2e init
+  ```
+
+  ```bash bun
+  bunx e2e init
+  ```
+  </CodeGroup>
+
+  Оберіть **Web (Playwright)** або **Mobile (iOS/Android)**, а потім підписку,
+  провайдера моделей або **Skip for now** для тестів без AI. Майстер
+  налаштування створює конфіг і приклад тесту, додає залежності та пропонує
+  налаштувати вашого кодинг-агента. Наявні файли залишаються без змін.
+
+  <Tabs>
+    <Tab title="Веб">
+    Запустіть dev-сервер застосунку за адресою `http://localhost:3000` або
+    вкажіть його адресу у файлі `e2e.config.ts`. Ви також можете
+    [доручити запуск ранеру e2e](/web#starting-your-app).
+
+    <Accordion title="Приклад вебконфігу й тесту">
+    Цей конфіг використовує Vercel AI Gateway. Майстер налаштування підставляє
+    обраного вами провайдера.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { gateway } from 'ai';
+
+export default {
+  agents: { default: { model: gateway('openai/gpt-6-luna-fast') } },
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+} satisfies E2EConfig;
+```
+
+```ts title="tests/example.e2e.ts"
+import { test } from '@e2e-dev/web';
+import { expect } from 'e2e';
+
+test('app opens', async ({ app, browser }) => {
+  await app.open('/');
+  await expect(browser.locator('body')).toBeVisible();
+});
+```
+    </Accordion>
+    </Tab>
+    <Tab title="Мобільні">
+    Запустіть `npx e2e doctor`, щоб перевірити налаштування середовища. Майстер
+    налаштування обирає iOS на macOS та Android на інших системах. Приклад відкриває
+    застосунок «Параметри» (Settings).
+
+    <Accordion title="Приклад конфігу й тесту для iOS">
+    Цей конфіг використовує Vercel AI Gateway. Для Android майстер налаштування
+    задає `platform: 'android'` і `app: { bundleId: 'com.android.settings' }`.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { mobile } from '@e2e-dev/mobile';
+import { gateway } from 'ai';
+
+export default {
+  agents: { default: { model: gateway('openai/gpt-6-luna-fast') } },
+  targets: [{ name: 'ios', engine: mobile({ platform: 'ios' }), app: { bundleId: 'Settings' } }],
+  workers: 1,
+} satisfies E2EConfig;
+```
+
+```ts title="tests/example.e2e.ts"
+import { test } from '@e2e-dev/mobile';
+import { expect } from 'e2e';
+
+test('Settings opens', async ({ app, screen }) => {
+  await app.open();
+  await expect(screen.getByRole('button', 'General')).toBeVisible();
+});
+```
+    </Accordion>
+
+    Як підключити власний застосунок, читайте на сторінці [Мобільні застосунки](/mobile).
+    </Tab>
+  </Tabs>
+  </Step>
+  <Step title="Запустіть приклад">
+  <CodeGroup>
+  ```bash npm
+  npx e2e run
+  ```
+
+  ```bash pnpm
+  pnpm exec e2e run
+  ```
+
+  ```bash bun
+  bunx e2e run
+  ```
+  </CodeGroup>
+
+  e2e завантажує браузер (або запускає симулятор чи емулятор), перевіряє, що
+  застосунок відкривається, і виводить результат. Приклад не викликає модель,
+  тож на цьому етапі не потрібні ані підключена підписка, ані ключ API.
+  </Step>
+</Steps>
+
+<Video>
+  <video src="/images/init.mp4" aria-label="Команда npx e2e init запитує про рушій, шлюз моделей і налаштування кодинг-агента, а потім показує список файлів, які створить." muted loop playsInline controls />
+
+  Команда `npx e2e init` ставить кілька запитань і показує всі зміни, перш ніж щось записати.
+</Video>
+
+### Підключення підписки або ключа API
+
+<Tabs>
+  <Tab title="Підписка">
+  | План | Як підключити |
+  | --- | --- |
+  | ChatGPT Plus або Pro | `npx e2e login openai` |
+  | GitHub Copilot | `npx e2e login github-copilot` |
+  | OpenCode Console (OpenCode Zen та OpenCode Go) | `npx e2e login opencode-console` |
+  | SuperGrok або X Premium+ | `npx e2e login spacexsi` |
+  | Claude Max або Team (Claude Code) | Ключ API зі щомісячних API-кредитів плану. Див. [Claude Max або Team](/subscriptions#claude-max-or-team). |
+
+  Якщо ви вже увійшли в GitHub CLI, GitHub Copilot використає цю сесію. Див.
+  [Підписки](/subscriptions).
+  </Tab>
+  <Tab title="Ключ API">
+  Оберіть свого провайдера. Встановіть його пакет і задайте змінні середовища,
+  які він читає (якщо такі є), у терміналі, з якого ви запускаєте e2e.
+
+  <ModelProvider show="select" />
+
+  <ModelProvider show="install" />
+
+  <ModelProvider show="env" />
+
+  Майстер налаштування створює конфіг для Vercel AI Gateway, OpenRouter та
+  ендпоїнтів, сумісних з OpenAI. Для іншого провайдера замініть імпорт моделі й
+  значення `model` у файлі `e2e.config.ts`, а `agent` використайте як
+  `agents.default`:
+
+  <ModelProvider show="model" />
+
+  Про локальні моделі та інші варіанти читайте на сторінці [Моделі](/models).
+  </Tab>
+</Tabs>
+
+### Додавання дії агента
+
+Опишіть у `agent.act` кроки до однієї [цілі](/core-concepts#goals), а потім
+перевірте результат. Адаптуйте приклад до сценарію у вашому застосунку:
+
+<Tabs>
+  <Tab title="Веб">
+```ts title="tests/agent.e2e.ts"
+import { test } from '@e2e-dev/web';
+import { expect } from 'e2e';
+
+test('a visitor signs up for a trial', async ({ app, agent, screen }) => {
+  await app.open('/');
+
+  await agent.act('sign up for a free trial as {name} with email {email}', {
+    params: { name: 'Ada Lovelace', email: 'ada@example.test' },
+  });
+
+  await agent.assert('the welcome screen greets Ada by name');
+  await expect(screen.getByRole('status')).toContainText('trial');
+});
+```
+  </Tab>
+  <Tab title="Мобільні (iOS)">
+```ts title="tests/agent.e2e.ts"
+import { test } from '@e2e-dev/mobile';
+import { expect } from 'e2e';
+
+test('the agent opens General', async ({ agent, app, device }) => {
+  await app.open();
+  await agent.act('open {section} settings', { params: { section: 'General' } });
+
+  await agent.assert('the General settings screen is showing');
+  await expect(device.locator('role=navigation-bar id=General')).toBeVisible();
+});
+```
+
+  `app.open()` запускає застосунок заново, щоб кожен тест починався з чистого
+  стану, а не з екрана, де зупинився попередній. `device.locator` приймає
+  [селектори agent-device](/mobile#the-device-fixture).
+  </Tab>
+</Tabs>
+
+Об'єкт `params` підставляє значення у плейсхолдери цілі, `agent.assert`
+перевіряє екран за допомогою моделі, а `expect` звіряє точне значення.
+
+<CodeGroup>
+```bash npm
+npx e2e run tests/agent.e2e.ts
+```
+
+```bash pnpm
+pnpm exec e2e run tests/agent.e2e.ts
+```
+
+```bash bun
+bunx e2e run tests/agent.e2e.ts
+```
+</CodeGroup>
+
+Якщо в майстрі налаштування ви обрали **Skip for now**, спершу
+[додайте модель](/models). Передайте параметр `--headed`, щоб бачити вебтест
+наживо, або `--no-cache`, щоб викликати модель замість відтворення кешованих
+дій.
+
+### Налаштування проєкту
+
+У файлі `e2e.config.ts` зберігаються налаштування вашого проєкту. У більшості
+проєктів після `init` змінюють ці параметри:
+
+| Щоб | Задайте |
+| --- | --- |
+| підключити ваш застосунок | [`app.url`](/reference/config#the-app-under-test) або `app.bundleId` на мобільних |
+| запускати застосунок разом із тестами | [`app.command`](/web#starting-your-app) |
+| обрати модель | [`agents.default.model`](/models) |
+| тестувати кілька браузерів або пристроїв | окремий запис у [`targets`](/reference/config#targets) для кожного |
+
+У [довідці з конфігу](/reference/config) перелічено всі ключі, зокрема
+тайм-аути, повторні спроби, воркери, запис і репортери.
+
+<Accordion title="Приклад конфігу з типовими опціями">
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { gateway } from 'ai';
+
+const app = {
+  url: process.env.APP_URL ?? 'http://localhost:3000',
+  command: { executable: 'npm', args: ['run', 'dev'], reuseExisting: true },
+};
+
+export default {
+  agents: { default: { model: gateway('openai/gpt-6-luna-fast') } },
+  targets: [
+    { name: 'chromium', engine: web({ viewport: { width: 1440, height: 900 } }), app },
+    { name: 'firefox', engine: web({ browser: 'firefox' }), app },
+  ],
+  timeout: 180_000,
+  workers: 4,
+  reporters: ['list', 'junit'],
+  video: 'retain-on-failure',
+} satisfies E2EConfig;
+```
+
+Параметр `--target firefox` запускає лише один таргет. Таргети зі спільною
+командою `command` ділять один процес сервера.
+</Accordion>
+
+## Що далі
+
+<CardGroup cols={2}>
+  <Card title="Основні поняття" icon="pen-to-square" href="/core-concepts">
+    Цілі, перевірки та локатори.
+  </Card>
+  <Card title="Автентифікація" icon="key" href="/authentication">
+    Повторне використання сесії входу й захист паролів від потрапляння до моделі.
+  </Card>
+  <Card title="Налагодження" icon="bug" href="/debugging">
+    Аналіз збоїв, знімків екрана й трейсів.
+  </Card>
+  <Card title="Безперервна інтеграція" icon="code-branch" href="/ci">
+    Запуск тестів у GitHub Actions, Expo Workflows, Bitrise або Codemagic.
+  </Card>
+</CardGroup>

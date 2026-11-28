@@ -1,0 +1,956 @@
+---
+title: Мобільні застосунки
+description: "Тестуйте iOS- та Android-застосунки на симуляторах, емуляторах і підключених телефонах за допомогою @e2e-dev/mobile з тими самими API agent, screen і expect, що й у вебтестах."
+"og:image": "https://e2e.com/docs/images/og/mobile.png?v=0a8bfea0a3"
+"twitter:image": "https://e2e.com/docs/images/og/mobile.png?v=0a8bfea0a3"
+---
+
+import { Video } from '../snippets/video.jsx';
+
+Пакет `@e2e-dev/mobile` запускає тести на симуляторах iOS, емуляторах Android і
+телефонах, підключених до вашого комп'ютера. Він побудований на основі
+[agent-device](https://github.com/callstack/agent-device). Тести використовують
+ті самі API `agent`, `screen` і `expect`, що й браузерні тести.
+
+## Налаштування
+
+Встановіть Xcode із середовищем виконання симулятора iOS або Android SDK з
+емулятором. Далі пройдіть [Швидкий старт](/quickstart) та оберіть **Mobile
+(iOS/Android)**. Майстер налаштування обирає iOS на macOS та Android на інших
+системах. Як таргет він використовує застосунок «Параметри» (Settings) з одним
+воркером, тож тест запускається ще до підключення вашого застосунку. Завантаження
+пристрою відбувається до початку відліку часу тесту й не враховується в
+`launchTimeout`. Готові налаштування див. у
+[прикладах проєктів](/example-projects).
+
+Перевірте налаштування середовища:
+
+<CodeGroup>
+```bash npm
+npx e2e doctor
+```
+
+```bash pnpm
+pnpm exec e2e doctor
+```
+
+```bash bun
+bunx e2e doctor
+```
+</CodeGroup>
+
+Команда перевіряє agent-device, Xcode або Android SDK, кожен пристрій із
+таргета та збірку за шляхом `appPath`. Якщо `appPath` не задано, а один
+пристрій уже запущено, команда перевіряє, чи встановлено на ньому `bundleId`.
+Див. [`e2e doctor`](/reference/cli#e2e-doctor).
+
+## Підключення вашого застосунку
+
+Задайте в `app.bundleId` таргета ідентифікатор бандлу (bundle ID) або ім'я
+пакета вашого застосунку. Виклики `app.open()`, `app.restart()` та
+`app.clearState()` запускають саме цей застосунок. Додайте `appPath`, щоб
+вказати шлях до збірки: бандлу `.app` для iOS або файлу `.apk` для Android:
+
+```ts
+{
+  name: 'ios',
+  engine: mobile({ platform: 'ios' }),
+  app: {
+    bundleId: 'com.example.app',
+    appPath: './build/MyApp.app', // the iOS .app bundle
+  },
+}
+```
+
+Таргету пристрою потрібен `bundleId`, `appPath` або обидва параметри. Сам рушій
+нічого не встановлює. Викликайте `device.installApp()` один раз на пристрій у
+[фікстурі воркера](/fixtures#share-a-fixture-across-a-worker) з опцією
+[`auto: true`](/fixtures#run-a-fixture-for-every-test). Без переданого шляху
+метод встановлює `app.appPath`. Якщо `bundleId` не вказано, `app.open()`
+запускає застосунок, установлений із цієї збірки.
+
+Про запуск набору тестів у CI читайте в розділі
+[Мобільні завдання](/ci#mobile-jobs).
+
+### Аргументи запуску й дозволи
+
+Параметри `app.launchArguments` і `app.permissions` застосовуються під час
+кожного чистого запуску.
+
+```ts
+app: {
+  bundleId: 'com.example.app',
+  launchArguments: ['-e2e', 'YES'],
+  permissions: { camera: 'grant', notifications: 'deny', location: 'reset' },
+},
+```
+
+- Аргументи запуску передаються як аргументи процесу на iOS і як аргументи
+  `am start` на Android. Об'єкт іменує кожен аргумент, тому `{ e2e: true }`
+  перетворюється на `-e2e YES` на iOS і `--ez e2e true` на Android. Див.
+  [довідку](/reference/mobile#launch-arguments-and-permissions).
+- Дозволи задаються до запуску, тож системний запит не з'являється. Виклик
+  `app.clearState()` скидає їх разом із даними, а потім задає знову.
+- Значення `deny` на iOS відмовляє застосунку без діалогу. На Android воно
+  відкликає дозвіл, тож ОС запитує його повторно.
+- Значення `permissions: 'all'` надає всі дозволи, які може задати
+  платформа: кожен runtime-дозвіл, оголошений застосунком на Android, і кожен
+  сервіс приватності, доступний середовищу виконання на симуляторі iOS, із
+  геолокацією `always`. Android пропускає дозволи, які видаються під час
+  встановлення, наприклад `INTERNET`. Симулятор не дозволяє програмно вмикати
+  сповіщення, тому підтверджуйте цей запит через `device.alert('accept')`.
+- Прогрів (warm-up) перед запуском не передає ані аргументів запуску, ані
+  дозволів, тому починайте кожен тест із `app.open()`.
+- Аргументи, які перемикають режим збірки, змінюють сам застосунок. Задайте
+  кожному режиму окремий `app.identity`, щоб їхні записи в кеші не
+  перетиналися.
+
+Щоб запустити один тест із власними параметрами, скористайтеся `device.openApp`.
+Кожна передана опція повністю замінює відповідне значення з конфігу таргета:
+наприклад, `permissions: { camera: 'deny' }` скидає решту його дозволів. Під час
+перезапуску основного застосунку непередані опції зберігають значення таргета:
+
+```ts
+await device.openApp('com.example.app', { relaunch: true, permissions: { camera: 'deny' } });
+```
+
+### Запуск застосунку іншою мовою
+
+На iOS аргументи запуску задають мову й регіон застосунку для цього запуску,
+тоді як сам пристрій зберігає власну мову. Додайте окремий таргет для кожної
+мови:
+
+```ts
+{
+  name: 'ios-fr',
+  engine: mobile({ platform: 'ios' }),
+  app: {
+    bundleId: 'com.example.app',
+    launchArguments: { AppleLanguages: ['fr'], AppleLocale: 'fr_FR' },
+  },
+}
+```
+
+- У вигляді списку ці самі аргументи записуються як
+  `['-AppleLanguages', '(fr)', '-AppleLocale', 'fr_FR']`.
+- Ця мова має бути включена в збірку застосунку. Інакше iOS покаже мову
+  розробки.
+- На Android немає аргументу запуску для зміни мови. Ключі `AppleLanguages` або
+  `AppleLocale` в об'єкті для таргета Android спричиняють помилку під час
+  завантаження конфігу. На хмарному пристрої задайте `language` і `locale` у
+  `browserstack()` або `testmu()`. На локальному пристрої змініть мову пристрою
+  до запуску тестів.
+
+### Development-збірки Expo
+
+Development-збірка (`expo-dev-client`) відкривається в dev launcher і
+завантажує JavaScript із dev-сервера. На симуляторі iOS наведені нижче
+аргументи запуску відкривають сервер напряму та вимикають dev-меню, його
+вітальний екран і плаваючу кнопку. Сам сервер запускає `app.command`:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { mobile } from '@e2e-dev/mobile';
+
+export default {
+  targets: [
+    {
+      engine: mobile({ platform: 'ios' }),
+      app: {
+        bundleId: 'com.example.app',
+        launchArguments: [
+          '--initialUrl', 'http://localhost:8081',
+          '-EXDevMenuShowsAtLaunch', 'NO',
+          '-EXDevMenuIsOnboardingFinished', 'YES',
+          '-EXDevMenuShowFloatingActionButton', 'NO',
+        ],
+        command: { executable: 'npx', args: ['expo', 'start', '--port', '8081'] },
+        readyUrl: 'http://localhost:8081/status',
+      },
+    },
+  ],
+} satisfies E2EConfig;
+```
+
+- Прогрів залишає застосунок у dev launcher. Починайте кожен тест із
+  `app.open()`.
+- Перший запуск чекає, доки dev-сервер збере бандл застосунку. Задайте для
+  першої перевірки тесту більший тайм-аут.
+- На Android expo-dev-launcher не читає `--initialUrl`. Відкрийте сервер за
+  допомогою `device.openLink` і посилання збірки
+  `exp+<slug>://expo-development-client/?url=<encoded server URL>`.
+
+## Тест для пристрою
+
+Фікстура `screen` зіставляє нативні елементи керування із загальними ролями,
+наприклад `button`, `textbox`, `listitem` і `switch`. Для нативних ідентифікаторів
+елементів використовуйте `getByTestId`.
+
+```ts
+import { test } from '@e2e-dev/mobile';
+import { expect } from 'e2e';
+
+test('shows the version in dark mode', async ({ agent, app, device, screen }) => {
+  await device.setAppearance('dark');
+  await app.open();
+  await agent.act('go to General, then About');
+  await expect(screen.getByRole('button', /^iOS Version/)).toBeVisible();
+  await expect(device.locator('role=navigation-bar id=About')).toBeVisible();
+});
+```
+
+Між тестами застосунок зберігає стан, у якому завершився попередній тест.
+Пристрої не підтримують `selectOption`, `setInputFiles`,
+`scrollIntoView`, `secondaryTap` і `modifiers` у `tap` та `doubleTap`.
+Використовуйте тапи й свайпи по нативних елементах керування.
+
+### Test ID у різних фреймворках
+
+Метод `getByTestId` зчитує accessibility identifier на iOS і resource id на
+Android. Кожен UI-фреймворк задає їх по-своєму:
+
+| Фреймворк | Як задати ідентифікатор | Приклад |
+| --- | --- | --- |
+| React Native | `testID` | [with-expo](https://github.com/e2e-inc/e2e/tree/main/examples/with-expo) |
+| SwiftUI | `.accessibilityIdentifier()` | [with-swiftui](https://github.com/e2e-inc/e2e/tree/main/examples/with-swiftui) |
+| UIKit | `view.accessibilityIdentifier` або поле Identifier в інспекторі Identity в Interface Builder | - |
+| Jetpack Compose | `Modifier.testTag()` | [with-compose](https://github.com/e2e-inc/e2e/tree/main/examples/with-compose) |
+| Compose Multiplatform | `Modifier.testTag()` | [with-kotlin-multiplatform](https://github.com/e2e-inc/e2e/tree/main/examples/with-kotlin-multiplatform) |
+| Flutter | `Semantics(identifier:)` | [with-flutter](https://github.com/e2e-inc/e2e/tree/main/examples/with-flutter) |
+| .NET MAUI | `AutomationId` | [with-maui](https://github.com/e2e-inc/e2e/tree/main/examples/with-maui) |
+| NativeScript | `testID` | [Посібник Norrix](https://docs.norrix.net/guides/e2e-testing/#3-write-a-first-test) |
+
+- На Android нативний `android:id` і `AutomationId` у .NET MAUI зчитуються як
+  `<package>:id/<id>`. Виклик `getByTestId('greet')` знаходить їх без імені
+  пакета застосунку, як на iOS. Ідентифікатори фреймворку, наприклад
+  `android:id/content`, збігаються лише повністю.
+- На Android Jetpack Compose приховує test tags, доки кореневий composable не
+  задасть `Modifier.semantics { testTagsAsResourceId = true }`. Без цього
+  `getByTestId` їх не знайде. (iOS читає теги Compose Multiplatform як є, тому
+  цей параметр потрібен лише в activity для Android.)
+- У SwiftUI виклик `.accessibilityIdentifier()` на контейнері на кшталт
+  `VStack` перезаписує ідентифікатори дочірніх елементів, що призводить до
+  неоднозначних збігів. Додайте `.accessibilityElement(children: .contain)`
+  перед ідентифікатором, щоб зберегти обидва.
+- У Flutter обгорніть `Semantics` кнопки в `MergeSemantics`, щоб ідентифікатор
+  і роль кнопки опинилися на одному вузлі.
+- У NativeScript атрибути `testID` та `accessibilityIdentifier` задають той
+  самий ідентифікатор: `getByTestId('login-button')` знаходить
+  `<Button text="Login" testID="login-button" />` на обох платформах.
+  `accessibilityLabel` задає назву, а не ідентифікатор. На Android NativeScript
+  ставить його перед текстом, тому
+  `<Button text="Help" accessibilityLabel="Open help" />` отримує назву
+  `Open help. Help`. Шукайте таку кнопку через
+  `getByRole('button', /^Open help/)`.
+
+## Фікстура device
+
+Фікстура `device` змінює налаштування пристрою без виклику моделі: мережу,
+дозволи, тему оформлення, встановлення застосунків тощо. Кожен виклик
+записується у звіт як крок `device.<method>`. Усі методи перелічено в
+[довідці з мобільного рушія](/reference/mobile#device).
+
+Метод `device.locator` приймає селектор agent-device, як у тесті вище, для
+елементів керування, які неможливо описати запитами `screen`.
+
+Метод `device.installApp` також дає змогу тестувати оновлення й встановлення з
+нуля:
+
+```ts
+const { app } = await device.installApp('./build/MyApp.app', { reinstall: true });
+await device.openApp(app);
+```
+
+Метод `device.uninstallApp(id)` видаляє застосунок, а `device.isAppInstalled(id)`
+перевіряє його наявність. Без переданого ідентифікатора обидва методи працюють
+із заданим у таргеті застосунком.
+
+Метод `device.openApp` приймає ідентифікатор бандлу, ім'я пакета або
+відображувану назву, але ніколи не посилання. Метод `device.openLink` відкриває
+deep link або вебпосилання в заданому в таргеті застосунку чи в застосунку з
+параметра `app`. Це зручно для входу за magic link і переходів за deep link:
+
+```ts
+await device.openLink('myapp://orders/42');
+await expect(screen.getByText('Order #42')).toBeVisible();
+```
+
+Методи `device.setNetwork('offline')` і `device.setAirplaneMode(true)` працюють
+лише на Android. Оскільки симулятори iOS використовують мережу самого Mac, їх
+виклик на iOS завершується помилкою про непідтримувану функцію. Виклики
+`setNetwork('online')` або `setAirplaneMode(false)` на iOS просто ігноруються
+без помилки, тож спільні хуки очищення працюють без збоїв.
+
+На Android `setNetwork('offline')` вимикає лише Wi-Fi, і застосунок може
+залишатися онлайн через мобільну мережу. Щоб справді перевести застосунок в
+офлайн, використовуйте `setAirplaneMode(true)` (потрібен Android 11 або
+новіший). Рушій не відновлює мережу після тесту, тому вмикайте її назад у
+`afterEach`, який виконується навіть після збою тесту:
+
+```ts
+import { afterEach, test } from '@e2e-dev/mobile';
+import { expect } from 'e2e';
+
+afterEach(async ({ device }) => {
+  await device.setAirplaneMode(false);
+});
+
+test('shows the offline banner', { platforms: ['android'] }, async ({ app, device, screen }) => {
+  await app.open();
+  await device.setAirplaneMode(true);
+  await expect(screen.getByText('You are offline')).toBeVisible();
+});
+```
+
+Метод `device.clearKeychain()` очищає keychain симулятора, якого не торкається
+`app.clearState()`, тож збережений токен сесії зникає під час наступного
+запуску. Працює лише на iOS.
+
+Для всього, чого немає в `device`, властивість `device.unstable_raw` надає
+клієнт [agent-device](https://github.com/callstack/agent-device), прив'язаний
+до сесії тесту, а також ім'я сесії, ідентифікатор і назву пристрою та об'єкт
+`selection`, який можна розгорнути в параметри виклику клієнта. Це нестабільний API, який
+може змінитися або зникнути в будь-якому релізі:
+
+```ts
+const { client, deviceId } = device.unstable_raw;
+const { nodes } = await client.capture.snapshot({});
+```
+
+Виклики клієнта не є кроками: вони не потрапляють у звіт і трейс, кеш агента їх
+не відтворює, передані в них секрети не маскуються, і після них ніщо не чекає
+стабілізації екрана.
+
+<Accordion title="Розмір тексту й анімації">
+Фікстура `device` не має методу для системного розміру тексту чи анімацій, тому
+задавайте їх через `unstable_raw`. Змінюйте розмір тексту до `app.open()`.
+Запущений застосунок може зберегти старий розмір до перезапуску, тому після
+зміни посеред тесту викличте `app.restart()`:
+
+```ts
+import { afterEach, test } from '@e2e-dev/mobile';
+import { expect } from 'e2e';
+
+afterEach(async ({ app, device }) => {
+  const { client, selection } = device.unstable_raw;
+  await client.settings.update({ ...selection, setting: 'text-size', state: 'large' });
+});
+
+test('the checkout button shows at the largest text size', async ({ app, device, screen }) => {
+  const { client, selection } = device.unstable_raw;
+  await client.settings.update({ ...selection, setting: 'text-size', state: 'accessibility-extra-extra-extra-large' });
+  await app.open();
+  await expect(screen.getByRole('button', 'Checkout')).toBeVisible();
+});
+```
+
+Параметр `text-size` працює на симуляторах iOS та на Android, і значення `large` є
+стандартним на обох платформах. Параметр `setting: 'animations'` зі значенням
+`state: 'off'` або `'on'` працює лише на Android і падає на iOS. На Android він
+встановлює масштаби анімацій вікон, переходів і аніматора на 0 або 1. Обидва
+налаштування діють і після тесту, тому повертайте їх назад у `afterEach`.
+Наступний тест усе одно перезапустить застосунок через `app.open()`, тож
+достатньо відновити саме налаштування.
+</Accordion>
+
+<Accordion title="Фото для тесту вибору зображення">
+Фікстура `device` не вміє додавати фото до медіатеки, тому додавайте їх із
+хоста до `app.open()`. На симуляторі iOS це робить `xcrun simctl addmedia`, де
+`deviceId` є UDID симулятора. Команда `addmedia` додає копію під час кожного
+виклику, а агент не розрізняє однакові фото, тому приклад залишає
+файл-маркер у власній директорії даних симулятора й додає фото лише один раз.
+Коли симулятор стирають, маркер зникає разом із медіатекою:
+
+```ts
+import { execFileSync } from 'node:child_process';
+import { existsSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { test, type Device } from '@e2e-dev/mobile';
+import { expect } from 'e2e';
+
+// Put a JPEG named receipt.jpg beside this test.
+const receipt = resolve(import.meta.dirname, 'receipt.jpg');
+
+function addPhotoOnce(device: Device, file: string): void {
+  const { deviceId } = device.unstable_raw;
+  const listing = execFileSync('xcrun', ['simctl', 'list', 'devices', '-j'], { encoding: 'utf8' });
+  const { devices } = JSON.parse(listing) as {
+    devices: Record<string, { udid: string; dataPath: string }[]>;
+  };
+  const simulator = Object.values(devices).flat().find((d) => d.udid === deviceId);
+  if (!simulator) throw new Error(`No simulator ${deviceId}`);
+  const marker = resolve(simulator.dataPath, 'tmp', 'receipt-photo-added');
+  if (existsSync(marker)) return;
+  execFileSync('xcrun', ['simctl', 'addmedia', deviceId, file]);
+  writeFileSync(marker, file);
+}
+
+test('attaches the receipt from the photo library', { platforms: ['ios'] }, async ({ app, device, screen }) => {
+  addPhotoOnce(device, receipt);
+  await app.open();
+  await screen.getByLabel('Choose photo').tap();
+  await screen.getByRole('image', /^Photo, /).first().tap();
+  await expect(screen.getByText(/^Receipt attached/)).toBeVisible();
+});
+```
+
+Системне вікно вибору працює поза застосунком, але його фото є в дереві екрана:
+кожне представлене як `image` із назвою `Photo, ` і датою зйомки. Вікно вибору
+сортує фото за цією датою від найновіших. Це дата з EXIF-даних фото, а не день,
+коли ви його додали.
+
+На емуляторі Android файл потрібно передати через `adb` і запустити сканування
+медіа, а вікно вибору там є окремим застосунком із власними назвами елементів.
+Цю сторінку не перевіряли на Android, тому перед написанням локатора прочитайте
+дерево вікна вибору в трейсі.
+</Accordion>
+
+<Accordion title="Складані симулятори й емулятори">
+Метод `device.fold(pose)` переводить симулятор iPhone Duo або складаний
+емулятор Android (профіль Pixel Fold або стандартний «7.6in Foldable») у певне
+положення шарніра. Значення `closed` вмикає зовнішній дисплей. Значення
+`half-open` та `open` вмикають внутрішній. На iPhone Duo виклик повертає
+керування, коли шарнір досягає потрібного положення, що зазвичай триває від 10
+до 16 секунд, тому тримайте `actionTimeout` на рівні 20 секунд або більше.
+Положення `half-open` там відповідає розкриттю книжкою під кутом 130°. На емуляторі
+Android виклик повертається за кілька секунд, щойно Android зафіксує новий стан
+пристрою. Положення `half-open` відповідає власному куту профілю (90° на Pixel
+Fold), а складання на зовнішній дисплей закриває екран блокування «Swipe up to
+continue», який показує емулятор. Наступне спостереження читає застосунок уже
+на іншому дисплеї.
+
+Рушій ніколи не скидає положення шарніра, тому повторна спроба й наступний тест
+починаються в тому стані, у якому його залишив попередній тест. Складайте
+пристрій назад у `afterEach`, який виконується й тоді, коли тест падає:
+
+```ts
+import { afterEach, test } from '@e2e-dev/mobile';
+
+afterEach(async ({ device }) => {
+  await device.fold('closed');
+});
+
+test('the list and the detail split across the fold', async ({ agent, app, device }) => {
+  await app.open();
+  await device.fold('half-open');
+  await agent.assert('the list and the detail sit on either side of the fold', { vision: true });
+});
+```
+
+Агент складає пристрій за допомогою інструмента `fold` із `foldTools`. Додайте
+його до інструментів агента, щоб `agent.act`, `e2e explore` і MCP сервер могли
+складати й розкладати пристрій. Положення, у якому агент залишив пристрій, теж
+зберігається між тестами, тому не прибирайте скидання положення в `afterEach`:
+
+```ts
+import { foldTools, mobileTools } from '@e2e-dev/mobile/tools';
+
+tools: { ...mobileTools(iphoneDuo), ...foldTools(iphoneDuo) },
+```
+</Accordion>
+
+### Запис переходу
+
+Методи [`app.startRecording()` і `app.stopRecording()`](/reference/app#startrecording)
+записують один фрагмент роботи екрана у файл `.mp4`. Метод `boundingBox()`
+локатора повертає межі елемента в пунктах (у фізичних пікселях на Android).
+
+```ts
+test('the sheet slides up', { video: 'off' }, async ({ app, screen }) => {
+  await app.open();
+  await app.startRecording({ name: 'sheet' });
+  await screen.getByRole('button', 'Open sheet').tap();
+  await expect(screen.getByText('Sheet title')).toBeVisible();
+  const [video] = await app.stopRecording();
+});
+```
+
+Починайте запис після `app.open()`. Якщо почати запис після `device.closeApp()`,
+його зупинка завершить сесію пристрою, тож після цього відкрийте застосунок
+знову. Тапи показуються на відео, якщо
+[`videoTouches`](/reference/mobile#videotouches) не встановлено в `false`.
+
+## Кілька пристроїв
+
+<Video>
+  <video src="/images/cross-platform.mp4" aria-label="Один набір тестів одночасно працює у вебі, на iOS та Android." muted loop playsInline controls />
+
+  Один набір тестів працює у вебі, на iOS та Android.
+</Video>
+
+Додайте окремий таргет для кожної платформи:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { mobile } from '@e2e-dev/mobile';
+
+const app = { bundleId: 'com.example.app' };
+
+export default {
+  targets: [
+    { name: 'iphone', engine: mobile({ platform: 'ios' }), app },
+    { name: 'pixel', engine: mobile({ platform: 'android' }), app },
+  ],
+  workers: 1,
+} satisfies E2EConfig;
+```
+
+Тести запускаються на обох таргетах. Для тесту з підписами чи поведінкою,
+специфічними для платформи, задайте `platforms: ['ios']` або
+`platforms: ['android']`.
+
+Щоб запускати файли паралельно, задайте пул пристроїв і встановіть `workers` не
+менше за його розмір. Кожен пристрій отримує один воркер:
+
+```ts
+mobile({ platform: 'ios', device: ['iPhone 17', 'iPhone 17 Pro'] })
+```
+
+Без параметра `device` рушій використовує запущені пристрої в межах ліміту
+воркерів. Сполучений iPhone чи iPad, доступний через USB або мережу, вважається
+запущеним. Якщо запущених пристроїв немає, рушій запускає вимкнений: на iOS
+спершу iPhone, потім iPad, потім Apple TV, на Android спершу телефон чи
+планшет, потім телевізор. Далі пріоритет має найновіша версія ОС, а потім
+порядок назв. Два воркери ніколи не керують одним пристроєм одночасно.
+
+Щоб на один запуск виконати таргет на іншому пристрої, передайте назву
+пристрою, UDID симулятора або серійний номер емулятора через `--device`, а
+таргет через `--target`, якщо кілька обраних таргетів можуть використовувати цей
+пристрій: `e2e run --target iphone --device 'iPad Pro 13-inch (M5)'`. Тоді тести
+виконуватимуться саме на цьому пристрої замість значення `device` із конфігу таргета.
+
+## Інструменти агента
+
+Агент уже має базові дії, наприклад `tap`, `type` і `scroll`. Додайте `mobileTools`
+для перемикання між застосунками, довільних свайпів і роботи із системними
+алертами. Передайте всі мобільні рушії з конфігу в один виклик:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { mobile } from '@e2e-dev/mobile';
+import { mobileTools } from '@e2e-dev/mobile/tools';
+import { gateway } from 'ai';
+
+const app = { bundleId: 'com.example.app' };
+const iphone = mobile({ platform: 'ios' });
+const pixel = mobile({ platform: 'android' });
+
+export default {
+  targets: [
+    { name: 'iphone', engine: iphone, app },
+    { name: 'pixel', engine: pixel, app },
+  ],
+  agents: { default: { model: gateway('openai/gpt-6-luna-fast'), tools: mobileTools(iphone, pixel) } },
+} satisfies E2EConfig;
+```
+
+Виклики надходять до рушія, який виконує поточну спробу. Інструменти
+`open_app`, `swipe` і `alert` змінюють стан пристрою, тому під час відтворення
+з кешу агент виконує їх наживо. Кожен інструмент описано в
+[довідці з мобільного рушія](/reference/mobile#agent-tools). Як додати разом із
+ними власні інструменти, див. на сторінці [Інструменти проєкту](/tools).
+
+## Фізичні пристрої
+
+agent-device керує телефоном, підключеним до вашого комп'ютера, так само, як
+симулятором, без окремого рушія чи спеціальних опцій. Перегляньте список
+видимих пристроїв:
+
+<CodeGroup>
+```bash npm
+npx agent-device devices --platform ios
+```
+
+```bash pnpm
+pnpm exec agent-device devices --platform ios
+```
+
+```bash bun
+bunx agent-device devices --platform ios
+```
+</CodeGroup>
+
+Після цього вкажіть у `device` точну назву телефону зі списку:
+
+```ts
+mobile({ platform: 'ios', device: 'QA iPhone' })
+```
+
+Вказуйте саме назву, а не ідентифікатор. Рушій сприймає рядок `device` як
+ідентифікатор лише для UDID симулятора або серійного номера `emulator-<port>`.
+Обирається перший пристрій із такою назвою, тому давайте кожному телефону
+унікальне ім'я. Без параметра `device` сполучений iPhone чи iPad, доступний
+через USB або мережу, або підключений телефон Android вважається запущеним і
+потрапляє в пул поруч із запущеними симуляторами.
+
+Одноразове налаштування телефону:
+
+<Tabs>
+  <Tab title="iOS">
+  - Сполучіть телефон і позначте його як довірений, розблокуйте його й увімкніть
+    режим розробника (Developer Mode).
+  - agent-device збирає й підписує свій XCTest-ранер на телефоні. Задайте в
+    `AGENT_DEVICE_IOS_TEAM_ID` ідентифікатор своєї команди, а в
+    `AGENT_DEVICE_IOS_BUNDLE_ID` унікальний ідентифікатор у форматі
+    reverse-DNS, наприклад `com.example.agentdevice.runner`. Профіль підпису
+    має дозволяти цей ідентифікатор і `<id>.uitests`. Перший запуск збирає
+    ранер і триває довше.
+  - Після зміни цих змінних виконайте `npx agent-device daemon stop`. Запущений
+    демон (daemon) зберігає середовище, з яким стартував.
+  - Файл `app.appPath` має бути підписаною збіркою для пристрою, а не `.app`
+    для симулятора.
+
+  Підпис для iOS докладно описано в довідці команди `npx agent-device help physical-device`.
+  </Tab>
+  <Tab title="Android">
+  - Увімкніть налагодження через USB та авторизуйте телефон. Команда
+    `adb devices` має показувати його зі статусом `device`.
+  - Для `app.appPath` підходить той самий `.apk`, що й для емулятора.
+  </Tab>
+</Tabs>
+
+На телефоні `localhost` усередині застосунку означає сам телефон. Вкажіть у
+застосунку мережеву адресу вашого комп'ютера або на Android перенаправте
+порт командою `adb reverse tcp:<port> tcp:<port>`.
+
+<Accordion title="Що не працює на фізичному телефоні">
+Деякі функції керування пристроєм потребують симулятора або емулятора. На
+телефоні вони завершуються помилкою з повідомленням agent-device.
+
+- На iPhone усі налаштування пристрою працюють лише на симуляторі:
+  `app.permissions`, `device.setPermission`, `app.clearState()`,
+  `device.setLocation`, `device.clearLocation`, `device.setAppearance`,
+  біометричні методи й `device.clearKeychain`. Те саме стосується
+  `device.clipboard`, `device.setClipboard`, `device.fold`, `device.lock` і
+  `device.unlock`.
+- Щоб почати з чистого стану на iPhone, перевстановіть застосунок через
+  `device.installApp(path, { reinstall: true })`. Задайте `app.bundleId` або
+  опцію `app`, щоб agent-device знав, який застосунок видалити.
+- agent-device керує старішим iPhone без CoreDevice, коли
+  `xcrun devicectl list devices` його не показує. Тапи, введення тексту й
+  читання екрана працюють. Встановлення, `--video`, `device.openLink` та
+  `app.launchArguments` не працюють. Встановіть збірку з Xcode й зафіксуйте
+  `app.bundleId`.
+- На телефоні Android метод `device.setLocation` працює лише на емуляторі.
+  Метод `device.setBiometrics('fingerprint', ...)` працює лише там, де телефон
+  надає `cmd fingerprint`.
+- Параметр `--video` на iPhone збирає відео зі знімків екрана приблизно з
+  частотою 15 кадрів на секунду й пропускає кадри.
+</Accordion>
+
+## Хмарні пристрої
+
+Використовуйте [Limrun](/integrations/limrun) для хмарних симуляторів iOS та
+емуляторів Android з автоматичним встановленням застосунку й очищенням
+пристрою.
+
+Передайте `DeviceProvider` у параметр `device`, щоб запускати тести на
+пристроях хмарного сервісу. Підійде будь-який сервіс, який запускає демон
+(daemon) agent-device поруч із симулятором, емулятором або телефоном. Провайдер
+бронює один пристрій на кожен слот воркера на початку запуску й звільняє його
+наприкінці.
+
+Для [Expo Simulators](/integrations/eas) використовуйте `expoSimulators()` із
+`@e2e-dev/eas`. Для [TestMu AI](/integrations/testmu) використовуйте `testmu()`
+із `@e2e-dev/testmu`. Для [BrowserStack](/integrations/browserstack)
+використовуйте `browserstack()` із `@e2e-dev/browserstack`. Для Android в
+[E2B](/integrations/e2b) використовуйте `e2b()` із `@e2e-dev/e2b`. Для
+[Revyl](/integrations/revyl) використовуйте `revyl()` із `@e2e-dev/revyl`. Для
+іншого сервісу напишіть власного провайдера на кілька десятків рядків, як
+`hostedDevices` у прикладі нижче:
+
+```ts
+mobile({
+  platform: 'ios',
+  device: hostedDevices({ serviceUrl: 'https://devices.example.com', image: 'ios-18-iphone-17' }),
+})
+```
+
+- Кожен воркер бронює власну сесію, а сервіс тарифікує сесію, поки вона працює.
+  Тримайте `workers` на рівні, який набір тестів справді завантажує.
+- Ключ кешу відтворення базується на `app.bundleId`, тому локальні записи
+  відтворюються й на хмарних пристроях.
+- Заброньовані пристрої проходять прогрів (warm-up) так само, як локальні, до
+  початку відліку часу тестів.
+
+<Accordion title="Контракт DeviceProvider">
+```ts
+export interface DeviceProvider {
+  /** Label in progress lines and error messages. */
+  readonly name: string;
+  acquire(request: DeviceRequest): Promise<DeviceLease>;
+  release(lease: DeviceLease, context: DeviceReleaseContext): Promise<void>;
+  record?(lease: DeviceLease, context: ProviderRecordContext): Promise<ProviderRecording>;
+}
+
+export interface DeviceLease {
+  /** The provider's handle (a session id), handed back to `release`. */
+  readonly id: string;
+  /** The agent-device daemon the worker connects to; a lease names this, `client`, or both. */
+  readonly daemon?: { readonly baseUrl: string; readonly authToken?: string };
+  /** agent-device client configuration the worker's client is created with: a lease scope, a `stateDir`. */
+  readonly client?: DeviceClientConfig;
+  /** Device to select inside that daemon, when it hosts more than one. */
+  readonly device?: string;
+  /** Device to select inside that daemon by the id agent-device lists it under: a simulator UDID or an Android serial. */
+  readonly deviceId?: string;
+  /** Bundle id or package the provider installed itself; skips the target's `app.appPath`. */
+  readonly installedApp?: string;
+}
+```
+
+**`acquire`** викликається одночасно для всіх слотів воркерів у процесі ранера.
+Запит містить `platform`, `runId`, `targetName`, `slot`, `slots`, `app`
+(`app.bundleId` таргета), розв'язаний `appPath`, `agentDeviceVersion` (для
+сервісу, що запускає демон обраної версії), `projectRoot`, `env`, сигнал
+переривання `signal` і функцію `log`, яка передає повідомлення в репортер.
+
+- Читайте токени з `request.env`, а не з `process.env`. Читайте файли проєкту
+  відносно `request.projectRoot`, а не `process.cwd()`.
+- Таргет, у якому немає тестів для запуску, нічого не бронює.
+- Задавайте `installedApp` лише тоді, коли запит містить `appPath`. Інакше
+  запуск завершиться помилкою.
+- Щоб встановити `appPath` із запиту через демон бронювання, поверніть
+  `installLeasedApp(request, lease)` із `@e2e-dev/mobile/lease`.
+
+**`release`** виконується після зупинки останнього воркера в межах
+`cleanupTimeout` за будь-якого сценарію завершення: збою, переривання чи помилки в
+`prepare`. Він отримує об'єкт, який повернув `acquire`, тож провайдер може
+зберігати в ньому власні поля, а також `context` із полем `timeoutMs`, що
+містить залишок часу на очищення в мілісекундах на момент старту `release`. До
+воркерів передаються лише поля `DeviceLease`. Якщо один слот не зміг забронювати
+пристрій, запуск завершується до старту тестів, а рушій усе одно звільняє всі
+отримані бронювання.
+
+**`client`** містить конфігурацію клієнта agent-device у форматі JSON, яка
+застосовується поверх імені сесії та адреси `daemon`. Бронювання, яке задає
+`session`, `daemonBaseUrl`, `daemonAuthToken` або `daemonTransport`,
+відхиляється. Для власних хмарних середовищ agent-device поле `client` передає
+область бронювання, яку повернув `leases.allocate`: `tenant`, `runId`,
+`leaseId`, `leaseBackend` і `leaseProvider`. Команда без області бронювання
+повертається до локальних пристроїв. Поле `stateDir` у `client` вказує воркеру
+на демон, запущений провайдером, тож адреса `daemon` не потрібна.
+
+**`record`** є необов'язковим. Коли спроба записує відео, воркер викликає його
+замість запису екрана через agent-device. Воркер може працювати в іншому
+процесі, тому `record` отримує лише поля бронювання, без стану, який зберіг
+`acquire`. Метод повертає `ProviderRecording` (тип з `e2e/engine`), метод `stop`
+якого або записує файл у передану директорію й повертає `{ file }`, що зберігається
+як `video/<file>`, або повертає `{ url, mediaType }` для запису, який зберігає
+сам сервіс і на який посилається звіт. Якщо `record` завершується помилкою, падає
+запуск спроби. Якщо помилка виникає в `stop`, ранер повторює виклик ще раз
+наприкінці спроби.
+</Accordion>
+
+<Accordion title="Приклад: провайдер для API сесій">
+Типовий API сесій потребує трьох запитів: створити сесію, опитувати її, доки
+демон не стане доступним, і зупинити її.
+
+```ts title="device-provider.ts" expandable
+import type { DeviceProvider } from '@e2e-dev/mobile';
+
+/**
+ * Leases devices from a service that starts an agent-device daemon per
+ * session. Replace the three requests with your service's API.
+ */
+export function hostedDevices(options: { serviceUrl: string; image: string }): DeviceProvider {
+  return {
+    name: 'hosted-devices',
+    async acquire(request) {
+      const token = request.env['DEVICE_SERVICE_TOKEN'];
+      if (token === undefined || token === '') throw new Error('DEVICE_SERVICE_TOKEN is not set');
+      const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+      // 1. Ask for a device; name the session after the run so it can be found later.
+      const created = await fetch(`${options.serviceUrl}/sessions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          platform: request.platform,
+          image: options.image,
+          name: `e2e ${request.runId} ${request.targetName} ${request.slot + 1}/${request.slots}`,
+        }),
+        signal: request.signal,
+      });
+      if (!created.ok) throw new Error(`device service: HTTP ${created.status}`);
+      const { id } = (await created.json()) as { id: string };
+      // 2. Wait until the session exposes its agent-device daemon.
+      for (;;) {
+        const response = await fetch(`${options.serviceUrl}/sessions/${id}`, { headers, signal: request.signal });
+        const session = (await response.json()) as { status: string; daemonUrl?: string; daemonToken?: string; viewerUrl?: string };
+        if (session.status === 'ready' && session.daemonUrl !== undefined) {
+          if (session.viewerUrl !== undefined) request.log(`watch at ${session.viewerUrl}`);
+          return { id, daemon: { baseUrl: session.daemonUrl, authToken: session.daemonToken } };
+        }
+        if (session.status !== 'starting') throw new Error(`device service: session ${id} is ${session.status}`);
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+      }
+    },
+    async release(lease, context) {
+      // 3. Stop the session; the run waits for this within cleanupTimeout.
+      const token = context.env['DEVICE_SERVICE_TOKEN'] ?? '';
+      await fetch(`${options.serviceUrl}/sessions/${lease.id}/stop`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        signal: context.signal,
+      });
+    },
+  };
+}
+```
+</Accordion>
+
+<Accordion title="Приклад: хмара пристроїв із підтримкою agent-device">
+Для хмари пристроїв, із якою agent-device працює напряму, власний API сесій не
+потрібен. Функція `agentDeviceLeases()` із `@e2e-dev/mobile/lease` запускає
+окремий демон agent-device на кожен слот воркера з обліковими даними в `env`,
+бронює пристрій за `selectors`, підтримує сесію активною, поки запуск її
+тримає, а під час звільнення завершується помилкою, якщо agent-device не
+підтвердить завершення сесії. Саме так працюють `testmu()` із `@e2e-dev/testmu`
+для [TestMu AI](/integrations/testmu), `browserstack()` із
+`@e2e-dev/browserstack` для [BrowserStack](/integrations/browserstack) і
+`revyl()` із `@e2e-dev/revyl` для [Revyl](/integrations/revyl).
+
+Якщо хмарі потрібен плагін провайдера agent-device, додайте його в залежності й
+передайте `agentDevicePlugin(import.meta.resolve('@agent-device/<plugin>'))`:
+викличте його `assertVersion(request.agentDeviceVersion)` в `acquire` і
+передайте його `prepareHome` разом із бронюванням, щоб зареєструвати плагін у
+домашній директорії демона.
+
+```ts title="device-cloud-provider.ts" expandable
+import type { DeviceProvider } from '@e2e-dev/mobile';
+import { agentDeviceLeases } from '@e2e-dev/mobile/lease';
+
+/**
+ * Leases devices from a device cloud agent-device itself speaks to. Each
+ * worker slot gets its own agent-device daemon, whose runtime for the cloud
+ * starts the session when the lease is allocated and ends it on release.
+ * `provider` is agent-device's name for the cloud.
+ */
+export function cloudDevices(options: { provider: string; device: string; osVersion: string; app: string }): DeviceProvider {
+  const leases = agentDeviceLeases({ provider: options.provider, label: options.provider });
+  return {
+    name: options.provider,
+    async acquire(request) {
+      const token = request.env['CLOUD_TOKEN'];
+      if (token === undefined || token === '') throw new Error('CLOUD_TOKEN is not set');
+      return leases.acquire(request, {
+        // The daemon's runtime reads the credentials from its environment.
+        env: { CLOUD_TOKEN: token },
+        selectors: { device: options.device, providerOsVersion: options.osVersion, providerApp: options.app },
+        summary: `${options.device}, ${request.platform} ${options.osVersion}`,
+      });
+    },
+    release: (lease, context) => leases.release(lease, context),
+  };
+}
+```
+</Accordion>
+
+## Відмінності від вебу
+
+| У вебі | На пристрої |
+| --- | --- |
+| `app.open('/path')` і дія агента `navigate` | Немає ані URL застосунку, ані `navigate`. `app.open()` запускає `app.bundleId` заново, а `device.openLink(url)` відкриває в ньому посилання. Із [`app.linkBase`](/reference/config#linkbase) виклик `app.open('/path')` відкриває шлях як посилання |
+| `test.setup` зберігає сесію, `session:` відновлює її | Недоступно. У симулятора немає переносного снепшоту сесії, тож виконуйте вхід у кожному тесті або готуйте стан застосунку наперед |
+| Введення секретів | `type_secret` і `screen.getByLabel(...).fill(secret)` вводять оголошені секрети в захищені поля |
+| `--video` записує скринкаст WebM | `--video` записує MP4 екрана пристрою з відображенням тапів (`videoTouches: false` їх приховує) або зберігає власний запис провайдера пристроїв |
+| Кеш прив'язується до шляху сторінки | Кеш прив'язується до розташування `<bundle id> / <screen title>`, де заголовок береться з панелі навігації на iOS і з панелі інструментів на Android |
+
+### Відомі обмеження пристроїв
+
+- Вузол пристрою надає через `getAttribute()` лише атрибути `label`,
+  `resource-id`, `class`, `placeholder` та `content-desc` на Android. Див.
+  [`getAttribute`](/reference/screen#getattribute).
+- Вкладка React Native (`accessibilityRole="tab"`) на iOS має роль `other`.
+  Шукайте її за test ID або підписом і перевіряйте через `toBeSelected`.
+  Чекбокси, радіокнопки й `toBeChecked` працюють на обох платформах.
+- На iOS звичайний `View` у React Native не має дочірніх вузлів у дереві, тому
+  `filter({ has })` і вкладені в нього запити нічого не знаходять, а
+  `filter({ hasNot })` залишає кожен такий рядок, включно з тим, який ви хотіли
+  виключити. Обмежуйте область пошуку компонентом `ScrollView` екрана
+  (`device.locator('role=scroll-area')`) або призначте дочірнім елементам
+  test ID.
+- Клікабельний елемент у Jetpack Compose розміром менше ніж 48dp відображається
+  в дереві як дві кнопки, а тап падає з помилкою
+  `has no parent-owned touch point`. Зробіть елемент керування щонайменше 48dp,
+  що є мінімальним розміром області натискання в Android.
+- Елемент, прихований через `display: none`, відсутній у дереві, тому
+  `toBeAttached` падає. Перевіряйте через `toHaveCount(0)` або `toBeHidden`.
+- Вузол, центр якого перекриває екранна клавіатура, вважається прихованим, як і
+  прокручений за межі екрана. Клавіші клавіатури, панель підказок і док
+  залишаються видимими, так само як і поле у фокусі. Контейнер залишається
+  видимим, доки хоча б один його дочірній елемент видно над клавіатурою. На
+  інших перекритих вузлах `toBeVisible()` падає, а тап по них завершується
+  помилкою `ACTION_FAILED`. Спершу викличте `device.dismissKeyboard()` або
+  прокрутіть вузол у видиму область. Див.
+  [Видимість](/reference/mobile#visibility).
+- Виклики `doubleTap()` і `screen.doubleTapAt()` на iOS виконують два тапи з
+  інтервалом приблизно від 285 до 335 мс. Задавайте для детектора подвійного
+  тапу вікно щонайменше 350 мс.
+- На iOS `device.foregroundApp()` усе ще повертає застосунок сесії навіть після
+  `device.home()`. Натомість перевіряйте екран.
+- У збірці Android без shell-команди для сервісу буфера обміну (як на емуляторі
+  Android 16) методи `device.clipboard()` і `device.setClipboard()` викидають
+  `UNSUPPORTED_CAPABILITY`. Щоб перевірити копіювання, вставте текст у поле й
+  прочитайте його значення.
+- На iPhone Duo параметр `--video` записує той дисплей, який був активний на
+  початку запису. Коли `device.fold` переносить застосунок на інший дисплей,
+  на решті відео буде чорний екран.
+
+## Усунення проблем
+
+Збої пристрою виводять оригінальне повідомлення про помилку від agent-device:
+читайте саме його, а не лише код помилки-обгортки.
+
+**Ранер автоматизації iOS зайнятий або завис.** Важкі анімації чи зупинка
+запуску через Ctrl-C можуть заблокувати ранер. Спробуйте запустити тести ще
+раз. Якщо проблема повторюється, зупиніть демон і перезавантажте симулятор
+командами нижче.
+
+**`device.installApp()` не може визначити пакет Android.** Якщо agent-device не
+зміг прочитати маніфест APK, задайте `app.bundleId` явно у вашому конфігу або
+експортуйте `ANDROID_HOME` і перезапустіть демон agent-device.
+
+**Android повідомляє про недостатній вміст активного застосунку / iOS
+повідомляє, що застосунок не запущено.** Зазвичай це означає, що застосунок ще
+виконує холодний старт. Локатори з очікуванням і `expect()` перечікують холодний
+старт, тоді як миттєві зчитування на кшталт `isVisible()` або `count()` бачать
+нуль збігів. Через це `not.toBeVisible()` може пройти, поки екран не зчитується,
+зокрема якщо застосунок упав ще до рендеру. Після запуску застосунку надавайте
+перевагу позитивним перевіркам `expect(...).toBeVisible()`.
+
+**Тайм-аути пристрою.** Якщо запуск симулятора, старт застосунку або дія
+перевищують тайм-аут, e2e завершує крок помилкою замість повторення дії, яка
+вже могла спрацювати на пристрої. Для довгих жестів, таких як `longPress`,
+збільште `actionTimeout` або передайте окремий `timeout` у виклик.
+
+<CodeGroup>
+```bash npm
+npx e2e doctor                   # agent-device, the toolchain, the devices, the app
+npx agent-device daemon stop     # after a wedge: drops every session, the next run starts the daemon
+xcrun simctl shutdown <udid> && xcrun simctl boot <udid>
+```
+
+```bash pnpm
+pnpm exec e2e doctor                   # agent-device, the toolchain, the devices, the app
+pnpm exec agent-device daemon stop     # after a wedge: drops every session, the next run starts the daemon
+xcrun simctl shutdown <udid> && xcrun simctl boot <udid>
+```
+
+```bash bun
+bunx e2e doctor                   # agent-device, the toolchain, the devices, the app
+bunx agent-device daemon stop     # after a wedge: drops every session, the next run starts the daemon
+xcrun simctl shutdown <udid> && xcrun simctl boot <udid>
+```
+</CodeGroup>
+
+## Що далі
+
+<CardGroup cols={2}>
+  <Card title="Довідник мобільного рушія" icon="mobile-screen" href="/reference/mobile">
+    Усі параметри, фікстура `device` і набір інструментів.
+  </Card>
+  <Card title="Локатори" icon="crosshairs" href="/core-concepts#locators">
+    Явні тапи, свайпи й перевірки за допомогою `screen` і `expect` на будь-якій платформі.
+  </Card>
+</CardGroup>

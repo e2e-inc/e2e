@@ -1,0 +1,321 @@
+---
+title: Веб
+description: "Тестування вебзастосунку в Chromium, Firefox або WebKit за допомогою @e2e-dev/web за вашим URL або через dev-сервер під керуванням ранера, з кількома розмірами в'юпорту."
+"og:image": "https://e2e.com/docs/images/og/web.png?v=e860636537"
+"twitter:image": "https://e2e.com/docs/images/og/web.png?v=e860636537"
+---
+
+Пакет `@e2e-dev/web` запускає тести в браузері на URL вашого застосунку. Про
+[перехоплення запитів](/reference/web#route), [cookies](/reference/web#setcookies),
+[діалогові вікна](/reference/web#ondialog) та
+[завантаження файлів](/reference/web#waitfordownload) читайте в
+[довідці з вебрушія](/reference/web).
+
+## Запуск застосунку
+
+Вкажіть URL вашого застосунку в параметрі `app` таргета. Виклик
+`app.open('/path')` формує адресу відносно нього:
+
+```ts title="Target fragment"
+engine: web(),
+app: { url: process.env.APP_URL ?? 'http://localhost:3000' },
+```
+
+URL без схеми використовує HTTPS, а для loopback-хоста HTTP. Звичайний HTTP
+працює лише на loopback-хості. URL зі схемою `file:` відкриває
+[один файл із диска](/reference/config#a-file-as-the-app) без сервера.
+
+### Запуск застосунку ранером
+
+Додайте `app.command`, і e2e сам запустить ваш dev-сервер, дочекається
+відповіді від `app.url` і зупинить його після завершення запуску (навіть у разі
+збою чи натискання Ctrl-C):
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [{
+    engine: web(),
+    app: {
+      url: process.env.APP_URL ?? 'http://localhost:3000',
+      command: {
+        executable: 'npm',
+        args: ['run', 'dev'],
+        reuseExisting: true,
+        log: '.e2e/logs/app.log',
+      },
+    },
+  }],
+} satisfies E2EConfig;
+```
+
+```text
+ ✓ target "web" command at http://localhost:3000/ ready 1.20s
+```
+
+Команда запускається напряму без оболонки (`executable` шукається в `PATH`, а
+`args` передаються як є). Дочірній процес отримує лише `PATH`, `HOME`, змінні
+тимчасової директорії, `inheritEnv` та `env`.
+
+| Параметр | Призначення |
+| --- | --- |
+| `reuseExisting: true` | Використовувати вже запущений сервер (наприклад, піднятий у [сесії MCP](/reference/mcp#running-tests-beside-a-session)). Ігнорується в CI, де наявний сервер завершує запуск помилкою. |
+| `log` | Зберігати stdout і stderr застосунку у файл відносно кореня проєкту. Якщо сервер не стартує або аварійно завершується під час виконання тестів, e2e виводить відповідні рядки з цього логу (значення `env` та `inheritEnv` від 4 символів у цьому фрагменті маскуються). Сам файл логу не маскується. |
+| `env` | Змінні середовища для застосунку або функція, яка повертає їх із [сервісів](/services) конфігу. |
+| `inheritEnv` | Змінні хоста, які передаються, якщо вони задані, за іменем або префіксом: `['DATABASE_URL', 'STRIPE_*']`. Значення з `env` мають вищий пріоритет. |
+| `startupTimeout` | Скільки чекати на відповідь застосунку. За замовчуванням 60 секунд. |
+| `readyUrl` | Задається поруч із `command` (а не всередині нього), щоб опитувати ендпоїнт готовності замість `app.url`. |
+
+Усі параметри та правила скорочення логів описано в
+[довідці з command](/reference/config#command).
+
+<Note>
+Щоб запустити базу даних, мок API або іншу залежність перед застосунком, додайте її як [сервіс](/services).
+</Note>
+
+### Автоматичний вибір порту
+
+Вкажіть порт `0`, щоб запускати кілька копій проєкту без конфліктів портів. e2e
+підбирає вільний порт і підставляє його замість `{port}` в `args` та `env`:
+
+```ts title="Target fragment"
+engine: web(),
+app: {
+  url: 'http://127.0.0.1:0',
+  command: { executable: 'pnpm', args: ['dev', '--port', '{port}'], env: { PORT: '{port}' } },
+},
+```
+
+- Пишіть `127.0.0.1` або `[::1]`, тобто адресу, на якій слухає команда. Адресу
+  `localhost:0` ранер відхиляє.
+- Тести отримують URL із реальним портом через `app.baseUrl`.
+- Записи кешу залишаються чинними, коли порт змінюється.
+- Параметр `reuseExisting` не працює з портом `0`.
+- Для dev-сервера Next.js потрібно додати хост в `allowedDevOrigins`. Див.
+  [Next.js](/frameworks/nextjs#fix-next-js-problems).
+
+Див. [вільні порти](/reference/config#free-ports).
+
+## Захищені прев'ю-деплої
+
+Використовуйте `headers`, щоб відкрити захищений прев'ю-деплой (preview) або
+пропустити сторінку попередження тунелю. Наприклад, прев'ю-деплой у Vercel
+приймає заголовок обходу захисту:
+
+```ts title="Target fragment"
+engine: web({
+  headers: {
+    'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET ?? '',
+  },
+}),
+app: {
+  url: process.env.PREVIEW_URL ?? 'http://localhost:3000',
+  identity: 'storefront',
+},
+```
+
+Браузер надсилає `headers` лише в запитах, що починаються з origin адреси
+`app.url`, і зберігає їх під час редиректів на будь-який origin. Щоб додати
+інший origin, скажімо API-хост за тим самим захистом, укажіть його в
+`credentialOrigins` (див.
+[облікові дані запитів](/reference/security#request-credentials)). Для ngrok
+використовуйте `'ngrok-skip-browser-warning': '1'`. Поле `app.identity`
+зберігає ключі кешу відтворення стабільними, коли URL прев'ю-деплою змінюється.
+
+<Note>
+Якщо задати `headers`, браузер вимикає свій HTTP-кеш і блокує service workers.
+</Note>
+
+Для HTTP Basic-автентифікації використовуйте `basicAuth`. Браузер відповідає на
+статус `401` від `app.url` і будь-якого origin із `credentialOrigins` (у WebKit
+від будь-якого origin, якщо один із них використовує стандартний порт або має
+IPv6-хост). Оголосіть пароль у `secrets` і передайте `secrets.get(name)`, щоб
+e2e не допускав його у звіти, логи та дані для моделі:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { secrets } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [
+    {
+      engine: web({
+        basicAuth: { username: 'preview', password: secrets.get('previewPassword') },
+      }),
+      app: { url: 'https://staging.example.com' },
+    },
+  ],
+  secrets: { previewPassword: () => process.env.PREVIEW_PASSWORD ?? '' },
+} satisfies E2EConfig;
+```
+
+Звичайний рядок як пароль теж працює, але маскуються лише паролі з
+`secrets.get()`.
+
+## В'юпорти
+
+Задайте в'юпорт таргета, щоб запускати набір тестів у цьому розмірі, або
+викликайте `browser.setViewport()` під час тесту. Агент змінює розмір за
+допомогою інструмента [`resize_viewport`](/reference/agent#action-tools).
+
+### Один розмір на таргет
+
+Параметр `viewport` задає початковий розмір кожної спроби в пікселях. За
+замовчуванням це 1280 на 720. Додайте окремий таргет для кожного розміру:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+const app = { url: 'http://localhost:3000' };
+
+export default {
+  targets: [
+    { name: 'desktop', engine: web(), app },
+    { name: 'tablet', engine: web({ viewport: { width: 820, height: 1180 } }), app },
+    { name: 'phone', engine: web({ browser: 'webkit', viewport: { width: 390, height: 844 } }), app },
+  ],
+} satisfies E2EConfig;
+```
+
+Усі тести запускаються на кожному таргеті, а результати фіксуються окремо за
+назвою таргета. Повторна спроба завжди починається з початкового розміру
+відповідного таргета.
+
+- Запустіть один розмір командою `npx e2e run --target phone`. Пари
+  тест-таргет перелічує `npx e2e list`.
+- Таргети з однаковою `app.command` ділять один dev-сервер.
+- У тому самому списку може бути й таргет мобільного пристрою. Див.
+  [довідку з мобільного рушія](/reference/mobile).
+
+### Екрани з високою щільністю пікселів
+
+Параметр `deviceScaleFactor` визначає, скільки пікселів пристрою припадає на
+один CSS-піксель. Зі значенням 2 сторінка рендериться як на дисплеї Retina, а
+збережені знімки екрана вдвічі більші за в'юпорт із кожного боку:
+
+```ts title="Target fragment"
+{ name: 'retina', engine: web({ deviceScaleFactor: 2 }), app }
+```
+
+Цей коефіцієнт не змінює ані зображення, яке отримує модель, ані зображення,
+яке порівнює `toHaveScreenshot`.
+
+### Заповнення всього вікна
+
+Значення `viewport: null` не задає фіксованого розміру, тож сторінка заповнює
+вікно браузера, а агент, знімки екрана й відео використовують цей розмір. Це
+зручно під час запуску в режимі headed або з хмарним браузером, де live view
+інакше показав би сторінку 1280 на 720 в одному куті:
+
+```ts title="Target fragment"
+{ name: 'window', engine: web({ viewport: null }), app }
+```
+
+Локальний запуск у режимі headed відкриває невелике вікно. Хмарний браузер
+використовує розмір вікна, який ви запросили в сервісу. Виклик
+`browser.setViewport` усе одно працює.
+
+### Зміна розміру під час тесту
+
+Метод `browser.setViewport` змінює розмір сторінки до кінця поточної спроби,
+зокрема після `app.restart()` та `app.clearState()`. Використовуйте його, коли
+тест перевіряє верстку до і після зміни розміру:
+
+```ts
+import { test } from '@e2e-dev/web';
+import { expect } from 'e2e';
+
+test('the menu collapses on a narrow screen', async ({ app, screen, browser }) => {
+  await app.open('/');
+  await expect(screen.getByRole('navigation')).toBeVisible();
+
+  await browser.setViewport({ width: 390, height: 844 });
+  await expect(screen.getByRole('button', 'Menu')).toBeVisible();
+  await expect(screen.getByRole('navigation')).toBeHidden();
+});
+```
+
+Викличте його перед `app.open`, щоб перша сторінка одразу завантажилася в
+потрібному розмірі без попереднього десктопного рендеру.
+
+### Що бачить агент
+
+Агент отримує поточний розмір в'юпорту під час кожного спостереження, тому
+змінюйте розмір до виклику `agent.act`. Знімки екрана охоплюють видимий
+в'юпорт, тоді як елементи за межами екрана можуть залишатися в дереві
+доступності (тапи автоматично прокручують їх у поле зору, а агент може
+прокручувати сторінку для запуску відкладеного завантаження).
+
+Стилізовані чекбокси й радіокнопки, у яких нативний input візуально прихований під
+підписом, усе одно видимі для агента (тап по них клікає по підпису), якщо цей
+підпис не обгортає посилання чи інший елемент керування. Для локаторів
+перевіряйте їх через `toBeChecked()` замість `toBeVisible()`.
+
+### Обмеження тесту одним розміром
+
+Параметр `platforms` не може обрати конкретний в'юпорт, бо кожен браузерний
+таргет має платформу `web`. Щоб пропустити тест на певних розмірах, зчитайте
+ширину прямо в тесті:
+
+```ts
+test('the sidebar stays open', async ({ app, screen, browser }) => {
+  await app.open('/');
+  test.skip((await browser.evaluate(() => window.innerWidth)) < 768, 'desktop layout only');
+  await expect(screen.getByRole('complementary')).toBeVisible();
+});
+```
+
+Щоб тримати групу тестів для конкретного розміру окремо, створіть для них
+власний конфіг і запускайте його з параметром `--config`.
+
+### Обмеження
+
+Вузький в'юпорт перевіряє лише адаптивну верстку. Браузер залишається
+десктопним: коефіцієнт масштабу 1, десктопний вказівник і звичайний user agent.
+Сенсорне введення він не емулює. Для тестування на симуляторі або емуляторі
+використовуйте [мобільний рушій](/mobile). Про темну тему та зменшення анімації
+читайте в розділі [емуляція медіа](/reference/web#media-emulation).
+
+Відео зберігає розмір, який сторінка мала на початку запису. Щоб зафіксувати
+один розмір, задайте `web({ screencast: { size } })`. Провайдер браузерів, який
+сам веде запис, наприклад [Kernel](/integrations/kernel#recordings), натомість
+записує весь екран.
+
+## Надання дозволів браузеру
+
+Chromium у режимі headless відхиляє дозволи, не надані в таргеті, тому
+`navigator.clipboard.writeText` падає навіть після кліку. Щоб дозволити
+застосунку користуватися буфером обміну, надайте дозвіл у таргеті:
+
+```ts
+{
+  engine: web(),
+  app: {
+    url: 'http://localhost:3000',
+    permissions: { 'clipboard-read': 'grant', 'clipboard-write': 'grant' },
+  },
+}
+```
+
+- Дозволи діють на кожній сторінці та для будь-якого origin цього таргета.
+- Вебтаргет приймає лише `'grant'` (просто не вказуйте дозвіл замість того, щоб
+  передавати `'deny'` або `'reset'`).
+- Назви дозволів відповідають списку Playwright і залежать від браузера. Див.
+  [`permissions`](/reference/config#permissions).
+- Значення `permissions: 'all'` надає всі дозволи, які підтримує браузер
+  таргета.
+
+## Що далі
+
+<CardGroup cols={2}>
+  <Card title="Довідник вебрушія" icon="masks-theater" href="/reference/web">
+    Усі параметри `web()` і всі методи `browser`: перехоплення запитів, cookies, діалогові вікна й завантаження файлів.
+  </Card>
+  <Card title="Хмарні браузери" icon="globe" href="/reference/web#hosted-browsers">
+    Бронюйте браузери в хмарному сервісі замість локального запуску.
+  </Card>
+</CardGroup>

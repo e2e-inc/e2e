@@ -9,7 +9,7 @@
  * (`check-docs-examples.ts`), a snippet such as the provider list holds
  * content no page repeats, and the images and `docs.json` only serve the
  * site, as do the translations under `docs/ja/`, `docs/zh/`, `docs/cs/`,
- * `docs/es/`, `docs/pt/`, `docs/hi/`, `docs/fr/`, `docs/pl/`, and `docs/id/`.
+ * `docs/es/`, `docs/pt/`, `docs/hi/`, `docs/fr/`, `docs/pl/`, `docs/id/`, and `docs/uk/`.
  * The root README ships
  * as the package README, so the npm page matches the repository page. npm resolves
  * no relative paths, so its `./` links become GitHub URLs: raw files for
@@ -26,7 +26,7 @@ for (const page of globSync(['**/*.mdx', 'snippets/*.jsx'], {
   cwd: '../../docs',
   exclude: [
     'node_modules/**', 'ja/**', 'zh/**', 'cs/**', 'es/**', 'pt/**',
-    'hi/**', 'fr/**', 'pl/**', 'id/**',
+    'hi/**', 'fr/**', 'pl/**', 'id/**', 'uk/**',
   ],
 })) {
   cpSync(`../../docs/${page}`, `docs/${page}`);
