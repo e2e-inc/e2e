@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Protocol } from 'devtools-protocol';
 import { consoleText } from '../../src/console-text.ts';
-import { functionSource, plainData } from '../../src/main-process.ts';
+import { functionSource, plainData } from '../../src/evaluate.ts';
 
 describe('functionSource', () => {
   it('keeps a function that is an expression, and puts the keyword back on a shorthand method', () => {
@@ -14,15 +14,15 @@ describe('functionSource', () => {
       },
       async: (value: number) => value,
     };
-    expect(functionSource(() => 1)).toBe('() => 1');
-    expect(functionSource(methods.async)).toBe('(value) => value');
-    expect(functionSource(methods.plain)).toMatch(/^function plain\(\)/);
-    expect(functionSource(methods.later)).toMatch(/^async function later\(\)/);
-    expect(functionSource(function named() {})).toMatch(/^function named\(\)/);
+    expect(functionSource(() => 1, 'electron.evaluate')).toBe('() => 1');
+    expect(functionSource(methods.async, 'electron.evaluate')).toBe('(value) => value');
+    expect(functionSource(methods.plain, 'electron.evaluate')).toMatch(/^function plain\(\)/);
+    expect(functionSource(methods.later, 'electron.evaluate')).toMatch(/^async function later\(\)/);
+    expect(functionSource(function named() {}, 'electron.evaluate')).toMatch(/^function named\(\)/);
   });
 
   it('refuses a function with no source of its own', () => {
-    expect(() => functionSource(Math.max)).toThrow(/cannot be sent as source text/);
+    expect(() => functionSource(Math.max, 'electron.evaluate')).toThrow(/cannot be sent as source text/);
   });
 });
 

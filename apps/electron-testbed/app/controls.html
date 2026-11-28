@@ -10,6 +10,7 @@
       header { position: sticky; top: 0; height: 60px; background: #fff; border-bottom: 1px solid #ccc; z-index: 1; display: flex; align-items: center; padding: 0 24px; }
       #cover { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.2); }
       .spacer { height: 900px; }
+      .glyph::before { content: '\f090'; }
     </style>
   </head>
   <body>
@@ -95,6 +96,13 @@
       <output data-testid="more-clicks">0</output>
       <div data-testid="disabled-host" aria-disabled="true"></div>
       <output data-testid="host-clicks">0</output>
+      <button data-testid="glyph-button"><i class="glyph"></i> Scan</button>
+      <div role="toolbar" aria-label="Selection" style="width: 100%"><span><span id="unselect"><i></i> <span>Unselect All</span></span></span></div>
+      <output data-testid="unselect-clicks">0</output>
+      <button disabled style="width: 100%; text-align: left"><span>Wide save</span></button>
+      <table style="width: 100%"><tr><td><span id="open-row">Open row</span></td></tr></table>
+      <output data-testid="open-row-clicks">0</output>
+      <div role="option" tabindex="0" data-testid="composite-row" aria-label="Composite row"><input aria-label="Row name" data-testid="row-name" /></div>
     </section>
     <p data-testid="far-below" style="margin-top: 3000px">Far below</p>
     <script src="controls.js"></script>

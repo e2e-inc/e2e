@@ -1,0 +1,577 @@
+---
+title: Depurar uma execução
+description: Leia a página de trace, abra as evidências, acompanhe o navegador e veja o que foi enviado ao modelo.
+"og:image": "https://e2e.com/docs/images/og/debugging.png?v=38a51086e1"
+"twitter:image": "https://e2e.com/docs/images/og/debugging.png?v=38a51086e1"
+---
+
+Um teste que falhou imprime o próprio erro e o caminho da sua
+[página de trace](#traces). Para um resumo da execução inteira, adicione o
+reporter `markdown`. Ele escreve `.e2e/summary.md`.
+
+## Leia a falha
+
+O reporter `list` mostra, na seção `Failed Tests`, o erro, a linha que
+falhou, correspondências próximas para um localizador que falhou, o que o app
+registrou no log e a página de trace. Ele cita os 3 primeiros erros do app
+(erros de console, exceções não capturadas, requisições que falharam,
+respostas 5xx), com os dados sensíveis ocultados como na página de trace.
+`.e2e/summary.md` também os cita:
+
+```text
+ FAIL  |web| tests/todos.e2e.ts > shows the remaining count
+LOCATOR_NOT_FOUND: locator did not become visible: getByRole("heading", name: "Todos")
+ ❯ tests/todos.e2e.ts:31:3
+ ❯ at http://127.0.0.1:4271/nope
+ ❯ app 2 errors, 2 warnings logged
+   × console error: Error occurred prerendering page "/todos"
+   × network error: GET /api/todos 500 Internal Server Error
+ ❯ trace .e2e/results/todos-shows-the-remaining-count-796fac5f12ab34cd/trace.md
+```
+
+O código de saída indica o tipo de falha:
+
+| Saída | Significado | Rodar o job de novo? |
+| ---: | --- | --- |
+| 1 | Um teste falhou | Só se o teste for instável |
+| 2 | Configuração, coleta ou política | Corrija primeiro o problema relatado |
+| 3 | Falha de infraestrutura da engine, do processo do app, do provedor de modelo, de artefatos ou da limpeza | Se a causa for temporária |
+| 4 | Um erro interno do runner | Relate o erro |
+| 130 | A execução foi interrompida | |
+
+## Traces
+
+Por padrão, cada teste que falhou, excedeu o tempo limite, foi interrompido
+ou se mostrou instável ganha uma página de trace, `trace.md`, no seu
+[diretório de resultados](#artifacts). Abra-a na pré-visualização de
+markdown de um editor para que os links dela funcionem. Depois de indicar o
+navegador ou o dispositivo em que o teste rodou, ela mostra:
+
+- **Passos.** O nó que uma ação atingiu, os valores que uma asserção leu
+  enquanto esperava, a decisão do cache de replay, o que o app registrou no
+  log, para onde a página foi e como a tela mudou desde o passo anterior.
+- **Log do app.** Saída do console, exceções não capturadas, requisições que
+  falharam e respostas 4xx e 5xx, cada uma com o seu passo: até 50 linhas,
+  com erros e avisos primeiro. Uma tentativa guarda no máximo 200 erros e
+  avisos e 100 outras linhas.
+- **Os últimos turnos do agente.**
+- **Tela no momento da falha.** A captura de tela e a árvore semântica,
+  obtidas em no máximo 5 s. Um app que não responde a tempo fica sem a seção
+  da tela.
+
+<Accordion title="Exemplo de página de trace">
+
+````markdown
+# ✗ todos › shows the remaining count
+
+`tests/todos.e2e.ts` · failed · 2.2s
+
+**ASSERTION_FAILED**
+
+```text
+expect.toHaveText failed
+locator: getByRole("status", name: "Remaining")
+expected: text "1 remaining"
+observed: text "0 remaining" (match count 1)
+```
+
+Ran on: browser `chromium 141.0.7390.37` · user agent `Mozilla/5.0 (Macintosh; …) HeadlessChrome/141.0.7390.37 Safari/537.36`
+
+Look at: `tests/todos.e2e.ts:15`
+
+## Steps
+
+1. ✓ `app.open` `/todos` (37ms in beforeEach) — `tests/todos.e2e.ts:4`
+2. ✓ `agent.act` "Add a todo named Milk." (429ms, 2 model calls) — `tests/todos.e2e.ts:12`
+   - cache: no replay: nothing recorded for this step yet; recording saved (`.e2e/cache/1227d5a6….json`)
+   - type "Milk" into textbox "New todo" (17ms)
+   - press "Enter" on the focused field (5ms)
+   - ✗ network error: `POST /api/todos 500 Internal Server Error`
+   - screen: 6 changes since step 1 at `/todos`, 38 nodes
+     - `added listitem "Milk Delete Milk" testid="todo"`
+     - `added checkbox "Milk"`
+     - `changed status "Remaining" text="1 remaining" (was: status "Remaining" text="0 remaining")`
+     - 3 more
+3. ✓ `locator.check` `getByLabel("Milk")` (13ms) — `tests/todos.e2e.ts:14`
+   - check checkbox "Milk" (13ms)
+   - screen: 3 changes since step 2 at `/todos`, 38 nodes
+     - `added checkbox "Milk" [checked]`
+     - `changed status "Remaining" text="0 remaining" (was: status "Remaining" text="1 remaining")`
+     - `removed checkbox "Milk"`
+4. ✗ `expect.toHaveText` `getByRole("status", name: "Remaining")` (1.6s) — **ASSERTION_FAILED** — `tests/todos.e2e.ts:15`
+   - expect gave up after 16 reads in 1.6s: text "0 remaining" (1 match) x16
+
+## App log
+
+What the app logged, oldest first, with the step it happened in.
+
+- step 2 · ✗ network error: `POST /api/todos 500 Internal Server Error`
+
+## Screen at failure
+`http://127.0.0.1:4271/todos` · viewport 1280x720 · 38 nodes
+
+![screenshot at failure](attempt-1/screenshots/001-failure.png)
+
+```text
+#n29 textbox "New todo"
+#n30 button "Add"
+ #n35 listitem "Milk Delete Milk" testid="todo"
+  #n36 checkbox "Milk" [checked]
+#n40 status "Remaining" text="0 remaining"
+```
+````
+
+</Accordion>
+
+Uma asserção que leu um único valor o tempo todo tem uma expectativa errada,
+ou o app nunca chegou a esse estado: procure no log do app uma requisição que
+falhou. Uma asserção cujas leituras mudaram
+(`"2 remaining" x3 -> at 410ms "1 remaining"`) entrou em uma condição de
+corrida com o app. `screen: unchanged` depois de uma ação significa que a
+ação não teve efeito visível. Na web, a tela de um passo é a que uma ação
+deixou. Em um dispositivo, é a tela sobre a qual o passo agiu.
+
+O modo [`trace`](/reference/config#trace) define quais testes mantêm uma
+página. `--trace` mantém uma para cada teste de uma execução, incluindo os
+que passam. `--trace off` não escreve nenhuma. A opção `trace` do próprio
+teste prevalece sobre as duas.
+
+## Artefatos
+
+Cada teste ganha um diretório em `.e2e/results/` (ou
+[`<output>`](/reference/config#output)`/results/`), com a página de trace
+dele e um `attempt-<n>` por tentativa. Os testes de um grupo serial
+compartilham um diretório:
+
+```text
+.e2e/results/todos-adds-a-todo-1a2b3c4d5e6f7a8b/trace.md
+.e2e/results/todos-adds-a-todo-1a2b3c4d5e6f7a8b/attempt-1/screen-at-failure.txt
+.e2e/results/todos-adds-a-todo-1a2b3c4d5e6f7a8b/attempt-1/screenshots/001-failure.png
+```
+
+Cada execução que chega aos testes esvazia `results/` primeiro. Uma
+reexecução com `--last-failed` mantém os arquivos que as execuções anteriores
+a ela citam e escreve as próprias tentativas no `rerun-<n>/` de cada teste.
+
+| Artefato | Quando |
+| --- | --- |
+| Capturas de tela | Uma tentativa que falhou captura uma quando a engine consegue. O `agent.assert` embutido captura uma depois de qualquer um dos vereditos, a menos que `screenshot: false`. `app.screenshot('label')` captura uma sob demanda, e `locator.screenshot('label')`, uma de um elemento. Elas mascaram só campos seguros. Veja [capturas de tela depois de um preenchimento de segredo](/reference/security#screenshots-after-a-secret-fill). |
+| Downloads | Arquivos salvos por `browser.waitForDownload`, do tipo `download`, como o app os serviu. [Downloads](/reference/security#downloads) diz quando o runner mascara segredos neles. |
+| Vídeos | Quando você [os grava](#watch-it-happen). Vídeos não mascaram nada. Veja [onde a ocultação termina](/reference/security#where-redaction-stops). |
+| Transcrições do agente | Com [`--debug`](#agent-steps). |
+
+## Para scripts: report.json
+
+Toda execução que chega aos testes também escreve `report.json` no
+[diretório de saída](/reference/config#output), `.e2e` por padrão. Ele
+guarda todos os resultados da execução em um schema versionado.
+`--reporter json` o imprime no stdout:
+
+```bash
+jq '.run | {status, exitCode, errors}' .e2e/report.json
+jq '.run.results[] | select(.status != "passed") | .attempts[-1]
+    | {status, error, failure, steps: [.steps[] | select(.status != "passed") | {api, label, source, status, error}], artifacts}' .e2e/report.json
+```
+
+`run.errors` guarda as falhas no nível da execução. A última tentativa de
+cada resultado com falha guarda:
+
+| Campo | Guarda |
+| --- | --- |
+| `error` | O código, a mensagem, a linha do código-fonte e os detalhes da asserção |
+| `failure` | Os artefatos de tela e de captura de tela, e quaisquer candidatos do localizador |
+| `steps` | As chamadas que levaram à falha. Os `events` de cada passo guardam o que ele fez (`engine`), o que ele consultou em polling (`poll`) e para onde o app foi (`navigation`). Os passos do agente acrescentam `cache` e os turnos recentes do modelo. `observationTruncated: true` significa que pelo menos uma observação semântica ficou incompleta. |
+| `appLog` | O que o app registrou no log. O `step` de cada linha é o `index` do passo dela, ausente antes do primeiro passo. |
+| `artifacts` | Os arquivos capturados |
+
+Os testes de um grupo serial não têm `attempts` próprios. Os resultados
+deles ficam em `run.serialGroups`, um membro para cada teste em cada
+tentativa. Uma nova tentativa que a execução interrompeu ou que nunca chegou
+aos membros tem `cutRetry: true` e não guarda os vereditos, então pule-a:
+
+```bash
+jq '.run.serialGroups[] | (.attempts | map(select(.cutRetry != true)) | last).members[]? | select(.status != "passed")
+    | {testId, status, error, failure}' .e2e/report.json
+```
+
+## Acompanhe a execução
+
+<CodeGroup>
+```bash npm
+npx e2e run --headed                      # a visible browser
+npx e2e run --video                       # record every attempt
+npx e2e run --video=retain-on-failure     # record every attempt, keep the failures
+```
+
+```bash pnpm
+pnpm exec e2e run --headed                      # a visible browser
+pnpm exec e2e run --video                       # record every attempt
+pnpm exec e2e run --video=retain-on-failure     # record every attempt, keep the failures
+```
+
+```bash bun
+bunx e2e run --headed                      # a visible browser
+bunx e2e run --video                       # record every attempt
+bunx e2e run --video=retain-on-failure     # record every attempt, keep the failures
+```
+</CodeGroup>
+
+`--video` aceita um modo opcional. Coloque os arquivos de teste antes da flag,
+ou escreva `--video=<mode>`.
+
+Cada gravação vai para o diretório da tentativa dela: WebM por página na
+web, MP4 em um dispositivo. O resumo da falha imprime o caminho, ou a URL
+quando um navegador hospedado guarda a gravação. Subtraia o `startedAt` da
+gravação do `startedAt` de um passo para encontrar esse passo no vídeo.
+
+Na CI, defina `video: 'on-first-retry'` na configuração. Um teste que passa
+na primeira vez não grava nada, e um teste instável deixa uma gravação da
+nova tentativa dele.
+
+O `video` de um alvo prevalece sobre o da configuração, e `--video`
+prevalece sobre os dois. A opção do próprio teste, como
+`test('checkout', { video: 'on' }, ...)`, prevalece sobre todos eles.
+
+O `video` da configuração e a flag `--video` só se aplicam a alvos cuja
+engine suporta gravação (os outros alvos são pulados com um aviso). Pedir
+vídeo em um alvo ou teste específico cuja engine não consegue gravar falha
+antes de os testes começarem.
+
+[Gravação](/reference/config#recording) traz todos os modos e arquivos.
+
+## Avance um teste passo a passo
+
+`--step` roda o primeiro passo e depois pausa cada passo seguinte até você
+apertar uma tecla. Adicione `--headed` para acompanhar o navegador entre os
+passos.
+
+<CodeGroup>
+```bash npm
+npx e2e run tests/checkout.e2e.ts --step --headed
+```
+
+```bash pnpm
+pnpm exec e2e run tests/checkout.e2e.ts --step --headed
+```
+
+```bash bun
+bunx e2e run tests/checkout.e2e.ts --step --headed
+```
+</CodeGroup>
+
+O passo pausado aparece sob o teste dele, abaixo dos passos que já rodaram:
+
+```text
+ ❯ |web| tests/checkout.e2e.ts 0/1
+   └── pays with a card (k3f9)
+       ✓ app.open "/checkout" 412ms
+       ⏸ step 2  locator.fill "getByLabel("Email")"  tests/checkout.e2e.ts:9
+
+ Test Files  0 passed (1)
+      Tests  0 passed (1)
+
+Paused (k3f9) at step 2
+  press enter to run this step, press h to show help, press q to quit
+```
+
+As teclas seguem as de [`--watch`](/reference/cli#watch-mode). Estas
+funcionam em um prompt:
+
+| Tecla | Faz |
+| --- | --- |
+| Enter | roda o passo pausado e pausa o seguinte |
+| `s` | mostra a árvore de acessibilidade da tela |
+| `l` | mostra o log do app da tentativa atual, começando pelas linhas mais novas |
+| `n` | roda o resto deste teste, incluindo as novas tentativas, e pausa no próximo teste |
+| `a` | roda o resto da execução sem pausar passos |
+| `h` | mostra todas as teclas abaixo do prompt, ou as esconde |
+| `q`, Esc | interrompe a execução como o Ctrl-C: o teste termina `interrupted`, os outros são pulados, código de saída 130 |
+
+Você pode rolar pela tela ou pelo log do app enquanto o teste continua
+pausado.
+
+| Tecla do visualizador | Faz |
+| --- | --- |
+| Seta para cima, seta para baixo, `k`, `j` | Rola uma linha |
+| Page Up, Page Down, `b`, Espaço | Rola uma página |
+| `g`, `G` | Vai para o topo ou para o fim |
+| `s`, `l` | Alterna para a tela ou para o log |
+| `p` | Fecha o visualizador e imprime o texto dele acima do resumo ao vivo |
+| `q`, Esc | Volta ao prompt |
+
+- Teclas apertadas por engano logo que um prompt abre são ignoradas,
+  enquanto o Ctrl-C funciona a qualquer momento.
+- O tempo em pausa não conta para os tempos limite de passo, de teste ou de
+  execução.
+- Testes de preparação, novas tentativas, hooks `afterEach`, desmontagens de
+  fixtures e callbacks de polling rodam sem pausar; cada `agent.act` conta
+  como um passo.
+- Passos concorrentes (como `Promise.all`) compartilham um único prompt, para
+  que um `waitForResponse` combinado com um clique rode junto com ele.
+- Navegadores ou dispositivos hospedados podem, mesmo assim, fechar sessões
+  inativas se ficarem pausados por tempo demais.
+
+`--step` roda um teste por vez. A flag é recusada na CI, com `--watch` e com
+`--workers` acima de 1. Com o reporter json, ela precisa que o stdin e o
+stdout sejam um terminal: o prompt é impresso no stderr, e o relatório, no
+stdout, no fim.
+
+## Avance um teste passo a passo sem um terminal
+
+Quando o stdin ou o stdout não é um terminal, como no shell de um agente de
+código, `--step` roda o teste em segundo plano. O comando retorna no
+primeiro passo pausado, com a tela em que esse passo espera. Rode cada
+comando seguinte a partir do mesmo diretório. Um shell que dá um terminal
+aos comandos recebe o prompt de teclas no lugar disso; redirecione o stdin
+do dispositivo nulo (`< /dev/null`, ou `< NUL` no `cmd` do Windows).
+
+<CodeGroup>
+```bash npm
+npx e2e run tests/checkout.e2e.ts --step
+npx e2e run --step next
+```
+
+```bash pnpm
+pnpm exec e2e run tests/checkout.e2e.ts --step
+pnpm exec e2e run --step next
+```
+
+```bash bun
+bunx e2e run tests/checkout.e2e.ts --step
+bunx e2e run --step next
+```
+</CodeGroup>
+
+```text
+✓ app.open "/checkout" 124ms
+Paused (k3f9) before step 2 of pays with a card [web]:
+  locator.fill "getByLabel("Email")" (tests/checkout.e2e.ts:9)
+Screen:
+  http://localhost:3000/checkout
+  heading "Checkout"
+  textbox "Email"
+  button "Pay"
+Next: e2e run --step next to run it, e2e run --step rest to run the rest, or e2e run --step stop to end the run.
+```
+
+| Comando | Faz |
+| --- | --- |
+| `e2e run --step next` | roda o passo pausado e retorna no próximo |
+| `e2e run --step rest` | roda o resto da execução sem pausar passos |
+| `e2e run --step stop` | interrompe a execução como o `q`, com código de saída 130, mesmo enquanto outro comando espera |
+
+- Cada comando imprime tudo o que aconteceu desde o comando anterior, junto
+  com a árvore de acessibilidade da tela atual, com os dados sensíveis
+  ocultados.
+- Só uma execução passo a passo pode estar ativa por diretório de cada vez,
+  e um passo inativo atinge o tempo limite automaticamente depois de 30
+  minutos.
+- Se um arquivo ou diretório se chama literalmente `next`, `rest` ou `stop`,
+  passe-o com um caminho relativo como `./next`.
+
+## Pause um teste
+
+Com [`screen.pause()`](/reference/screen#screen-pause), você pode pausar o
+teste em uma linha, com o app aberto, até retomá-lo. Você pode usá-lo em
+qualquer `e2e run`, com ou sem [`--step`](#step-through-a-test). O teste
+é pausado toda vez que a linha roda, como em cada volta de um loop.
+
+```ts title="tests/checkout.e2e.ts"
+import { test } from '@e2e-dev/web';
+
+test('pays with a card', async ({ app, screen }) => {
+  await app.open('/checkout');
+  await screen.pause();
+});
+```
+
+Adicione `--headed` para olhar o navegador enquanto o teste está pausado:
+
+<CodeGroup>
+```bash npm
+npx e2e run tests/checkout.e2e.ts --headed
+```
+
+```bash pnpm
+pnpm exec e2e run tests/checkout.e2e.ts --headed
+```
+
+```bash bun
+bunx e2e run tests/checkout.e2e.ts --headed
+```
+</CodeGroup>
+
+Em um terminal, a pausa aparece sob o teste dela:
+
+```text
+ ❯ |web| tests/checkout.e2e.ts 0/1
+   └── pays with a card (k3f9)
+       ⏸ paused  screen.pause()  tests/checkout.e2e.ts:5
+
+ Test Files  0 passed (1)
+      Tests  0 passed (1)
+
+Paused (k3f9) at screen.pause()
+  press enter to resume, press h to show help, press q to quit
+```
+
+Aperte Enter para retomar o teste, `h` para listar as teclas ou `q` para
+interromper a execução com o código de saída 130, como em um
+[prompt do `--step`](#step-through-a-test). Aperte `s` para ver a tela ou
+`l` para o log do app e depois use as
+[teclas do visualizador](#step-through-a-test).
+
+Sem um terminal, como no shell de um agente de código, a pausa é impressa
+com a tela em que ela espera:
+
+```text
+Paused (k3f9) in pays with a card [web]:
+  screen.pause() (tests/checkout.e2e.ts:5)
+Screen:
+  http://localhost:3000/checkout
+  heading "Checkout"
+Next: e2e run --step next to resume the test, or e2e run --step stop to end the run.
+```
+
+Para retomar o teste, rode `e2e run --step next` em outro shell, no mesmo
+diretório. Para encerrar a execução com o código de saída 130, rode
+`e2e run --step stop`. Você pode usar esses comandos com ou sem um
+terminal. Nesta pausa, você pode enviar `rest` no lugar de `next`.
+
+Para [se conectar pelo MCP](/reference/mcp#attaching-to-a-held-test) a
+partir do mesmo diretório, passe o ID do cabeçalho da pausa, como em
+`open_session {attach: "k3f9"}`.
+
+Você recebe uma resposta quando o teste pausa de novo ou a execução termina.
+No fim, você recebe `The run has ended.` e o código de saída da execução.
+Veja
+[Avance um teste passo a passo sem um terminal](#step-through-a-test-without-a-terminal)
+para saber o que cada resposta contém.
+
+- O tempo em pausa não conta para os tempos limite dos testes (mas as
+  execuções sem um terminal excedem o tempo limite depois de 30 minutos sem
+  nenhum comando).
+- As pausas acontecem em toda tentativa, incluindo novas tentativas e testes
+  de preparação. Com vários workers, as pausas entram em uma fila, uma de
+  cada vez, enquanto os outros workers continuam.
+- Chame `await screen.pause()` dentro do corpo de um teste, de um
+  `beforeEach` ou da preparação de uma fixture. Só uma execução por
+  diretório pode ser controlada por comandos `--step` de cada vez.
+- Na CI, `screen.pause()` faz o teste falhar na hora. Remova-o antes de
+  fazer commit.
+
+## Saída do console
+
+`console.log` e `console.error` em um teste aparecem enquanto ele roda, sob
+um cabeçalho que nomeia o stream, o alvo, o arquivo e o teste:
+
+```text
+stdout | |web| tests/todos.e2e.ts > adds a todo
+hello from the test
+```
+
+A saída de fora de um teste, como do nível superior de um arquivo ou de um
+reporter, é impressa sob `stdout | runner` ou `stderr | runner`. Os dois
+streams são impressos onde o `list` imprime: no stdout, ou no stderr ao lado
+de `json`. Sem `list`, `dot`, `line` ou outro reporter
+[interativo](/reference/reporters#interactive), a saída é impressa no stderr
+como foi escrita, então o stdout contém só o que um reporter imprime ali. A
+saída do carregamento da configuração é impressa no stderr antes do
+cabeçalho da execução, ou um aviso a substitui se o carregamento falhar.
+
+O runner [oculta](/reference/security#redaction) os valores de segredos. O
+relatório não inclui a saída do console, então use `expect` ou um artefato
+para tudo de que um leitor posterior precise.
+
+## Passos do agente
+
+Estas flags mostram o que o agente fez:
+
+<CodeGroup>
+```bash npm
+npx e2e run --debug     # timings and a step table on stderr
+npx e2e run --ai-trace  # every model call, for a trace viewer
+npx e2e run --no-cache  # run the agent live instead of replaying
+```
+
+```bash pnpm
+pnpm exec e2e run --debug     # timings and a step table on stderr
+pnpm exec e2e run --ai-trace  # every model call, for a trace viewer
+pnpm exec e2e run --no-cache  # run the agent live instead of replaying
+```
+
+```bash bun
+bunx e2e run --debug     # timings and a step table on stderr
+bunx e2e run --ai-trace  # every model call, for a trace viewer
+bunx e2e run --no-cache  # run the agent live instead of replaying
+```
+</CodeGroup>
+
+`--debug` acrescenta os tempos por fase da execução e uma tabela com uma
+linha por passo do agente: duração, chamadas ao modelo, tokens, parcela do
+cache de prompt e custo, quando o provedor informa um. Cada passo planejado
+também salva a transcrição do modelo como um artefato.
+
+```console
+[e2e debug] agent steps (execution order, model openai/gpt-6-luna-fast, total $0.0312)
+  step                                   total   model  observe  action  calls  tokens in/out  cached       cost
+  act "add a todo named groceries"       3.9s    2.8s    410ms   620ms      3  9412/388       61% (5740)   $0.0198
+  assert "the list shows groceries"      1.2s    1.1s     88ms     0ms      1  3120/41        0% (0)       $0.0114
+```
+
+`--ai-trace` escreve `.e2e/ai-trace.json`: uma execução por passo do
+agente, uma entrada por chamada ao modelo, com a entrada já com os dados
+sensíveis ocultados e os bytes de imagens trocados por contagens. Leia-o com
+o [unbox-ai](https://github.com/e2e-inc/unbox-ai) para ver os prompts, as
+chamadas de ferramenta e o uso de tokens:
+
+<CodeGroup>
+```bash npm
+npx unbox-ai runs .e2e/ai-trace.json
+npx unbox-ai summary .e2e/ai-trace.json --run 0
+```
+
+```bash pnpm
+pnpm dlx unbox-ai runs .e2e/ai-trace.json
+pnpm dlx unbox-ai summary .e2e/ai-trace.json --run 0
+```
+
+```bash bun
+bunx unbox-ai runs .e2e/ai-trace.json
+bunx unbox-ai summary .e2e/ai-trace.json --run 0
+```
+</CodeGroup>
+
+Um passo reproduzido não faz chamada ao modelo e não deixa trace de IA.
+Adicione `--no-cache` para capturar o fluxo inteiro no trace ou descartar a
+hipótese de uma [gravação](/cache) desatualizada.
+
+## Erros comuns
+
+| Código | Causa comum | Correção |
+| --- | --- | --- |
+| `APP_UNREACHABLE` | Nada responde em `app.url`, ou `app.command` nunca ficou pronto. No iOS, a mensagem pode nomear, em vez disso, o runner de automação | Defina `app.command.log` e leia o log; verifique a porta; aumente `app.command.startupTimeout`. Para o runner do iOS, siga a mensagem (veja [Mobile](/mobile#troubleshooting)) |
+| `APP_ALREADY_RUNNING` | Algo já serve `app.url` quando o runner queria iniciar `app.command` | Encerre esse processo, ou defina `reuseExisting: true` para execuções locais |
+| `LOCATOR_NOT_FOUND` | Papel ou nome errado, texto não exato, elemento dentro de um iframe, página não aberta | Leia o markup para achar o nome acessível; tente `exact: false`; `browser.frameLocator` para iframes; `--headed` para olhar |
+| `LOCATOR_AMBIGUOUS` | Duas correspondências: uma duplicata oculta, um rótulo repetido | Adicione `{ name }`, restrinja a busca a um contêiner, `filter`, `first()` ou `{ visible: true }` |
+| `ASSERTION_FAILED` | A expectativa está errada, ou o estado se estabiliza depois de 5 s; para `agent.assert`, o julgamento foi falso | Compare com a captura de tela; `{ timeout }` no matcher; reescreva a pergunta |
+| `ASSERTION_INCONCLUSIVE` | `agent.assert` ou `agent.extract` perguntou sobre algo que a tela não mostra: em outra página, ainda carregando ou só em pixels | Abra a tela certa ou espere por ela antes; adicione `vision: true` quando a resposta estiver nos pixels (a mensagem diz isso) |
+| `ACTION_FAILED` | Elemento coberto, desabilitado ou desanexado, ou uma operação excedeu o tempo limite | Espere pela condição certa com `expect` antes; feche as sobreposições |
+| `STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT` | O agente ficou sem ações, chamadas ao modelo ou tempo | Restrinja o objetivo a um passo. Aumente o `maxSteps` ou o `maxModelCalls` da entrada do agente para o orçamento, o `timeout` da configuração para um passo `act`, ou o `judgmentTimeout` do agente para `assert`, `waitFor` e `extract` |
+| `MODEL_UNAVAILABLE` | Nenhum modelo construído na configuração, ou o GitHub Copilot não disponibiliza o modelo configurado para a sua conta | Veja [Modelos](/models); para o Copilot, [Escolha um modelo](/subscriptions#pick-a-model) |
+| `MODEL_PROVIDER_FAILED` | Chave ausente ou inválida, limite de taxa, falta de créditos, ou toda tentativa de uma requisição ficou 120 s sem resposta | Verifique a chave que o provedor lê e a cota; para um modelo local lento, uma tela menor (`agents.<name>.maxObservationBytes`) ou um modelo mais rápido |
+| `MODEL_REFUSED` | O modelo recusou o prompt (motivo de término `content-filter`). Sai com código 1 | Reformule a instrução, ou troque para outro modelo |
+
+A [referência de erros](/reference/errors) lista todos os códigos, a classe
+e o código de saída de cada um.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Referência da CLI" icon="terminal" href="/reference/cli#e2e-run">
+    Todas as flags de `e2e run`.
+  </Card>
+  <Card title="Erros" icon="triangle-exclamation" href="/reference/errors">
+    Todos os códigos de erro.
+  </Card>
+</CardGroup>

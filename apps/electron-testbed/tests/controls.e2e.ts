@@ -199,6 +199,28 @@ test.describe('controls page', () => {
     await expect(screen.getByTestId('hold-state')).toHaveText('up', { timeout: 100 });
   });
 
+  test('names a button by its text, not its icon font\'s glyph, as web() does', async ({ screen }) => {
+    await expect(screen.getByRole('button', 'Scan')).toBeVisible();
+    await expect(screen.getByTestId('glyph-button')).toHaveAccessibleName('Scan');
+  });
+
+  test('taps text where it is, not the middle of the container the tree folds it into', async ({ screen }) => {
+    await screen.getByText('Unselect All').tap();
+    await expect(screen.getByTestId('unselect-clicks')).toHaveText('1');
+    await screen.getByText('Open row').tap();
+    await expect(screen.getByTestId('open-row-clicks')).toHaveText('1');
+    // A control is its text wherever the text is drawn: the query answers with the button, and its state.
+    await expect(screen.getByText('Wide save')).toBeDisabled();
+    await expect(screen.getByText('Wide save')).toHaveRole('button');
+  });
+
+  test('focuses a composite that hands focus to a part of itself, and types there', async ({ screen }) => {
+    await screen.getByTestId('composite-row').focus();
+    await expect(screen.getByTestId('row-name')).toBeFocused();
+    await screen.getByTestId('composite-row').pressSequentially('abc');
+    await expect(screen.getByTestId('row-name')).toHaveValue('abc');
+  });
+
   test('refuses a secret as electron.evaluate\'s argument', async ({ electron }) => {
     const refused = await failure(electron.evaluate((_main, arg: unknown) => JSON.stringify(arg), { password: credentials.user('ada').password }));
     expect(refused).toMatchObject({ code: 'POLICY_DENIED' });

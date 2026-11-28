@@ -15,7 +15,8 @@ import type { ElectronMainModule } from './fixtures.ts';
 import { closedWindow, invalidState, unsupported } from './errors.ts';
 import { appDirectory } from './file-bound.ts';
 import { ElectronProcess, type ProcessExit } from './launcher.ts';
-import { MainEvaluateError, MainProcess } from './main-process.ts';
+import { EvaluateError } from './evaluate.ts';
+import { MainProcess } from './main-process.ts';
 import { REFUSED_ENV, type ResolvedElectronOptions } from './options.ts';
 import { PageTarget } from './page.ts';
 import type { Windows } from './windows.ts';
@@ -34,6 +35,16 @@ export interface LaunchSetup {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly userDataDir: string;
   readonly attempt: EngineAttemptContext;
+  /** What `electron.launch()` added for this attempt, over the target's arguments and the engine's `env`. */
+  readonly extra?: LaunchExtra;
+}
+
+/** The arguments and variables one attempt's launches add to the target's own. */
+export interface LaunchExtra {
+  readonly args: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+  /** The directory the process starts in, over the engine's `cwd`. */
+  readonly cwd?: string;
 }
 
 /** How long the main process gets to answer a question whose answer is optional. */
@@ -210,8 +221,8 @@ export class AppProcess {
   /** Starts the binary. Nothing is awaited: a binary that cannot start shows as a process that ended. */
   private start(setup: LaunchSetup): RunningApp {
     const { appPath, launchArguments } = setup.app;
-    const args = [`--user-data-dir=${setup.userDataDir}`, ...(appPath === undefined ? [] : [path.resolve(setup.projectRoot, appPath)]), ...(launchArguments ?? [])];
-    const process = new ElectronProcess({ executable: setup.executable, args, cwd: setup.projectRoot, env: launchEnv(setup.env, this.options.env) });
+    const args = [`--user-data-dir=${setup.userDataDir}`, ...(appPath === undefined ? [] : [path.resolve(setup.projectRoot, appPath)]), ...(launchArguments ?? []), ...(setup.extra?.args ?? [])];
+    const process = new ElectronProcess({ executable: setup.executable, args, cwd: path.resolve(setup.projectRoot, setup.extra?.cwd ?? this.options.cwd ?? '.'), env: launchEnv(setup.env, [this.options.env, setup.extra?.env ?? {}]) });
     let withoutMain: () => void = () => undefined;
     const none = new Promise<undefined>((resolve) => {
       withoutMain = () => resolve(undefined);
@@ -329,7 +340,7 @@ export class AppProcess {
     });
     session.on('Page.loadEventFired', () => {
       this.windows.markLoaded(page);
-      page.emit('load');
+      page.markLoaded();
     });
     session.on('Page.frameNavigated', ({ frame }) => {
       if (frame.parentId !== undefined) return;
@@ -375,7 +386,7 @@ export class AppProcess {
       const exiting = this.app === app && (closedWindow(cause) || /Execution context was destroyed/.test(String(cause)));
       if (exiting) await answerWithin(app.process.exited, ANSWER_MS);
       if (this.app !== app) throw new EngineError('INVALID_STATE', 'the app quit while electron.evaluate ran', { retryable: false, cause });
-      if (!(cause instanceof MainEvaluateError)) throw cause;
+      if (!(cause instanceof EvaluateError)) throw cause;
       // Its message is the test's, never read for a pattern.
       throw new TestError('EVALUATE_FAILED', `electron.evaluate: ${cause.message}`, { cause });
     }
@@ -592,20 +603,24 @@ async function keepWindowsDrawing(main: MainProcess, withinMs: number): Promise<
 
 /**
  * The app's environment: the few variables of the run's that a process needs
- * to start and draw (`INHERITED_ENV`, and the locale's `LC_*`), with the
- * engine's `env` option over them. The rest of the run's environment stays
+ * to start and draw (`INHERITED_ENV`, and the locale's `LC_*`), with each of
+ * `layers` over them in turn: the engine's `env` option, then a test's own. The rest of the run's environment stays
  * with the runner: it holds provider keys and tokens, and an app can log or
  * upload what it is given. Never `ELECTRON_RUN_AS_NODE`, which would start
  * the binary as plain Node.js, nor `NODE_OPTIONS`.
  */
-export function launchEnv(runEnv: Readonly<Record<string, string | undefined>>, extra: Readonly<Record<string, string>>): Record<string, string> {
+export function launchEnv(runEnv: Readonly<Record<string, string | undefined>>, layers: readonly Readonly<Record<string, string>>[], platform: NodeJS.Platform = process.platform): Record<string, string> {
   const env: Record<string, string> = {};
-  // Windows reads a variable's name in any case.
+  // Windows reads a variable's name in any case: a later layer's `path` replaces an earlier `PATH`, never sits beside it.
+  const set = (key: string, value: string): void => {
+    if (platform === 'win32') for (const known of Object.keys(env)) if (known !== key && known.toUpperCase() === key.toUpperCase()) delete env[known];
+    env[key] = value;
+  };
   for (const [key, value] of Object.entries(runEnv)) {
     const name = key.toUpperCase();
-    if (value !== undefined && (INHERITED_ENV.has(name) || name.startsWith('LC_'))) env[key] = value;
+    if (value !== undefined && (INHERITED_ENV.has(name) || name.startsWith('LC_'))) set(key, value);
   }
-  for (const [key, value] of Object.entries(extra)) if (!REFUSED_ENV.has(key.toUpperCase())) env[key] = value;
+  for (const layer of layers) for (const [key, value] of Object.entries(layer)) if (!REFUSED_ENV.has(key.toUpperCase())) set(key, value);
   return env;
 }
 

@@ -421,13 +421,17 @@ config by hand.
 | Playwright | e2e |
 | --- | --- |
 | `_electron.launch({ args })` in a fixture, `electronApp.firstWindow()` | `await app.open()` in `beforeEach`. Arguments the app reads, and Chromium switches, go in the target's `app.launchArguments`, the same for every test |
+| `_electron.launch({ args, env })` with values of one test, a data directory filled before the launch | `await electron.launch({ args, env })` and `electron.userDataDir`, see [per-test arguments](/electron#launch-with-per-test-arguments). The app doesn't inherit the runner's environment: name a variable it reads, such as `PLAYWRIGHT_TEST`, in `electron({ env })` |
 | `electronApp.evaluate(fn, arg)` | `electron.evaluate(fn, arg)` |
-| `page.evaluate(fn)` in the renderer | `electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.executeJavaScript('…'))`. Pick the window by title: `getAllWindows()` is not in the order `electron.windows()` lists |
+| `page.evaluate(fn, arg)` in the renderer, `page.reload()`, `page.url()` | `electron.activeWindow().evaluate(fn, arg)`, `reload()`, `url()` |
+| `page.keyboard`, `page.mouse` | `electron.keyboard`, `electron.mouse` |
+| `page.waitForURL(re)`, `page.waitForFunction(fn)` | `await expect.poll(() => window.url()).toMatch(re)`, `await expect.poll(() => window.evaluate(fn)).toBeTruthy()` |
 | `electronApp.waitForEvent('window')` | `await electron.waitForWindow(() => screen.getByRole('button', 'Open').tap())`, which makes the new window active. For a window the app opens on its own, `await electron.window({ title: 'Settings' })` |
 | `page.on('dialog')` | `await electron.onDialog('accept')`, `'dismiss'`, or a handler |
 | `page.waitForEvent('close')` | `await expect.poll(() => window.isClosed()).toBe(true)` |
 | `expect(page).toHaveTitle(title)` | `await expect.poll(() => window.title()).toBe(title)` |
-| `page.getByRole`, `getByLabel`, `getByTestId`, `locator(css)` | `screen.getByRole`, `getByLabel`, `getByTestId`, and `electron.locator(css)`, which takes CSS only |
+| `page.getByRole`, `getByLabel`, `getByTestId`, `locator(css)` | `screen.getByRole`, `getByLabel`, `getByTestId`, and `electron.locator(css)`, which takes CSS only: no `text=`, `:has-text()`, `:visible`, or `>>`. Use `.filter({ hasText })` and `.filter({ has })` |
+| A query for an element behind an open modal | `electron.locator(css)`: the page behind a modal is `inert`, and `screen` queries leave an inert subtree out |
 | `page.on('console')`, `electronApp.on('console')` | Recorded in the test's trace under App log, main-process lines prefixed `[main]`. A test cannot read them |
 | `electronApp.close()` | Nothing: every test ends with the app quit |
 
