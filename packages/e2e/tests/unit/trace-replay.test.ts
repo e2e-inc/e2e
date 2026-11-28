@@ -769,6 +769,8 @@ describe('replayTrace: bare-point drags', () => {
       readonly dragsFrom?: { readonly x: number; readonly y: number };
       /** Why the replay stops when it sends none. */
       readonly stops?: 'target-ambiguous' | 'target-not-found';
+      /** The last look repeats until the wait runs out. */
+      readonly waitsOut?: true;
     }
 
     it.each<WaitCase>([
@@ -839,9 +841,25 @@ describe('replayTrace: bare-point drags', () => {
         dragsFrom: { x: 125, y: 50 },
       },
       {
-        label: 'refuses a late destination that appears hidden',
+        label: 'waits for a late destination that appears hidden and then shows',
+        looks: [[card, twin], [moved, twin, hidden(lane)], [moved, twin, lane]],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'waits for a destination that is hidden on the first look',
+        looks: [[card, twin, hidden(at(lane, 900))], [card, twin, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'waits for a hidden destination when the source has no twin',
+        looks: [[card], [card, hidden(at(lane, 900))], [card, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'stops without a drag when the destination stays hidden',
         looks: [[card, twin], [moved, twin, hidden(lane)]],
         stops: 'target-not-found',
+        waitsOut: true,
       },
       {
         label: 'refuses a recovered test ID on a hidden source',
@@ -859,7 +877,7 @@ describe('replayTrace: bare-point drags', () => {
         looks: [[card, twin], [{ ref: card.ref, role: 'button', name: 'Card' }, twinInPlace, lane]],
         stops: 'target-ambiguous',
       },
-    ])('$label', async ({ source, looks, dragsFrom, stops }) => {
+    ])('$label', async ({ source, looks, dragsFrom, stops, waitsOut }) => {
       const drag: RecordedAction = {
         name: 'dragAt',
         summary: 'drag Card to Done',
@@ -879,8 +897,9 @@ describe('replayTrace: bare-point drags', () => {
         expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: stops });
         expect(drags).toEqual([]);
       }
-      // Each case ends on the last look it lists.
-      expect(host.looks).toEqual(['held-still', ...looks.slice(1).map(() => 'raw')]);
+      // A case ends on the last look it lists, unless it waits that look out.
+      if (waitsOut === true) expect(host.looks.length).toBeGreaterThan(looks.length + 1);
+      else expect(host.looks).toEqual(['held-still', ...looks.slice(1).map(() => 'raw')]);
     });
   });
 });

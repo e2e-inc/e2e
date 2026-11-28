@@ -480,10 +480,15 @@ interface Ends {
  * the next. An end with no descriptor (a bare point) needs no finding. Waits
  * like `relocate` does, judging the source first as main did, so a source
  * still loading is waited for whatever the destination shows. Each end keeps
- * its twin refusal on later looks, as `relocate` does. A coordinate source
- * that can be placed on this look lets an unresolved destination wait.
- * If the source loses a candidate during that wait, or either recovered
- * endpoint lacks a visible box, the drag stops.
+ * its twin refusal on later looks, as `relocate` does.
+ *
+ * A drag between points passes `shouldWaitForDestination`, and needs a box
+ * to place its drop point in: a destination listed before it shows (mounted
+ * hidden, or with no box yet) is still loading, whichever look it turns up
+ * on, and is waited for like one that is not listed. A source its point
+ * can be placed in on this look lets such a destination wait. If the source
+ * loses a candidate during that wait, or is re-found without a visible box,
+ * the drag stops.
  * Returns the last look judged; nothing when no look could be read.
  */
 async function relocateEnds(
@@ -507,18 +512,17 @@ async function relocateEnds(
     const marked = refused.has(descriptor) && result.failure === 'target-ambiguous' ? { ...result, twinLeft: true as const } : result;
     return { relocated: marked.failure === 'target-ambiguous' ? { ...marked, screen } : marked, wait: retryable(marked, descriptor) };
   };
+  const placesPoints = shouldWaitForDestination !== undefined;
   const settled = await pollSettled<Ends>(host, (screen) => {
     const from = source === undefined ? undefined : judge(source, screen);
-    const to = destination === undefined ? undefined : judge(destination, screen);
+    const listed = destination === undefined ? undefined : judge(destination, screen);
+    const to = placesPoints && listed?.relocated.kind === 'found' && visibleBox(listed.relocated.node) === undefined ? STILL_LOADING : listed;
     if (sourceGroup !== undefined) {
       const count = sourceGroup.countIn(screen.nodes);
       const unplaceableSource = from?.relocated.kind === 'found' && visibleBox(from.relocated.node) === undefined;
       if (count < sourceGroup.count || unplaceableSource) {
         const lostSource: Relocated = { kind: 'failed', failure: 'target-ambiguous', candidates: [], screen, twinLeft: true };
         return { screen, ends: [lostSource, to?.relocated], refused: true };
-      }
-      if (to?.relocated.kind === 'found' && visibleBox(to.relocated.node) === undefined) {
-        return { screen, ends: [from?.relocated, { kind: 'failed', failure: 'target-not-found' }], refused: false };
       }
       sourceGroup.count = count;
     }
@@ -540,6 +544,9 @@ async function relocateEnds(
   }, look);
   return settled ?? latest;
 }
+
+/** An end a look lists but cannot place a point in yet: not found on this look, and worth another. */
+const STILL_LOADING = { relocated: { kind: 'failed', failure: 'target-not-found' }, wait: true } as const;
 
 /** Why a drag's ends could not both be found: a twin refusal while its end is still missing, else the first end that failed. */
 function endsFailure(ends: Ends | undefined): RelocationFailure {
