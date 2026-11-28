@@ -436,10 +436,10 @@ describe('pixels', () => {
   });
 
   it('captures a window the app showed and then hid, and one it opens and hides later', async () => {
-    const page = (colour: string): string => `'data:text/html,' + ${JSON.stringify(encodeURIComponent(`<body style="margin:0;background:${colour}"></body>`))}`;
-    const { app, windows, launch } = appWith(`const SHOWN_MS = ${SHOWN_MS}; const open = async (url) => { const window = new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }); await window.loadURL(url); await new Promise((resolve) => setTimeout(resolve, SHOWN_MS)); window.hide(); };
-      app.whenReady().then(() => open(${page('rgb(0,128,0)')}));
-      globalThis.openSecond = () => setTimeout(() => open(${page('rgb(0,0,255)')}));`);
+    const { app, windows, launch } = appWith(`const page = (colour) => 'data:text/html,<body style="margin:0;background:' + colour + '"></body>';
+      const open = async (url) => { const window = new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }); await window.loadURL(url); await new Promise((resolve) => setTimeout(resolve, ${SHOWN_MS})); window.hide(); };
+      app.whenReady().then(() => open(page('rgb(0,128,0)')));
+      globalThis.openSecond = () => setTimeout(() => open(page('rgb(0,0,255)')));`);
     await launch();
     const hidden = (): Promise<boolean[]> => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((window) => window.isVisible()), undefined);
     const corner = async (window: AppWindow): Promise<number[]> => {
@@ -501,8 +501,8 @@ describe('video', () => {
   });
 
   it('records a window the app hid', async () => {
-    const blinking = `<body style="margin:0;background:rgb(255,0,0)"><script>let blue = false; setInterval(() => { blue = !blue; document.body.style.background = blue ? 'rgb(0,0,255)' : 'rgb(255,0,0)'; }, 100)</script>`;
-    const { app, windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(blinking))}));`);
+    const { app, windows, launch, directory } = appWith(`const blinking = '<body style="margin:0;background:rgb(255,0,0)"><script>let blue = false; setInterval(() => { blue = !blue; document.body.style.background = blue ? "rgb(0,0,255)" : "rgb(255,0,0)"; }, 100)</script>';
+      app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + encodeURIComponent(blinking)));`);
     await launch();
     const ffmpeg = await ensureFfmpeg(process.env, new AbortController().signal);
     await new Promise((resolve) => setTimeout(resolve, SHOWN_MS));
