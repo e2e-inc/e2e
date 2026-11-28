@@ -5,8 +5,8 @@
  * `@e2e-dev/util` does it, on real browser screenshots.
  */
 
-import { previousMaskPng } from '../../mobile/tests/helpers/previous-mask.ts';
 import { decodePng, NativeImage, processPng } from '../src/index.ts';
+import { mobileMaskBefore } from '../tests/mobile-mask-before.ts';
 import * as reference from '../tests/reference.ts';
 import { screenshots } from '../tests/screenshots.ts';
 
@@ -94,7 +94,7 @@ export async function cases(): Promise<readonly Case[]> {
       name: 'mask 1170x2532 phone screenshot',
       when: 'every masked mobile screenshot (maskPng)',
       // The engine's own code before this package, which painted in place, not core's copying fillBoxes.
-      old: () => previousMaskPng(phone, phoneRects),
+      old: () => mobileMaskBefore(phone, phoneRects),
       native: () => processPng(phone, { fill: { boxes: phoneMasks, color: [0, 0, 0] }, output: 'png' }),
     },
   ];
