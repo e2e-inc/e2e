@@ -421,6 +421,15 @@ describe('DesktopSurface: launching', () => {
     expect(Date.now() - started).toBeLessThan(3_000);
   });
 
+  it('quits a process an app started before it quit right after its launch', async () => {
+    const { surface, fake } = await initialized({ launch: [spawnApp({ exits: true })], listWindows: [ok([])] });
+    await expect(surface.restart(operation())).rejects.toThrow(/quit right after it launched/);
+    const helper = standIn();
+    fake.carriers.set(helper, last<{ token: string }>(fake, 'launch')!.token);
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(helper)).toBe(true);
+  });
+
   it('says a copy that was already running took the launch, when the launched process quit beside one', async () => {
     const running = standIn();
     const open = launched({ launch: [spawnApp({ exits: true, runningBefore: [running] })], listWindows: [ok([])] }, { observe: false });

@@ -442,8 +442,8 @@ export class DesktopSurface {
       readable: (read) => this.readable(read),
       exited: async () => {
         if (this.pid === undefined || (await this.running(this.pid))) return false;
+        // The process stays the engine's until a quit: one it started carries its token, and the quit ends it.
         this.forget();
-        this.dropProcess();
         return true;
       },
       screenLocked: () => driver.screenLocked(),
