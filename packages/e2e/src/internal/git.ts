@@ -53,10 +53,15 @@ export function runGit(cwd: string, args: readonly string[], options: GitOptions
       }
       if (signal?.aborted) reject(error);
       else if (error.code === 'ENOENT') reject(new GitFailure('git was not found'));
-      else if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') reject(new GitFailure(`git ${args[0] ?? ''} printed more than ${maxBuffer / 1024 / 1024} MiB`));
-      else reject(new GitFailure(`git ${args[0] ?? ''}: ${error.message}`));
+      else if (error.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') reject(new GitFailure(`git ${commandOf(args)} printed more than ${maxBuffer / 1024 / 1024} MiB`));
+      else reject(new GitFailure(`git ${commandOf(args)}: ${error.message}`));
     });
   });
+}
+
+/** The git command `args` run, as a failure names it: the first that is no option of git itself, such as `--literal-pathspecs`. */
+function commandOf(args: readonly string[]): string {
+  return args.find((arg) => !arg.startsWith('-')) ?? '';
 }
 
 /** One git command's trimmed stdout; undefined when git is missing, slow, or refuses. */
@@ -88,8 +93,7 @@ export async function gitOutput(cwd: string, args: readonly string[], signal: Ab
 export function gitFailureText(args: readonly string[], result: GitResult): string {
   const lines = result.stderr.split('\n').map((line) => line.trim()).filter((line) => line !== '');
   const said = [...(lines.find((line) => /^(fatal|error): /u.test(line)) ?? lines[0] ?? `exited with code ${result.exitCode}`).replace(/^(fatal|error): /u, '')];
-  // The command is the first argument that is no option of git itself, such as `--literal-pathspecs`.
-  return `git ${args.find((arg) => !arg.startsWith('-')) ?? ''}: ${said.length <= 200 ? said.join('') : `${said.slice(0, 199).join('')}…`}`;
+  return `git ${commandOf(args)}: ${said.length <= 200 ? said.join('') : `${said.slice(0, 199).join('')}…`}`;
 }
 
 /** The repository `cwd` is in, by its absolute root. */
