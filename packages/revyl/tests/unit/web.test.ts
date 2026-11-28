@@ -294,7 +294,7 @@ describe('revylBrowsers()', () => {
 
       const failed = await failure(provider.sweep!(context()));
 
-      expect(failed.message).toBe(`stopped ${first!.id}; could not stop ${second!.id} (Revyl /api/v1/execution/device/sessions/:id/stop answered 500: internal), so Revyl ends it after idleTimeoutSeconds`);
+      expect(failed.message).toBe(`stopped ${first!.id}; could not stop ${second!.id} (Revyl /api/v1/execution/device/sessions/:id/stop answered 500: internal), so Revyl ends it after 600 s idle`);
       expect(markers()).toEqual([second!.id]);
       routes['POST /api/v1/execution/device/sessions/'] = () => json({ ok: true });
       await expect(provider.sweep!(context())).resolves.toEqual([second!.id]);
