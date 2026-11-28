@@ -614,10 +614,16 @@ export class DesktopSurface {
       if (owned.size > 0 || !reportMissing) return;
       throw new EngineError('ENGINE_FAILURE', `a launch of ${pending.target} failed, and no process it started was found; if the app is running, quit it by hand`, { retryable: false });
     }
-    const { pid } = this;
+    const { pid, token } = this;
     this.forget();
     if (pid === undefined) return;
-    if ((await this.running(pid)) && !(await killed([pid], deadline, signal))) throw new EngineError('ENGINE_FAILURE', `the app (process ${pid}) did not exit`, { retryable: false });
+    // A process the app started carries the launch's token in its environment, and outlives the app's kill: it is the
+    // launch's too, as a sweep counts it, and must not be left running into the next test.
+    const live = await this.running(pid);
+    const helpers = token === undefined ? [] : await this.requireDriver().processesCarrying(token);
+    if (helpers === null) throw new EngineError('ENGINE_FAILURE', `could not tell which processes the app (process ${pid}) started: looking for its token among the processes failed; quitting tries again`, { retryable: false });
+    const owned = [...new Set([...(live ? [pid] : []), ...helpers])];
+    if (!(await killed(owned, deadline, signal))) throw new EngineError('ENGINE_FAILURE', `the app (process ${pid}) or a process it started did not exit`, { retryable: false });
     this.driver?.forgetProcess(pid);
     this.dropProcess();
     if (this.home !== undefined) await rm(path.join(this.home, APP_FILE), { force: true }).catch(() => undefined);

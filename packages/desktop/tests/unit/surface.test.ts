@@ -246,6 +246,28 @@ describe('DesktopSurface: launching', () => {
     expect(await gone(pid)).toBe(true);
   });
 
+  it('quits the processes the app started, which carry its launch token, with the app', async () => {
+    const { surface, fake } = await launched({}, { observe: false });
+    const { token } = last<{ token: string }>(fake, 'launch')!;
+    const helper = standIn();
+    fake.carriers.set(helper, token);
+    const theirs = standIn();
+    fake.carriers.set(theirs, 'another-token');
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(helper)).toBe(true);
+    expect(await gone(theirs, 300)).toBe(false);
+  });
+
+  it('keeps the app to quit again when the processes it started cannot be looked up', async () => {
+    const { surface, fake } = await launched({}, { observe: false });
+    const app = fake.pid;
+    fake.lookupFails = true;
+    await expect(surface.endAttempt({ signal, timeoutMs: 5_000 })).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringMatching(/looking for its token/) });
+    fake.lookupFails = false;
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(app)).toBe(true);
+  });
+
   it('quits the process carrying the token of a launch that failed after it may have started the app', async () => {
     const theirs = standIn();
     const { surface, fake } = await initialized({ launch: [spawnApp({ answer: failure('TIMEOUT', 'delivered_unverified') })] });
@@ -725,7 +747,9 @@ describe('DesktopSurface: reading', () => {
   it('takes a process whose start time changed as the app quit, as when another process took its id, and kills nothing', async () => {
     const { surface, fake } = await launched({}, { observe: false });
     const pid = fake.pid;
+    // Another process: it started at another time, and its environment carries no launch token.
     fake.startTimes.set(pid, 42);
+    fake.carriers.delete(pid);
     await expect(surface.locate(testId('nowhere'), operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/quit/) });
     await expect(surface.windows({ signal, timeoutMs: 5_000 })).resolves.toEqual([]);
     await surface.endAttempt({ signal, timeoutMs: 5_000 });
