@@ -260,7 +260,9 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
                     )
                 })?
             } else {
-                us
+                // The key carries its character, but an app that reads the key code must see the key a person would
+                // press on this layout, as typed text does; a layout with no key for it keeps the US one.
+                crate::layout::characters(crate::layout::Layer::Plain).and_then(|table| crate::layout::code_for(lower, &table)).unwrap_or(us)
             };
             // With Shift the key types its shifted character; one with none on the US layout is left to the app to work out.
             let typed = if flags.contains(CGEventFlags::CGEventFlagShift) { shifted(lower) } else { Some(lower) };
