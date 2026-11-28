@@ -33,7 +33,6 @@ const ADDONS: Readonly<Record<string, AddonSpec>> = {
     file: 'desktop',
     targets: { 'aarch64-apple-darwin': 'darwin-arm64', 'x86_64-apple-darwin': 'darwin-x64' },
   },
-  // A prototype (ENG-1543): the platforms its loader names, none published yet, so only a checkout build loads.
   util: {
     crate: 'e2e-util-napi',
     package: 'util',
@@ -81,6 +80,17 @@ export function addonFile(addon: Addon, platform: string): string {
 /** The directory of the platform package that ships the addon for one platform. */
 export function platformPackageDir(addon: Addon, platform: string): string {
   return path.join(ROOT, 'packages', addon.package, 'npm', platform);
+}
+
+/** NAPI-RS's name for this machine's platform, the one an addon's loader asks for: `darwin-arm64`, `linux-x64-gnu`. */
+export function hostPlatform(): string {
+  const { platform: os, arch } = process;
+  if (os === 'linux') {
+    const glibc = (process.report.getReport() as { header?: { glibcVersionRuntime?: string } }).header?.glibcVersionRuntime;
+    return `linux-${arch}-${glibc === undefined ? 'musl' : 'gnu'}`;
+  }
+  if (os === 'win32') return `win32-${arch}-msvc`;
+  return `${os}-${arch}`;
 }
 
 /**

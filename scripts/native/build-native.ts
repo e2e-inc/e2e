@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { findAddon, addonFile, replaceAddon, scriptArgs } from './addons.ts';
+import { findAddon, addonFile, hostPlatform, replaceAddon, scriptArgs } from './addons.ts';
 import { cargo } from './cargo.ts';
 
 /** The oldest macOS an addon runs on. */
@@ -52,17 +52,6 @@ if (values.out !== undefined) {
   }
 }
 process.stdout.write(`built ${path.join(addon.packageDir, name)}\n`);
-
-/** NAPI-RS's name for this machine's platform, the one an addon's loader asks for: `darwin-arm64`, `linux-x64-gnu`. */
-function hostPlatform(): string {
-  const { platform: os, arch } = process;
-  if (os === 'linux') {
-    const glibc = (process.report.getReport() as { header?: { glibcVersionRuntime?: string } }).header?.glibcVersionRuntime;
-    return `linux-${arch}-${glibc === undefined ? 'musl' : 'gnu'}`;
-  }
-  if (os === 'win32') return `win32-${arch}-msvc`;
-  return `${os}-${arch}`;
-}
 
 /** The file name cargo gives a crate's `cdylib` on a target. */
 function library(crateName: string, triple: string): string {

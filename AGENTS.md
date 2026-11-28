@@ -119,8 +119,16 @@ the way a user would.
   `NativeImage`. The addon loads on the first call. `@e2e-dev/core`'s
   `internal/image.ts` and `@e2e-dev/mobile`'s masking use it; its
   `tests/` hold it to the JavaScript it replaced, byte for byte, and
-  `bench/` times both. A prototype (ENG-1543): no platform packages are
-  published yet, so it loads only a checkout build.
+  `bench/` times both. A release ships the addon for eight platforms in
+  `@e2e-dev/util-<platform>` (`packages/util/npm/<platform>`: macOS arm64
+  and x64, Linux x64 and arm64 with glibc or musl, Windows x64 and arm64),
+  optional dependencies with `os`, `cpu`, and `libc` set, in a changesets
+  `fixed` group with `@e2e-dev/util`. `.github/workflows/util-native.yml`
+  builds each on a runner of its platform (glibc on Ubuntu 22.04, so 2.35 is
+  the floor; musl in Alpine; Windows on GitHub-hosted runners), checks it
+  with `scripts/native/check-build.ts`, and loads it there; `spec.yml`,
+  `release.yml`, and `examples.yml` call it. After a dependency change, run
+  `pnpm --filter @e2e-dev/util licenses:native`, which CI checks.
 - `packages/web` — the published `@e2e-dev/web` package: the
   browser engine, built with the public `defineEngine`, contributing the
   `browser` fixture and `expect(browser)`. `@e2e-dev/web/engine` (and
@@ -974,7 +982,9 @@ trees, on both platforms, without a device.
   through the engine's loader test, and a load of the x64 build in the
   official darwin-x64 Node under Rosetta; rustup, when the image has none,
   comes from the rustup-init release and SHA-256 that
-  `.github/actions/rust-toolchain` pins), which
+  `.github/actions/rust-toolchain` pins), and `util-native`
+  (`util-native.yml`: `@e2e-dev/util`'s addon built, checked, and loaded on
+  each of its eight platforms), which
   `spec gate` needs; `benchmark.yml` runs the
   web benchmark's two suites; `mobile.yml` runs the mobile benchmark's on an
   iOS simulator and an Android emulator (KVM on x64 Linux); `docs.yml`
@@ -999,9 +1009,12 @@ trees, on both platforms, without a device.
   pins actions by SHA; keep new actions SHA-pinned. Every job runs on
   Blacksmith, like the e2e-inc repos. Linux jobs use
   `blacksmith-4vcpu-ubuntu-2404` and macOS jobs `blacksmith-6vcpu-macos-26`;
-  keep new jobs on those labels. The one exception is the `release` job:
+  keep new jobs on those labels. The exceptions: the `release` job, since
   npm Trusted Publishing rejects OIDC tokens from self-hosted runners, and
-  Blacksmith counts as one, so it stays on `ubuntu-latest`.
+  Blacksmith counts as one, so it stays on `ubuntu-latest`; Windows jobs, on
+  GitHub-hosted `windows-latest` and `windows-11-arm`; and `util-native.yml`'s glibc builds, on
+  `blacksmith-4vcpu-ubuntu-2204` and its `-arm` twin, so the addon needs
+  glibc 2.35, not 2.39 (arm64 Linux jobs add `-arm` to a label).
 - Commits follow Conventional Commits; PRs are squash-merged with the number in
   the subject.
 - PR titles and bodies follow the `writing-pr` skill

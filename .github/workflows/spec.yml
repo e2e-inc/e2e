@@ -82,10 +82,14 @@ jobs:
         if: ${{ inputs.agent-device-version == '' }}
         run: pnpm mcp-server:check
       # @e2e-dev/util's crates on Linux, which the macOS `native` job does not reach; it checks the whole workspace.
-      # rustup installs the toolchain rust-toolchain.toml pins on first use.
-      - name: Rust crates of @e2e-dev/util (clippy, tests)
+      # rustup installs the toolchain rust-toolchain.toml pins on first use. The notices of the crates the addon links,
+      # committed in each platform package, must match Cargo.lock.
+      - name: Rust crates of @e2e-dev/util (clippy, tests, notices)
         if: ${{ inputs.agent-device-version == '' }}
-        run: cargo clippy -p e2e-util -p e2e-util-napi --all-targets --locked -- -D warnings && cargo test -p e2e-util -p e2e-util-napi --locked
+        run: |
+          cargo clippy -p e2e-util -p e2e-util-napi --all-targets --locked -- -D warnings
+          cargo test -p e2e-util -p e2e-util-napi --locked
+          node scripts/native/native-licenses.ts util --check
       # The registry rejects an invalid entry only at publish, from a release
       # tag that can no longer change.
       - uses: ./.github/actions/mcp-publisher
@@ -304,11 +308,20 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm --filter @e2e-dev/electron-testbed test
 
+  # @e2e-dev/util's addon built, checked, and loaded on each of the eight
+  # platforms its platform packages ship, the way the release builds it.
+  # Not on a compatibility run: the addon does not involve agent-device, and
+  # nightly-agent-device.yml also calls examples.yml, whose own call would
+  # upload the same `util-native-*` artifact names into the same run.
+  util-native:
+    if: ${{ inputs.agent-device-version == '' }}
+    uses: ./.github/workflows/util-native.yml
+
   # The one check the ruleset requires from this workflow. A skipped job
   # passes (the change cannot reach it); a failed or cancelled one fails it.
   gate:
     name: spec gate
-    needs: [check, test, bun, install, native, electron, electron-windows]
+    needs: [check, test, bun, install, native, electron, electron-windows, util-native]
     if: ${{ always() }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5

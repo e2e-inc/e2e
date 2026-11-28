@@ -9,7 +9,9 @@ description: >-
 # at sh.rustup.rs. The toolchain itself stays pinned in rust-toolchain.toml.
 # To move to a newer rustup, take the version from
 # https://static.rust-lang.org/rustup/release-stable.toml and each checksum
-# from https://static.rust-lang.org/rustup/archive/<version>/<target>/rustup-init.sha256.
+# from https://static.rust-lang.org/rustup/archive/<version>/<target>/rustup-init.sha256
+# (`rustup-init.exe.sha256` on Windows). `.github/scripts/build-musl.sh` pins the
+# musl installers of the same version.
 runs:
   using: composite
   steps:
@@ -19,24 +21,41 @@ runs:
         RUSTUP_VERSION: 1.29.3
         SHA256_AARCH64_APPLE_DARWIN: 63752a1919a3a4793173ec70f8f212621a7ce38ba6a246095984482f4de20f9f
         SHA256_X86_64_APPLE_DARWIN: bc107f1fb0228de7fa32413c89c1b305cea9cd256e94b01150cd054128145429
+        SHA256_X86_64_UNKNOWN_LINUX_GNU: b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55
+        SHA256_AARCH64_UNKNOWN_LINUX_GNU: 9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282
+        SHA256_X86_64_PC_WINDOWS_MSVC: 38027d51d69a5d05493627a0634dbea52d6cd793c8f072d2373d3f4163eec7db
+        SHA256_AARCH64_PC_WINDOWS_MSVC: 407e0d72f81d26a01f9d032b8317908cbb2917ba22765474b682b41390792ad9
       run: |
         set -euo pipefail
         if command -v rustup >/dev/null; then
           exit 0
         fi
-        case "$(uname -s) $(uname -m)" in
-          "Darwin arm64") target=aarch64-apple-darwin sha256="$SHA256_AARCH64_APPLE_DARWIN" ;;
-          "Darwin x86_64") target=x86_64-apple-darwin sha256="$SHA256_X86_64_APPLE_DARWIN" ;;
-          *) echo "no pinned rustup-init for $(uname -s) $(uname -m)" >&2; exit 1 ;;
+        # The runner's own names: `uname -m` reads x86_64 in the emulated Git Bash of an arm64 Windows runner.
+        exe=
+        case "$RUNNER_OS $RUNNER_ARCH" in
+          "macOS ARM64") target=aarch64-apple-darwin sha256="$SHA256_AARCH64_APPLE_DARWIN" ;;
+          "macOS X64") target=x86_64-apple-darwin sha256="$SHA256_X86_64_APPLE_DARWIN" ;;
+          "Linux X64") target=x86_64-unknown-linux-gnu sha256="$SHA256_X86_64_UNKNOWN_LINUX_GNU" ;;
+          "Linux ARM64") target=aarch64-unknown-linux-gnu sha256="$SHA256_AARCH64_UNKNOWN_LINUX_GNU" ;;
+          "Windows X64") target=x86_64-pc-windows-msvc sha256="$SHA256_X86_64_PC_WINDOWS_MSVC" exe=.exe ;;
+          "Windows ARM64") target=aarch64-pc-windows-msvc sha256="$SHA256_AARCH64_PC_WINDOWS_MSVC" exe=.exe ;;
+          *) echo "no pinned rustup-init for $RUNNER_OS $RUNNER_ARCH" >&2; exit 1 ;;
         esac
         dir="$RUNNER_TEMP/rustup-init"
         mkdir -p "$dir"
-        curl --proto '=https' --tlsv1.2 -sSf --retry 3 -o "$dir/rustup-init" \
-          "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$target/rustup-init"
-        echo "$sha256  $dir/rustup-init" | shasum -a 256 -c -
-        chmod +x "$dir/rustup-init"
-        "$dir/rustup-init" -y --no-modify-path --default-toolchain none
-        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        curl --proto '=https' --tlsv1.2 -sSf --retry 3 -o "$dir/rustup-init$exe" \
+          "https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/$target/rustup-init$exe"
+        if command -v sha256sum >/dev/null; then
+          echo "$sha256  $dir/rustup-init$exe" | sha256sum -c -
+        else
+          echo "$sha256  $dir/rustup-init$exe" | shasum -a 256 -c -
+        fi
+        chmod +x "$dir/rustup-init$exe"
+        "$dir/rustup-init$exe" -y --no-modify-path --default-toolchain none
+        # GITHUB_PATH takes a Windows path on Windows, which Git Bash's $HOME is not.
+        bin="$HOME/.cargo/bin"
+        if command -v cygpath >/dev/null; then bin="$(cygpath -w "$bin")"; fi
+        echo "$bin" >> "$GITHUB_PATH"
     # The pinned toolchain's own cargo, first on PATH: a rustup that was already there, such as Homebrew's, may put no
     # cargo on PATH, and a standalone cargo there may lack the targets rust-toolchain.toml pins.
     - name: Put cargo on PATH
@@ -44,4 +63,6 @@ runs:
       run: |
         set -euo pipefail
         rustup toolchain install
-        dirname "$(rustup which cargo)" >> "$GITHUB_PATH"
+        # Either separator: rustup prints a Windows path on Windows, which `dirname` in Git Bash does not split.
+        cargo_path="$(rustup which cargo)"
+        echo "${cargo_path%[/\\]*}" >> "$GITHUB_PATH"
