@@ -12,6 +12,16 @@ const parse = (...args: unknown[]) => parseModifierCall(args);
 const runtime = (condition: unknown, reason?: string) => ({ kind: 'runtime', condition, reason });
 const read = (condition: unknown) => readRunningCondition('test.skip()', condition);
 
+/** The error `run` throws; fails when it returns. */
+const thrown = (run: () => unknown): unknown => {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('expected a throw');
+};
+
 /** Runs `body` while a test attempt is running, as a test body does. */
 const inBody = (body: () => void): void => {
   const end = new AbortController();
@@ -75,12 +85,16 @@ describe('readRunningCondition', () => {
   });
 
   it('refuses a Promise condition, which is always truthy, as INVALID_ARGUMENT', () => {
-    expect(() => read(Promise.resolve(false))).toThrow(TestError);
+    const error = thrown(() => read(Promise.resolve(false)));
+    expect(error).toBeInstanceOf(TestError);
+    expect(error).toMatchObject({ code: 'INVALID_ARGUMENT' });
     expect(() => read(Promise.resolve(false))).toThrow('test.skip() got a Promise as its condition; await it before the call');
   });
 
   it('refuses a function condition, which is always truthy, as INVALID_ARGUMENT', () => {
-    expect(() => read(() => false)).toThrow(TestError);
+    const error = thrown(() => read(() => false));
+    expect(error).toBeInstanceOf(TestError);
+    expect(error).toMatchObject({ code: 'INVALID_ARGUMENT' });
     expect(() => read(() => false)).toThrow('test.skip() got a function as its condition; call it and pass the result');
   });
 });

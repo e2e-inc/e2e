@@ -143,7 +143,7 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | Called in a setup test with a truthy condition, or none. A setup test cannot skip because other tests depend on its sessions. |
-| `INVALID_ARGUMENT` | A Promise or function condition inside a test body. |
+| `INVALID_ARGUMENT` | A Promise or function condition inside a running test, its hooks, or its fixtures. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. |
 | `COLLECTION_ERROR` | The registration form, inside a serial group. Set [`skip`](#skip) on the serial `describe` instead. |
 
@@ -188,7 +188,7 @@ test.fixme(); // inside a body, always
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | Called in a setup test with a truthy condition, or none. A setup test cannot skip because other tests depend on its sessions. |
-| `INVALID_ARGUMENT` | A Promise or function condition inside a test body. |
+| `INVALID_ARGUMENT` | A Promise or function condition inside a running test, its hooks, or its fixtures. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. Use `test.fixme(title, fn)` at collection. |
 | `COLLECTION_ERROR` | The registration form, inside a serial group. Set [`skip`](#skip) on the serial `describe` instead. |
 
@@ -338,7 +338,7 @@ To mark every test in a group, use [`describe.fail`](#describe-fail).
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A Promise or function condition inside a test body. |
+| `INVALID_ARGUMENT` | A Promise or function condition inside a running test, its hooks, or its fixtures. |
 | `INVALID_ARGUMENT` | A truthy condition in a setup test, a serial group member, an `afterEach` hook, or a fixture teardown. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body, or the `fail` option inside a serial group. |
 
