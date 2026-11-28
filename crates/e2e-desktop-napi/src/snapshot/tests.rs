@@ -209,6 +209,33 @@ mod walk {
     }
 
     #[test]
+    fn leaves_out_the_menu_button_macos_puts_in_the_title_bar_and_keeps_the_apps_own() {
+        let close = Fake::new("AXButton").subrole("AXCloseButton").frame(5.0, 5.0, 12.0, 12.0).actions(&["AXPress"]);
+        // macOS 27 adds it, a direct child of the window, beside the close button, while the window is recorded.
+        let sharing = Fake::new("AXMenuButton").title("Window sharing").frame(300.0, 3.0, 30.0, 16.0).actions(&["AXPress"]);
+        let app_menu = Fake::new("AXMenuButton").title("Sort").frame(300.0, 60.0, 30.0, 16.0).actions(&["AXPress"]);
+        // A unified toolbar puts the app's own menu button at the close button's height, inside the toolbar.
+        let toolbar_menu = Fake::new("AXMenuButton").title("Filter").frame(400.0, 3.0, 30.0, 16.0).actions(&["AXPress"]);
+        let toolbar = Fake::new("AXToolbar").frame(80.0, 0.0, 600.0, 22.0).children(vec![toolbar_menu]);
+        let named_window = window(vec![close.clone(), sharing, app_menu, toolbar]).with("AXCloseButton", Value::Element(close));
+        let tree = whole(&named_window);
+        assert!(!has(&tree, "Window sharing"), "the title bar's menu button is window chrome");
+        assert!(has(&tree, "Sort"), "a menu button of the app's content stays");
+        assert!(has(&tree, "Filter"), "a menu button in the toolbar stays, in the title bar's band too");
+        assert!(crate::snapshot::system_title_bar_control(
+            "AXMenuButton",
+            Some(crate::snapshot::Rect { x: 0.0, y: 3.0, width: 10.0, height: 16.0 }),
+            Some((5.0, 17.0))
+        ));
+        assert!(!crate::snapshot::system_title_bar_control(
+            "AXButton",
+            Some(crate::snapshot::Rect { x: 0.0, y: 3.0, width: 10.0, height: 16.0 }),
+            Some((5.0, 17.0))
+        ));
+        assert!(!crate::snapshot::system_title_bar_control("AXMenuButton", Some(crate::snapshot::Rect { x: 0.0, y: 3.0, width: 10.0, height: 16.0 }), None));
+    }
+
+    #[test]
     fn offers_scroll_on_a_scroll_area_only_with_a_scroll_bar_for_the_axis() {
         let pages = ["AXScrollDownByPage", "AXScrollUpByPage", "AXScrollLeftByPage", "AXScrollRightByPage"];
         let area = |title: &str| Fake::new("AXScrollArea").title(title).frame(0.0, 0.0, 400.0, 300.0).actions(&pages);

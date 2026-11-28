@@ -248,6 +248,9 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
         if window.bounds.is_none_or(|bounds| bounds.width < 1.0 || bounds.height < 1.0) {
             continue;
         }
+        if window.bounds.is_some_and(|bounds| drawn_in_title_bar(bounds, &out)) {
+            continue;
+        }
         out.push(WindowInfo {
             id: window.id.to_string(),
             title: window.title.clone(),
@@ -321,6 +324,22 @@ pub fn server_bounds(id: u32) -> Option<Rect> {
     server_windows().into_iter().find(|window| window.id == id).and_then(|window| window.bounds)
 }
 
+/// Whether a window accessibility does not list lies in the title bar of one it does list that is on screen. macOS
+/// draws a control into a window's title bar as a window of the app's own (the Window sharing button while the window
+/// is recorded): it is part of that window, not one of the app's. A minimized window's remembered frame, or another
+/// window accessibility does not list, has no title bar on screen to hold it.
+fn drawn_in_title_bar(bounds: Rect, listed: &[WindowInfo]) -> bool {
+    listed.iter().any(|outer| outer.accessible && outer.visible && outer.bounds.is_some_and(|outer| in_title_bar(bounds, outer)))
+}
+
+/// How far below a window's top edge its title bar and a toolbar unified with it reach, in points.
+const TITLE_BAR_POINTS: f64 = 60.0;
+
+/// Whether `inner` lies wholly in the title bar band of `outer`: inside its frame and within `TITLE_BAR_POINTS` of its top.
+fn in_title_bar(inner: Rect, outer: Rect) -> bool {
+    inner.x >= outer.x && inner.x + inner.width <= outer.x + outer.width && inner.y >= outer.y && inner.y + inner.height <= outer.y + TITLE_BAR_POINTS
+}
+
 /// How many menus `pid` has open on screen: windows at the menu level.
 pub fn open_menus(pid: i32) -> usize {
     server_windows().into_iter().filter(|window| window.pid == pid && window.layer == MENU_LAYER && window.onscreen).count()
@@ -328,8 +347,43 @@ pub fn open_menus(pid: i32) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{complete, may_be_window, system_dialog};
+    use super::{Rect, WindowInfo, complete, drawn_in_title_bar, in_title_bar, may_be_window, system_dialog};
     use crate::ax;
+
+    #[test]
+    fn reads_a_window_drawn_into_another_window_s_title_bar_as_part_of_it() {
+        let window = Rect { x: 414.0, y: 329.0, width: 900.0, height: 512.0 };
+        // The Window sharing button macOS 27 draws while the window is recorded.
+        assert!(in_title_bar(Rect { x: 430.0, y: 345.0, width: 66.0, height: 20.0 }, window));
+        // A helper window the app opens over its content (Calculator's mode picker) is a window of its own.
+        assert!(!in_title_bar(Rect { x: 500.0, y: 400.0, width: 468.0, height: 101.0 }, window));
+        assert!(!in_title_bar(Rect { x: 430.0, y: 345.0, width: 66.0, height: 60.0 }, window));
+        assert!(!in_title_bar(Rect { x: 1300.0, y: 345.0, width: 66.0, height: 20.0 }, window));
+    }
+
+    #[test]
+    fn leaves_out_only_a_window_in_the_title_bar_of_a_listed_window_on_screen() {
+        let frame = Rect { x: 414.0, y: 329.0, width: 900.0, height: 512.0 };
+        let sharing = Rect { x: 430.0, y: 345.0, width: 66.0, height: 20.0 };
+        let window = |accessible: bool, visible: bool| WindowInfo {
+            id: "1".into(),
+            title: None,
+            is_focused: false,
+            sheet_focused: false,
+            sheet_id: None,
+            is_main: false,
+            visible,
+            accessible,
+            minimized: !visible,
+            pid: 1,
+            bounds: Some(frame),
+            system: false,
+        };
+        assert!(drawn_in_title_bar(sharing, &[window(true, true)]));
+        assert!(!drawn_in_title_bar(sharing, &[window(true, false)]), "a minimized window's frame holds nothing on screen");
+        assert!(!drawn_in_title_bar(sharing, &[window(false, true)]), "a window accessibility does not list holds nothing");
+        assert!(!drawn_in_title_bar(sharing, &[]));
+    }
 
     #[test]
     fn counts_an_entry_whose_role_the_app_did_not_answer_as_a_window() {

@@ -359,9 +359,14 @@ the way a user would.
 - `apps/desktop-testbed` (`@e2e-dev/desktop-testbed`, private) - a native
   AppKit app (`app/macos/main.swift`, built by `pnpm build:app` into
   `build/SignInForm.app`): a sign-in form, and a Controls window with one
-  control per engine capability the form does not reach. Its e2e suites on
-  `@e2e-dev/desktop`: `tests/` locators only, `tests-physical/` the physical
-  pointer and keyboard (`pnpm test:physical`, which moves your pointer), and
+  control per engine capability the form does not reach; and a SwiftUI app,
+  TaskBoard (`app/macos-swiftui/TaskBoard.swift`, `build/TaskBoard.app`),
+  for the surfaces AppKit's form has none of (sheets, alerts, popovers, a
+  stepper, a toolbar menu, a lazy 200-row list, tabs, a window with no
+  focusable control). Its e2e suites on `@e2e-dev/desktop`: `tests/`
+  locators only, `tests-swiftui/` TaskBoard (`e2e.swiftui.config.ts`;
+  `pnpm test` runs both), `tests-physical/` the physical pointer and
+  keyboard (`pnpm test:physical`, which moves your pointer), and
   `tests-agent/` one `agent.act`. Hand-run on a Mac with Accessibility
   permission and the native driver built; no CI job runs it yet.
 - `apps/electron-testbed` (`@e2e-dev/electron-testbed`, private) - a small

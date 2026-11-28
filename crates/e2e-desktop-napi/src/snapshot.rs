@@ -186,6 +186,8 @@ struct Walk<E> {
     focus_unknown: bool,
     /// The window's own title-bar buttons, as it names them (`AXCloseButton`, ...); `None` when it names none.
     chrome: Option<Vec<E>>,
+    /// The band of the screen, top to bottom, the window's title-bar buttons sit in; `None` when it names none.
+    title_bar: Option<(f64, f64)>,
     nodes: usize,
     complete: bool,
     /// Whether the deadline stopped the read.
@@ -655,7 +657,7 @@ impl<E: Accessible> Walk<E> {
         let chrome = match &self.chrome {
             Some(chrome) => chrome.contains(element),
             None => roles::window_control_name(read.subrole.as_deref()).is_some(),
-        };
+        } || (level == 2 && system_title_bar_control(&read.ax_role, read.bounds, self.title_bar));
         if !root && chrome {
             return None;
         }
@@ -864,6 +866,23 @@ fn window_chrome<E: Accessible>(window: &E) -> Option<Vec<E>> {
     (!buttons.is_empty()).then_some(buttons)
 }
 
+/// The band of the screen the title-bar buttons sit in, from the top of the highest to the bottom of the lowest.
+fn title_bar_band<E: Accessible>(buttons: &[E]) -> Option<(f64, f64)> {
+    let frames: Vec<_> = buttons.iter().filter_map(Accessible::frame).collect();
+    let top = frames.iter().map(|(_, y, _, _)| *y).reduce(f64::min)?;
+    let bottom = frames.iter().map(|(_, y, _, height)| y + height).reduce(f64::max)?;
+    Some((top, bottom))
+}
+
+/// Whether a direct child of the window is a control macOS put in its title bar, beside the close button: a menu button
+/// whose middle lies in the band the title-bar buttons sit in. macOS 27 adds a "Window sharing" one while the window is
+/// recorded or shared; the app's own toolbar controls sit in the window's toolbar, never directly in the window.
+fn system_title_bar_control(ax_role: &str, bounds: Option<Rect>, band: Option<(f64, f64)>) -> bool {
+    let (Some(bounds), Some((top, bottom))) = (bounds, band) else { return false };
+    let middle = bounds.y + bounds.height / 2.0;
+    ax_role == "AXMenuButton" && middle >= top && middle <= bottom
+}
+
 /// `element` and every element above it, up to `window` or as far as the app answers.
 fn ancestors<E: Accessible>(element: &E, window: &E) -> HashSet<E> {
     let mut path = HashSet::new();
@@ -887,6 +906,7 @@ fn read_tree<E: Accessible>(window: &E, app: &E, settings: Settings) -> Outcome<
     };
     let window_bounds = window.frame().map(|(x, y, width, height)| Rect { x, y, width, height });
     let focus_path = focused.as_ref().map(|focused| ancestors(focused, window)).unwrap_or_default();
+    let chrome = window_chrome(window);
     let mut walk = Walk {
         snapshot: settings.snapshot.clone(),
         max_depth: settings.max_depth.max(1),
@@ -894,7 +914,8 @@ fn read_tree<E: Accessible>(window: &E, app: &E, settings: Settings) -> Outcome<
         deadline: settings.deadline,
         focused,
         focus_unknown,
-        chrome: window_chrome(window),
+        title_bar: chrome.as_deref().and_then(title_bar_band),
+        chrome,
         nodes: 0,
         complete: !focus_unknown,
         timed_out: false,
