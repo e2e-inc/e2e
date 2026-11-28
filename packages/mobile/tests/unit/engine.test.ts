@@ -1505,6 +1505,117 @@ describe('observation', () => {
     expect(asked).toEqual([undefined, true]);
   });
 
+  describe('a secure field that moves, comes, or goes during the capture', () => {
+    const png = encodePng({ width: 195, height: 422, channels: 4, pixels: new Uint8Array(195 * 422 * 4).fill(255) });
+    const screen = (passwordY?: number) => ({
+      nodes: [
+        { ref: 'e1', index: 0, depth: 0, type: 'application', label: 'Bank', rect: { x: 0, y: 0, width: 390, height: 844 } },
+        ...(passwordY === undefined ? [] : [{ ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'SecureTextField', label: 'Password', rect: { x: 0, y: passwordY, width: 390, height: 44 } }]),
+      ],
+    });
+
+    /** An open attempt whose reads of the screen take the next screen in line, or fail with the next error; the last one stays. */
+    async function bracketed(...screens: (ReturnType<typeof screen> | { nodes: object[] } | Error)[]) {
+      const h = harness();
+      h.fake.respond('capture.screenshot', (args) => {
+        writeFileSync((args as { path: string }).path, png);
+        return { path: (args as { path: string }).path };
+      });
+      await openAttempt(h);
+      const queue = [...screens];
+      h.fake.respond('capture.snapshot', () => {
+        const next = queue.length > 1 ? queue.shift()! : queue[0]!;
+        if (next instanceof Error) throw next;
+        return next;
+      });
+      return h;
+    }
+
+    /** The RGB of one pixel of a written screenshot. */
+    function pixelAt(relative: string, x: number, y: number): number[] {
+      const image = decodePng(new Uint8Array(readFileSync(path.join(artifactsDir, relative))));
+      return [...image.pixels.subarray((y * image.width + x) * image.channels, (y * image.width + x) * image.channels + 3)];
+    }
+
+    it('withholds the pixels when the field moved between the read and the screenshot', async () => {
+      const h = await bracketed(screen(270), screen(500));
+      const moved = await h.engine.observe!(operation(), { pixels: true });
+      expect(moved.pixels).toBeUndefined();
+      expect(moved.maskedRegionCount).toBe(0);
+      expect(moved.root.children).toHaveLength(1);
+    });
+
+    it('withholds the pixels when a field appeared after the read', async () => {
+      const h = await bracketed(screen(), screen(270));
+      const appeared = await h.engine.observe!(operation(), { pixels: true });
+      expect(appeared.pixels).toBeUndefined();
+      expect(appeared.maskedRegionCount).toBe(0);
+    });
+
+    it('still ships the pixels of a screen with no secure field in either read', async () => {
+      const h = await bracketed(screen());
+      const plain = await h.engine.observe!(operation(), { pixels: true });
+      expect(plain.pixels).toBeDefined();
+      expect(plain.maskedRegionCount).toBe(0);
+    });
+
+    it('withholds the pixels when the screen turned between the reads', async () => {
+      const turned = { nodes: [{ ...screen(270).nodes[0]!, rect: { x: 0, y: 0, width: 844, height: 390 } }, screen(270).nodes[1]!] };
+      const h = await bracketed(screen(270), turned);
+      const rotated = await h.engine.observe!(operation(), { pixels: true });
+      expect(rotated.pixels).toBeUndefined();
+      expect(rotated.maskedRegionCount).toBe(0);
+    });
+
+    it('withholds the pixels when the read after the capture fails', async () => {
+      const h = await bracketed(screen(270), new AppError('COMMAND_FAILED', 'snapshot failed'));
+      const unread = await h.engine.observe!(operation(), { pixels: true });
+      expect(unread.pixels).toBeUndefined();
+      expect(unread.maskedRegionCount).toBe(0);
+    });
+
+    it('takes a screenshot artifact once more, and masks the field where it settled', async () => {
+      const h = await bracketed(screen(270), screen(500), screen(500));
+      const shots = () => h.fake.methods().filter((method) => method === 'capture.screenshot').length;
+      const before = shots();
+      const relative = await h.engine.artifacts!.screenshot('settled', operation());
+      expect(shots() - before).toBe(2);
+      expect(pixelAt(relative, 100, 520 / 2)).toEqual([0, 0, 0]);
+      expect(pixelAt(relative, 100, 290 / 2)).toEqual([255, 255, 255]);
+    });
+
+    it('refuses a screenshot artifact of a field that keeps moving, and writes nothing', async () => {
+      const h = await bracketed(screen(100), screen(200), screen(300), screen(400));
+      await expect(h.engine.artifacts!.screenshot('moving', operation())).rejects.toMatchObject({ category: 'configuration', code: 'POLICY_DENIED' });
+      expect(existsSync(path.join(artifactsDir, 'screenshots', '001-moving.png'))).toBe(false);
+    });
+
+    it("fails a screenshot artifact with the device's own error when the read after the capture fails", async () => {
+      const h = await bracketed(screen(270), new AppError('COMMAND_FAILED', 'snapshot failed'));
+      const failure = await h.engine.artifacts!.screenshot('unread', operation()).then(() => undefined, (cause: unknown) => cause);
+      expect(failure).toBeDefined();
+      expect(failure).not.toMatchObject({ code: 'POLICY_DENIED' });
+      expect(existsSync(path.join(artifactsDir, 'screenshots', '001-unread.png'))).toBe(false);
+    });
+
+    it('scales the masks to the screen the session knows when the app draws a smaller tree', async () => {
+      // An app drawn a third of the screen's size (behind Notification Center) reports a 130-point tree.
+      const shrunk = {
+        nodes: [
+          { ref: 'e1', index: 0, depth: 0, type: 'application', label: 'Bank', rect: { x: 0, y: 0, width: 130, height: 281 } },
+          { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'SecureTextField', label: 'Password', rect: { x: 0, y: 90, width: 130, height: 20 } },
+        ],
+      };
+      const h = await bracketed(screen(), shrunk);
+      // The session learns the 390-point screen from a full read first.
+      await h.engine.observe!(operation());
+      const relative = await h.engine.artifacts!.screenshot('small', operation());
+      // 390 points onto 195 pixels: the field at y=90..110 lands at 45..55, not where a 130-point screen would put it.
+      expect(pixelAt(relative, 10, 50)).toEqual([0, 0, 0]);
+      expect(pixelAt(relative, 10, 150)).toEqual([255, 255, 255]);
+    });
+  });
+
   it('withholds the pixels of a screen with a secure field when the image cannot be read or decoded', async () => {
     const h = harness();
     // A PNG signature and header naming the size, with no image data behind them: the size reads, the decode fails.
