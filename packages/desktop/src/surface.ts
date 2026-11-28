@@ -499,7 +499,8 @@ export class DesktopSurface {
    */
   async closeWindow(id: string, operation: OperationContext): Promise<void> {
     const { pid } = this;
-    if (pid === undefined) return;
+    // An app that quit with its last window has closed this one too.
+    if (pid === undefined || !(await this.running(pid))) return;
     const inputId = this.requireDriver().inputId();
     await this.input((driver, timeoutMs) => driver.closeWindow(pid, id, inputId, timeoutMs), {
       label: 'close window',

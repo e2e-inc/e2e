@@ -936,6 +936,16 @@ describe('desktop fixture: windows', () => {
     await controls.close();
   });
 
+  it('leaves a window alone once the app quit with it, as an app does when its last window closes', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [mine])], closeWindow: [failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer')] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const only = (await desktop.windows())[0]!;
+    process.kill(fake.pid, 'SIGKILL');
+    expect(await gone(fake.pid)).toBe(true);
+    await only.close();
+    expect(fake.of('closeWindow')).toHaveLength(0);
+  });
+
   it('reports a window that stayed open as a close that may have landed, and refuses one with no close button or that accessibility cannot read', async () => {
     const { surface } = await launched({
       listWindows: [windows(() => [mine, panel])],
