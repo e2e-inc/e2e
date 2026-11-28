@@ -33,9 +33,9 @@ type ReadinessCheck = { [K in keyof NodeOps]: ReturnType<NodeOps[K]> extends Rea
 const INERT_REASONS = new Set(['activeModalDialog', 'inertElement']);
 
 /**
- * Whether Chromium holds the node inert. The page-side checks walk what the
- * page can reach; a modal dialog in a closed shadow root is out of that
- * reach, and still makes the rest of the page inert.
+ * Whether Chromium holds the node inert. It alone knows which modal dialog is
+ * on top and what a closed shadow root holds; the page-side checks read only
+ * the `inert` attributes the page can reach.
  */
 async function blocked(target: WaitTarget): Promise<boolean> {
   const { nodes } = await target.window.page.session.send('Accessibility.getPartialAXTree', { backendNodeId: target.backendNodeId, fetchRelatives: false });
