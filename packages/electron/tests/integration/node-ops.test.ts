@@ -223,7 +223,7 @@ describe('queryAll', () => {
     expect(await run(await element('#styled'), 'readStyle', ['color', 'font-weight'])).toEqual({ color: 'rgb(255, 0, 0)', 'font-weight': '700' });
     // Any property the test names, and the class attribute as written; none is the empty list.
     expect(await run(await element('#fixed'), 'readStyle', ['position'])).toEqual({ position: 'fixed' });
-    expect(await run(await element('#styled'), 'className')).toBe('');
+    expect(await run(await element('#styled'), 'className')).toBeNull();
     await window.inPage(() => document.querySelector('#styled')!.setAttribute('class', ' lead  active '));
     expect(await run(await element('#styled'), 'className')).toBe(' lead  active ');
     expect(await run(await element('#half'), 'viewportIntersection')).toEqual({ intersects: true, ratio: 0.5 });

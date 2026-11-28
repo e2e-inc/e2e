@@ -216,7 +216,8 @@ await expect(electron).not.toHaveTitle('Sign in');
   `RegExp`.
 - `toHaveClass` and `toHaveCSS` take the locator first. A string is the whole
   class list, or the computed value as `getComputedStyle` reports it, such as
-  `'rgb(255, 0, 0)'`.
+  `'rgb(255, 0, 0)'`. An element with no `class` attribute matches no string,
+  `''` included.
 - Every matcher takes `{ timeout }`.
 
 `electron.waitForURL()` waits the same way without asserting, and

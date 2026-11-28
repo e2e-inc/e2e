@@ -558,11 +558,12 @@ export class ElectronSurface {
   }
 
   /**
-   * `expect(electron).toHaveClass` and `toHaveCSS`: the class attribute, or
-   * one computed style, of a node the test names. Any CSS property: the test
-   * is trusted with what it reads, as with `window.evaluate`.
+   * `expect(electron).toHaveClass` and `toHaveCSS`: the class attribute (null
+   * when the element has none), or one computed style, of a node the test
+   * names. Any CSS property: the test is trusted with what it reads, as with
+   * `window.evaluate`.
    */
-  async readElement(ref: NodeRef, what: 'class' | { readonly css: string }, operation: OperationContext): Promise<string> {
+  async readElement(ref: NodeRef, what: 'class' | { readonly css: string }, operation: OperationContext): Promise<string | null> {
     const { window, backendNodeId } = this.windowList.bind(ref);
     return await withBudget(operation, 'read element', async () => {
       if (what === 'class') return await this.devtools.callOn(window.page, backendNodeId, 'className');

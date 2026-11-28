@@ -187,6 +187,8 @@ test.describe('expect(electron) and the fixture\'s waits', () => {
     await expect(electron).toHaveClass(electron.locator('i.glyph'), 'glyph');
     await expect(electron).toHaveClass(electron.locator('i.glyph'), /^gly/);
     await expect(electron).not.toHaveClass(scan, 'glyph');
+    // An element with no class attribute has no class list, which the empty one does not match.
+    expect(await failure(expect(electron).toHaveClass(scan, '', { timeout: 300 }))).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('observed: no class attribute') });
     await expect(electron).toHaveCSS(screen.getByTestId('label-cover'), 'position', 'absolute');
     await expect(electron).toHaveCSS(scan, 'opacity', '1');
     // Both poll: the page changes them a moment later.

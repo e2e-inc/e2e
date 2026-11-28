@@ -131,6 +131,8 @@ export class WindowConditions {
         return this.poll(call('toHaveClass'), `class ${describePattern(pattern)}`, async (deadline) => {
           const value = await this.read(target, 'class', deadline);
           if (value === undefined) return { matches: undefined, observed: 'no node' };
+          // An absent attribute is no class list at all, which '' does not match, as on the web.
+          if (value === null) return { matches: false, observed: 'no class attribute' };
           return { matches: matchesText(value.trim().split(/\s+/).join(' '), pattern), observed: `class ${JSON.stringify(value)}` };
         }, timeoutOf('toHaveClass', options));
       },
@@ -139,7 +141,7 @@ export class WindowConditions {
         const pattern = toTextPattern(expected, { exact: true });
         return this.poll(call('toHaveCSS'), `${property} ${describePattern(pattern)}`, async (deadline) => {
           const value = await this.read(target, { css: property }, deadline);
-          if (value === undefined) return { matches: undefined, observed: 'no node' };
+          if (value === undefined || value === null) return { matches: undefined, observed: 'no node' };
           return { matches: matchesText(value, pattern), observed: `${property} ${JSON.stringify(value)}` };
         }, timeoutOf('toHaveCSS', options));
       },
@@ -151,14 +153,14 @@ export class WindowConditions {
    * matches, read from the element itself; undefined while it matches none,
    * which is one more poll. Several matches fail at once.
    */
-  private async read(target: Locator, what: 'class' | { readonly css: string }, deadline: Deadline): Promise<string | undefined> {
+  private async read(target: Locator, what: 'class' | { readonly css: string }, deadline: Deadline): Promise<string | null | undefined> {
     const expression = this.context.expression(target);
-    const operation = this.context.operation(deadline.remaining());
-    const nodes = await this.surface.locate(expression, operation);
+    const nodes = await this.surface.locate(expression, this.context.operation(deadline.remaining()));
     if (nodes.length === 0) return undefined;
     const [node] = nodes;
     if (nodes.length > 1 || node === undefined) throw new TestError('LOCATOR_AMBIGUOUS', `the locator matched ${nodes.length} nodes: expect(electron) reads one`);
-    return await this.surface.readElement(node.ref, what, operation);
+    // What is left of the deadline now: the locate before it spent some.
+    return await this.surface.readElement(node.ref, what, this.context.operation(deadline.remaining()));
   }
 }
 
