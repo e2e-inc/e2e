@@ -190,7 +190,7 @@ export default {
 
 The engine starts every app with switches of its own, before the target's
 `app.launchArguments` and a test's
-[`launch({ args })`](#launch). An app with a strict argument parser must allow
+[`launch({ launchArguments })`](#launch). An app with a strict argument parser must allow
 them.
 
 | Switch | Why |
@@ -203,7 +203,7 @@ them.
 | `--no-sandbox` | On Linux only. |
 | `--user-data-dir=<directory>` | The test's own [user-data directory](#userdatadir). |
 
-`app.launchArguments` and `launch({ args })` must not set `--user-data-dir`,
+`app.launchArguments` and `launch({ launchArguments })` must not set `--user-data-dir`,
 `--inspect`, `--inspect-brk`, `--remote-debugging-port`, or
 `--remote-debugging-pipe`: the engine owns them.
 
@@ -244,7 +244,7 @@ window.
 
 ```ts
 test('opens on saved settings', async ({ electron, screen }) => {
-  await electron.launch({ args: ['--skip-onboarding'] });
+  await electron.launch({ launchArguments: ['--skip-onboarding'] });
   await expect(screen.getByRole('heading', 'Projects')).toBeVisible();
 });
 ```
@@ -314,19 +314,19 @@ launch(options?: ElectronLaunchOptions): Promise<void>;
 
 ```ts
 await electron.launch({
-  args: ['--skip-onboarding'],
+  launchArguments: ['--skip-onboarding'],
   env: { APP_DATA_PATH: electron.userDataDir },
 });
 ```
 
 | Option | Type | Default |
 | --- | --- | --- |
-| `args` | `readonly string[]` | `[]` |
+| `launchArguments` | `readonly string[]` | `[]` |
 | `env` | `Record<string, string>` | `{}` |
 | `cwd` | `string` | the engine's `cwd` |
 | `timeout` | `number` | the test's `timeout` |
 
-- `args` go after the target's `app.launchArguments`.
+- `launchArguments` go after the target's `app.launchArguments`.
 - `env` goes over the engine's [`env`](#env). `cwd` replaces the engine's
   [`cwd`](#cwd), absolute or relative to the project root.
 - A running app is quit first, and the app launches fresh, as `app.open()`
@@ -339,7 +339,7 @@ await electron.launch({
 | --- | --- |
 | `POLICY_DENIED` | A secret anywhere in the options. |
 | `INVALID_ARGUMENT` | The options are not an object, or name an option other than these four. |
-| `INVALID_ARGUMENT` | `args` is not a list of strings, or sets a switch the engine owns (see [Launch arguments](#launch-arguments)). |
+| `INVALID_ARGUMENT` | `launchArguments` is not a list of strings, or sets a switch the engine owns (see [Launch arguments](#launch-arguments)). |
 | `INVALID_ARGUMENT` | `env` is not an object of variable name to string value, or sets `ELECTRON_RUN_AS_NODE` or `NODE_OPTIONS`. |
 | `INVALID_ARGUMENT` | `cwd` is not a non-empty string, or names a path that is not a directory. |
 
@@ -746,7 +746,7 @@ export interface WindowMatcher {
 export type ElectronMainModule = typeof import('electron');
 
 export interface ElectronLaunchOptions {
-  readonly args?: readonly string[] | undefined;
+  readonly launchArguments?: readonly string[] | undefined;
   readonly env?: Readonly<Record<string, string>> | undefined;
   readonly cwd?: string | undefined;
   readonly timeout?: number | undefined;

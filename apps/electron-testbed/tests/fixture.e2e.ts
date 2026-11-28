@@ -29,7 +29,7 @@ test.describe('electron.launch', () => {
   test('adds arguments and variables of the test\'s own, and keeps them through a restart', async ({ app, screen, electron }) => {
     const launched = (): Promise<{ readonly args: readonly string[]; readonly mode: string | undefined }> =>
       electron.evaluate(() => ({ args: process.argv.filter((argument) => argument.startsWith('--greeting=') || argument === '--per-test'), mode: process.env['TESTBED_MODE'] }));
-    await electron.launch({ args: ['--per-test'], env: { TESTBED_MODE: 'per-test' } });
+    await electron.launch({ launchArguments: ['--per-test'], env: { TESTBED_MODE: 'per-test' } });
     await expect(screen.getByRole('heading', 'Hello from e2e')).toBeVisible();
     // After the target's own arguments, and over the engine's `env`, which is still there.
     expect(await launched()).toEqual({ args: ['--greeting=Hello from e2e', '--per-test'], mode: 'per-test' });
@@ -50,7 +50,7 @@ test.describe('electron.launch', () => {
   });
 
   test('refuses an argument the engine owns, a variable it never sets, and an option it does not know', async ({ electron }) => {
-    expect(await failure(electron.launch({ args: ['--user-data-dir=/tmp/elsewhere'] }))).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('electron.launch({ args })') });
+    expect(await failure(electron.launch({ launchArguments: ['--user-data-dir=/tmp/elsewhere'] }))).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('electron.launch({ launchArguments })') });
     expect(await failure(electron.launch({ env: { TOKEN: credentials.user('ada').password as never } }))).toMatchObject({ code: 'POLICY_DENIED' });
     expect(await failure(electron.launch({ env: { NODE_OPTIONS: '--inspect' } }))).toMatchObject({ code: 'INVALID_ARGUMENT' });
     expect(await failure(electron.launch({ cwd: 'no-such-directory' }))).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('not a directory') });
