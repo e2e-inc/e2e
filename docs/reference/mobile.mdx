@@ -318,6 +318,7 @@ export default {
 | --- | --- |
 | `INVALID_CONFIG` | At config load: no `app.bundleId` and no `app.appPath`; an `app.url` (not supported yet); a link in `bundleId` (a test opens one with `device.openLink`); an unknown permission name; an Apple launch argument such as `AppleLocale`, or a list item `am start` cannot carry, in an object on an Android target. |
 | `UNSUPPORTED_CAPABILITY` | `app.open()`, `app.restart()`, or `app.clearState()` on a target with no `app.bundleId` before its build is installed. |
+| `TEST_SETUP_FAILED` | `app.open()`, `app.restart()`, or `app.clearState()` when the device has no installed app to launch: the target's `app.bundleId`, or the build `device.installApp()` installed. The message names the app and the device. On an iOS simulator, opening a missing dotted bundle id is still `ENGINE_FAILURE`, because agent-device does not report it as not installed there. |
 
 #### Launch arguments and permissions
 
@@ -663,6 +664,7 @@ await app.open();
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | A permission name outside `DevicePermission` (naming the nearest one when it is a likely typo), or a state other than `grant`, `deny`, or `reset`. Fails before any device command. |
+| `TEST_SETUP_FAILED` | The device does not have the pinned app. |
 
 #### `setLocation`
 
@@ -903,6 +905,7 @@ await device.openApp('com.example.app', { relaunch: true, launchArguments: { App
 | --- | --- |
 | `POLICY_DENIED` | A `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, or `filesystem:` link. |
 | `INVALID_ARGUMENT` | Any other link, with a message pointing at `openLink`; an invalid permission name or state; or `launchArguments` outside the declared shape, or one Android cannot carry (see [Launch arguments and permissions](#launch-arguments-and-permissions)). |
+| `TEST_SETUP_FAILED` | The device has no app with that package or display name, or on a device, that bundle id. The message names the app and the device. An iOS simulator's missing bundle id is `ENGINE_FAILURE`. |
 
 #### `openLink`
 
@@ -941,6 +944,7 @@ await expect(screen.getByText('Order #42')).toBeVisible();
 | `POLICY_DENIED` | A `file:`, `data:`, `javascript:`, `view-source:`, `blob:`, or `filesystem:` link. |
 | `INVALID_ARGUMENT` | No app on iOS: an open bound to none leaves no app session to observe. |
 | `INVALID_ARGUMENT` | A string that does not parse as an absolute URL. The message names no part of the input, which may carry a magic-link token in its query, path, or userinfo. |
+| `TEST_SETUP_FAILED` | The app the link opens into is not on the device, on Android and iOS devices. On an iOS simulator, a missing dotted bundle id is `ENGINE_FAILURE`, because agent-device does not report it as not installed there. |
 
 #### `closeApp`
 
@@ -1374,8 +1378,11 @@ A tool that fails during a built-in agent step returns
 goes on. `open_app` fails with `INVALID_STATE` when it names no app, the
 target has no `app.bundleId`, and nothing has installed its `app.appPath`
 build yet (no `device.installApp()`, no device provider install); with
-`INVALID_ARGUMENT` when it names an app that is not installed or a link; and
-with `POLICY_DENIED` for a link with a forbidden scheme. Any tool fails with
+`INVALID_ARGUMENT` when it names an app that is not installed or a link;
+with `TEST_SETUP_FAILED` when it names no app and the app under test is not
+installed (on an iOS simulator with a dotted bundle id this is
+`ENGINE_FAILURE`, as for `app.open()`); and with `POLICY_DENIED` for a link
+with a forbidden scheme. Any tool fails with
 `INVALID_STATE` when no device attempt is running, or when several device
 attempts are running in one worker.
 

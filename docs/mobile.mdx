@@ -873,6 +873,14 @@ message itself, not just the wrapper error code.
 Ctrl-C'd run can wedge the runner. Try rerunning once; if it persists, stop
 the daemon and reboot the simulator with the commands below.
 
+**`app.open()` fails with `TEST_SETUP_FAILED`: the app is not installed.**
+The device has no installed app matching the one the target opens. The engine
+installs nothing on its own: call `device.installApp()` (with no path, it
+installs `app.appPath`) in an `auto: true` worker fixture before
+`app.open()`, use a device provider that installs the build, or fix the
+bundle id. On an iOS simulator, opening a bundle id the simulator does not have
+fails as `ENGINE_FAILURE` until agent-device reports it as not installed.
+
 **`device.installApp()` can't detect the Android package.** If agent-device
 can't read the APK manifest, either set `app.bundleId` explicitly in your
 config or export `ANDROID_HOME` and restart the agent-device daemon.

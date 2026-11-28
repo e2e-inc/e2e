@@ -3477,6 +3477,34 @@ describe('device fixture', () => {
     expect((await h.engine.observe!(operation())).location).toBe('dev.e2e.benchmark / General');
   });
 
+  it('fails an open, a clear-state, and a permission change of an app the device does not have as a setup error in e2e words', async () => {
+    const h = harness();
+    await openAttempt(h);
+    const device = fixture(h);
+    const missing = () => {
+      throw new AppError('APP_NOT_INSTALLED', 'No app found matching "Settings"');
+    };
+    const notInstalled = (verb: string) =>
+      expect.objectContaining({
+        code: 'TEST_SETUP_FAILED',
+        message: expect.stringMatching(new RegExp(`^${verb} Settings failed: Settings is not installed on the device .*Install it with device\\.installApp\\(\\) first`)),
+      });
+    h.fake.respond('apps.open', missing);
+    const restart = await h.engine.session!.restart!(operation()).then(() => undefined, (error: unknown) => error as Error);
+    expect(restart).toEqual(notInstalled('open'));
+    expect(restart?.message).not.toContain('Run install');
+    await expect(device.openApp('Settings', { relaunch: true })).rejects.toEqual(notInstalled('open'));
+    await expect(h.engine.session!.openLink!('e2e-benchmark://orders/42', operation())).rejects.toEqual(notInstalled('open'));
+    h.fake.respond('settings.update', missing);
+    await expect(device.setPermission('camera', 'grant')).rejects.toEqual(notInstalled('permission camera grant for'));
+    await expect(h.engine.session!.reset!(operation())).rejects.toEqual(notInstalled('clear app state of'));
+    // Any other launch failure is still the device's.
+    h.fake.respond('apps.open', () => {
+      throw new AppError('COMMAND_FAILED', 'Simulator device failed to launch Settings.');
+    });
+    await expect(device.openApp('Settings')).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
+  });
+
   it('opens app.open(path) links on a target with app.linkBase in the pinned app, through session.openLink', async () => {
     const h = harness();
     await openAttempt(h);

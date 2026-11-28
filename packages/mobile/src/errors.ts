@@ -14,6 +14,7 @@
  * | a covered or keyboard-occluded target, `dispatched: no`      | NOT_ACTIONABLE, with the hint |
  * | a target with no screen origin to aim at, `dispatched: no`   | NOT_ACTIONABLE, with the hint |
  * | screen.swipe({ from, to }) off agent-device's viewport       | NOT_ACTIONABLE, with the hint |
+ * | APP_NOT_INSTALLED on an open, clear-state, or app-targeted permission | TEST_SETUP_FAILED, naming the app |
  * | the iOS runner busy, wedged, or past its watchdog           | ENGINE_FAILURE, naming the   |
  * | a snapshot the iOS runner acquired but could not present    |   runner and the recovery    |
  * | anything else, agent-device's own timeouts included         | ENGINE_FAILURE with the text |
@@ -358,9 +359,30 @@ export function isShortLivedClaim(error: unknown): boolean {
   return typeof session === 'string' && session.startsWith(TRANSIENT_HOLDER);
 }
 
+/** Whether agent-device refused an `open` because no installed app matches: `APP_NOT_INSTALLED`. */
+function notInstalledCause(cause: unknown): boolean {
+  return isAgentDeviceError(cause) && normalizeAgentDeviceError(cause).code === 'APP_NOT_INSTALLED';
+}
+
 /** True for a translated `open` agent-device refused because no installed app matches the name. */
-export function isAppNotInstalled(error: unknown): boolean {
-  return error instanceof Error && isAgentDeviceError(error.cause) && normalizeAgentDeviceError(error.cause).code === 'APP_NOT_INSTALLED';
+export function isAppNotInstalled(error: unknown): error is Error {
+  return error instanceof Error && notInstalledCause(error.cause);
+}
+
+/**
+ * An `operation` (an `open` by default) on `app` that failed because the device has no such app, as a
+ * setup failure in e2e's words: agent-device's own advice names its CLI
+ * (`Run install before open`). Any other failure is returned as it came.
+ * `where` names the session and device.
+ */
+export function appNotInstalled(error: unknown, app: string, where: string | undefined, operation = 'open'): unknown {
+  if (!isAppNotInstalled(error)) return error;
+  const location = where === undefined ? '' : ` (${where})`;
+  return new ConfigurationError(
+    'TEST_SETUP_FAILED',
+    `${operation} ${app} failed: ${app} is not installed on the device${location}. Install it with device.installApp() first (with no path, it installs the target's app.appPath), or check the bundle id or package name.`,
+    { cause: error.cause },
+  );
 }
 
 /**

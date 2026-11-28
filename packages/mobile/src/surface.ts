@@ -51,7 +51,7 @@ import {
   readPngSize,
   TestError,
 } from '@e2e-dev/core/engine';
-import { isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
+import { appNotInstalled, isAppNotRunning, isSnapshotPresentationFailure, isUnreadableCapture, ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING, refusedSwipePath, runCommand, staleOr } from './errors.ts';
 import { pointerInteraction, DEFAULT_LONG_PRESS_MS, MAX_TAP_COUNT } from './actions.ts';
 import { resolveExpression } from './locate.ts';
 import { launchArgumentList, launchArgumentsForOpen } from './launch-arguments.ts';
@@ -926,7 +926,9 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
           ...(launchArgs === undefined ? {} : { launchArgs: [...launchArgs] }),
         }),
       signal,
-    );
+    ).catch((error: unknown) => {
+      throw appNotInstalled(error, app, this.where);
+    });
     this.launched(result.appBundleId ?? result.appName ?? app);
   }
 
@@ -964,7 +966,9 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       `permission ${permission} ${state}`,
       (client) => client.settings.update({ setting: 'permission', permission, state, ...this.selection(), ...(app === undefined ? {} : { app }) }),
       signal,
-    );
+    ).catch((error: unknown) => {
+      throw app === undefined ? error : appNotInstalled(error, app, this.where, `permission ${permission} ${state} for`);
+    });
   }
 
   /**
@@ -999,7 +1003,9 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
         return input === undefined ? open() : input.send(open);
       },
       signal,
-    );
+    ).catch((error: unknown) => {
+      throw target === undefined ? error : appNotInstalled(error, target, this.where);
+    });
     this.launched(result.appBundleId ?? (target === undefined ? undefined : (result.appName ?? target)));
   }
 
@@ -2015,7 +2021,9 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       'clear app state',
       (client) => client.settings.update({ ...this.selection(), setting: 'clear-app-state', state: 'clear', app }),
       operation.signal,
-    );
+    ).catch((error: unknown) => {
+      throw appNotInstalled(error, app, this.where, 'clear app state of');
+    });
     await this.openApp(app, { relaunch: true }, operation.signal);
   }
 

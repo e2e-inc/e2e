@@ -273,7 +273,7 @@ describe('agent tool pack', () => {
     expect(failure?.message).not.toContain('Run apps');
   });
 
-  it('keeps the device error when the app under test is not installed', async () => {
+  it('reports a setup error when the app under test is not installed', async () => {
     const fake = createFakeClient({
       'apps.open': () => {
         throw new AppError('APP_NOT_INSTALLED', 'No app found matching "dev.e2e.benchmark"');
@@ -282,9 +282,10 @@ describe('agent tool pack', () => {
     const open = await attemptTools(fake, { bundleId: 'dev.e2e.benchmark' });
     const failure = await open({}).then(
       () => undefined,
-      (error: unknown) => error as Error,
+      (error: unknown) => error as Error & { code: string },
     );
-    expect(failure?.message).toContain('No app found matching "dev.e2e.benchmark"');
+    expect(failure?.code).toBe('TEST_SETUP_FAILED');
+    expect(failure?.message).toContain('dev.e2e.benchmark is not installed on the device');
     expect(failure?.message).not.toContain('Omit app');
   });
 });
