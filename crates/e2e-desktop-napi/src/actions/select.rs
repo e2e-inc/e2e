@@ -307,6 +307,8 @@ pub(super) fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<(
             }
             return Ok(());
         }
+        // A row the app shows disabled may still take a written selection, which the user could not make.
+        enabled(&row, deadline, "select")?;
         if choose_row(Some(element), &row, deadline, &format!("\"{label}\" did not become selected"))? {
             return Ok(());
         }
