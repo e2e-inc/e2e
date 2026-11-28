@@ -125,10 +125,23 @@ async function capturePage(window: AppWindow, scale: 'css' | 'device', region: E
     if (inside === undefined) throw new TestError('INVALID_ARGUMENT', `screenshot clip { x: ${x}, y: ${y}, width: ${width}, height: ${height} } is outside the ${whole.width}x${whole.height} page`);
     kept = inside;
   }
-  const clip = { ...kept, scale: scale === 'css' ? 1 / ratio : 1 };
+  // Past this many image pixels on a side, Chromium repeats the start of the page instead of painting the rest.
+  const output = { width: kept.width * (scale === 'css' ? 1 : ratio), height: kept.height * (scale === 'css' ? 1 : ratio) };
+  if (Math.max(output.width, output.height) > MAX_CAPTURE_PIXELS) {
+    throw new ConfigurationError(
+      'UNSUPPORTED_CAPABILITY',
+      `a ${Math.ceil(output.width)}x${Math.ceil(output.height)} capture is past the ${MAX_CAPTURE_PIXELS} pixels on a side Electron paints in one screenshot; capture a clip of the page`,
+    );
+  }
+  // The clip is read in the page's zoomed pixels, and `devicePixelRatio` counts the zoom too.
+  const zoom = scrolled.zoom ?? 1;
+  const clip = { x: kept.x * zoom, y: kept.y * zoom, width: kept.width * zoom, height: kept.height * zoom, scale: scale === 'css' ? 1 / ratio : 1 };
   const { data } = await page.captured(() => page.session.send('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true }));
   return { image: Buffer.from(data, 'base64'), width: kept.width, scroll: { x: scrolled.pageX, y: scrolled.pageY } };
 }
+
+/** The most pixels on a side one `Page.captureScreenshot` paints; Chromium's limit for a single compositor frame. */
+const MAX_CAPTURE_PIXELS = 16_384;
 
 /** The part of `box` inside `bounds`; undefined when none of it is. */
 function overlap(

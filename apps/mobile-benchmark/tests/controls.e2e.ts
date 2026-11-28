@@ -413,12 +413,12 @@ test.describe('control inventory', () => {
 
   test('a clip cuts the screen as a locator screenshot cuts its match, and a full page is refused', async ({ app, screen }) => {
     const header = screen.getByTestId('inventory-header');
-    const box = await header.boundingBox();
-    expect(box).not.toBeNull();
     // Both are cut from the device's screenshot at its own density, so a still header comes out the same bytes. Right
-    // after the scenario opens, its push transition can still repaint the header's text between two captures.
+    // after the scenario opens, its push transition can still move and repaint the header, so each round measures it again.
     await expect.poll(async () => {
-      const clipped = await app.screenshot('header-clip', { clip: box! });
+      const box = await header.boundingBox();
+      if (box === null) return false;
+      const clipped = await app.screenshot('header-clip', { clip: box });
       const matched = await header.screenshot('header-match');
       return readFileSync(clipped).equals(readFileSync(matched));
     }, { timeout: 15_000 }).toBe(true);

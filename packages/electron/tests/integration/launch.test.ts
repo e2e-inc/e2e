@@ -567,26 +567,78 @@ describe('pixels', () => {
     expect(await window.page.evaluate(() => scrollY)).toBe(2500);
   });
 
-  it('masks a password field and a nested document below the viewport in a whole-page screenshot', async () => {
-    const page = `<body style="margin:0;background:white"><div style="height:900px"></div><input type="password" value="hunter2" style="display:block;border:0;width:200px;height:40px;background:red"><div style="height:200px"></div>${RED_FRAME}<div style="height:200px"></div></body>`;
-    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);
-    await launch();
-    const relative = await screenshotFile(new DevTools(), windows.require(), directory, 'page.png', () => undefined, { fullPage: true });
-    const image = new Transformer(readFileSync(path.join(directory, relative)));
+  /** How many red pixels a PNG holds, and the RGB at one point of it. */
+  function inspect(png: Buffer): { readonly width: number; readonly height: number; readonly red: number; at(x: number, y: number): number[] } {
+    const image = new Transformer(png);
     const { width, height } = image.metadataSync();
     const rgba = image.rawPixelsSync();
     const channels = rgba.length / (width * height);
     let red = 0;
     for (let offset = 0; offset < rgba.length; offset += channels) if (rgba[offset]! > 200 && rgba[offset + 1]! < 50) red += 1;
-    expect(height).toBeGreaterThan(1300);
-    expect(red).toBe(0);
-    const field = (920 * width + 100) * channels;
-    expect([rgba[field], rgba[field + 1], rgba[field + 2]]).toEqual([0, 0, 0]);
+    return { width, height, red, at: (x, y) => [...rgba.subarray((y * width + x) * channels, (y * width + x) * channels + 3)] };
+  }
+
+  const PASSWORD = '<input type="password" value="hunter2" style="display:block;border:0;width:200px;height:40px;background:red">';
+
+  it('masks a password field and a nested document below the viewport in a whole-page screenshot', async () => {
+    const page = `<body style="margin:0;background:white"><div style="height:900px"></div>${PASSWORD}<div style="height:200px"></div>${RED_FRAME}<div style="height:200px"></div></body>`;
+    // One image pixel per CSS pixel, so the field's place in the page is its place in the file.
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=1']);
+    await launch();
+    const relative = await screenshotFile(new DevTools(), windows.require(), directory, 'page.png', () => undefined, { fullPage: true });
+    const image = inspect(readFileSync(path.join(directory, relative)));
+    expect(image.height).toBeGreaterThan(1300);
+    expect(image.red).toBe(0);
+    expect(image.at(100, 920)).toEqual([0, 0, 0]);
+  });
+
+  // The masks are fixed boxes measured at the current scroll: this holds only while the capture paints them where they show.
+  it('masks fields above, below, and fixed to the bottom of a scrolled window in a whole-page screenshot', async () => {
+    const fixed = '<input type="password" value="pinned" style="position:fixed;bottom:0;left:0;border:0;width:200px;height:30px;background:red">';
+    const page = `<body style="margin:0;background:white"><div style="height:100px"></div>${PASSWORD}<div style="height:900px"></div>${PASSWORD}<div style="height:300px"></div>${fixed}</body>`;
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=1']);
+    await launch();
+    const window = windows.require();
+    await window.page.evaluate(() => scrollTo(0, 500));
+    const relative = await screenshotFile(new DevTools(), window, directory, 'scrolled.png', () => undefined, { fullPage: true });
+    const image = inspect(readFileSync(path.join(directory, relative)));
+    expect(image.red).toBe(0);
+    expect(image.at(100, 120)).toEqual([0, 0, 0]);
+    expect(image.at(100, 1060)).toEqual([0, 0, 0]);
+    expect(await window.page.evaluate(() => scrollY)).toBe(500);
+  });
+
+  it('captures the whole page and its clip at the window\'s zoom, and reads the pixels back at one per CSS pixel', async () => {
+    const page = `<body style="margin:0;background:white"><div style="height:900px"></div>${PASSWORD}<div style="height:640px"></div></body>`;
+    const { app, windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=1']);
+    await launch();
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.setZoomFactor(1.5), undefined);
+    const window = windows.require();
+    await expect.poll(() => window.page.evaluate(() => devicePixelRatio)).toBe(1.5);
+    const whole = inspect(readFileSync(path.join(directory, await screenshotFile(new DevTools(), window, directory, 'zoomed.png', () => undefined, { fullPage: true }))));
+    // 200 CSS pixels wide and 1580 tall, at 1.5 image pixels each.
+    expect([whole.width, whole.height, whole.red]).toEqual([300, 2370, 0]);
+    const clipped = inspect(readFileSync(path.join(directory, await screenshotFile(new DevTools(), window, directory, 'zoomed-clip.png', () => undefined, { fullPage: true, clip: { x: 0, y: 900, width: 100, height: 40 } }))));
+    expect([clipped.width, clipped.height, clipped.at(10, 10)]).toEqual([150, 60, [0, 0, 0]]);
+    const raw = await readWindow(new DevTools(), window);
+    const { pixels } = await withPixels(new DevTools(), raw, { root: { ref: { id: 'window', revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } }, { fullPage: true });
+    expect(pixels).toMatchObject({ width: 200, height: 1580, scale: 1 });
+  });
+
+  it('refuses a whole-page capture past the pixels Electron paints in one screenshot, and takes a clip of it', async () => {
+    const page = `<body style="margin:0;background:white"><div style="height:20000px"></div></body>`;
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=1']);
+    await launch();
+    const window = windows.require();
+    const refused = await screenshotFile(new DevTools(), window, directory, 'tall.png', () => undefined, { fullPage: true }).then(() => undefined, (error: unknown) => error);
+    expect(refused).toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', message: expect.stringContaining('past the 16384 pixels') });
+    const clipped = inspect(readFileSync(path.join(directory, await screenshotFile(new DevTools(), window, directory, 'tall-clip.png', () => undefined, { fullPage: true, clip: { x: 0, y: 18000, width: 100, height: 100 } }))));
+    expect([clipped.width, clipped.height]).toEqual([100, 100]);
   });
 
   it('cuts a whole-page screenshot to a clip in the page, and refuses one with nothing of the page inside it', async () => {
     const page = `<body style="margin:0;overflow-x:hidden"><div style="height:1000px;background:rgb(255,0,0)"></div><div style="height:1000px;background:rgb(0,128,0)"></div></body>`;
-    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,${page}'));`);
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,${page}'));`, ['--force-device-scale-factor=1']);
     await launch();
     const window = windows.require();
     const relative = await screenshotFile(new DevTools(), window, directory, 'clip.png', () => undefined, { fullPage: true, clip: { x: 10, y: 1500, width: 50, height: 40 } });

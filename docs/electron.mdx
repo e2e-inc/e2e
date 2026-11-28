@@ -384,6 +384,9 @@ The engine adds `--no-sandbox` on Linux automatically.
 - **Menu accelerators:** keyboard events go straight to the page, so menu
   shortcuts and `before-input-event` don't receive them. Trigger menu items
   with `electron.evaluate()`.
+- **Very long pages:** a `fullPage` screenshot more than 16384 image pixels
+  on a side is refused, since Chromium repeats the top of the page past that
+  size. Capture a `clip` of the page instead.
 
 ### Not supported yet
 

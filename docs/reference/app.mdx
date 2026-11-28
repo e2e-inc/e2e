@@ -163,7 +163,7 @@ const header = await app.screenshot({ clip: { x: 0, y: 0, width: 1280, height: 8
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | An unknown option, a `clip` that is not a rectangle with a positive size, or a `clip` with nothing inside the viewport or page. |
-| `UNSUPPORTED_CAPABILITY` | The engine takes no screenshots, `fullPage` on an engine that doesn't declare `fullPageScreenshots`, or `clip` on an engine without `observe` or whose screenshot is not a PNG. |
+| `UNSUPPORTED_CAPABILITY` | The engine takes no screenshots, `fullPage` on an engine that doesn't declare `fullPageScreenshots`, `clip` on an engine without `observe` or whose screenshot is not a PNG, or on Electron a full page more than 16384 image pixels on a side (clip it). |
 | `POLICY_DENIED` | On iOS and Android, a secure field on screen has no bounds to mask. |
 | `ENGINE_FAILURE` | The capture failed. |
 
