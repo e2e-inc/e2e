@@ -1008,7 +1008,12 @@ trees, on both platforms, without a device.
   newer sibling's export or contract field;
   `scripts/check-peer-ranges.ts` (`pnpm check`) fails on any other shape for
   every peer one package under `packages/` has on another (vendor SDK peers
-  such as `@onkernel/sdk` are not checked). Narrow or exact, every runner minor (exact: every patch too)
+  such as `@onkernel/sdk` are not checked). It also fails when a package
+  that depends on `agent-device` or an `@agent-device/*` plugin pins another
+  version than `@e2e-dev/mobile`, lacks a `@e2e-dev/mobile` peer, or peers on
+  it with a lower floor than the others on that pin
+  (`scripts/agent-device-pins.ts`): an agent-device bump moves every pin and
+  every such floor in one change. Narrow or exact, every runner minor (exact: every patch too)
   falls out of range, and changesets 3 then patch-bumps each engine and
   rewrites its pin, never a major (`determineDependents` in
   `@changesets/assemble-release-plan` patches an out-of-range peer dependent).

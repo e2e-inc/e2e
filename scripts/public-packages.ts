@@ -20,6 +20,7 @@ export interface PackageManifest {
   name: string;
   version?: string;
   private?: boolean;
+  dependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
 }
 

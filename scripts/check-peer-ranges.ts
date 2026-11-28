@@ -11,11 +11,16 @@
  * (ERESOLVE). `restore-peer-ranges.ts` puts the ranges back after a publish;
  * this check is what notices when it did not run.
  *
+ * It also holds every package that drives agent-device to the engine's pin
+ * (`agent-device-pins.ts`): the version check between them runs only once a
+ * device is leased, so a pin a bump missed would install and then fail.
+ *
  * Usage: `node scripts/check-peer-ranges.ts`, part of `pnpm check`. Exits 1
  * listing every offending peer.
  */
 
 import { relative } from 'node:path';
+import { agentDevicePins } from './agent-device-pins.ts';
 import { REPO_ROOT, isWidePeerRange, publicPackages, siblingPeers } from './public-packages.ts';
 
 const packages = publicPackages();
@@ -33,9 +38,13 @@ for (const { path, manifest } of packages) {
   }
 }
 
+const pins = agentDevicePins(packages.map(({ manifest }) => manifest));
+problems.push(...pins.problems);
+
 if (problems.length > 0) {
   process.stderr.write(`${problems.join('\n')}\n`);
   process.exitCode = 1;
 } else {
   process.stdout.write(`peer ranges: ${checked.toSorted().join(', ')} as wide ranges\n`);
+  process.stdout.write(`agent-device: ${pins.pinned.join(', ')} on ${String(pins.version)}\n`);
 }
