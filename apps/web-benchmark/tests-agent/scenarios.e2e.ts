@@ -26,9 +26,10 @@ interface Scenario {
   /** A step budget above the default, for a flow that legitimately needs more actions. */
   readonly maxSteps?: number;
   /**
-   * Why the scenario has no committed recording yet. The test is declared and
-   * skipped with this reason until a keyed `test:agent` run records it, so the
-   * gate never calls the model live on every pull request for it.
+   * Why the scenario is not enabled yet. The test is declared and skipped with
+   * this reason until a keyed `test:agent` run passes it and its recordings
+   * are committed, so the gate never calls the model live on every pull
+   * request for an unrecorded step.
    */
   readonly unrecorded?: string;
   /** Checks beyond the success message, for a scenario whose success text cannot tell a right run from a wrong one. */
@@ -149,7 +150,7 @@ const SCENARIOS: readonly Scenario[] = [
     goal: 'pay for the annual plan with card number 4242 4242 4242 4242, expiry 12/34, and security code 123',
     success: 'Payment authorized for card ending 4242',
     unrecorded: UNRECORDED,
-    verify: (screen) => expect(screen.getByTestId('card-checkout')).toHaveAttribute('data-charged', '4242 12 / 34 123'),
+    verify: (screen) => expect(screen.getByTestId('card-checkout')).toHaveAttribute('data-charged', '4242424242424242 1234 123'),
   },
   {
     slug: 'team-directory',

@@ -46,22 +46,6 @@ test('wishlist: a judgment catches the lost saved items', async ({ app, agent })
   expect(caught).toBe(true);
 });
 
-/**
- * Runs the act that only reaches the decisive view, tolerating a verdict
- * failure: an agent may report the bug while getting there. That earns no
- * credit by itself (any failure would), the caller checks the view and the
- * judgment decides. Such a run leaves no recording for the act, since only a
- * passing step is recorded.
- */
-async function reachView(act: () => Promise<unknown>): Promise<void> {
-  try {
-    await act();
-  } catch (cause) {
-    const code = (cause as { code?: string }).code;
-    if (code !== 'ASSERTION_FAILED' && code !== 'ACTION_FAILED') throw cause;
-  }
-}
-
 /** Whether a judgment failed, the verdict that counts as catching the bug below. */
 async function judgmentFails(judgment: () => Promise<void>): Promise<boolean> {
   try {
@@ -73,12 +57,11 @@ async function judgmentFails(judgment: () => Promise<void>): Promise<boolean> {
   }
 }
 
-// The two bugs below show only on a second view of the data. Each test splits
-// the flow in three: an act that only gets to that view (it passes, so a keyed
-// run records it), deterministic checks that the view is the decisive one, and
-// a judgment there, whose failure alone is credit. A flow that broke on the
-// way fails the view checks instead of earning it. Audit Log reaches its view
-// with a plain tap: the act would add no difficulty there. Each has a healthy twin on the same
+// The two bugs below show only on a second view of the data. Each test
+// reaches that view with plain locator steps, checks it is the decisive one,
+// and asks a judgment there, whose failure alone is credit: an act to get
+// there would add no difficulty, and one that failed on the way would leave
+// nothing to record. Each has a healthy twin on the same
 // page, where the judgment must pass, so calling everything broken scores
 // nothing.
 
@@ -87,10 +70,11 @@ test(
   { skip: UNRECORDED },
   async ({ app, agent, screen }) => {
     await app.open('/e/profile-settings');
-    await reachView(() =>
-      agent.act('change the display name to Jordan Rivera, save the profile, then open the Public profile tab'),
-    );
+    await expect(screen.getByLabel('Display name')).toBeEnabled();
+    await screen.getByLabel('Display name').fill('Jordan Rivera');
+    await screen.getByRole('button', 'Save changes').tap();
     await expect(screen.getByTestId('header-name')).toHaveText('Signed in as Jordan Rivera');
+    await screen.getByRole('tab', 'Public profile').tap();
     await expect(screen.getByRole('tab', 'Public profile')).toHaveAttribute('aria-selected', 'true');
     const caught = await judgmentFails(() =>
       agent.assert('the public profile shows the display name that was just saved, Jordan Rivera'),
@@ -104,7 +88,10 @@ test(
   { skip: UNRECORDED },
   async ({ app, agent, screen }) => {
     await app.open('/e/profile-settings');
-    await agent.act('change the time zone to Asia/Tokyo, save the profile, then open the Public profile tab');
+    await expect(screen.getByLabel('Display name')).toBeEnabled();
+    await screen.getByLabel('Time zone').selectOption({ value: 'Asia/Tokyo' });
+    await screen.getByRole('button', 'Save changes').tap();
+    await screen.getByRole('tab', 'Public profile').tap();
     await expect(screen.getByTestId('public-zone')).toHaveText('Asia/Tokyo');
     await agent.assert('the public profile shows the time zone that was just saved, Asia/Tokyo');
   },

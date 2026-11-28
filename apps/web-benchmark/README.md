@@ -113,8 +113,8 @@ data shows.
 - Card Fields: number, expiry, and security code each sit in a sandboxed
   `srcdoc` iframe (an opaque origin the page cannot read), reformat as you
   type, and move focus into the next frame. The page charges whatever valid
-  values it gets, as a test card would, so the tests read what was charged
-  from `data-charged`. The frames stay on the app's site on purpose: the web
+  values it gets, as a test card would, so the tests read the full card,
+  expiry, and code it charged from `data-charged`. The frames stay on the app's site on purpose: the web
   engine leaves frames from another site out of what the agent observes, by
   design.
 - Support Refund: the task is one refund. The customer's message asks for
@@ -140,11 +140,12 @@ Neither counter is shown on screen, the way a real app would not announce
 the mistake.
 
 Their agentic tests are declared and skipped with the `UNRECORDED` reason
-(`tests-agent/recordings.ts`) until a keyed `test:agent` run records them: CI
-replays read-only and would otherwise call the model live for them on every
-pull request. In the bug-book tests an act (for Audit Log, a plain tap) only
-reaches the view that shows the bug, deterministic checks confirm it is that
-view, and only a failed judgment there counts as catching it. Each has a
+(`tests-agent/recordings.ts`): CI replays read-only and would otherwise call
+the model live for their unrecorded steps on every pull request. To enable
+one, remove its skip, pass it in a keyed `test:agent` run, and commit the
+recordings that run writes. In the bug-book tests plain locator steps reach
+the view that shows the bug, deterministic checks confirm it is that view,
+and only a failed judgment there counts as catching it. Each has a
 healthy twin on the same page (the time zone that does save; page 4, which
 matches its footer) where the judgment must pass, so a flow that calls
 everything broken scores nothing.

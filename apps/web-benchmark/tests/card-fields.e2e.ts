@@ -25,7 +25,16 @@ test.describe('card fields', () => {
     await expect(pay).toBeEnabled();
     await pay.tap();
     await expect(screen.getByTestId('success-message')).toHaveText('Payment authorized for card ending 4242');
-    await expect(screen.getByTestId('card-checkout')).toHaveAttribute('data-charged', '4242 12 / 34 123');
+    await expect(screen.getByTestId('card-checkout')).toHaveAttribute('data-charged', '4242424242424242 1234 123');
+  });
+
+  test('another valid card with the same last four is charged as itself', async ({ screen, browser }) => {
+    await browser.frameLocator('iframe[title="Secure card number input"]').getByLabel('Card number').fill('4143424242424242');
+    await browser.frameLocator('iframe[title="Secure expiration date input"]').getByLabel('Expiration (MM / YY)').fill('1234');
+    await browser.frameLocator('iframe[title="Secure CVC input"]').getByLabel('Security code').fill('123');
+    await screen.getByRole('button', 'Pay $96.00').tap();
+    await expect(screen.getByTestId('success-message')).toHaveText('Payment authorized for card ending 4242');
+    await expect(screen.getByTestId('card-checkout')).toHaveAttribute('data-charged', '4143424242424242 1234 123');
   });
 
   test('a number that fails the checksum keeps Pay disabled', async ({ screen, browser }) => {
