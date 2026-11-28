@@ -111,8 +111,9 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
    * Whether an `inert` element holds the element in the tree as rendered:
    * through the slot it is assigned to and the shadow host of each root it
    * sits in. An open modal dialog is in the top layer, out of reach of an
-   * `inert` above it. What a modal dialog makes inert has no attribute to
-   * show it, and only Chromium orders the top layer: `waitReady` asks it.
+   * `inert` above it, though not of its own. What a modal dialog makes inert
+   * has no attribute to show it, and only Chromium orders the top layer:
+   * `waitReady` asks it.
    */
   const isInert = (target: Element): boolean => {
     for (let at: Element | null = target; at !== null; ) {
@@ -355,7 +356,7 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       if (TYPEAHEAD_ROLES.has(active.getAttribute('role') ?? '')) return true;
       // A date or time input takes typed digits; a range or color picker takes none.
       if (active instanceof HTMLInputElement) return (TEXT_INPUT_TYPES.has(typeOf(active)) || TYPED_PICKER_TYPES.has(typeOf(active))) && !active.readOnly && !active.disabled;
-      // Keys to the page itself, a select, a button, or a link are lost or click. Any other element the app made
+      // Keys to the page itself, a select, a button, or a link (HTML or SVG) are lost or click. Any other element the app made
       // focusable (a canvas, a widget with a tabindex and key handlers of its own) opted into keys, as on the web.
       if (active === active.ownerDocument.body || active === active.ownerDocument.documentElement) return false;
       return !(active instanceof HTMLSelectElement || active instanceof HTMLButtonElement || active instanceof HTMLAnchorElement || active instanceof SVGAElement);
