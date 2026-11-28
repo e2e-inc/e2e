@@ -134,6 +134,11 @@ describe('revylBrowsers()', () => {
     expect(lines).toEqual([`session ${lease.id}`]);
   });
 
+  it('refuses a REVYL_API_URL that would send the key over plain http to another host, before calling Revyl', async () => {
+    await expect(revylBrowsers(options).acquire(request({ env: { ...env, REVYL_API_URL: 'http://backend.example' } }))).rejects.toThrow('REVYL_API_URL must use https');
+    expect(calls).toEqual([]);
+  });
+
   it('fails without REVYL_API_KEY before calling Revyl', async () => {
     await expect(revylBrowsers(options).acquire(request({ env: {} }))).rejects.toThrow('REVYL_API_KEY is not set');
     expect(calls).toEqual([]);

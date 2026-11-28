@@ -52,19 +52,8 @@ export class RevylComputerClient {
   readonly #apiUrl: string;
   readonly #apiKey: string;
 
-  /** Refuses an API URL that would carry the key in the clear: `https`, or plain `http` to this machine only, as Revyl's own plugin allows. */
   constructor(credentials: RevylCredentials) {
-    const apiUrl = (credentials.apiUrl ?? DEFAULT_API_URL).replace(/[/]+$/, '');
-    let url: URL;
-    try {
-      url = new URL(apiUrl);
-    } catch {
-      throw new Error('REVYL_API_URL is not a URL');
-    }
-    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) {
-      throw new Error('REVYL_API_URL must use https; plain http is allowed only to localhost');
-    }
-    this.#apiUrl = apiUrl;
+    this.#apiUrl = (credentials.apiUrl ?? DEFAULT_API_URL).replace(/[/]+$/, '');
     this.#apiKey = credentials.apiKey;
   }
 
