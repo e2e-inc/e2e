@@ -258,6 +258,17 @@ describe('DesktopSurface: launching', () => {
     expect(await gone(theirs, 300)).toBe(false);
   });
 
+  it('kills no app a launch started after the quit queued behind it ran out of time', async () => {
+    const slow = windows(() => [{ id: 'w-mine', is_focused: true }], 600);
+    const { surface, fake } = await initialized({ listWindows: [slow] });
+    const opening = surface.restart({ ...operation(), timeoutMs: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await expect(surface.closeApp(signal, 300)).rejects.toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    await opening;
+    expect(await gone(fake.pid, 300)).toBe(false);
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+  });
+
   it('quits a process the app started as its processes were listed', async () => {
     const { surface, fake } = await launched({}, { observe: false });
     const { token } = last<{ token: string }>(fake, 'launch')!;

@@ -561,9 +561,13 @@ export class DesktopSurface {
     return next;
   }
 
-  /** `quitNow` once no other launch or quit of this surface is running. */
+  /**
+   * `quitNow` once no other launch or quit of this surface is running. The budget counts from the call, as `restart`'s
+   * does: a quit that waited out a launch must not kill the app it started after the caller's time ran out.
+   */
   private quit(signal: AbortSignal, timeoutMs: number): Promise<void> {
-    return this.serially(() => this.quitNow(signal, timeoutMs));
+    const deadline = Date.now() + timeoutMs;
+    return this.serially(() => this.quitNow(signal, deadline - Date.now()));
   }
 
   /**
