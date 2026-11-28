@@ -7,7 +7,7 @@ description: Rode alvos web no Chromium hospedado do Kernel com o provedor de na
 ---
 
 `kernel()` de `@e2e-dev/kernel` é um
-[provedor de navegadores](/browser#hosted-browsers) para o [Kernel](https://kernel.sh).
+[provedor de navegadores](/reference/web#hosted-browsers) para o [Kernel](https://kernel.sh).
 Cada slot de worker, ou cada tentativa, recebe o próprio Chromium hospedado.
 Os testes continuam iguais. Só o `browser` do alvo muda.
 
@@ -95,7 +95,7 @@ contexto padrão do navegador.
 as novas tentativas. A tentativa roda no contexto padrão e na primeira aba
 desse navegador, então um `profile` se aplica e a visualização ao vivo mostra
 uma aba só. Cada teste arca com o custo de iniciar um navegador, e os
-[limites de uma reserva por tentativa](/browser#hosted-browsers) se aplicam,
+[limites de uma reserva por tentativa](/reference/web#hosted-browsers) se aplicam,
 incluindo as sessões.
 
 ## Gravações
@@ -138,7 +138,7 @@ Se a própria execução cair antes, o Kernel exclui cada navegador depois de
 ## Próximos passos
 
 <CardGroup cols={2}>
-  <Card title="Navegadores hospedados" icon="globe" href="/browser#hosted-browsers">
+  <Card title="Navegadores hospedados" icon="globe" href="/reference/web#hosted-browsers">
     Como um provedor de navegadores reserva navegadores, e os limites do escopo `'attempt'`.
   </Card>
   <Card title="Integração contínua" icon="rotate" href="/ci">

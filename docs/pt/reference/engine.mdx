@@ -2369,7 +2369,7 @@ gravação enquanto outra está em andamento.
 Uma engine que reserva o navegador ou o dispositivo de um serviço hospedado
 pode deixar o serviço gravar a tentativa no lugar da captura da própria
 engine. É assim que
-[`BrowserProvider.record`](/browser#recording-on-the-provider) e
+[`BrowserProvider.record`](/reference/web#recording-on-the-provider) e
 [`DeviceProvider.record`](/mobile#hosted-devices) funcionam. `e2e/engine`
 exporta o formato compartilhado e `stopProviderRecording`, para que toda engine
 transforme a gravação de um provedor em um `VideoSegment` da mesma forma.
@@ -2834,7 +2834,7 @@ expressão, também sob um escopo, um filtro ou um índice.
 
 [Engines](/engines) compara as formas de construir uma.
 [Escrever uma engine](/writing-an-engine) explica `defineEngine` passo a passo,
-e [Servidores de engine](/engine-servers) mostra como rodar uma engine em outro
+e [Servidores de engine](/reference/engine-protocol#engine-servers) mostra como rodar uma engine em outro
 processo, outra máquina ou outra linguagem.
 `@e2e-dev/web` ([referência](/reference/web)) e `@e2e-dev/mobile`
 ([referência](/reference/mobile)) implementam este contrato com o mesmo

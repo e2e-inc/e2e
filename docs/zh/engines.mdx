@@ -18,8 +18,8 @@ flowchart LR
 | 你的需求 | 编写内容 | 指南 |
 | --- | --- | --- |
 | 使用 TypeScript 编写引擎 | `defineEngine`，配置在测试目标上 | [编写引擎](/writing-an-engine) |
-| 在独立进程中运行 TypeScript 引擎 | `defineEngine`，通过 `serveEngine` 提供服务 | [引擎服务器](/engine-servers#serve-a-typescript-engine) |
-| 使用其他语言编写引擎，或在设备上运行引擎 | 响应协议消息的服务器 | [引擎服务器](/engine-servers#write-a-server-in-another-language) |
+| 在独立进程中运行 TypeScript 引擎 | `defineEngine`，通过 `serveEngine` 提供服务 | [引擎服务器](/reference/engine-protocol#serve-a-typescript-engine) |
+| 使用其他语言编写引擎，或在设备上运行引擎 | 响应协议消息的服务器 | [引擎服务器](/reference/engine-protocol#write-a-server-in-another-language) |
 
 `defineEngine` 创建的引擎在运行器进程中运行。每次调用仍然经过协议，因此，通过测试套件的引擎所需的所有内容，都能由其他位置的服务器接收。
 
@@ -29,7 +29,7 @@ flowchart LR
   <Card title="编写引擎" icon="code" href="/writing-an-engine">
     逐步使用 `defineEngine` 构建引擎。
   </Card>
-  <Card title="引擎服务器" icon="network-wired" href="/engine-servers">
+  <Card title="引擎服务器" icon="network-wired" href="/reference/engine-protocol#engine-servers">
     在其他进程、机器中运行引擎，或使用其他语言实现引擎。
   </Card>
   <Card title="e2e/engine" icon="book" href="/reference/engine">

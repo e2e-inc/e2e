@@ -351,7 +351,7 @@ bunx e2e run --target ios --reporter list,junit
 | 保存済みセッション、`test.setup` と `{ session }` | テストごとにログインするか、アプリに初期データを投入。デバイスには保存するセッションがありません。[Web との違い](/mobile#what-differs-from-the-web)を参照 |
 | デバイスのグリッドやハブ、その他のデバイスクラウド | ホスト型プロバイダー、または自作の `DeviceProvider` |
 | `sauce:options` | [`DeviceProvider`](/mobile#hosted-devices) を実装 |
-| Appium Inspector | `screen.debug()`、またはコーディングエージェントのライブセッション用の [`npx e2e mcp`](/mcp-server) |
+| Appium Inspector | `screen.debug()`、またはコーディングエージェントのライブセッション用の [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) |
 | `driver.updateSettings()`, `appium:settings[...]` | [`mobile()`](/reference/mobile#engine) の `snapshot`、`settle`、`transition` |
 | `.getAttribute('clickable')`, `.isClickable()` | 要素を操作。操作は対象が操作可能になるまで待機 |
 | リモート Appium サーバー（`hostname`、`port`） | デバイスが接続されているマシンで e2e を実行 |

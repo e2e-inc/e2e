@@ -7,7 +7,7 @@ description: Wskaż silnikowi webowemu swoją aplikację albo pozwól runnerowi 
 
 `@e2e-dev/web` uruchamia testy w przeglądarce pod adresem URL twojej aplikacji.
 Przechwytywanie żądań, ciasteczka, okna dialogowe i pobieranie plików opisuje strona
-[Praca z przeglądarką](/browser).
+[Praca z przeglądarką](/reference/web).
 
 ## Uruchamianie aplikacji
 
@@ -58,7 +58,7 @@ wskazujące katalog tymczasowy, `inheritEnv` i `env`.
 
 | Opcja | Do czego służy |
 | --- | --- |
-| `reuseExisting: true` | Używa serwera, który już działa, np. uruchomionego przez [sesję MCP](/mcp-server#run-tests-next-to-a-session). W CI e2e ignoruje tę opcję, a serwer, który już odpowiada, powoduje błąd `APP_ALREADY_RUNNING`. |
+| `reuseExisting: true` | Używa serwera, który już działa, np. uruchomionego przez [sesję MCP](/coding-agents#run-tests-next-to-a-session). W CI e2e ignoruje tę opcję, a serwer, który już odpowiada, powoduje błąd `APP_ALREADY_RUNNING`. |
 | `log` | Zapisuje stdout i stderr aplikacji do pliku (ścieżka względem katalogu projektu). Przy błędzie startu albo nieoczekiwanym zakończeniu procesu podczas `e2e run` komunikat cytuje linie, które dowolny proces dopisał do pliku od startu polecenia. Log, który ma do 40 linii i mieści się w 8 KiB, trafia do cytatu w całości; w przeciwnym razie cytat obejmuje do 20 linii z początku i z końca, rozdzielonych znacznikiem `[startup output omitted]`, a przy logu większym niż 8 KiB te linie pochodzą z jego pierwszych i ostatnich 4 KiB. Wartości z `command.env` i `inheritEnv`, które mają co najmniej cztery znaki, e2e maskuje w cytacie. Samego pliku nie maskuje. |
 | `env` | Zmienne środowiskowe dla aplikacji. |
 | `inheritEnv` | Zmienne hosta, które runner przekazuje dalej, jeśli są ustawione; podajesz je po nazwie albo prefiksie: `['DATABASE_URL', 'STRIPE_*']`. `env` ma przed nimi pierwszeństwo. |
@@ -275,7 +275,7 @@ desktopowa: współczynnik skalowania 1, desktopowy wskaźnik i jej zwykły user
 agent. Nie emuluje dotyku. Do testów na symulatorze lub emulatorze
 użyj [silnika mobilnego](/mobile). Tryb ciemny i ograniczenie animacji opisuje
 sekcja
-[Emulacja trybu ciemnego i ograniczenia animacji](/browser#emulate-dark-mode-and-reduced-motion).
+[Emulacja trybu ciemnego i ograniczenia animacji](/reference/web#media-emulation).
 
 Nagranie wideo zachowuje rozmiar, jaki strona miała na początku nagrywania.
 Ustaw `web({ screencast: { size } })`, żeby nagrywać w jednym stałym
@@ -310,7 +310,7 @@ uprawnienie w targecie:
 ## Co dalej
 
 <CardGroup cols={2}>
-  <Card title="Praca z przeglądarką" icon="globe" href="/browser">
+  <Card title="Praca z przeglądarką" icon="globe" href="/reference/web">
     Mockuj żądania, ustawiaj ciasteczka, obsługuj okna dialogowe i pobieraj pliki.
   </Card>
   <Card title="Referencja silnika webowego" icon="masks-theater" href="/reference/web">

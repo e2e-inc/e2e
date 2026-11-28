@@ -95,7 +95,7 @@ web({ browser: 'firefox' }); // default: 'chromium'
   [Lightpanda](/integrations/lightpanda) ou o [Moli](/integrations/moli).
 - Um provedor com `scope: 'attempt'` usa um contexto persistente, com os
   limites descritos em [Recuperar um transporte CDP](#recovering-a-cdp-transport).
-- [Navegadores hospedados](/browser#hosted-browsers) traz o contrato de
+- [Navegadores hospedados](/reference/web#hosted-browsers) traz o contrato de
   `BrowserProvider` e um provedor de exemplo.
 
 | Lança | Quando |
@@ -707,7 +707,7 @@ nome, texto, rótulo e atributo do próprio Playwright, e cada nó é encontrado
 uma vez. Um controle que a árvore observada lista dentro de um root fechado é
 resolvido e aceita ações e leituras. `locator`, `frameLocator` e
 `filter({ hasText })` mantêm o alcance do Playwright e não passam de um root
-fechado; o [guia do navegador](/browser#shadow-dom) tem os detalhes.
+fechado; o [guia do navegador](/reference/web#shadow-dom) tem os detalhes.
 </Note>
 
 #### `frameLocator`
@@ -722,7 +722,7 @@ await payment.getByLabel('Card number').fill('4242424242424242');
 Retorna um `FrameScreen`, um `Screen` cujas consultas respondem de dentro do
 frame. Use o `locator` do frame só quando o controle não tem nome acessível,
 rótulo, placeholder nem test id. O
-[guia do navegador](/browser#reach-into-an-iframe) mostra quando isso se aplica.
+[guia do navegador](/reference/web#framelocator) mostra quando isso se aplica.
 
 ```ts
 export interface FrameScreen extends Screen {
@@ -1316,7 +1316,7 @@ const file = await browser.waitForDownload(() =>
 - Use `absolutePath` com APIs de arquivo para inspecionar o conteúdo, inclusive
   em um navegador hospedado.
 - Em um navegador hospedado, o arquivo volta pelo
-  [`downloads`](/browser#downloads-on-the-provider) do provedor.
+  [`downloads`](/reference/web#downloads-on-the-provider) do provedor.
 - A espera inclui o tempo do próprio gatilho.
 
 | Lança | Quando |
@@ -1928,6 +1928,6 @@ export type JsonValue =
 
 ## Relacionados
 
-O [guia do navegador](/browser) mostra estes membros em receitas e cobre os
-[navegadores hospedados](/browser#hosted-browsers). As operações portáveis
+O [guia do navegador](/reference/web) mostra estes membros em receitas e cobre os
+[navegadores hospedados](/reference/web#hosted-browsers). As operações portáveis
 ficam na fixture [`app`](/reference/app).

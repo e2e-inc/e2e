@@ -1,6 +1,6 @@
 ---
 title: Reporters
-description: Receive run events and publish results with a custom reporter.
+description: "Reference for e2e reporters, with the built-in reporters, the run events a custom reporter receives, and how to publish test results."
 "og:image": "https://e2e.com/docs/images/og/reference/reporters.png?v=6f74d2a2a5"
 "twitter:image": "https://e2e.com/docs/images/og/reference/reporters.png?v=6f74d2a2a5"
 ---
@@ -70,9 +70,13 @@ reporters: ['list'], // default
   terminal (piped, redirected, most CI), each test prints as it finishes.
 - Its [`onSummary`](#onsummary) prints every reporter's summary rows under
   its summary.
+- Its `Failed Tests` section shows each failure's error, the failing line,
+  nearby matches for a failed locator, what the app logged, and the trace
+  page. It quotes the app's first 3 errors (console errors, uncaught
+  exceptions, failed requests, 5xx responses), redacted like the
+  [trace page](/reference/config#what-a-trace-page-holds).
 - The output ends with a `Failed` row per failed test: its file and line,
-  its error's first line, and its trace page when one was written, so `e2e run | tail` still
-  names what broke.
+  its error's first line, and its trace page when one was written.
 
 #### `dot`
 
@@ -90,12 +94,9 @@ Rows wrap after 80 marks. Colors follow the terminal settings; `NO_COLOR`
 disables them. The run header, failure details and locations, summary, and
 step prompts use the same format as `list`.
 
-It prints to stdout by default; `dot({ stream: 'stderr' })` moves it. Beside
-`json`, as in `--reporter dot,json`, `dot` prints all of it to stderr, so
-stdout holds the JSON report.
-
-Unlike Playwright, e2e uses ASCII marks and prints only the final result
-after retries, with no mark for each retried attempt.
+It prints to stdout, or to stderr beside `json`;
+`dot({ stream: 'stderr' })` moves it. A test gets one mark, for its final
+result after retries.
 
 #### `line`
 
@@ -113,19 +114,16 @@ reporters: ['line'],
   stdout is not a terminal (piped, redirected, most CI), each test prints
   its row as it finishes.
 - `[3/12]` counts the selected tests with a final result, after retries.
-  The total is `?` when the run stops before it knows its tests.
+  The total is `?` when the run stops before it knows its tests. The row
+  names no step.
 - A test that failed or timed out prints its failure details right away,
   not under `Failed Tests` at the end. They name no trace page, which is
   written when the run ends: the closing `Failed` rows name it.
 - The run header, summary, and step prompts use the same format as `list`,
   and so does what your code prints.
 
-It prints to stdout by default; `line({ stream: 'stderr' })` moves it. Beside
-`json`, as in `--reporter line,json`, `line` prints all of it to stderr, so
-stdout holds the JSON report.
-
-Unlike Playwright, e2e counts a test when its final result arrives, not each
-attempt when it starts, and the row names no step.
+It prints to stdout, or to stderr beside `json`;
+`line({ stream: 'stderr' })` moves it.
 
 #### `json`
 
@@ -136,7 +134,8 @@ reporters: ['json'],
 ```
 
 It is not [interactive](#interactive). Without `list`, `dot`, or `line` beside it,
-what your code prints goes to stderr.
+what your code prints goes to stderr. [`report.json`](#report-json) lists the
+fields a script reads.
 
 #### `junit`
 
@@ -150,8 +149,7 @@ reporters: ['list', 'junit'],
   it elsewhere, as a path from the project root. Default: `junit.xml` in the
   [output directory](/reference/config#output).
 - Its [`reportFiles`](#reportfiles) renders `run.report` as one file with a
-  `JUnit` row. It is the smallest complete example of a reporter, and it
-  writes nothing when the report was not written.
+  `JUnit` row. It writes nothing when the report was not written.
 - When a test that failed, timed out, passed only on a retry, or failed as
   [`test.fail`](/reference/test#fail) expected recorded a failure screenshot, its `<testcase>` links it as
   `<system-out>[[ATTACHMENT|<path>]]</system-out>`, which GitLab CI shows in
@@ -168,7 +166,8 @@ reporters: ['list', 'markdown'],
 
 It does what `junit` does with `summary.md`, through
 [`renderMarkdownReport`](#rendermarkdownreport), and takes the same
-`outputFile`: `markdown({ outputFile: 'reports/summary.md' })`.
+`outputFile`: `markdown({ outputFile: 'reports/summary.md' })`. For each
+failure it quotes the app's first 3 errors, as [`list`](#list) does.
 
 <a id="rendermarkdownreport" />
 
@@ -195,8 +194,7 @@ const reporter: Reporter = {
 #### `ctrf`
 
 Writes `ctrf.json` beside the report, in the
-[Common Test Report Format](https://ctrf.io) 0.3.0. Any CTRF tool can read
-it: test report actions, chat notifiers, dashboards.
+[Common Test Report Format](https://ctrf.io) 0.3.0.
 
 ```ts
 reporters: ['list', 'ctrf'],
@@ -298,31 +296,14 @@ const reporter = htmlReporter({ media: 'embed' });
 - The page shows only the run that wrote it: after `--last-failed`, the
   rerun's tests without the failures it carried over, and under
   `e2e explore`, the exploration without its findings.
-- The tests list as a tree: each file, its describe blocks, then their tests,
-  failures first. Selecting a file's path folds its tests away.
-- A run that selected more than one target gets target tabs above the status
-  tabs. Picking one shows only its tests and their counts; the URL carries
-  the choice, so a filtered view keeps working as a link.
-- Each step shows where it starts in the attempt's video; selecting the time
-  plays the video from there, and the step the video is on stays
-  highlighted. The video's timeline marks each step's start, and its speed
-  button steps from 0.25× to 4×; a recording under five seconds starts
-  slowed down. A phone recording sits beside the steps instead of above
-  them.
-- A failed assertion that reports expected and received values (a locator
-  assertion, say) shows them with the characters that differ marked. When
-  the test file is in the project, the failure shows the code around the
-  failing call, and each step opens to the code that ran it. The page keeps a few lines of the
-  test files around each step for this, so a shared report shows them too.
+- A run that selected more than one target gets target tabs. The URL
+  carries the choice, so a filtered view keeps working as a link.
+- When the test file is in the project, the page keeps a few lines of the
+  test files around each step, so a shared report shows them too.
 - **copy prompt** on a failed attempt's error copies the failure for a coding
   agent: the error, the steps, what the failed step did, and the paths of
   whichever of its trace page, screen tree, screenshot, and video exist, from
   the project root.
-- Agent steps show their explanation, the actions they took, the model,
-  tokens and cost, whether the step replayed from the cache, and their last
-  turns.
-- The page follows the system's light or dark theme. The sun and moon at the
-  top hold one, and the browser keeps the choice for every report it opens.
 
 ### Custom reporters
 
@@ -461,8 +442,7 @@ interface ReportFile {
 ```
 
 - It has the same one-minute deadline and `signal` as `onRunFinished`. After
-  a second Ctrl-C it has 5 seconds left, so a file from the previous run is
-  rarely left beside the new report.
+  a second Ctrl-C it has 5 seconds left.
 - A file at `report.json`'s path, a file that can't be written, or a return
   value that isn't a list of files is one line on stderr.
 
@@ -848,7 +828,7 @@ interface PausedStep {
   `Promise.all`.
 - `keys` lists what the keyboard does now, in the order a prompt shows it,
   such as `{ key: 'enter', does: 'run this step' }`. It is empty when no
-  keyboard is read, as in a run [stepped by commands](/debugging#step-through-a-test-without-a-terminal).
+  keyboard is read, as in a run [stepped by commands](/reference/cli#step-commands).
 - Tests that wait show one at a time. A second `paused` for the same test
   replaces the first: a step joined it, or the keys changed.
 - Every `paused` gets a `resumed`, also when the test or the run ends
@@ -859,6 +839,68 @@ interface PausedStep {
   It stays the same across pauses of the attempt.
 - Unless an [interactive](#interactive) reporter runs, a pause the keyboard
   answers also prints on stderr as one line.
+
+## Console output
+
+`console.log` and `console.error` in a test print while it runs, under a
+heading that names the stream, target, file, and test:
+
+```text
+stdout | |web| tests/todos.e2e.ts > adds a todo
+hello from the test
+```
+
+- Output from outside a test, such as a file's top level or a reporter,
+  prints under `stdout | runner` or `stderr | runner`.
+- Both streams print where `list` does: stdout, or stderr beside `json`.
+  Without an [interactive](#interactive) reporter, output prints on stderr
+  as written.
+- Output from the config load prints on stderr before the run header, or a
+  warning replaces it if the load fails.
+- The runner [redacts](/reference/security#redaction) secret values.
+- The report doesn't include console output, so use `expect` or an artifact
+  for anything a later reader needs.
+
+A reporter receives the same writes as [`output`](#output) events.
+
+## `report.json`
+
+Every run that reaches its tests writes `report.json` to the
+[output directory](/reference/config#output), `.e2e` by default. It holds
+every result of the run in a versioned schema. `--reporter json` prints it
+to stdout.
+
+```bash
+jq '.run | {status, exitCode, errors}' .e2e/report.json
+jq '.run.results[] | select(.status != "passed") | .attempts[-1]
+    | {status, error, failure, steps: [.steps[] | select(.status != "passed") | {api, label, source, status, error}], artifacts}' .e2e/report.json
+```
+
+`run.errors` holds run-level failures. The last attempt of each failed
+result holds:
+
+| Field | Holds |
+| --- | --- |
+| `error` | The code, message, source line, and assertion details |
+| `failure` | The screen and screenshot artifacts, and any locator candidates |
+| `steps` | The calls that led to the failure. Each step's `events` hold what it did (`engine`), what it polled (`poll`), and where the app went (`navigation`). Agent steps add `cache` and recent model turns. `observationTruncated: true` means at least one semantic observation was incomplete. |
+| `appLog` | What the app logged. Each line's `step` is the `index` of its step, absent before the first step. |
+| `artifacts` | The captured files |
+
+A serial group's tests have no `attempts` of their own. Their results are in
+`run.serialGroups`, one member for each test in each attempt. A retry the run
+interrupted or that never reached its members has `cutRetry: true` and does
+not hold the verdicts, so skip it:
+
+```bash
+jq '.run.serialGroups[] | (.attempts | map(select(.cutRetry != true)) | last).members[]? | select(.status != "passed")
+    | {testId, status, error, failure}' .e2e/report.json
+```
+
+- [`FinishedRun`](#onrunfinished) hands a reporter the same document as
+  `run.report`.
+- [What a run captures](/reference/config#what-a-run-captures) lists the
+  files `artifacts` names.
 
 ## What `--reporter` does to reporter objects
 

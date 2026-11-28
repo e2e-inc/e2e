@@ -18,8 +18,8 @@ flowchart LR
 | 作りたいもの | 実装方法 | ガイド |
 | --- | --- | --- |
 | TypeScript のエンジン | `defineEngine` で定義し、ターゲットに設定 | [エンジンを作る](/writing-an-engine) |
-| 独立したプロセスで動く TypeScript エンジン | `defineEngine` で定義し、`serveEngine` で提供 | [エンジンサーバー](/engine-servers#serve-a-typescript-engine) |
-| 他の言語で作るエンジン、またはデバイス上で動くエンジン | プロトコルのメッセージに応答するサーバー | [エンジンサーバー](/engine-servers#write-a-server-in-another-language) |
+| 独立したプロセスで動く TypeScript エンジン | `defineEngine` で定義し、`serveEngine` で提供 | [エンジンサーバー](/reference/engine-protocol#serve-a-typescript-engine) |
+| 他の言語で作るエンジン、またはデバイス上で動くエンジン | プロトコルのメッセージに応答するサーバー | [エンジンサーバー](/reference/engine-protocol#write-a-server-in-another-language) |
 
 `defineEngine` で作ったエンジンは、ランナーのプロセス内で動きます。それでもすべての呼び出しがプロトコルを通るため、テストスイートに合格するエンジンは、別の場所にあるサーバーへ渡せない情報に依存しません。
 
@@ -29,7 +29,7 @@ flowchart LR
   <Card title="エンジンを作る" icon="code" href="/writing-an-engine">
     `defineEngine` を使って、順を追ってエンジンを実装します。
   </Card>
-  <Card title="エンジンサーバー" icon="network-wired" href="/engine-servers">
+  <Card title="エンジンサーバー" icon="network-wired" href="/reference/engine-protocol#engine-servers">
     別のプロセス、マシン、言語でエンジンを動かします。
   </Card>
   <Card title="e2e/engine" icon="book" href="/reference/engine">

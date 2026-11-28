@@ -65,7 +65,7 @@ Dalam laporan JSON, `step.cache.write` mencatat status entri:
 | `kept` | Entri yang sudah ada dibiarkan apa adanya. |
 | `unconfirmed` | Tidak disimpan karena tidak ada pemeriksaan verifikasi yang berhasil setelah langkah tersebut. |
 | `evicted` | Dihapus karena pemutaran ulang gagal, memerlukan perbaikan, atau belum dikonfirmasi sebelum terjadi kegagalan. |
-| `no-change` | Tidak disimpan karena tidak ada kontrol atau rute yang berubah secara terlihat (termasuk langkah yang hanya menyentuh [iframe lintas origin](/browser#reach-into-an-iframe)). Langkah seperti ini dijalankan langsung setiap kali. |
+| `no-change` | Tidak disimpan karena tidak ada kontrol atau rute yang berubah secara terlihat (termasuk langkah yang hanya menyentuh [iframe lintas origin](/reference/web#framelocator)). Langkah seperti ini dijalankan langsung setiap kali. |
 | `not-written` | Tidak disimpan karena cache store menolaknya (misalnya, ukuran melewati batas). |
 
 Jika tes gagal di tengah jalan, e2e tetap menyimpan langkah sebelumnya yang

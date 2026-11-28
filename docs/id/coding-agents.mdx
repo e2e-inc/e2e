@@ -81,7 +81,7 @@ Teams dan Enterprise, plugin lokal memerlukan pengaturan admin **Allow Local
 Plugin Imports**, atau admin dapat mengimpor `e2e-inc/e2e` sebagai marketplace
 untuk tim. Plugin menambahkan skill `e2e`, `create-verification-skill`, dan
 `migrate-to-e2e`, bukan paket npm. Di Codex dan Cursor, plugin juga menambahkan
-[MCP server](/mcp-server); di Claude Code dan Grok Build, daftarkan server itu
+[MCP server](/coding-agents#let-the-agent-use-the-app); di Claude Code dan Grok Build, daftarkan server itu
 pada proyek. Panggil dua skill lainnya dengan nama plugin: `/e2e:<skill>` di
 Claude Code, `$e2e:<skill>` di Codex, dan `/<skill>` di Cursor.
 
@@ -125,7 +125,7 @@ hermes skills install e2e-inc/e2e/e2e
 
 `e2e mcp` memberi agent sesi aktif pada aplikasi Anda. Sebelum menulis locator,
 server memeriksanya terhadap layar dan memeriksa perubahan UI yang dibuat agent.
-`init` mendaftarkan server tersebut. Lihat [MCP server](/mcp-server) untuk
+`init` mendaftarkan server tersebut. Lihat [MCP server](/coding-agents#let-the-agent-use-the-app) untuk
 penyiapan dan prompt.
 
 ## Cara agent menulis dan menjalankan tes
@@ -246,7 +246,7 @@ Lalu minta agent menjalankan `/create-verification-skill`.
 - Dua cara mengendalikan aplikasi: sesi `e2e mcp` aktif dan tes.
 - Bukti yang disimpan sebagai hasil verifikasi.
 - Peta fitur dengan satu charter `e2e explore` untuk setiap fitur, sehingga
-  [bug bash](/bug-bash) dapat dijalankan berdasarkan peta tersebut.
+  [bug bash](/explore#bug-bashes) dapat dijalankan berdasarkan peta tersebut.
 
 Skill yang dihasilkan hanya menyatakan hal yang benar tentang aplikasi Anda
 serta menautkan skill e2e untuk hal lainnya. Skill ini didasarkan pada

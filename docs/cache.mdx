@@ -1,8 +1,9 @@
 ---
 title: Caching
-description: Replay verified agent actions without model calls, and let the agent take over when the app changes.
+description: "Replay verified agent actions from the replay cache with zero model calls, and let the agent take over when the UI changes."
 "og:image": "https://e2e.com/docs/images/og/cache.png?v=d035986b13"
 "twitter:image": "https://e2e.com/docs/images/og/cache.png?v=d035986b13"
+keywords: [replay cache, cost, speed]
 ---
 
 import { VideoCard } from './snippets/video-card.jsx';
@@ -64,7 +65,7 @@ In the JSON report, `step.cache.write` records what happened to the entry:
 | `kept` | Existing entry left as is. |
 | `unconfirmed` | Not saved because no verification check passed after the step. |
 | `evicted` | Deleted because the replay failed, needed repair, or wasn't confirmed before a failure. |
-| `no-change` | Not saved because no visible control or route changed (including steps that only touch a [cross-origin iframe](/browser#reach-into-an-iframe)). Such a step runs live on every run. |
+| `no-change` | Not saved because no visible control or route changed (including steps that only touch a [cross-origin iframe](/reference/web#framelocator)). Such a step runs live on every run. |
 | `not-written` | Not saved because the cache store rejected it (for example, exceeding the size limit). |
 
 If a test fails partway through, e2e still saves any earlier steps that were

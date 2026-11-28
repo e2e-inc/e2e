@@ -1,6 +1,6 @@
 ---
 title: From Maestro
-description: Move Maestro flows to TypeScript with locators, assertions, and agent goals.
+description: "Migrate from Maestro to e2e by moving Maestro flows to TypeScript tests with locators, assertions, and agent goals, with a map of each Maestro command."
 "og:image": "https://e2e.com/docs/images/og/migrate/maestro.png?v=227549ed41"
 "twitter:image": "https://e2e.com/docs/images/og/migrate/maestro.png?v=227549ed41"
 ---
@@ -32,7 +32,7 @@ use the same simulator or emulator while you move one flow at a time.
 
 </SetupPrompt>
 
-For a migration that spans several sessions, the [`migrate-to-e2e` skill](/coding-agents#migrate-an-existing-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
+For a migration that spans several sessions, the [`migrate-to-e2e` skill](/migrate#let-an-agent-migrate-the-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
 
 ## Port the config
 
@@ -202,7 +202,7 @@ on purpose.
 | `retryTapIfNoChange` | Assert the result, then tap again in the test. A blind second tap can fire a control twice |
 | `waitToSettleTimeoutMs` | An assertion with its own `timeout` after the action; that assertion is the wait |
 | `toggleAirplaneMode`, `toggleDarkMode` | Set the state you want: `device.setAirplaneMode(true)`, `device.setAppearance('dark')` |
-| Maestro Studio | A coding agent over [`npx e2e mcp`](/mcp-server), or `screen.debug()` with `npx e2e run --watch` or `--step` |
+| Maestro Studio | A coding agent over [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app), or `screen.debug()` with `npx e2e run --watch` or `--step` |
 | `waitForAnimationToEnd` | `await expect(locator).toBeVisible()` on what the animation ends with |
 | `below`, `above`, `leftOf`, `rightOf` | `getByLabel`, a test id, `filter({ has })` on a shared container, or an `agent.act` goal |
 

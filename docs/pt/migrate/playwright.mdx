@@ -359,7 +359,7 @@ Playwright.
 | `locator.locator(selector)` | Uma consulta de `screen` dentro do escopo, como `card.getByRole('button', { name: 'Close' })`, ou um seletor de `browser.locator`, como `'.card >> .close'` |
 | `getByTitle()` | `browser.locator('[title="Close"]')`. Um título é um atributo do DOM, então não tem consulta em `screen` |
 | `page.waitForLoadState()` | Uma asserção sobre o que a próxima página mostra. Uma navegação espera por `load`, e cada ação e asserção espera pelo seu nó |
-| `npx playwright codegen`, o Inspector | [`npx e2e mcp`](/mcp-server) deixa um agente de código controlar o app enquanto escreve o teste; `screen.debug()` exibe a árvore |
+| `npx playwright codegen`, o Inspector | [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) deixa um agente de código controlar o app enquanto escreve o teste; `screen.debug()` exibe a árvore |
 | `{ force: true }`, `{ trial: true }` | `tap({ position })` pula as verificações de acionabilidade; `toBeVisible()` e `toBeEnabled()` para uma simulação |
 | `ariaSnapshot()`, `toMatchAriaSnapshot()`, `toMatchSnapshot()` | `expect(await screen.tree()).toContain(...)`; um arquivo de fixture e `toEqual` |
 | `keyboard.insertText()`, `inputValue()` em um `<label>` | `fill()`; o próprio controle, localizado com `getByLabel` |

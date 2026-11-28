@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-description: Set up e2e with one prompt to your coding agent, or step by step.
+description: "Install e2e and run your first end-to-end test in minutes, with one prompt to a coding agent like Claude Code or Cursor, or step by step with npx e2e init."
 "og:image": "https://e2e.com/docs/images/og/quickstart.png?v=4a3569d569"
 "twitter:image": "https://e2e.com/docs/images/og/quickstart.png?v=4a3569d569"
 ---
@@ -264,23 +264,18 @@ instead of replaying cached actions.
 
 ### Configure the project
 
-`e2e.config.ts` holds your project settings. Most projects tweak a few of
-these after `init`:
+`e2e.config.ts` holds your project settings. Most projects change these
+after `init`:
 
-| To | Set | See |
-| --- | --- | --- |
-| point at your app | `app.url`, or `app.bundleId` on mobile | [The app under test](/reference/config#the-app-under-test) |
-| start the app with the run | `app.command` | [Starting your app](/web#starting-your-app) |
-| use a model | `agents.default.model` | [Models](/models) |
-| test several browsers or devices | one `targets` entry each, with a `name` | [targets](/reference/config#targets) |
-| give tests more time | `timeout`, `actionTimeout`, `assertionTimeout` | [timeout](/reference/config#timeout) |
-| retry failed tests | `retries`, `1` in CI | [retries](/reference/config#retries) |
-| run tests in parallel | `workers`, `1` in CI | [workers](/reference/config#workers) |
-| pick the test files | `tests` | [tests](/reference/config#tests) |
-| keep traces and videos | `trace`, `video` | [Recording](/reference/config#recording) |
-| write a JUnit report | `reporters: ['list', 'junit']` | [reporters](/reference/config#reporters) |
-| sign in and pass API keys | `credentials`, `secrets` | [Authentication](/authentication) |
-| write the replay cache in CI | `cache: 'read-write'` | [Caching](/cache) |
+| To | Set |
+| --- | --- |
+| point at your app | [`app.url`](/reference/config#the-app-under-test), or `app.bundleId` on mobile |
+| start the app with the run | [`app.command`](/web#starting-your-app) |
+| use a model | [`agents.default.model`](/models) |
+| test several browsers or devices | one [`targets`](/reference/config#targets) entry each |
+
+The [config reference](/reference/config) lists every key, such as timeouts,
+retries, workers, recording, and reporters.
 
 <Accordion title="Example config with common options">
 ```ts title="e2e.config.ts"

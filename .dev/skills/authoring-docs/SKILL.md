@@ -11,7 +11,7 @@ Readers skim. They read the headings, the first sentence of each section,
 the code blocks, and the tables, then leave. Write for that reader. Show the
 fast path first and fold everything else.
 
-Model pages: `docs/bug-bash.mdx` and `docs/quickstart.mdx`. When in doubt,
+Model pages: `docs/explore.mdx` and `docs/quickstart.mdx`. When in doubt,
 copy their shape.
 
 ## IMPORTANT: shorten every page
@@ -57,13 +57,13 @@ of three kinds, and work them in this order.
 
    Keep a guarantee the reader would otherwise doubt, even when it reads
    like "works as it does locally". Check whether another page says it can
-   fail. `browser.mdx` says a provider without `downloads` fails, so a
+   fail. `reference/web.mdx` says a provider without `downloads` fails, so a
    provider page keeps the line that downloads work.
 2. **Merge what's said twice.** Each fact has one place.
    - A lede paragraph that previews a section becomes a link to it.
    - A "Before you start" whose items fit in two short sentences becomes a
      `Note` in the first task. Keep the section when its items need
-     bullets, as in `docs/bug-bash.mdx`.
+     bullets, as in `docs/explore.mdx`.
    - A section that explains one option moves under the config that sets
      it.
    - A list and a table that describe the same fields become one table,
@@ -181,7 +181,8 @@ description: <one sentence: what the reader can do after this page>
 
 ## Vendor logos
 
-The sidebar shows no icons. Don't set `icon:` in a page's frontmatter;
+The sidebar shows an icon on each group (`icon` on the group in
+`docs/docs.json`), never on a page. Don't set `icon:` in a page's frontmatter;
 `pnpm docs:check` fails on one.
 
 **A vendor page gets the vendor's logo on its cards.** A vendor page is
@@ -457,8 +458,9 @@ Each group opens with one table, one row per entry. Keep it to the minimum:
 - A short example. Show a default as a code comment: `// default: 5000`.
 - Accepted values as a list or a table. Errors as a `| Throws | When |` table.
 - At most one `<Note>`. `<Warning>` only for data loss or a leaked secret.
-- TypeScript declarations keep their JSDoc, in the entry or under
-  `## Types`. They are the contract.
+- TypeScript declarations show signatures and types only, with no JSDoc,
+  in the entry or under `## Types`. A default, limit, unit, or error goes in
+  the entry's prose or tables, stated once.
 - No Version History section; nothing reliable feeds it.
 
 ### Keep every fact

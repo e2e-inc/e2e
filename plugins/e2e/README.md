@@ -95,7 +95,7 @@ In Codex, Cursor, GitHub Copilot, and Devin, the plugin registers the e2e MCP
 server as `npx -y e2e@<version> mcp` (from `mcp.json`, or Devin's manifest),
 pinned to the e2e release the plugin version matches. The Claude Code plugin,
 which Grok Build also reads, has no MCP server: register it in the project
-with `npx e2e init` (see [MCP server](https://e2e.com/docs/mcp-server)).
+with `npx e2e init` (see [MCP server](https://e2e.com/docs/coding-agents#register-the-server)).
 Codex starts the plugin's server in the plugin's own directory, not the
 project's, so the server finds no project config on its own. The agent opens
 a session by passing the config's absolute path,

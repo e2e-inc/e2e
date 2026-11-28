@@ -79,7 +79,7 @@ Teams e Enterprise, plugins locais precisam da configuração de administrador
 **Allow Local Plugin Imports**, ou um administrador importa `e2e-inc/e2e` como
 marketplace da equipe. O plugin adiciona as skills
 `e2e`, `create-verification-skill` e `migrate-to-e2e`, não o pacote npm. No
-Codex e no Cursor, ele também adiciona o [servidor MCP](/mcp-server); no Claude
+Codex e no Cursor, ele também adiciona o [servidor MCP](/coding-agents#let-the-agent-use-the-app); no Claude
 Code e no Grok Build, registre o servidor no projeto. Invoque as outras duas sob
 o nome do plugin, `/e2e:<skill>` no Claude Code e `$e2e:<skill>` no Codex, e como
 `/<skill>` no Cursor.
@@ -159,7 +159,7 @@ projeto ou na raiz do workspace que ele detecta, ele não cria novas cópias.
 
 O `e2e mcp` dá ao agente uma sessão ao vivo no seu app. O agente confere seus
 localizadores na tela antes de escrevê-los e verifica as próprias mudanças na
-UI. O `init` registra o servidor. Veja [Servidor MCP](/mcp-server) para
+UI. O `init` registra o servidor. Veja [Servidor MCP](/coding-agents#let-the-agent-use-the-app) para
 configuração e prompts.
 
 ## Como um agente escreve e roda um teste
@@ -282,7 +282,7 @@ Depois, peça ao agente `/create-verification-skill`.
   teste.
 - As evidências que uma prova guarda.
 - Um mapa de funcionalidades com um charter de `e2e explore` para cada
-  funcionalidade, para que um [bug bash](/bug-bash) se distribua a partir do
+  funcionalidade, para que um [bug bash](/explore#bug-bashes) se distribua a partir do
   mapa.
 
 A skill gerada diz só o que é verdade sobre o seu app e aponta para a skill do

@@ -7,7 +7,7 @@ description: 別の UI プラットフォーム向けに、e2e のエンジン�
 
 エンジンは、`e2e/engine` の契約を通して、`screen`、`app`、エージェントの呼び出しを UI プラットフォームにつなぎます。デスクトップアプリ、テレビ、その他のプラットフォームをテストしたい場合に実装します。`@e2e-dev/web` と `@e2e-dev/mobile` も同じ公開 `defineEngine` API を使っており、完全な実装例として参照できます。
 
-このページでは、ランナーのプロセス内で動く TypeScript のエンジンを作ります。別のプロセスや言語で動かすには、[エンジンサーバー](/engine-servers)を参照してください。
+このページでは、ランナーのプロセス内で動く TypeScript のエンジンを作ります。別のプロセスや言語で動かすには、[エンジンサーバー](/reference/engine-protocol#engine-servers)を参照してください。
 
 エンジンが扱うのはユーザーインターフェースだけです。受信箱、データベース、テスト API には、[`test.extend`](/reference/test#your-own-fixtures) でフィクスチャを作ってください。
 
@@ -178,7 +178,7 @@ targets: [{ name: 'phone', engine: hyperdrive({ device: 'iPhone 16' }), app: { b
 
 ## エンジンが提供するフィクスチャ
 
-エンジンは `browser` や `device` のようなフィクスチャを提供できます。テストから見ると、これらは[組み込みフィクスチャ](/reference/test#fixtures)です。各メソッドを `context.fixture` で包むと、呼び出しごとに独自のアーティファクトと失敗情報を持つ `<fixture>.<method>` ステップとして記録できます。フィクスチャは、テストと同じランナープロセス内で動きます。エンジンサーバーでは、フィクスチャを `connectEngine` に渡します。[ホスト側の処理をクライアントに置く](/engine-servers#keep-host-work-on-the-client)を参照してください。
+エンジンは `browser` や `device` のようなフィクスチャを提供できます。テストから見ると、これらは[組み込みフィクスチャ](/reference/test#fixtures)です。各メソッドを `context.fixture` で包むと、呼び出しごとに独自のアーティファクトと失敗情報を持つ `<fixture>.<method>` ステップとして記録できます。フィクスチャは、テストと同じランナープロセス内で動きます。エンジンサーバーでは、フィクスチャを `connectEngine` に渡します。[ホスト側の処理をクライアントに置く](/reference/engine-protocol#keep-host-work-on-the-client)を参照してください。
 
 ```ts
 fixtures: {
@@ -234,7 +234,7 @@ open_session {engine: {package: "kiosk-engine", options: {lane: 2}}}
   <Card title="モバイルエンジンリファレンス" icon="mobile-screen" href="/reference/mobile">
     完全なデバイスエンジンの実装と併せて読みます。
   </Card>
-  <Card title="エンジンサーバー" icon="network-wired" href="/engine-servers">
+  <Card title="エンジンサーバー" icon="network-wired" href="/reference/engine-protocol#engine-servers">
     別のプロセス、マシン、言語でエンジンを動かします。
   </Card>
 </CardGroup>

@@ -76,7 +76,7 @@ cp -R "$repo/plugins/e2e" ~/.cursor/plugins/local/
 Cursor Teams と Enterprise でローカルプラグインを使うには、管理者設定の **Allow Local Plugin Imports**
 を有効にするか、管理者が `e2e-inc/e2e` をチームのマーケットプレイスとしてインポートする必要があります。
 プラグインは `e2e`、`create-verification-skill`、`migrate-to-e2e` の各スキルを追加します。npm パッケージは追加しません。
-Codex と Cursor では [MCP サーバー](/mcp-server) も追加します。Claude Code と Grok Build では、サーバーをプロジェクトに登録してください。
+Codex と Cursor では [MCP サーバー](/coding-agents#let-the-agent-use-the-app) も追加します。Claude Code と Grok Build では、サーバーをプロジェクトに登録してください。
 後者 2 つのスキルは、Claude Code では `/e2e:<skill>`、Codex では `$e2e:<skill>`、
 Cursor では `/<skill>` で呼び出します。
 
@@ -120,7 +120,7 @@ hermes skills install e2e-inc/e2e/e2e
 
 `e2e mcp` はアプリのライブセッションをエージェントに提供します。
 エージェントは、ロケーターを書く前に画面で確認し、自分が加えた UI の変更も確認します。
-`init` がサーバーを登録します。セットアップとプロンプトは [MCP サーバー](/mcp-server) を参照してください。
+`init` がサーバーを登録します。セットアップとプロンプトは [MCP サーバー](/coding-agents#let-the-agent-use-the-app) を参照してください。
 
 ## エージェントがテストを作成・実行する流れ
 
@@ -233,7 +233,7 @@ bunx skills add e2e-inc/e2e --skill create-verification-skill
 - アプリを操作する 2 つの方法。ライブの `e2e mcp` セッションとテスト。
 - 検証で残す根拠。
 - 機能ごとに `e2e explore` のチャーターを持つ機能マップ。
-  [バグバッシュ](/bug-bash) はこのマップから各機能に展開します。
+  [バグバッシュ](/explore#bug-bashes) はこのマップから各機能に展開します。
 
 生成されるスキルは、アプリに実際に当てはまる内容だけを記述し、それ以外は e2e スキルへリンクします。
 これは poteto の pstack にある

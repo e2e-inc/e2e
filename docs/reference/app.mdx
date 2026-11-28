@@ -1,6 +1,6 @@
 ---
 title: app
-description: The portable app lifecycle fixture, available on every platform.
+description: "API reference for the app fixture, on every platform, which opens, restarts, and resets the app under test and takes screenshots and recordings."
 "og:image": "https://e2e.com/docs/images/og/reference/app.png?v=0b63e99aab"
 "twitter:image": "https://e2e.com/docs/images/og/reference/app.png?v=0b63e99aab"
 ---
@@ -169,10 +169,10 @@ test('the dialog slides in', { video: 'off' }, async ({ app, screen }) => {
 });
 ```
 
-- One recording at a time. The engine has one recorder, so set
-  `video: 'off'` on the test: a start fails while the test's
+- One recording at a time. Set `video: 'off'` on the test: a start fails while the test's
   [video](/reference/config#video) records. That includes `--video`,
   `retain-on-failure`, and the retries `on-first-retry` records.
+- `name` is the file name stem, `recording` by default.
 - A recording still running when the test ends is stopped and kept.
 - Like the test's video, a recording masks nothing.
 
@@ -196,6 +196,9 @@ if ('path' in video) console.log(video.path);
 - There is one video. The web screencast instead writes one per page it
   showed: a new one starts when the active tab changes or the page is
   replaced (`app.restart()`, `app.clearState()`).
+- Each video has `startedAt`, an ISO timestamp of when it started
+  recording. A `url` video is an `http(s)` URL with a `mediaType`:
+  `video/mp4`, or `text/html` for a player page.
 - The step links each video in the trace.
 
 | Throws | When |
@@ -207,71 +210,30 @@ if ('path' in video) console.log(video.path);
 
 ```ts
 export interface App {
-  /**
-   * The resolved base URL of the target's app, with the port the run
-   * allocated when `app.url` declared port 0 and no trailing slash, so
-   * `${app.baseUrl}/api/users` joins with one slash; undefined for a target
-   * that declares no `app.url`.
-   */
   readonly baseUrl: string | undefined;
-  /**
-   * Opens the app: the declared URL, a path relative to it, or any absolute
-   * http(s) URL. On a device target, which has no URL, it launches the pinned
-   * app fresh; a path opens as a link in it when the target declares
-   * `app.linkBase`.
-   */
   open(path?: string): Promise<void>;
-  /**
-   * Recreates the execution context while preserving persisted state, then
-   * reopens the app at its base URL when the target declares one.
-   */
   restart(): Promise<void>;
-  /**
-   * Clears persisted client state, recreates the execution context, then
-   * reopens the app at its base URL when the target declares one.
-   */
   clearState(): Promise<void>;
-  /** Navigates back once. */
   back(): Promise<void>;
-  /** Captures a redacted evidence screenshot and returns its absolute path. */
   screenshot(label?: string): Promise<string>;
-  /**
-   * Starts recording the screen, until `stopRecording`. One recording at a
-   * time, and none while the test's `video` records: set `{ video: 'off' }`
-   * on the test.
-   */
   startRecording(options?: RecordingOptions): Promise<void>;
-  /**
-   * Stops the recording and returns its videos in play order: one, or on the
-   * web one per page it showed: a tab switch or a replaced page starts another.
-   */
   stopRecording(): Promise<readonly [RecordedVideo, ...RecordedVideo[]]>;
 }
 
-/** How `app.startRecording` names its file. */
 export interface RecordingOptions {
-  /** File name stem, `recordings/001-<name>.<ext>`; defaults to `recording`. */
   readonly name?: string;
 }
 
-/** One video `app.stopRecording` returns: a file, or a link to a recording a hosted service keeps. */
 export type RecordedVideo = RecordedVideoFile | RecordedVideoLink;
 
-/** A video file under the attempt's `recordings/` directory. */
 export interface RecordedVideoFile {
-  /** Absolute path of the file. */
   readonly path: string;
-  /** When it started recording, as an ISO timestamp. */
   readonly startedAt: string;
 }
 
-/** A recording a hosted browser or device service keeps, by URL. */
 export interface RecordedVideoLink {
-  /** `http(s)` URL of the recording. */
   readonly url: string;
-  /** Media type of what the URL serves: `video/mp4`, or `text/html` for a player page. */
   readonly mediaType: string;
-  /** When it started recording, as an ISO timestamp. */
   readonly startedAt: string;
 }
 ```

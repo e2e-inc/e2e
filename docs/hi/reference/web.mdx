@@ -91,7 +91,7 @@ web({ browser: 'firefox' }); // default: 'chromium'
   CDP सर्वर जैसे [Lightpanda](/integrations/lightpanda) या [Moli](/integrations/moli)।
 - `scope: 'attempt'` वाला प्रोवाइडर एक पर्सिस्टेंट कॉन्टेक्स्ट पर चलता है, जिसकी
   सीमाएँ [CDP ट्रांसपोर्ट की रिकवरी](#recovering-a-cdp-transport) में बताई गई हैं।
-- `BrowserProvider` कॉन्ट्रैक्ट और एक उदाहरण प्रोवाइडर [होस्टेड ब्राउज़र](/browser#hosted-browsers) में हैं।
+- `BrowserProvider` कॉन्ट्रैक्ट और एक उदाहरण प्रोवाइडर [होस्टेड ब्राउज़र](/reference/web#hosted-browsers) में हैं।
 
 | थ्रो करता है | कब |
 | --- | --- |
@@ -670,7 +670,7 @@ const conditions = browser.locator(
 नोड एक ही बार मिलता है। ऑब्ज़र्व हुए ट्री में क्लोज़्ड रूट के अंदर दिखने वाला कंट्रोल
 रिज़ॉल्व होता है और उस पर एक्शन और रीड दोनों चलते हैं। `locator`, `frameLocator`, और
 `filter({ hasText })` Playwright की पहुँच बनाए रखते हैं और क्लोज़्ड रूट पर रुक जाते हैं;
-पूरी जानकारी [ब्राउज़र गाइड](/browser#shadow-dom) में है।
+पूरी जानकारी [ब्राउज़र गाइड](/reference/web#shadow-dom) में है।
 </Note>
 
 #### `frameLocator`
@@ -684,7 +684,7 @@ await payment.getByLabel('Card number').fill('4242424242424242');
 
 यह एक `FrameScreen` लौटाता है, यानी ऐसा `Screen` जिसकी क्वेरी फ़्रेम के अंदर से जवाब
 देती हैं। फ़्रेम के `locator` का इस्तेमाल तभी करें जब कंट्रोल के पास कोई एक्सेसिबल नाम,
-लेबल, प्लेसहोल्डर, या टेस्ट id न हो। [ब्राउज़र गाइड](/browser#reach-into-an-iframe) में
+लेबल, प्लेसहोल्डर, या टेस्ट id न हो। [ब्राउज़र गाइड](/reference/web#framelocator) में
 दिखाया गया है कि यह कब काम आता है।
 
 ```ts
@@ -1259,7 +1259,7 @@ const file = await browser.waitForDownload(() =>
   रनर की तरफ़ का `absolutePath`, और `suggestedFilename` लौटाता है।
 - कंटेंट जाँचने के लिए फ़ाइल API के साथ `absolutePath` इस्तेमाल करें, होस्टेड ब्राउज़र
   पर भी।
-- होस्टेड ब्राउज़र पर फ़ाइल प्रोवाइडर के [`downloads`](/browser#downloads-on-the-provider)
+- होस्टेड ब्राउज़र पर फ़ाइल प्रोवाइडर के [`downloads`](/reference/web#downloads-on-the-provider)
   के ज़रिए वापस आती है।
 - इंतज़ार के समय में ट्रिगर का अपना समय भी शामिल होता है।
 
@@ -1847,6 +1847,6 @@ export type JsonValue =
 
 ## संबंधित
 
-[ब्राउज़र गाइड](/browser) इन मेंबर्स को रेसिपी में दिखाता है और
-[होस्टेड ब्राउज़र](/browser#hosted-browsers) को कवर करता है। पोर्टेबल ऑपरेशन
+[ब्राउज़र गाइड](/reference/web) इन मेंबर्स को रेसिपी में दिखाता है और
+[होस्टेड ब्राउज़र](/reference/web#hosted-browsers) को कवर करता है। पोर्टेबल ऑपरेशन
 [`app`](/reference/app) फ़िक्स्चर पर हैं।

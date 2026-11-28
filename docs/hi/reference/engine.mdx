@@ -2265,7 +2265,7 @@ export interface VideoLink {
 #### प्रोवाइडर रिकॉर्डिंग
 
 जो इंजन किसी होस्टेड सर्विस से ब्राउज़र या डिवाइस लीज़ पर लेता है, वह अपने कैप्चर की जगह
-उस सर्विस से अटेम्प्ट रिकॉर्ड करा सकता है। [`BrowserProvider.record`](/browser#recording-on-the-provider)
+उस सर्विस से अटेम्प्ट रिकॉर्ड करा सकता है। [`BrowserProvider.record`](/reference/web#recording-on-the-provider)
 और [`DeviceProvider.record`](/mobile#hosted-devices) इसी तरह काम करते हैं। `e2e/engine`
 साझा शेप और `stopProviderRecording` एक्सपोर्ट करता है, ताकि हर इंजन प्रोवाइडर की
 रिकॉर्डिंग को एक ही तरीके से `VideoSegment` में बदले।
@@ -2718,7 +2718,7 @@ export type QueryKind = 'role' | 'label' | 'placeholder' | 'text' | 'displayValu
 
 [इंजन](/engines) इन्हें बनाने के तरीकों की तुलना करता है।
 [इंजन लिखना](/writing-an-engine) `defineEngine` के बारे में विस्तार से बताता है, और
-[इंजन सर्वर्स](/engine-servers) किसी दूसरे प्रोसेस, मशीन, या भाषा में इंजन चलाता है।
+[इंजन सर्वर्स](/reference/engine-protocol#engine-servers) किसी दूसरे प्रोसेस, मशीन, या भाषा में इंजन चलाता है।
 `@e2e-dev/web` ([रेफ़रेंस](/reference/web)) और `@e2e-dev/mobile`
 ([रेफ़रेंस](/reference/mobile)) इसी पब्लिक `defineEngine` के साथ इस कॉन्ट्रैक्ट को लागू
 करते हैं।

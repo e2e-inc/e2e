@@ -632,7 +632,7 @@ await screen.pause();
 - `--step` रन में `n`, `a`, या `e2e run --step rest` के बाद भी टेस्ट
   `screen.pause()` पर रुकता है।
 - रुका हुआ समय किसी भी टाइमआउट में नहीं गिना जाता।
-- [MCP](/mcp-server) के `open_session {test}` से खुले सेशन में, `@e2e-dev/core`
+- [MCP](/coding-agents#let-the-agent-use-the-app) के `open_session {test}` से खुले सेशन में, `@e2e-dev/core`
   या `openHost` के प्रोग्राम में, या `e2e/runner` के `run()` में टेस्ट पॉज़ नहीं
   होता। `CI` सेट होने पर `run()` में टेस्ट तब भी `e2e run` की तरह
   `PAUSE_UNAVAILABLE` से फ़ेल होता है।

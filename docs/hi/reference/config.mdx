@@ -1031,7 +1031,7 @@ video: 'retain-on-failure', // default: 'off'
 | --- | --- |
 | ब्राउज़र इंजन, Playwright स्क्रीनकास्ट | `video/video.webm`, अटेम्प्ट के दिखाए हर पेज का एक सेगमेंट, बाद वाले `video/video-part<n>.webm`। [`web({ screencast })`](/reference/web#options) फ़्रेम साइज़ और क्वालिटी सेट करता है |
 | मोबाइल इंजन, agent-device | `video/video.mp4` |
-| प्रोवाइडर की अपनी रिकॉर्डिंग ([`BrowserProvider.record`](/browser#recording-on-the-provider), [`DeviceProvider.record`](/mobile#hosted-devices)) | प्रोवाइडर की लिखी फ़ाइल, `video/<file>` के रूप में: Kernel की `video/replay.mp4` होती है। या सर्विस से रखी रिकॉर्डिंग का लिंक, जिसे `path` की जगह `url` से दर्ज किया जाता है; रनर इसे कभी डाउनलोड नहीं करता |
+| प्रोवाइडर की अपनी रिकॉर्डिंग ([`BrowserProvider.record`](/reference/web#recording-on-the-provider), [`DeviceProvider.record`](/mobile#hosted-devices)) | प्रोवाइडर की लिखी फ़ाइल, `video/<file>` के रूप में: Kernel की `video/replay.mp4` होती है। या सर्विस से रखी रिकॉर्डिंग का लिंक, जिसे `path` की जगह `url` से दर्ज किया जाता है; रनर इसे कभी डाउनलोड नहीं करता |
 
 - हर सेगमेंट में `startedAt` होता है, इसलिए `step.startedAt - artifact.startedAt` उसमें
   स्टेप का ऑफ़सेट होता है।

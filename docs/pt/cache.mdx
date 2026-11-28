@@ -66,7 +66,7 @@ gravação quando a tentativa terminou:
 | `kept` | A entrada fica como está. |
 | `unconfirmed` | Não salva: nenhuma verificação passou depois do passo. Termine o teste com uma asserção de localizador ou da engine ou com `agent.assert`, ou espere pelo estado com `locator.waitFor()` ou `agent.waitFor`. |
 | `evicted` | A entrada foi apagada: o replay dela terminou em uma falha ou em um reparo, ou nenhuma verificação a confirmou antes de a tentativa falhar. |
-| `no-change` | Nada gravado: nenhum controle apareceu, sumiu ou mudou de estado, e a rota continuou a mesma. Isso inclui um passo cuja única mudança fica dentro de um [frame de outro site](/browser#reach-into-an-iframe). Um passo assim roda ao vivo em toda execução. |
+| `no-change` | Nada gravado: nenhum controle apareceu, sumiu ou mudou de estado, e a rota continuou a mesma. Isso inclui um passo cuja única mudança fica dentro de um [frame de outro site](/reference/web#framelocator). Um passo assim roda ao vivo em toda execução. |
 | `not-written` | Não salva: o armazenamento rejeitou a escrita ou recusou a gravação, por exemplo uma acima do limite de tamanho do armazenamento em arquivos. |
 
 Um passo que não executou nenhuma ação não grava nada e não informa `write`.

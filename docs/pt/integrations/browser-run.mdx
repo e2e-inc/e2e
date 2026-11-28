@@ -58,7 +58,7 @@ O tempo limite conta o tempo sem comandos CDP, mesmo com a conexão aberta. Aume
 
 O escopo por worker cria um contexto isolado para cada tentativa.
 O escopo por tentativa usa o contexto padrão do navegador novo e permite reconectar a esse navegador depois de uma queda do transporte.
-Os [limites de provedores por tentativa](/browser#hosted-browsers) se aplicam.
+Os [limites de provedores por tentativa](/reference/web#hosted-browsers) se aplicam.
 
 As sessões são excluídas no encerramento. Se o runner sair antes da limpeza, o tempo limite de inatividade encerra o navegador.
 
@@ -79,6 +79,6 @@ Um HTTP `401` ou `403` informa qual permissão do token verificar.
 ## Próximos passos
 
 <CardGroup cols={2}>
-  <Card title="Navegadores hospedados" href="/browser#hosted-browsers">Entenda os escopos dos provedores e o isolamento.</Card>
+  <Card title="Navegadores hospedados" href="/reference/web#hosted-browsers">Entenda os escopos dos provedores e o isolamento.</Card>
   <Card title="Engine web" href="/web">Configure viewports, acesso ao app e vídeo.</Card>
 </CardGroup>

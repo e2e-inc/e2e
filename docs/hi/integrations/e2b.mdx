@@ -7,7 +7,7 @@ description: "@e2e-dev/e2b के e2b() और e2bBrowsers() प्रोवा�
 `@e2e-dev/e2b` आपके टारगेट [E2B](https://e2b.dev) सैंडबॉक्स में चलाता है:
 Android 16 के लिए `e2b()`, जो एक [डिवाइस प्रोवाइडर](/mobile#hosted-devices) है,
 और Chromium के लिए `@e2e-dev/e2b/web` का `e2bBrowsers()`, जो एक
-[ब्राउज़र प्रोवाइडर](/browser#hosted-browsers) है। आपके टेस्ट वैसे ही रहते हैं।
+[ब्राउज़र प्रोवाइडर](/reference/web#hosted-browsers) है। आपके टेस्ट वैसे ही रहते हैं।
 
 ## ऑथेंटिकेट करें
 
@@ -70,7 +70,7 @@ agent-device उस `.apk` के लिए बताता है।
 हर वर्कर को अपना Chromium सैंडबॉक्स मिलता है, और उसमें हर अटेम्प्ट को नया
 ब्राउज़र कॉन्टेक्स्ट मिलता है, बिल्कुल लोकल रन की तरह। `scope: 'attempt'` के साथ
 हर अटेम्प्ट को इसकी जगह नया सैंडबॉक्स मिलता है
-([इस स्कोप की सीमाएँ](/browser#pick-a-lease-scope))।
+([इस स्कोप की सीमाएँ](/reference/web#pick-a-lease-scope))।
 
 इंटीग्रेशन को वेब इंजन के साथ इंस्टॉल करें:
 
@@ -172,7 +172,7 @@ export default {
   <Card title="होस्टेड डिवाइस" icon="mobile" href="/mobile#hosted-devices">
     डिवाइस प्रोवाइडर डिवाइस लीज़ पर कैसे लेता है।
   </Card>
-  <Card title="होस्टेड ब्राउज़र" icon="globe" href="/browser#hosted-browsers">
+  <Card title="होस्टेड ब्राउज़र" icon="globe" href="/reference/web#hosted-browsers">
     ब्राउज़र प्रोवाइडर ब्राउज़र लीज़ पर कैसे लेता है।
   </Card>
 </CardGroup>

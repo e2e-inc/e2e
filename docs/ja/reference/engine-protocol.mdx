@@ -3,7 +3,7 @@ title: エンジンプロトコル
 description: エンジンを別のプロセスやマシンで動かしたり、別の言語で実装したりできます。
 ---
 
-エンジンプロトコルは、[エンジン契約](/reference/engine)を JSON-RPC メッセージで表したものです。ランナーは、すべてのエンジンをこのプロトコルで操作します。別のプロセス、マシン、言語で動かすには、[エンジンサーバー](/engine-servers)を参照してください。
+エンジンプロトコルは、[エンジン契約](/reference/engine)を JSON-RPC メッセージで表したものです。ランナーは、すべてのエンジンをこのプロトコルで操作します。別のプロセス、マシン、言語で動かすには、[エンジンサーバー](/reference/engine-protocol#engine-servers)を参照してください。
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -65,7 +65,7 @@ export interface ConnectEngineOptions {
 
 ハンドルは、ハーネスがエンジンを呼び出す場所で接続を開きます。ランナーでは、ターゲットごとに 1 接続が `prepare` から `finish` まで存続します。ただし、サーバーが `lifecycle/prepare` または `lifecycle/finish` に対応する場合だけ開きます。各ワーカーでは、1 接続が `init` から `dispose` まで存続します。`e2e doctor` はターゲットごとに `doctor` 接続を開き、`lifecycle/doctor` だけを呼び出して閉じます。`spawnTransport` のように、そのためにトランスポートがサーバーを起動してもかまいませんが、マシンのプロビジョニング、デバイスのリース、アプリのインストールは行ってはいけません。doctor のシグナルが発火すると、サーバーには応答まで 5 秒の猶予が与えられ、その後接続が閉じます。`init`..`dispose` の外で操作を呼び出すと、`INVALID_STATE` で失敗します。`init` を実行しなかったワーカーには接続がないため、サーバーに `lifecycle/dispose` は届きません。2 つの接続で状態を共有するかどうかは、サーバーが決めます。spawn したサーバーは接続ごとにプロセスを持ち、loopback や socket のサーバーはひとつのエンジンで全接続を処理できます。
 
-`resolveLocators` を指定すると、各 `locate` が観測を行い、[`resolveExpression`](/reference/engine#resolveexpression) で式を解決します。`fixtures`、`validateApp`、`secrets`、`session` フックはクライアント側で実行します。`session` フックは、サーバーの同名メソッドを置き換えます。[ホスト側の処理をクライアントに置く](/engine-servers#keep-host-work-on-the-client)を参照してください。
+`resolveLocators` を指定すると、各 `locate` が観測を行い、[`resolveExpression`](/reference/engine#resolveexpression) で式を解決します。`fixtures`、`validateApp`、`secrets`、`session` フックはクライアント側で実行します。`session` フックは、サーバーの同名メソッドを置き換えます。[ホスト側の処理をクライアントに置く](/reference/engine-protocol#keep-host-work-on-the-client)を参照してください。
 
 <Warning>
 `lifecycle/prepare`、`lifecycle/init`、`lifecycle/finish`、`lifecycle/doctor` には、モデルのキーや `E2E_SECRET_*` の値を含む実行環境の変数が渡されます。`attempt/resolveSecret` は平文で応答します。信頼できるサーバーにだけ接続してください。`socketTransport` は暗号化しません。
@@ -87,7 +87,7 @@ export function serveEngine(
 ): Promise<void>;
 ```
 
-標準出力はプロトコルに使うため、サーバー自身のログは標準エラー出力に書いてください。[TypeScript エンジンをサーバーとして提供する](/engine-servers#serve-a-typescript-engine)を参照してください。
+標準出力はプロトコルに使うため、サーバー自身のログは標準エラー出力に書いてください。[TypeScript エンジンをサーバーとして提供する](/reference/engine-protocol#serve-a-typescript-engine)を参照してください。
 
 ### `describeEngine`
 
@@ -244,7 +244,7 @@ export interface EngineManifest {
 
 ## 型
 
-トランスポートは、ひとつの接続のバイトストリームを開きます。[トランスポートを実装する](/engine-servers#write-a-transport)を参照してください。
+トランスポートは、ひとつの接続のバイトストリームを開きます。[トランスポートを実装する](/reference/engine-protocol#write-a-transport)を参照してください。
 
 ```ts
 export interface EngineTransport {
@@ -275,4 +275,4 @@ export interface TransportConnection {
 
 ## 関連ページ
 
-[エンジン](/engines)では実装方法を比較しています。[`e2e/engine`](/reference/engine) は各メッセージが表す契約です。[エンジンサーバー](/engine-servers)と[エンジンを作る](/writing-an-engine)では、実装の手順を説明しています。
+[エンジン](/engines)では実装方法を比較しています。[`e2e/engine`](/reference/engine) は各メッセージが表す契約です。[エンジンサーバー](/reference/engine-protocol#engine-servers)と[エンジンを作る](/writing-an-engine)では、実装の手順を説明しています。

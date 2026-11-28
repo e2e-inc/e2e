@@ -78,7 +78,7 @@ web({ browser: 'firefox' }); // default: 'chromium'
 - `'chromium'`、`'firefox'` 或 `'webkit'`。
 - `BrowserProvider` 则租用托管浏览器：每次运行中每个工作进程槽位一个，或每次尝试一个（[`WebOptions`](#weboptions)）。引擎通过 CDP 将它们作为 chromium 驱动，无论实际是 Chromium，还是 [Lightpanda](/integrations/lightpanda)、[Moli](/integrations/moli) 等其他 CDP 服务器。
 - `scope: 'attempt'` 的提供方使用持久化上下文，限制见[恢复 CDP 传输连接](#recovering-a-cdp-transport)。
-- [托管浏览器](/browser#hosted-browsers)介绍了 `BrowserProvider` 契约和提供方示例。
+- [托管浏览器](/reference/web#hosted-browsers)介绍了 `BrowserProvider` 契约和提供方示例。
 
 | 抛出错误 | 触发条件 |
 | --- | --- |
@@ -485,7 +485,7 @@ const conditions = browser.locator(
 | `INVALID_LOCATOR` | 空选择器，或在最后一部分之前使用 `*` 捕获（`*css=article >> text=Hello`）。 |
 
 <Note>
-每个 `screen` 查询都会搜索其作用域，以及页面在该作用域下附加的每个封闭 Shadow Root，使用 Playwright 自身的角色、名称、文本、标签和属性匹配方式，每个节点只查找一次。观测树列出的封闭根内控件可以被解析、操作和读取。`locator`、`frameLocator` 和 `filter({ hasText })` 保持 Playwright 的搜索范围，在封闭根处停止；详情见[浏览器指南](/browser#shadow-dom)。
+每个 `screen` 查询都会搜索其作用域，以及页面在该作用域下附加的每个封闭 Shadow Root，使用 Playwright 自身的角色、名称、文本、标签和属性匹配方式，每个节点只查找一次。观测树列出的封闭根内控件可以被解析、操作和读取。`locator`、`frameLocator` 和 `filter({ hasText })` 保持 Playwright 的搜索范围，在封闭根处停止；详情见[浏览器指南](/reference/web#shadow-dom)。
 </Note>
 
 #### `frameLocator`
@@ -497,7 +497,7 @@ const payment = browser.frameLocator('#payment-frame');
 await payment.getByLabel('Card number').fill('4242424242424242');
 ```
 
-它返回 `FrameScreen`，即查询结果来自框架内部的 `Screen`。只有控件没有无障碍名称、标签、占位符或测试 ID 时，才使用框架的 `locator`。[浏览器指南](/browser#reach-into-an-iframe)展示了适用场景。
+它返回 `FrameScreen`，即查询结果来自框架内部的 `Screen`。只有控件没有无障碍名称、标签、占位符或测试 ID 时，才使用框架的 `locator`。[浏览器指南](/reference/web#framelocator)展示了适用场景。
 
 ```ts
 export interface FrameScreen extends Screen {
@@ -869,7 +869,7 @@ const file = await browser.waitForDownload(() =>
 
 - 将文件注册为 `download` 产物，并返回相对 `path`、运行器侧的 `absolutePath` 和 `suggestedFilename`。
 - 使用 `absolutePath` 配合文件 API 检查内容，托管浏览器上也适用。
-- 在托管浏览器上，文件通过提供方的 [`downloads`](/browser#downloads-on-the-provider) 返回。
+- 在托管浏览器上，文件通过提供方的 [`downloads`](/reference/web#downloads-on-the-provider) 返回。
 - 等待时间包括触发函数自身的耗时。
 
 | 抛出错误 | 触发条件 |
@@ -1274,4 +1274,4 @@ export type JsonValue =
 
 ## 相关内容
 
-[浏览器指南](/browser)通过示例展示这些成员的用法，并介绍[托管浏览器](/browser#hosted-browsers)。可跨平台使用的操作位于 [`app`](/reference/app) 测试夹具上。
+[浏览器指南](/reference/web)通过示例展示这些成员的用法，并介绍[托管浏览器](/reference/web#hosted-browsers)。可跨平台使用的操作位于 [`app`](/reference/app) 测试夹具上。

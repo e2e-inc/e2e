@@ -531,7 +531,7 @@ across `/`); a relative one resolves against the base URL. In strings that
 use glob syntax, e2e matches raw `"`, `<`, `>`, `` ` ``, `^`, `'`, and escaped `\{` and `\}`
 as the browser encodes them in paths, queries, and fragments. For example,
 a query apostrophe in an HTTP URL matches `%27`. Full reference:
-docs/reference/web.mdx, docs/browser.mdx.
+docs/reference/web.mdx.
 
 ## Habits
 

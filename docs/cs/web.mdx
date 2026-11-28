@@ -6,7 +6,7 @@ description: Nasměruj webový engine na svou aplikaci nebo ji nech spustit runn
 ---
 
 `@e2e-dev/web` spouští testy v prohlížeči proti URL tvé aplikace. Routy,
-cookies, dialogy a stahování popisuje stránka [Práce s prohlížečem](/browser).
+cookies, dialogy a stahování popisuje stránka [Práce s prohlížečem](/reference/web).
 
 ## Spuštění aplikace
 
@@ -57,7 +57,7 @@ pro dočasný adresář, `inheritEnv` a `env`.
 
 | Volba | Účel |
 | --- | --- |
-| `reuseExisting: true` | Použije server, který už běží, například ten, který spustila [relace MCP](/mcp-server#run-tests-next-to-a-session). V CI to e2e ignoruje, a pokud server už odpovídá, běh skončí chybou `APP_ALREADY_RUNNING`. |
+| `reuseExisting: true` | Použije server, který už běží, například ten, který spustila [relace MCP](/coding-agents#run-tests-next-to-a-session). V CI to e2e ignoruje, a pokud server už odpovídá, běh skončí chybou `APP_ALREADY_RUNNING`. |
 | `log` | Uloží stdout a stderr aplikace do souboru s cestou relativní k projektu. Chyba při startu nebo nečekané ukončení během `e2e run` cituje řádky, které do souboru od spuštění příkazu připsal jakýkoli proces. Log do 40 řádků a 8 KiB se cituje celý; jinak citace ponechá nejvýš 20 řádků z každého konce a mezi ně vloží `[startup output omitted]`. U logu nad 8 KiB se tyto řádky berou z jeho prvních a posledních 4 KiB. Hodnoty z `command.env` a `inheritEnv` dlouhé aspoň čtyři znaky se v citaci zamaskují. Samotný soubor se nemaskuje. |
 | `env` | Proměnné prostředí pro aplikaci. |
 | `inheritEnv` | Proměnné hostitele, které se předají, pokud jsou nastavené, podle názvu nebo prefixu: `['DATABASE_URL', 'STRIPE_*']`. `env` má před nimi přednost. |
@@ -292,7 +292,7 @@ kterou spustíš s `--config`.
 desktopový: měřítko 1, desktopový ukazatel a jeho obvyklý user agent.
 Dotykové ovládání neemuluje. Pro testování na simulátoru nebo emulátoru
 použij [mobilní engine](/mobile). Tmavý režim a omezený pohyb popisuje
-[Emulace tmavého režimu a omezeného pohybu](/browser#emulate-dark-mode-and-reduced-motion).
+[Emulace tmavého režimu a omezeného pohybu](/reference/web#media-emulation).
 
 Video si ponechá velikost, kterou stránka měla na začátku nahrávání. Pro
 jednu pevnou velikost nastav `web({ screencast: { size } })`. Poskytovatel
@@ -325,7 +325,7 @@ používat schránku, uděl to oprávnění na cíli:
 ## Co dál
 
 <CardGroup cols={2}>
-  <Card title="Práce s prohlížečem" icon="globe" href="/browser">
+  <Card title="Práce s prohlížečem" icon="globe" href="/reference/web">
     Mockování rout, nastavení cookies, obsluha dialogů a stahování souborů.
   </Card>
   <Card title="Reference webového enginu" icon="masks-theater" href="/reference/web">

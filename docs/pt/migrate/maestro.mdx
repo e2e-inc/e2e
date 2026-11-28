@@ -208,7 +208,7 @@ deixado de fora de propósito.
 | `retryTapIfNoChange` | Faça a asserção do resultado e depois toque de novo no teste. Um segundo toque às cegas pode acionar um controle duas vezes |
 | `waitToSettleTimeoutMs` | Uma asserção com o próprio `timeout` depois da ação; essa asserção é a espera |
 | `toggleAirplaneMode`, `toggleDarkMode` | Defina o estado que você quer: `device.setAirplaneMode(true)`, `device.setAppearance('dark')` |
-| Maestro Studio | Um agente de código conectado a [`npx e2e mcp`](/mcp-server), ou `screen.debug()` com `npx e2e run --watch` ou `--step` |
+| Maestro Studio | Um agente de código conectado a [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app), ou `screen.debug()` com `npx e2e run --watch` ou `--step` |
 | `waitForAnimationToEnd` | `await expect(locator).toBeVisible()` sobre o que aparece no fim da animação |
 | `below`, `above`, `leftOf`, `rightOf` | `getByLabel`, um test id, `filter({ has })` em um contêiner compartilhado ou um objetivo `agent.act` |
 

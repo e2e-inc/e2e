@@ -6,7 +6,7 @@ description: 使用 @e2e-dev/lightpanda 的 lightpanda() 浏览器提供方，�
 "twitter:image": "https://e2e.com/docs/images/og/integrations/lightpanda.png?v=b97a3ebae4"
 ---
 
-[Lightpanda](https://lightpanda.io) 是从零编写的开源无头浏览器，不依赖 Chromium。它在几毫秒内启动，内存占用仅为 Chrome 的一小部分，并支持 Chrome DevTools Protocol。`@e2e-dev/lightpanda` 中的 `lightpanda()` 是它的[浏览器提供方](/browser#hosted-browsers)：每个工作进程槽位都有自己的 `lightpanda serve`，在运行开始时通过空闲端口启动，运行结束时停止。测试和 CI 保持不变；配置中只需修改测试目标的 `browser`。
+[Lightpanda](https://lightpanda.io) 是从零编写的开源无头浏览器，不依赖 Chromium。它在几毫秒内启动，内存占用仅为 Chrome 的一小部分，并支持 Chrome DevTools Protocol。`@e2e-dev/lightpanda` 中的 `lightpanda()` 是它的[浏览器提供方](/reference/web#hosted-browsers)：每个工作进程槽位都有自己的 `lightpanda serve`，在运行开始时通过空闲端口启动，运行结束时停止。测试和 CI 保持不变；配置中只需修改测试目标的 `browser`。
 
 Lightpanda 没有布局引擎。它构建 DOM、运行 JavaScript，并暴露引擎读取的无障碍树，供定位器、断言和[智能体步骤](/agent-steps)使用。依赖节点绘制位置的功能会有不同的行为；迁移测试套件前，请参阅[不支持的功能](#what-does-not-work)。
 
@@ -119,9 +119,9 @@ web({ browser: lightpanda({ loadResources: ['stylesheet', 'iframe'] }) })
 | 功能 | 实际行为 | 原因 |
 | ------- | ------------ | --- |
 | [会话](/authentication)（在 `test.setup` 中使用 `session.save`，在测试上设置 `session:`） | 初始化通过且会话已保存，但恢复会话的测试打开后处于未登录状态。 | 在上下文的首个页面创建之前设置的 Cookie 会被丢弃。改为在测试中调用 `app.open` 后，通过 `browser.setCookies` 设置。 |
-| [对话框](/browser#handle-a-dialog) | `browser.onDialog` 执行后，测试以 `ENGINE_FAILURE` 失败：`Page.handleJavaScriptDialog` 报告没有对话框。 | Lightpanda 在客户端有机会响应之前，自行响应了 `alert`、`confirm`（`false`）和 `prompt`（`null`）。 |
-| [下载](/browser#download-a-file) | `browser.waitForDownload` 超时。 | CDP 不发送下载事件。 |
-| [Iframe](/browser#reach-into-an-iframe) | `frameLocator` 找不到任何内容。 | 默认不加载 iframe。`loadResources: ['iframe']` 会加载它们，之后查询和填充可以工作，但主页面中监听 iframe 所创建元素的监听器不会触发。 |
+| [对话框](/reference/web#ondialog) | `browser.onDialog` 执行后，测试以 `ENGINE_FAILURE` 失败：`Page.handleJavaScriptDialog` 报告没有对话框。 | Lightpanda 在客户端有机会响应之前，自行响应了 `alert`、`confirm`（`false`）和 `prompt`（`null`）。 |
+| [下载](/reference/web#waitfordownload) | `browser.waitForDownload` 超时。 | CDP 不发送下载事件。 |
+| [Iframe](/reference/web#framelocator) | `frameLocator` 找不到任何内容。 | 默认不加载 iframe。`loadResources: ['iframe']` 会加载它们，之后查询和填充可以工作，但主页面中监听 iframe 所创建元素的监听器不会触发。 |
 | 拖动：`screen.swipe`、`locator.swipeTo`，以及按住按钮时的 `browser.mouse` 移动 | `ENGINE_FAILURE`，指出 `Input.setInterceptDrags`。 | Playwright 拖动时需要此命令，而 Lightpanda 尚未实现。 |
 | `browser.setViewport` | 页面测量到新尺寸，但 `resize` 监听器始终不运行。 | 没有分发 `resize` 事件。 |
 | [媒体模拟](/reference/web#media-emulation)：`colorScheme`、`reducedMotion`、`browser.emulateMedia` | 页面始终报告 `light` 和完整动画。 | `Emulation.setEmulatedMedia` 不会改变 `matchMedia` 的返回值。 |

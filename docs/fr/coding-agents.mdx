@@ -79,7 +79,7 @@ Teams et Enterprise, les plugins locaux nécessitent le réglage administrateur 
 Plugin Imports**, ou qu'un administrateur importe `e2e-inc/e2e` comme marketplace
 d'équipe. Le plugin ajoute les skills
 `e2e`, `create-verification-skill` et `migrate-to-e2e`, mais pas le paquet
-npm. Dans Codex et Cursor, il ajoute aussi le [serveur MCP](/mcp-server) ; dans
+npm. Dans Codex et Cursor, il ajoute aussi le [serveur MCP](/coding-agents#let-the-agent-use-the-app) ; dans
 Claude Code et Grok Build, enregistrez-le dans le projet. Invoquez les deux autres sous le nom du plugin,
 `/e2e:<skill>` dans Claude Code et `$e2e:<skill>` dans Codex, et avec
 `/<skill>` dans Cursor.
@@ -124,7 +124,7 @@ hermes skills install e2e-inc/e2e/e2e
 
 `e2e mcp` donne à l'agent une session en direct sur votre app. Il vérifie ses
 locators sur l'écran avant de les écrire, et vérifie ses propres modifications
-d'UI. `init` enregistre le serveur. Consultez [Serveur MCP](/mcp-server) pour la configuration et
+d'UI. `init` enregistre le serveur. Consultez [Serveur MCP](/coding-agents#let-the-agent-use-the-app) pour la configuration et
 les prompts.
 
 ## Comment un agent écrit et lance un test
@@ -245,7 +245,7 @@ Demandez ensuite `/create-verification-skill` à l'agent.
 - Les deux façons de piloter l'app : une session `e2e mcp` en direct et un test.
 - Les éléments qu'une preuve conserve.
 - Une carte des fonctionnalités avec une charte `e2e explore` pour chaque fonctionnalité, afin qu'un
-  [bug bash](/bug-bash) se déploie à partir de la carte.
+  [bug bash](/explore#bug-bashes) se déploie à partir de la carte.
 
 Le skill généré ne dit que ce qui est vrai pour votre app et renvoie au skill e2e
 pour le reste. Il s'inspire de

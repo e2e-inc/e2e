@@ -6,7 +6,7 @@ description: "@e2e-dev/e2b の e2b() と e2bBrowsers() プロバイダーを使�
 
 `@e2e-dev/e2b` は [E2B](https://e2b.dev) サンドボックスでターゲットを実行します。
 [デバイスプロバイダー](/mobile#hosted-devices)の `e2b()` は Android 16 を、
-`@e2e-dev/e2b/web` の[ブラウザプロバイダー](/browser#hosted-browsers) `e2bBrowsers()` は Chromium を実行します。
+`@e2e-dev/e2b/web` の[ブラウザプロバイダー](/reference/web#hosted-browsers) `e2bBrowsers()` は Chromium を実行します。
 テストを書き換える必要はありません。
 
 ## 認証
@@ -67,7 +67,7 @@ export default {
 
 各ワーカーには専用の Chromium サンドボックスが割り当てられ、ローカル実行と同様に、各試行はその中の新しいブラウザコンテキストを使います。
 `scope: 'attempt'` の場合は、代わりに各試行に新しいサンドボックスが割り当てられます
-（[このスコープの制限](/browser#pick-a-lease-scope)）。
+（[このスコープの制限](/reference/web#pick-a-lease-scope)）。
 
 Web エンジンとともに連携パッケージをインストールします。
 
@@ -161,7 +161,7 @@ export default {
   <Card title="ホスト型デバイス" icon="mobile" href="/mobile#hosted-devices">
     デバイスプロバイダーのリースの仕組みを説明します。
   </Card>
-  <Card title="ホスト型ブラウザ" icon="globe" href="/browser#hosted-browsers">
+  <Card title="ホスト型ブラウザ" icon="globe" href="/reference/web#hosted-browsers">
     ブラウザプロバイダーのリースの仕組みを説明します。
   </Card>
 </CardGroup>

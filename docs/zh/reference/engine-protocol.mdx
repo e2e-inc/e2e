@@ -3,7 +3,7 @@ title: 引擎协议
 description: 在另一个进程、另一台机器上，或使用另一种语言运行引擎。
 ---
 
-引擎协议是以 JSON-RPC 消息形式表达的[引擎契约](/reference/engine)。运行器通过它驱动所有引擎。要在另一个进程、另一台机器上，或使用另一种语言运行引擎，请参阅[引擎服务器](/engine-servers)。
+引擎协议是以 JSON-RPC 消息形式表达的[引擎契约](/reference/engine)。运行器通过它驱动所有引擎。要在另一个进程、另一台机器上，或使用另一种语言运行引擎，请参阅[引擎服务器](/reference/engine-protocol#engine-servers)。
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -65,7 +65,7 @@ export interface ConnectEngineOptions {
 
 句柄在测试执行框架调用引擎的位置建立连接。在运行器中，每个测试目标的一个连接从 `prepare` 持续到 `finish`，并且只有当服务器支持 `lifecycle/prepare` 或 `lifecycle/finish` 时才会打开。每个工作进程中的一个连接从 `init` 持续到 `dispose`。`e2e doctor` 为每个测试目标打开一个 `doctor` 连接，仅用于 `lifecycle/doctor`，之后关闭。传输层可以像 `spawnTransport` 一样为其启动服务器，但不得配置机器、租用设备或安装应用。收到 doctor 信号后，服务器有 5 秒时间响应，之后连接会关闭。在 `init`..`dispose` 之外调用操作会以 `INVALID_STATE` 失败。从未运行 `init` 的工作进程没有连接，因此服务器不会收到它的 `lifecycle/dispose`。两个连接是否共享状态由服务器决定：派生的服务器为每个连接创建一个进程，而回环或套接字服务器可以通过同一个引擎处理所有连接。
 
-使用 `resolveLocators` 时，每次 `locate` 都会观察并通过 [`resolveExpression`](/reference/engine#resolveexpression) 解析表达式。`fixtures`、`validateApp`、`secrets` 和 `session` 钩子在客户端运行；`session` 钩子会替换服务器的同名方法。参阅[将主机工作保留在客户端](/engine-servers#keep-host-work-on-the-client)。
+使用 `resolveLocators` 时，每次 `locate` 都会观察并通过 [`resolveExpression`](/reference/engine#resolveexpression) 解析表达式。`fixtures`、`validateApp`、`secrets` 和 `session` 钩子在客户端运行；`session` 钩子会替换服务器的同名方法。参阅[将主机工作保留在客户端](/reference/engine-protocol#keep-host-work-on-the-client)。
 
 <Warning>
 `lifecycle/prepare`、`lifecycle/init`、`lifecycle/finish` 和 `lifecycle/doctor` 会携带本次运行的环境，包括模型密钥和 `E2E_SECRET_*` 值，而 `attempt/resolveSecret` 会以明文响应。只连接你信任的服务器：`socketTransport` 不会加密。
@@ -87,7 +87,7 @@ export function serveEngine(
 ): Promise<void>;
 ```
 
-服务器自身的日志应写入 stderr：stdout 用于传输协议。参阅[提供 TypeScript 引擎服务](/engine-servers#serve-a-typescript-engine)。
+服务器自身的日志应写入 stderr：stdout 用于传输协议。参阅[提供 TypeScript 引擎服务](/reference/engine-protocol#serve-a-typescript-engine)。
 
 ### `describeEngine`
 
@@ -242,7 +242,7 @@ export interface EngineManifest {
 
 ## 类型
 
-传输层打开一个连接的字节流。参阅[编写传输层](/engine-servers#write-a-transport)。
+传输层打开一个连接的字节流。参阅[编写传输层](/reference/engine-protocol#write-a-transport)。
 
 ```ts
 export interface EngineTransport {
@@ -273,4 +273,4 @@ export interface TransportConnection {
 
 ## 相关内容
 
-[引擎](/engines)比较了构建引擎的不同方式。[`e2e/engine`](/reference/engine) 是每条消息所承载的契约。[引擎服务器](/engine-servers)和[编写引擎](/writing-an-engine)逐步介绍了构建过程。
+[引擎](/engines)比较了构建引擎的不同方式。[`e2e/engine`](/reference/engine) 是每条消息所承载的契约。[引擎服务器](/reference/engine-protocol#engine-servers)和[编写引擎](/writing-an-engine)逐步介绍了构建过程。

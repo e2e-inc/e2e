@@ -81,7 +81,7 @@ runs your suite. The server needs no model.
 }
 ```
 
-See the [MCP server docs](https://e2e.com/docs/mcp-server) for setup and
+See the [MCP server docs](https://e2e.com/docs/coding-agents#let-the-agent-use-the-app) for setup and
 every tool.
 
 ## Packages

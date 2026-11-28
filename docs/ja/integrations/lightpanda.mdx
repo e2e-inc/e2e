@@ -8,7 +8,7 @@ description: "@e2e-dev/lightpanda の lightpanda() ブラウザプロバイダ�
 
 [Lightpanda](https://lightpanda.io) は、Chromium を使わずにゼロから開発されたオープンソースのヘッドレスブラウザです。
 ミリ秒単位で起動し、Chrome より大幅に少ないメモリーで動作し、Chrome DevTools Protocol に対応しています。
-`@e2e-dev/lightpanda` の `lightpanda()` は、その [ブラウザプロバイダー](/browser#hosted-browsers) です。
+`@e2e-dev/lightpanda` の `lightpanda()` は、その [ブラウザプロバイダー](/reference/web#hosted-browsers) です。
 実行開始時に、ワーカースロットごとに専用の `lightpanda serve` を空きポートで起動し、終了時に停止します。
 テストと CI は変更せず、設定内のターゲットの `browser` だけを変えます。
 
@@ -130,7 +130,7 @@ Lightpanda 1.0.4 で e2e testbed のローカルスイートを実行したと�
   その操作である `tap`、`fill`、`check`、`select`、`press`、キーボード入力。
 - テキスト、値、個数、状態をポーリングするアサーション。
 - `browser.route` によるモックと、リクエストの待機。
-- `browser.waitForDownload` による[ダウンロード](/browser#download-a-file)。
+- `browser.waitForDownload` による[ダウンロード](/reference/web#waitfordownload)。
 - テストから呼び出す `browser.setCookies`。
 - [セッション](/authentication)：`test.setup` と `session.save`、テストの `session:`。
 - `app.screenshot` と、失敗時のスクリーンショット。
@@ -150,9 +150,9 @@ Lightpanda 1.0.4 で e2e testbed のローカルスイートを実行したと�
 
 | 機能 | 動作 | 理由 |
 | ------- | ------------ | --- |
-| [ダイアログ](/browser#handle-a-dialog) | `browser.onDialog` が実行された後、`Page.handleJavaScriptDialog` がダイアログなしと報告し、`ENGINE_FAILURE` で失敗します。 | クライアントより先に Lightpanda 自身が `alert`、`confirm`（`false`）、`prompt`（`null`）に応答します。 |
+| [ダイアログ](/reference/web#ondialog) | `browser.onDialog` が実行された後、`Page.handleJavaScriptDialog` がダイアログなしと報告し、`ENGINE_FAILURE` で失敗します。 | クライアントより先に Lightpanda 自身が `alert`、`confirm`（`false`）、`prompt`（`null`）に応答します。 |
 | 非表示のファイル入力を開くボタンからの[ファイルアップロード](/reference/screen#setinputfiles) | ボタンに `setInputFiles` を使うと、操作のタイムアウト後に失敗します。クリックしてもファイル選択ダイアログが開かないためです。入力要素自体への `setInputFiles` は動きます。 | Lightpanda は `Page.setInterceptFileChooserDialog` を受け付けますが、`Page.fileChooserOpened` を送りません。 |
-| [iframe](/browser#reach-into-an-iframe) | `frameLocator` が一致を見つけません。 | デフォルトでは iframe を読み込みません。`loadResources: ['stylesheet', 'iframe']` で読み込めばクエリと入力は動きますが、フレームが作成した要素にホストページが設定したリスナーは発火しません。 |
+| [iframe](/reference/web#framelocator) | `frameLocator` が一致を見つけません。 | デフォルトでは iframe を読み込みません。`loadResources: ['stylesheet', 'iframe']` で読み込めばクエリと入力は動きますが、フレームが作成した要素にホストページが設定したリスナーは発火しません。 |
 | ドラッグ＆ドロップ：`locator.swipeTo`、またはドロップ先に向かう `screen.swipe` の経路 | ポインターは動きますが、何もドロップされず、ドラッグしたノードは元の位置に残ります。 | Lightpanda では、マウス入力で HTML のドラッグがまだ始まりません。 |
 | `browser.setViewport` | ページは新しいサイズを認識しますが、`resize` リスナーは実行されません。 | `resize` イベントが送られません。 |
 | [メディアのエミュレーション](/reference/web#media-emulation)：`colorScheme`、`reducedMotion`、`browser.emulateMedia` | ページは `light` と、動きの低減なしを報告し続けます。 | `Emulation.setEmulatedMedia` が `matchMedia` の応答を変えません。 |

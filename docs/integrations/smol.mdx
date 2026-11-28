@@ -1,13 +1,13 @@
 ---
 title: smol machines browsers
 sidebarTitle: smol machines
-description: Run each web test attempt in its own branch of a warm Chromium microVM on your computer with the smol() browser provider from @e2e-dev/smol.
+description: "Run each e2e web test attempt in its own branch of a warm Chromium microVM on your computer with the smol() browser provider from @e2e-dev/smol."
 "og:image": "https://e2e.com/docs/images/og/integrations/smol.png?v=93b61e0399"
 "twitter:image": "https://e2e.com/docs/images/og/integrations/smol.png?v=93b61e0399"
 ---
 
 `smol()` from `@e2e-dev/smol` is a
-[browser provider](/browser#hosted-browsers) that runs Chromium in
+[browser provider](/reference/web#hosted-browsers) that runs Chromium in
 [smol machines](https://smolmachines.com) microVMs on your computer. Each
 worker slot boots one browser machine. By default, each test attempt runs in
 a copy-on-write branch of it, ready in about a second, so every retry starts
@@ -159,7 +159,7 @@ Set `app.url` to `http://localhost:<port>` and declare no `app.command`.
 
 `scope: 'attempt'`, the default, gives every attempt its own branch of the
 slot's warm browser, with the limits of a
-[per-attempt lease](/browser#hosted-browsers).
+[per-attempt lease](/reference/web#hosted-browsers).
 
 `scope: 'worker'` keeps one machine per worker slot for the run. Each
 attempt gets a new browser context on it, as in a local run, so sessions
@@ -197,7 +197,7 @@ for example `smol machine ls`.
   <Card title="Security" icon="shield-halved" href="/security">
     What runs on your computer, and what can still leak.
   </Card>
-  <Card title="Hosted browsers" icon="globe" href="/browser#hosted-browsers">
+  <Card title="Hosted browsers" icon="globe" href="/reference/web#hosted-browsers">
     How a browser provider leases browsers, and the limits of `'attempt'` scope.
   </Card>
 </CardGroup>

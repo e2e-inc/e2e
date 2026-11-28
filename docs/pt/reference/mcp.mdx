@@ -9,7 +9,7 @@ description: Deixe um agente de código inspecionar o seu app e interagir com el
 seu app, experimentem localizadores, rodem linhas de teste e tirem capturas de
 tela mascaradas enquanto escrevem testes. Ele roda por stdio e usa a engine
 configurada no projeto. Para a configuração e o que pedir ao agente, veja o
-guia [Servidor MCP](/mcp-server).
+guia [Servidor MCP](/coding-agents#let-the-agent-use-the-app).
 
 ```json title=".mcp.json"
 {
@@ -512,7 +512,7 @@ O servidor vem com o `e2e`. O `e2e init` se oferece para registrá-lo em
 `.codex/config.toml` (Codex). Instale as dependências e inicie o cliente MCP
 no diretório do projeto para que o comando use a versão do e2e instalada. O
 init escreve o comando do seu gerenciador de pacotes; veja
-[Servidor MCP](/mcp-server#set-it-up). Manualmente:
+[Servidor MCP](/coding-agents#register-the-server). Manualmente:
 
 <CodeGroup>
 ```bash npm
@@ -540,7 +540,7 @@ args = ["e2e", "mcp"]
 ```
 
 O OpenCode lê o servidor de `mcp` no `opencode.json` do projeto. Veja a aba
-OpenCode em [Servidor MCP](/mcp-server#set-it-up).
+OpenCode em [Servidor MCP](/coding-agents#register-the-server).
 
 O servidor também está listado no
 [MCP Registry](https://registry.modelcontextprotocol.io) como
@@ -798,7 +798,7 @@ Várias sessões podem ficar abertas ao mesmo tempo, até `--max-sessions`, cada
 uma na própria tentativa e com o próprio navegador ou dispositivo. Agentes em
 paralelo, como os subagentes de um agente de código, compartilham um servidor
 assim: cada um abre uma sessão e passa o id dela em todo `tools`, `call` e
-`close_session`. Os [Bug bashes](/bug-bash) usam isso: um subagente de
+`close_session`. Os [Bug bashes](/explore#bug-bashes) usam isso: um subagente de
 verificação que transforma uma reprodução em um teste roteirizado controla a
 própria sessão.
 

@@ -7,7 +7,7 @@ description: Rode cada tentativa de teste web em uma branch própria de uma micr
 ---
 
 `smol()` de `@e2e-dev/smol` é um
-[provedor de navegadores](/browser#hosted-browsers) que roda o Chromium em
+[provedor de navegadores](/reference/web#hosted-browsers) que roda o Chromium em
 microVMs do [smol machines](https://smolmachines.com) no seu computador. Cada
 slot de worker faz o boot de uma máquina de navegador. Por padrão, cada
 tentativa de teste roda em uma branch copy-on-write dessa máquina, pronta em
@@ -162,7 +162,7 @@ Defina `app.url` como `http://localhost:<port>` e não declare
 
 `scope: 'attempt'`, o padrão, dá a cada tentativa a própria branch do
 navegador aquecido do slot, com os limites de uma
-[reserva por tentativa](/browser#hosted-browsers).
+[reserva por tentativa](/reference/web#hosted-browsers).
 
 `scope: 'worker'` mantém uma máquina por slot de worker durante a execução.
 Cada tentativa recebe um novo contexto de navegador nessa máquina, como em
@@ -200,7 +200,7 @@ nomes que começam com `e2e-`. Liste e exclua essas máquinas com a
   <Card title="Segurança" icon="shield-halved" href="/security">
     O que roda no seu computador e o que ainda pode vazar.
   </Card>
-  <Card title="Navegadores hospedados" icon="globe" href="/browser#hosted-browsers">
+  <Card title="Navegadores hospedados" icon="globe" href="/reference/web#hosted-browsers">
     Como um provedor de navegadores reserva navegadores, e os limites do escopo `'attempt'`.
   </Card>
 </CardGroup>

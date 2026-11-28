@@ -78,7 +78,7 @@ web({ browser: 'firefox' }); // default: 'chromium'
 - `'chromium'`、`'firefox'`、`'webkit'` を指定できます。
 - `BrowserProvider` を渡すと、代わりにホスト型ブラウザをリースします。実行中のワーカースロットごと、または試行ごとに 1 つです（[`WebOptions`](#weboptions)）。Chromium 自体でも、[Lightpanda](/integrations/lightpanda) や [Moli](/integrations/moli) のような別の CDP サーバーでも、エンジンは chromium として CDP 経由で操作します。
 - `scope: 'attempt'` のプロバイダーは永続コンテキストを使います。[CDP 接続の復旧](#recovering-a-cdp-transport)に記載した制限が適用されます。
-- [ホスト型ブラウザ](/browser#hosted-browsers)に `BrowserProvider` の契約と実装例があります。
+- [ホスト型ブラウザ](/reference/web#hosted-browsers)に `BrowserProvider` の契約と実装例があります。
 
 | エラー | 発生条件 |
 | --- | --- |
@@ -485,7 +485,7 @@ const conditions = browser.locator(
 | `INVALID_LOCATOR` | 空のセレクター、または最後の部分より前の `*` キャプチャ（`*css=article >> text=Hello`）。 |
 
 <Note>
-すべての `screen` クエリは、スコープとその下にページが作った閉じたシャドウルートを検索します。ロール、名前、テキスト、ラベル、属性の照合には Playwright のルールを使い、各ノードは 1 回だけ取得します。観測ツリーに載る閉じたルート内のコントロールも解決でき、アクションと読み取りを行えます。`locator`、`frameLocator`、`filter({ hasText })` は Playwright と同じ範囲だけを検索し、閉じたルートには入りません。詳細は[ブラウザガイド](/browser#shadow-dom)を参照してください。
+すべての `screen` クエリは、スコープとその下にページが作った閉じたシャドウルートを検索します。ロール、名前、テキスト、ラベル、属性の照合には Playwright のルールを使い、各ノードは 1 回だけ取得します。観測ツリーに載る閉じたルート内のコントロールも解決でき、アクションと読み取りを行えます。`locator`、`frameLocator`、`filter({ hasText })` は Playwright と同じ範囲だけを検索し、閉じたルートには入りません。詳細は[ブラウザガイド](/reference/web#shadow-dom)を参照してください。
 </Note>
 
 #### `frameLocator`
@@ -497,7 +497,7 @@ const payment = browser.frameLocator('#payment-frame');
 await payment.getByLabel('Card number').fill('4242424242424242');
 ```
 
-`FrameScreen` を返します。これは、クエリがフレーム内の要素を返す `Screen` です。フレームの `locator` は、コントロールにアクセシブルな名前、ラベル、プレースホルダー、テスト ID がない場合にだけ使ってください。該当する状況は[ブラウザガイド](/browser#reach-into-an-iframe)で説明しています。
+`FrameScreen` を返します。これは、クエリがフレーム内の要素を返す `Screen` です。フレームの `locator` は、コントロールにアクセシブルな名前、ラベル、プレースホルダー、テスト ID がない場合にだけ使ってください。該当する状況は[ブラウザガイド](/reference/web#framelocator)で説明しています。
 
 ```ts
 export interface FrameScreen extends Screen {
@@ -869,7 +869,7 @@ const file = await browser.waitForDownload(() =>
 
 - ファイルを `download` アーティファクトとして登録し、相対 `path`、ランナー側の `absolutePath`、`suggestedFilename` を返します。
 - ホスト型ブラウザの場合も、ファイル API で内容を調べるには `absolutePath` を使います。
-- ホスト型ブラウザでは、プロバイダーの [`downloads`](/browser#downloads-on-the-provider) を通してファイルを取得します。
+- ホスト型ブラウザでは、プロバイダーの [`downloads`](/reference/web#downloads-on-the-provider) を通してファイルを取得します。
 - 待機時間には、トリガー自体の実行時間も含みます。
 
 | エラー | 発生条件 |
@@ -1282,4 +1282,4 @@ export type JsonValue =
 
 ## 関連項目
 
-[ブラウザガイド](/browser)では、これらのメンバーを使う実践例と[ホスト型ブラウザ](/browser#hosted-browsers)を説明しています。プラットフォーム共通の操作は [`app`](/reference/app) フィクスチャにあります。
+[ブラウザガイド](/reference/web)では、これらのメンバーを使う実践例と[ホスト型ブラウザ](/reference/web#hosted-browsers)を説明しています。プラットフォーム共通の操作は [`app`](/reference/app) フィクスチャにあります。

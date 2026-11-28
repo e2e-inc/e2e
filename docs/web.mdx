@@ -1,12 +1,16 @@
 ---
 title: Web
-description: Point the web engine at your app or let the runner start it, and run a suite at several viewport sizes.
+description: "Test a web app in Chromium, Firefox, or WebKit with @e2e-dev/web, pointed at your URL or at a dev server the runner starts, at several viewport sizes."
 "og:image": "https://e2e.com/docs/images/og/web.png?v=e860636537"
 "twitter:image": "https://e2e.com/docs/images/og/web.png?v=e860636537"
+keywords: [browser, Chromium, Firefox, WebKit, Safari]
 ---
 
-`@e2e-dev/web` runs tests in a browser against your app's URL. For routes,
-cookies, dialogs, and downloads, see [Working with the browser](/browser).
+`@e2e-dev/web` runs tests in a browser against your app's URL. For
+[routes](/reference/web#route), [cookies](/reference/web#setcookies),
+[dialogs](/reference/web#ondialog), and
+[downloads](/reference/web#waitfordownload), see the
+[web engine reference](/reference/web).
 
 ## Starting your app
 
@@ -57,7 +61,7 @@ The command runs directly without a shell (`executable` is resolved from
 
 | Option | Purpose |
 | --- | --- |
-| `reuseExisting: true` | Reuse a server that's already running (for example, one started by an [MCP session](/mcp-server#run-tests-next-to-a-session)). Ignored in CI, where an already-running server fails the run. |
+| `reuseExisting: true` | Reuse a server that's already running (for example, one started by an [MCP session](/reference/mcp#running-tests-beside-a-session)). Ignored in CI, where an already-running server fails the run. |
 | `log` | Save the app's stdout and stderr to a project-relative file. If the server fails to start or crashes mid-run, e2e prints the relevant lines from this log (`env` and `inheritEnv` values of 4+ characters are redacted in the quote). The log file itself isn't redacted. |
 | `env` | Environment variables for the app, or a function that returns them from the config's [services](/services). |
 | `inheritEnv` | Host variables to pass through when set, by name or prefix: `['DATABASE_URL', 'STRIPE_*']`. `env` wins over them. |
@@ -274,7 +278,7 @@ A narrow viewport tests responsive layout only. The browser is still a
 desktop browser: scale factor 1, desktop pointer, and its usual user agent.
 It doesn't emulate touch. To test on a simulator or emulator, use the
 [mobile engine](/mobile). For dark mode and reduced motion, see
-[Emulate dark mode and reduced motion](/browser#emulate-dark-mode-and-reduced-motion).
+[media emulation](/reference/web#media-emulation).
 
 A video keeps the size the page had when recording started. Set
 `web({ screencast: { size } })` for one fixed size. A browser provider that
@@ -308,10 +312,10 @@ the app use the clipboard, grant it on the target:
 ## Next
 
 <CardGroup cols={2}>
-  <Card title="Working with the browser" icon="globe" href="/browser">
-    Mock routes, set cookies, handle dialogs, and download files.
-  </Card>
   <Card title="Web engine reference" icon="masks-theater" href="/reference/web">
-    Every `web()` option and every `browser` method.
+    Every `web()` option and every `browser` method: routes, cookies, dialogs, and downloads.
+  </Card>
+  <Card title="Hosted browsers" icon="globe" href="/reference/web#hosted-browsers">
+    Lease browsers from a service instead of launching them locally.
   </Card>
 </CardGroup>
