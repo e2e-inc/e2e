@@ -1262,6 +1262,10 @@ export class DesktopSurface {
     const focused = screen === undefined ? undefined : [...screen.bindings.values()].find((binding) => binding.ref !== undefined && binding.states?.focused === true);
     // A read that ran out of time may stop short of the focused field: no proof that none has focus.
     if (focused === undefined && screen?.cutShort === true) throw partialRead('which field has keyboard focus');
+    // A read cut at its depth limit is cut the same way every time: the focused field may be below it.
+    if (focused === undefined && screen?.truncated === true) {
+      throw notActionable(`no field read has keyboard focus, and the window is deeper than the ${this.options.maxDepth} levels a snapshot reads, which desktop({ maxDepth }) raises, so the focused field may be below them`);
+    }
     if (focused === undefined) throw notActionable('no field has keyboard focus; tap or focus the field first');
     // Text goes only into a control that takes it; a list or button with focus would take the select-all and delete as commands.
     if (!focused.actions.includes('TypeText')) {
