@@ -17,6 +17,7 @@ import { compileGlob, compileGlobList, GLOB_SYNTAX, literalPrefix, matchesGlob, 
 import type { RunOptions, RunOutcome } from '../run/runner.ts';
 import { Keyboard, type Keypress } from './keyboard.ts';
 import type { SignalLadder } from './signals.ts';
+import { compileTitlePattern, titlePatternText } from './title-pattern.ts';
 
 /**
  * What asks for a run: the terminal names it in the banner above the run.
@@ -423,7 +424,7 @@ export function bannerText(pc: ReturnType<typeof picocolors.createColors>, trigg
           : 'start';
   const applied = [
     ...(filters.file === undefined ? [] : [`files: ${filters.file}`]),
-    ...(filters.title === undefined ? [] : [`title: ${filters.title.source}`]),
+    ...(filters.title === undefined ? [] : [`title: ${titlePatternText(filters.title)}`]),
   ];
   const filter = applied.length === 0 ? '' : pc.dim(` (${applied.join(', ')})`);
   return `${pc.inverse(pc.bold(' RERUN '))} ${why}${filter} ${pc.dim(`x${count}`)}\n\n`;
@@ -689,7 +690,7 @@ async function promptFile(filters: WatchFilters, output: Writable, signal: Abort
   return { ...filters, file: value === '' ? undefined : value };
 }
 
-/** `t`: the title pattern the next runs select with; empty clears it. Answers nothing when cancelled or invalid. */
+/** `t`: the title pattern the next runs select with, read as `--grep` reads one; empty clears it. Answers nothing when cancelled or invalid. */
 async function promptTitle(filters: WatchFilters, output: Writable, signal: AbortSignal): Promise<WatchFilters | undefined> {
   const answer = await clack.text({
     output,
@@ -697,12 +698,12 @@ async function promptTitle(filters: WatchFilters, output: Writable, signal: Abor
     message: 'Filter by a test name regex pattern (empty clears the filter)',
     placeholder: 'checkout',
     defaultValue: '',
-    initialValue: filters.title?.source ?? '',
-    validate: (value) => invalidPattern(value ?? ''),
+    initialValue: filters.title === undefined ? '' : titlePatternText(filters.title),
+    validate: (value) => invalidPattern((value ?? '').trim()),
   });
   if (clack.isCancel(answer)) return undefined;
   const value = answer.trim();
-  return { ...filters, title: value === '' ? undefined : new RegExp(value) };
+  return { ...filters, title: value === '' ? undefined : compileTitlePattern(value) };
 }
 
 /**
@@ -733,10 +734,11 @@ function invalidGlob(value: string): string | undefined {
   }
 }
 
-/** Why `source` is not a regular expression, or nothing when it is. */
-function invalidPattern(source: string): string | undefined {
+/** Why `value` is not a title pattern `--grep` would take, or nothing when it is one or is empty, which clears the filter. */
+function invalidPattern(value: string): string | undefined {
+  if (value === '') return undefined;
   try {
-    RegExp(source);
+    compileTitlePattern(value);
     return undefined;
   } catch (cause) {
     return cause instanceof Error ? cause.message : String(cause);
