@@ -93,6 +93,37 @@ call `app.open()` at the start of each test. Sessions last one run, are
 encrypted on disk with a key held only in memory, and are deleted at
 cleanup. See [Sessions](/reference/security#sessions).
 
+### On a device
+
+On a `mobile()` target a session is the app's data directory plus the
+app's own keychain items (iOS) or Keystore keys (Android), so a saved
+sign-in restores on any simulator or emulator in the run. The app restarts
+on save and on restore. A restored session stays on the device after the
+test: a later test without `session` on the same device starts signed in
+unless it calls `app.clearState()`, which leaves the iOS keychain alone.
+
+| Device | Sessions |
+| --- | --- |
+| Local iOS simulator | Yes. Restoring a session saved on another simulator clears the other apps' keychain items on that simulator |
+| Local Android emulator, image without Google Play | Yes |
+| Local Android emulator, Google Play image | Debuggable builds only, without Keystore keys: an app that encrypts its storage with one starts signed out |
+| Physical iPhone or iPad | No: `UNSUPPORTED_CAPABILITY` |
+| Device provider | No: collection error |
+
+What a device session does not hold:
+
+| Not saved | Use instead |
+| --- | --- |
+| iOS app group containers and shared keychain access groups | Sign in per test |
+| Android accounts in `AccountManager`, device-protected storage, files on shared storage | Sign in per test |
+| Keystore keys bound to the lock screen or to biometrics | Sign in per test |
+| What the app has not written yet. An Android WebView writes its cookies up to 30 seconds late | Call `CookieManager.getInstance().flush()` after sign-in, or save later |
+| App data over 256 MB | `UNSUPPORTED_CAPABILITY` on save |
+
+On iOS, a save or restore within 10 seconds of the previous one waits out
+the rest: the simulator's preferences service restarts each time, and the
+system starts it at most once in 10 seconds.
+
 ## Credentials
 
 Declare test accounts in your config and read passwords from the
