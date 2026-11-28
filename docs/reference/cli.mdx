@@ -260,9 +260,12 @@ bunx e2e init --yes --ci gitlab
   existing one the way `e2e run` does, after you confirm the changes and
   after the install. When an existing config still doesn't load, `init` says
   why and falls back to `package.json`: with only the web engine, one web job
-  runs every target; with the mobile engine, there's no pipeline.
-- The web job runs every target that isn't iOS or Android, HTTP tests
-  included, and all of them when the config has no mobile target.
+  runs every target; with the mobile or the Electron engine, there's no
+  pipeline.
+- The web job runs every target that isn't iOS, Android, or Electron, HTTP
+  tests included, and all of them when the config has none of those.
+- An Electron target gets no job, since it needs a display, and `init` says
+  so. See [Run in CI on Linux](/electron#run-in-ci-on-linux).
 - The mobile jobs build the app. An Expo app builds with `expo run:ios` and
   `expo prebuild` and Gradle. A bare React Native app builds its
   `ios/*.xcworkspace` with `xcodebuild` (through Bundler with a `Gemfile`)
