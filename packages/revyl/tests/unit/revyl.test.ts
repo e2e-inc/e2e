@@ -1,13 +1,17 @@
 /**
- * `revyl()` against a stubbed `@e2e-dev/mobile/lease`: the options it
- * refuses, and the selectors, credentials, and plugin home it leases with.
- * The lease lifecycle is `@e2e-dev/mobile`'s, tested there.
+ * `revyl()` against a stubbed `@e2e-dev/mobile/lease` and a stubbed Revyl
+ * API: the options it refuses, the device catalog it checks, the selectors,
+ * credentials, and plugin home it leases with, and the worker's recording
+ * it records an attempt with. The lease lifecycle is `@e2e-dev/mobile`'s,
+ * tested there.
  */
 
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DeviceLease, DeviceReleaseContext, DeviceRequest } from '@e2e-dev/mobile';
 import type { AgentDeviceLeaseOptions, AgentDeviceLeaseRequest } from '@e2e-dev/mobile/lease';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { revyl, type RevylOptions } from '../../src/index.ts';
 
 const mocks = vi.hoisted(() => ({
@@ -25,12 +29,45 @@ vi.mock('@e2e-dev/mobile/lease', () => ({
   },
 }));
 
+// The session id the plugin starts a lease's device under; the plugin ships no types.
+const { revylSessionIdForLease } = (await import(import.meta.resolve('@agent-device/revyl'))) as { revylSessionIdForLease: (leaseId: string) => string };
+
 const ROOT = '/project';
 const env = { REVYL_API_KEY: 'revyl-key', PATH: '/bin' };
 const options: RevylOptions = { app: 'https://builds.example.com/app.apk', device: 'Pixel 7' };
 
+const CATALOG = {
+  platforms: {
+    android: { available_models: ['Pixel 7', 'Pixel Tablet'], compatible_runtimes: { 'Pixel 7': ['Android 14'], 'Pixel Tablet': ['Android 14'] } },
+    ios: { available_models: ['iPhone 17 Pro Max', 'iPhone 16'], compatible_runtimes: { 'iPhone 17 Pro Max': ['iOS 27.0', 'iOS 26.5'], 'iPhone 16': ['iOS 27.0'] } },
+  },
+};
+
+interface Call {
+  readonly method: string;
+  readonly url: string;
+  readonly body: unknown;
+  readonly headers: Record<string, string>;
+}
+
+let calls: Call[] = [];
+let routes: Record<string, (call: Call) => Response> = {};
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
 beforeEach(() => {
   vi.clearAllMocks();
+  calls = [];
+  routes = { 'GET /api/v1/execution/device-targets': () => json(CATALOG) };
+  vi.stubGlobal('fetch', async (input: string | URL, init: RequestInit = {}) => {
+    const url = String(input);
+    const call: Call = { method: init.method ?? 'GET', url, body: init.body === undefined ? undefined : JSON.parse(String(init.body)), headers: init.headers as Record<string, string> };
+    calls.push(call);
+    const pathname = new URL(url).pathname;
+    const route = Object.entries(routes).find(([key]) => `${call.method} ${pathname}`.startsWith(key));
+    if (route === undefined) throw new Error(`no route for ${call.method} ${pathname}`);
+    return route[1](call);
+  });
   let leases = 0;
   mocks.acquire.mockImplementation(async (_request: DeviceRequest, { selectors }: AgentDeviceLeaseRequest): Promise<DeviceLease> => ({ id: `lease-${++leases}`, client: { ...selectors } }));
 });
@@ -138,4 +175,71 @@ describe('revyl()', () => {
       );
     },
   );
+  describe('device check', () => {
+    it("refuses a model Revyl does not list for the platform, naming the ones it does, before a device is allocated", async () => {
+      await expect(revyl({ ...options, device: 'iPhone 16 Pro Max' }).acquire(request({ platform: 'ios' }))).rejects.toThrow(
+        'Revyl has no ios device "iPhone 16 Pro Max"; set `device` to one of: iPhone 17 Pro Max, iPhone 16',
+      );
+      expect(mocks.acquire).not.toHaveBeenCalled();
+      expect(calls[0]).toMatchObject({ method: 'GET', url: 'https://backend.revyl.ai/api/v1/execution/device-targets' });
+      expect(calls[0]!.headers).toMatchObject({ Authorization: 'Bearer revyl-key' });
+    });
+
+    it('refuses an OS version Revyl does not run the model on, naming the ones it does', async () => {
+      await expect(revyl({ ...options, device: 'iPhone 16', osVersion: 'iOS 18.5' }).acquire(request({ platform: 'ios' }))).rejects.toThrow(
+        'Revyl runs "iPhone 16" on iOS 27.0, not "iOS 18.5"; set `osVersion` to one of those, or leave it out for Revyl\'s default',
+      );
+      expect(mocks.acquire).not.toHaveBeenCalled();
+    });
+
+    it("asks the run's REVYL_API_URL, and leaves the check to the allocation when Revyl does not answer it", async () => {
+      routes['GET /api/v1/execution/device-targets'] = () => json({ detail: 'down' }, 503);
+      await revyl(options).acquire(request({ env: { ...env, REVYL_API_URL: 'https://backend-staging.revyl.ai' } }));
+      expect(calls[0]!.url).toBe('https://backend-staging.revyl.ai/api/v1/execution/device-targets');
+      expect(mocks.acquire).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('record', () => {
+    const lease: DeviceLease = { id: 'lease-1' };
+    const sessionId = revylSessionIdForLease('lease-1');
+    const recordContext = { runId: 'run-1', targetName: 'android', attemptId: 'attempt-1', env, signal: new AbortController().signal };
+    let dir: string;
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'revyl-record-'));
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = () => json({ session_id: sessionId, workflow_run_id: 'run-9', status: 'running' });
+      routes['POST /api/v1/execution/device-proxy/run-9/start_screen_recording'] = () => json({ success: true, recording_id: 'rec-1' });
+      routes['POST /api/v1/execution/device-proxy/run-9/stop_screen_recording'] = () => new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]), { headers: { 'content-type': 'video/mp4' } });
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    it("records with the worker's screen recording of the session the plugin started for the lease, and writes the MP4 it stops with", async () => {
+      const recording = await revyl(options).record!(lease, recordContext);
+      expect(Date.parse(recording.startedAt)).not.toBeNaN();
+      expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+        `GET /api/v1/execution/device-sessions/${sessionId}`,
+        'POST /api/v1/execution/device-proxy/run-9/start_screen_recording',
+      ]);
+
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual({ file: 'recording.mp4' });
+      expect(calls.at(-1)!.body).toEqual({ recording_id: 'rec-1' });
+      expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+    });
+
+    it('fails the start when the lease has no running device, and a refused start or stop with the reason the worker gives', async () => {
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = () => json({ session_id: sessionId, status: 'completed' });
+      await expect(revyl(options).record!(lease, recordContext)).rejects.toThrow(`Revyl reports no running device for session ${sessionId}`);
+
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = () => json({ session_id: sessionId, workflow_run_id: 'run-9' });
+      routes['POST /api/v1/execution/device-proxy/run-9/start_screen_recording'] = () => json({ success: false, error: 'already recording' });
+      await expect(revyl(options).record!(lease, recordContext)).rejects.toThrow('Revyl refused start_screen_recording: already recording');
+
+      routes['POST /api/v1/execution/device-proxy/run-9/start_screen_recording'] = () => json({ success: true, recording_id: 'rec-1' });
+      routes['POST /api/v1/execution/device-proxy/run-9/stop_screen_recording'] = () => json({ success: false, error: 'no such recording' });
+      const recording = await revyl(options).record!(lease, recordContext);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).rejects.toThrow('Revyl refused stop_screen_recording: no such recording');
+      expect(calls.filter((call) => call.url.endsWith('/stop_screen_recording'))).toHaveLength(1);
+    });
+  });
 });

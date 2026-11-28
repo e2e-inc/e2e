@@ -470,7 +470,10 @@ async function timed<T>(took: string[], name: string, step: () => Promise<T>): P
  * start runs inside that request's 90 s envelope, which a cold runner on a
  * loaded CI Mac outlasts. A runner that is busy or wedged ends the run
  * here, like a warm-up open that meets one; any other failure is logged and
- * left to the first attempt. True when the runner is up.
+ * left to the first attempt. A runtime that refuses the step as unsupported,
+ * such as a hosted device whose provider runs the runner itself, has no
+ * runner to prepare, so the slot warms on without a log line. True when the
+ * runner is up or there is none to start.
  */
 async function prepareRunner(client: AgentDeviceClient, where: DeviceSelection, info: EnginePrepareInfo, at: string, movable: boolean): Promise<boolean> {
   try {
@@ -478,6 +481,7 @@ async function prepareRunner(client: AgentDeviceClient, where: DeviceSelection, 
     return true;
   } catch (cause) {
     if (info.signal.aborted || isRunnerFailure(cause) || (movable && deviceHolder(cause) !== undefined)) throw cause;
+    if (cause instanceof EngineError && cause.code === 'UNSUPPORTED_CAPABILITY') return true;
     info.log(`${at}: automation runner not prepared (${message(cause)}); the first attempt starts it`);
     return false;
   }

@@ -383,6 +383,16 @@ describe('lifecycle', () => {
     });
     await expect(h.prepare(info)).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
 
+    // A runtime that runs the runner itself (a hosted device's) refuses the step: nothing to log, and the slot opens its app.
+    const hosted = harness({ device: 'iPhone 16e' });
+    hosted.fake.respond('command.prepare', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'This lifecycle operation is unavailable for Revyl.', { reason: 'unsupported-provider-mode' });
+    });
+    const hostedLines: string[] = [];
+    await hosted.prepare({ ...info, log: (line) => hostedLines.push(line) });
+    expect(hosted.fake.methods()).toEqual(['devices.boot', 'command.prepare', 'apps.open']);
+    expect(hostedLines).toEqual(['booting iPhone 16e (1 of 1)', expect.stringMatching(/^iPhone 16e: boot \d+\.\ds, iOS runner \d+\.\ds, open Settings \d+\.\ds$/)]);
+
     // Android has no XCTest runner to start.
     const android = harness({ device: 'emulator-5556', platform: 'android' });
     const androidLines: string[] = [];
