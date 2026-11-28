@@ -264,8 +264,15 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
                 // press on this layout, as typed text does; a layout with no key for it keeps the US one.
                 crate::layout::characters(crate::layout::Layer::Plain).and_then(|table| crate::layout::code_for(lower, &table)).unwrap_or(us)
             };
-            // With Shift the key types its shifted character; one with none on the US layout is left to the app to work out.
-            let typed = if flags.contains(CGEventFlags::CGEventFlagShift) { shifted(lower) } else { Some(lower) };
+            // With Shift the key types its shifted character on this Mac's layout (Shift-3 is £ on a British one), else the US
+            // one; one with neither is left to the app to work out.
+            let typed = if flags.contains(CGEventFlags::CGEventFlagShift) {
+                crate::layout::characters(crate::layout::Layer::Shift)
+                    .and_then(|table| table.iter().find(|(key, _)| *key == code).map(|(_, character)| *character))
+                    .or_else(|| shifted(lower))
+            } else {
+                Some(lower)
+            };
             Key { code, character: typed }
         }
         _ => {
