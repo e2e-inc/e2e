@@ -421,19 +421,23 @@ Playwright.
 Uma suíte que controla um app Electron com o `_electron` do Playwright passa
 para a [engine Electron](/electron), não para a engine web: um alvo com
 `engine: electron()` e `app: { appPath: '.' }`, e `test` de
-`@e2e-dev/electron`. O `e2e init` ainda não tem um preset para Electron, então
-escreva a configuração à mão.
+`@e2e-dev/electron`. `npx e2e init --yes --engine electron` escreve essa
+configuração e um teste de exemplo.
 
 | Playwright | e2e |
 | --- | --- |
 | `_electron.launch({ args })` em uma fixture, `electronApp.firstWindow()` | `await app.open()` em `beforeEach`. Os argumentos que o app lê e as flags do Chromium vão em `app.launchArguments` do alvo, os mesmos para todos os testes |
+| `_electron.launch({ args, env })` com valores de um único teste, um diretório de dados preenchido antes da inicialização | `await electron.launch({ args, env })` e `electron.userDataDir`, veja [argumentos por teste](/electron#launch-with-per-test-arguments). O app não herda o ambiente do runner: nomeie uma variável que ele lê, como `PLAYWRIGHT_TEST`, em `electron({ env })` |
 | `electronApp.evaluate(fn, arg)` | `electron.evaluate(fn, arg)` |
-| `page.evaluate(fn)` no processo de renderização | `electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.executeJavaScript('…'))`. Escolha a janela pelo título: `getAllWindows()` não segue a ordem em que `electron.windows()` lista as janelas |
+| `page.evaluate(fn, arg)` no processo de renderização, `page.reload()`, `page.url()` | `electron.activeWindow().evaluate(fn, arg)`, `reload()`, `url()` |
+| `page.keyboard`, `page.mouse` | `electron.keyboard`, `electron.mouse` |
+| `page.waitForURL(re)`, `page.waitForFunction(fn)` | `await expect.poll(() => window.url()).toMatch(re)`, `await expect.poll(() => window.evaluate(fn)).toBeTruthy()` |
 | `electronApp.waitForEvent('window')` | `await electron.waitForWindow(() => screen.getByRole('button', 'Open').tap())`, que torna ativa a nova janela. Para uma janela que o app abre por conta própria, `await electron.window({ title: 'Settings' })` |
 | `page.on('dialog')` | `await electron.onDialog('accept')`, `'dismiss'` ou um handler |
 | `page.waitForEvent('close')` | `await expect.poll(() => window.isClosed()).toBe(true)` |
 | `expect(page).toHaveTitle(title)` | `await expect.poll(() => window.title()).toBe(title)` |
-| `page.getByRole`, `getByLabel`, `getByTestId`, `locator(css)` | `screen.getByRole`, `getByLabel`, `getByTestId` e `electron.locator(css)`, que aceita só CSS |
+| `page.getByRole`, `getByLabel`, `getByTestId`, `locator(css)` | `screen.getByRole`, `getByLabel`, `getByTestId` e `electron.locator(css)`, que aceita só CSS: sem `text=`, `:has-text()`, `:visible` ou `>>`. Use `.filter({ hasText })` e `.filter({ has })` |
+| Uma consulta por um elemento atrás de um modal aberto | `electron.locator(css)`: a página atrás de um modal é `inert`, e as consultas de `screen` deixam de fora uma subárvore inerte |
 | `page.on('console')`, `electronApp.on('console')` | As mensagens ficam registradas no trace do teste, na seção App log, com as linhas do processo principal prefixadas por `[main]`. Um teste não consegue ler essas mensagens |
 | `electronApp.close()` | Nada: todo teste termina com o app encerrado |
 

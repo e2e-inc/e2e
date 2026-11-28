@@ -116,7 +116,7 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 | `[directory]` | Onde criar a estrutura; o diretório é criado quando não existe. Padrão: o diretório de trabalho. |
 | `-y`, `--yes` | Pula as perguntas. Cada resposta não dada como flag assume o padrão: engine Web, Vercel AI Gateway, skill e configuração do MCP nos dois locais, sem pipeline de CI, sem instalação. |
 | `--example [name]` | Começa a partir de um app de exemplo: `with-vite`, `with-next`, `with-astro`, `with-angular`, `with-expo`, `with-swiftui`, `with-compose`, `with-kotlin-multiplatform`, `with-flutter` ou `with-maui`. O prefixo `with-` é opcional. Sem um nome, lista os exemplos para você escolher. Veja [Começar a partir de um exemplo](#starting-from-an-example). |
-| `--engine <ids>` | As engines de uma configuração nova: `web`, `mobile` ou `none`. Separadas por vírgula ou repetidas; `web,mobile` escreve um alvo para cada uma. Padrão: o assistente pergunta. |
+| `--engine <ids>` | As engines de uma configuração nova: `web`, `mobile`, `electron` ou `none`. Separadas por vírgula ou repetidas; `web,mobile` escreve um alvo para cada uma. Padrão: o assistente pergunta. |
 | `--gateway <id>` | O gateway de modelo para os passos do agente em uma configuração nova: `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok` ou `none`. Padrão: o assistente pergunta. |
 | `--endpoint <url>` | URL base para `--gateway openai-compatible`, e implica esse gateway. HTTPS, ou HTTP em um host de loopback. Padrão: o assistente pergunta; `http://127.0.0.1:11434/v1` com `--yes`. |
 | `--skills <dirs>` | Onde instalar a skill do agente: `.agents/skills`, `.claude/skills` ou `none`. `.agents/skills` também adiciona a linha da skill ao `AGENTS.md`, e `.claude/skills`, ao `CLAUDE.md`; `none` não mexe em nenhum dos dois arquivos. Separados por vírgula ou repetidos. Padrão: o assistente pergunta. |
@@ -153,11 +153,13 @@ para o comando para o qual foi iniciado.
 
 Para um projeto novo, o assistente pergunta:
 
-- **As engines.** Selecione uma, as duas ou nenhuma. **Web** (Playwright, o
+- **As engines.** Selecione quantas quiser, ou nenhuma. **Web** (Playwright, o
   padrão) adiciona `@e2e-dev/web`. **Mobile (iOS/Android)** adiciona
   `@e2e-dev/mobile`, usa iOS por padrão no macOS e Android nos outros
-  sistemas, e abre o app Settings. Sem nenhuma selecionada, nenhuma engine é
-  adicionada, para testes HTTP ou uma engine sua.
+  sistemas, e abre o app Settings. **Electron** adiciona `@e2e-dev/electron`
+  e um alvo cujo `app.appPath` é o diretório do projeto. Sem nenhuma
+  selecionada, nenhuma engine é adicionada, para testes HTTP ou uma engine
+  sua.
 - **Um provedor de modelo ou uma assinatura para os passos do agente:** Vercel
   AI Gateway, OpenRouter, um endpoint compatível com a OpenAI ou local,
   ChatGPT, GitHub Copilot, OpenCode Console, SuperGrok ou **Skip for now**
@@ -196,7 +198,7 @@ que o lockfile possa mudar também na CI.
 | --- | --- |
 | `package.json` | Criado como um pacote ESM privado quando não existe; caso contrário, recebe só as dependências e os scripts que faltam. Os pacotes irmãos (`@e2e-dev/web`, `@e2e-dev/mobile`) recebem o intervalo com circunflexo da versão lançada com a CLI, ou essa versão exata quando a CLI é uma versão de pré-lançamento. Adiciona um script `test:e2e` que roda `e2e run`, a menos que já exista um |
 | `e2e.config.ts` | Um alvo por engine selecionada, com o app na chave `app` do alvo. O Playwright lê `APP_URL` (padrão `http://localhost:3000`) e o usa em `app.url` e mostra `app.command` em um comentário. Em um app Next.js, define `app.url` e `app.command` em vez disso; veja [Apps Next.js](#nextjs-apps). O mobile define `app: { bundleId: 'Settings' }` no iOS e `com.android.settings` no Android, e `workers: 1`. Com um gateway, `agents.default` é `{ model, system }` |
-| `tests/example.e2e.ts` | Só com uma configuração nova. Um teste que abre o app e passa em qualquer página, mais um teste de agente comentado. Uma configuração de dispositivo recebe uma verificação do Settings em vez disso. Com as duas engines, `tests/web.e2e.ts` e `tests/mobile.e2e.ts` no lugar deste arquivo, cada teste com `platforms` definido como a plataforma do próprio alvo, para que o outro alvo pule esse teste |
+| `tests/example.e2e.ts` | Só com uma configuração nova. Um teste que abre o app e passa em qualquer página, mais um teste de agente comentado. Uma configuração de dispositivo recebe uma verificação do Settings em vez disso. Com várias engines, um arquivo por engine no lugar deste, como `tests/web.e2e.ts` e `tests/electron.e2e.ts`, cada teste com `platforms` definido como a plataforma do próprio alvo, para que o outro alvo pule esse teste |
 | `.gitignore` | Acrescenta `node_modules/`, `.e2e/results/`, `.e2e/cache/`, `.e2e/sessions/`, `.e2e/report.json`, `.e2e/ai-trace.json`, `.e2e/timings.json`, `.e2e/junit.xml`, `.e2e/summary.md`, `.e2e/ctrf.json`, `.e2e/logs/` e `.e2e/videos/`. Fazer commit do cache é opcional; veja [faça commit do cache de replay](/cache#commit-the-replay-cache) |
 | `.agents/skills/e2e/`, `.claude/skills/e2e/` | `SKILL.md` e um `references/<topic>.md` por tópico do `e2e guide`. Com os dois escolhidos, o diretório do Claude Code é um link simbólico relativo (`../../.agents/skills/e2e`) para a cópia, o layout que o `npx skills add` produz |
 | `AGENTS.md`, `CLAUDE.md` | Acrescenta `End-to-end tests use e2e; read .agents/skills/e2e/SKILL.md before writing or running one.` ao `AGENTS.md` quando a skill está em `.agents/skills/`, e a mesma linha com `.claude/skills/e2e/SKILL.md` ao `CLAUDE.md` quando ela está em `.claude/skills/`. Criados quando não existem; o resto de um arquivo existente fica inalterado. Nenhum dos dois com `--skills none` |
@@ -265,9 +267,11 @@ bunx e2e init --yes --ci gitlab
   confirma as mudanças e depois da instalação. Quando uma configuração
   existente ainda assim não carrega, o `init` diz por quê e recorre ao
   `package.json`: só com a engine web, um job web roda todos os alvos; com a
-  engine mobile, não há pipeline.
-- O job web roda todo alvo que não é iOS nem Android, incluindo testes HTTP,
-  e todos os alvos quando a configuração não tem alvo mobile.
+  engine mobile ou a Electron, não há pipeline.
+- O job web roda todo alvo que não é iOS, Android nem Electron, incluindo
+  testes HTTP, e todos os alvos quando a configuração não tem nenhum desses.
+- Um alvo Electron não recebe job, já que precisa de um servidor gráfico, e o
+  `init` avisa isso. Veja [Rode na CI no Linux](/electron#run-in-ci-on-linux).
 - Os jobs mobile fazem o build do app. Um app Expo faz o build com
   `expo run:ios` e com `expo prebuild` e Gradle. Um app React Native puro faz
   o build do `ios/*.xcworkspace` com `xcodebuild` (pelo Bundler, quando há um
@@ -1095,7 +1099,7 @@ bunx e2e explore 'Hunt for broken forms and dead links' --agent thorough --video
 | `[goal]` | O que explorar, em uma frase. Padrão: `Explore the app and find bugs`. |
 | `--config <path>` | Caminho explícito da configuração, com os erros de `run`. Padrão: a configuração descoberta. Quando nenhuma configuração é encontrada e tanto o stdin quanto o stdout são um terminal, o assistente do [`e2e init`](#e2e-init) roda primeiro no diretório de trabalho. A exploração vem em seguida quando não resta nada a fazer à mão: dependências instaladas, um modelo com a chave definida ou o login feito, e um alvo web (ele nomeia a URL que explora). Caso contrário, o init termina com os passos que faltam e depois o comando `e2e explore` como foi digitado. Sem um terminal, a falta de configuração é `CONFIG_NOT_FOUND`. |
 | `--target <id>` | O único alvo a explorar. Padrão: o primeiro alvo configurado; com vários alvos e sem a flag, ele explora o primeiro e avisa no stderr. Um nome desconhecido é `UNKNOWN_TARGET`. |
-| `--agent <name>` | O agente configurado com o qual explorar. Padrão: `default`. O modelo, o `system`, as ferramentas e o contexto dele são reutilizados. O agente embutido substitui um `StepExecutor` feito à mão, com um aviso. Uma entrada sem modelo, incluindo a de um executor personalizado, é `MODEL_UNAVAILABLE` antes de qualquer coisa iniciar. Um nome desconhecido é `INVALID_CONFIG`. |
+| `--agent <name>` | O agente configurado com o qual explorar. Padrão: `default`. O modelo, o `system`, as ferramentas e o contexto do agente embutido são reutilizados. Um `StepExecutor` com `extend`, como o do `@e2e-dev/acp`, continua rodando e recebe as regras da exploração e o `report_finding`; o agente embutido substitui um executor que não tem esse método, com um aviso. É `MODEL_UNAVAILABLE`, antes de qualquer coisa iniciar, quando o agente embutido não tem modelo, ou quando um executor mantido não tem `answer` e nem ele nem a entrada dele têm um `judge` ou `model` para planejar os passos. Um nome desconhecido é `INVALID_CONFIG`. |
 | `--session <name>` | Começa com o login feito. O teste de preparação, nos arquivos de teste da configuração, que declara essa sessão roda primeiro. A exploração restaura o que ele salvou, como faz um teste com `{ session }`. Nenhum outro teste roda. Um nome que nenhum teste de preparação declara é `COLLECTION_ERROR`, que nomeia os declarados, antes de qualquer processo do app iniciar. Veja [Comece com o login feito](/explore#start-signed-in). |
 | `--changed-since <ref>` | Explora a mudança desde a base de merge entre a ref e HEAD. O planejador lê as mensagens de commit e o diff commitado e, em um job `pull_request` do GitHub Actions ou em um pipeline de merge request do GitLab, o título e a descrição do pull request. Sem objetivo, o objetivo é `Explore what this change affects and find bugs in it`, e o planejador pode pular uma mudança que nenhum usuário consegue ver; a execução termina `skipped` e passa. Uma ref vazia, uma que começa com `-` ou uma a partir da qual o git não consegue calcular a mudança é `INVALID_CHANGED_SINCE`. O relatório registra a mudança como `run.explore.change`. Veja [Explore a mudança de um pull request](/explore#explore-a-pull-requests-change) e, para o que o modelo lê, [Segurança](/reference/security#mcp-and-explore). |
 | `--max-steps <n>` | No máximo esse número de passos de exploração, um inteiro de 1 a 100. Padrão: `8`. Fora do intervalo, sai com código 2. |

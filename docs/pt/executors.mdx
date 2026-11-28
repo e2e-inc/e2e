@@ -196,8 +196,28 @@ quando o executor declara `vision: true`; caso contrário, a chamada falha com
 `UNSUPPORTED_CAPABILITY`. `screenshot` continua anexando evidências depois do
 seu veredito.
 
-`waitFor` e `extract` continuam usando os julgamentos embutidos. Sem um
-modelo configurado, eles falham com `MODEL_UNAVAILABLE`.
+`waitFor` e `extract` usam os julgamentos embutidos, no `judge` ou no
+`model` do agente. Sem nenhum dos dois configurado, eles recorrem ao
+`answer(question)` opcional do executor: o e2e envia a tela com os dados
+ocultados e a instrução como texto, mais a captura de tela em `images` quando a chamada
+pede `vision`, e verifica o JSON que volta. Sem `answer`, eles falham com
+`MODEL_UNAVAILABLE`.
+
+```ts
+const own: StepExecutor = {
+  name: 'house-brain',
+  runStep,
+  async answer({ system, prompt, signal }) {
+    return { text: await complete(system, prompt, signal) };
+  },
+};
+```
+
+O [`e2e explore`](/explore) roda sobre um executor que tem
+`extend(extension)`, que retorna uma cópia que segue `extension.system` e
+oferece `extension.tools`. `createProjectTools(ctx, tools)` de `e2e/agent`
+roda essas ferramentas dentro da contabilização do passo. Sem `extend`, o
+explore roda o agente embutido no lugar do executor.
 
 ## O veredito
 
@@ -273,13 +293,14 @@ continuam valendo.
 
 A execução oculta, em tudo o que um executor retorna, as
 [chaves de provedor](/reference/security#provider-keys) que encontra no
-ambiente. Quatro funções de `e2e/agent` cobrem o resto:
+ambiente. Cinco funções de `e2e/agent` cobrem o resto:
 
 | Função | Uso |
 | --- | --- |
 | `registerProviderKey(name, value)` | Uma chave com a qual o seu agente faz login e que nenhuma variável listada contém, como uma que ele lê do próprio arquivo de login. Aparece como `<secret:name>` a partir de então. `name` aceita letras, dígitos, `_`, `.` e `-`; um valor com menos de 20 caracteres, com mais de 8.192 ou que não é uma string fica como está. |
 | `registerProviderKeys(env)` | As variáveis listadas de um ambiente com o qual você inicia um agente, quando esse ambiente não é o da própria execução. |
 | `redactSecrets(text)` | Texto que você corta ou guarda antes de retorná-lo. Oculte primeiro: metade de uma chave deixa de corresponder. |
+| `redactProviderKeys(text)` | Texto que a execução já ocultou, como uma pergunta do `answer`, logo antes de sair: só as chaves de provedor conhecidas no momento. |
 | `redactStepText(ctx, text)` | Texto que você envia ao seu agente e que a execução não montou, como um prompt com o seu próprio `system`: os segredos do passo e as chaves de provedor conhecidas no momento, e nenhum valor que um teste anterior descobriu. Chame-a logo antes de o texto sair. |
 
 Um modelo criado com uma chave no código também pode registrá-la em

@@ -124,7 +124,7 @@ nome como `other`.
 | `result` | `scaffolded`, `already-initialized`, `cancelled`, `install-failed`, `not-interactive`, `invalid-project` ou `example-failed` |
 | `yes`, `existing_config` | Se `--yes` foi passada, e se já existia uma configuração, caso em que nada foi perguntado sobre engine ou gateway |
 | `example` | O nome passado em `--example` (`with-vite`, `with-expo`, ...), `null` sem a flag |
-| `engine`, `gateway` | Os ids das engines e do gateway de modelo escolhidos para uma nova configuração (`web`, `mobile`, `web,mobile`, `none`; `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok`, `none`), `null` quando não houve pergunta. Nunca o endpoint digitado para um gateway compatível com OpenAI |
+| `engine`, `gateway` | Os ids das engines e do gateway de modelo escolhidos para uma nova configuração (`web`, `mobile`, `electron`, uma lista separada por vírgulas como `web,mobile`, `none`; `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok`, `none`), `null` quando não houve pergunta. Nunca o endpoint digitado para um gateway compatível com OpenAI |
 | `skill`, `mcp`, `install` | Se a skill do agente, o registro do MCP e a instalação das dependências foram escolhidos |
 | `ci` | O pipeline de CI escolhido (`github-actions`, `gitlab` ou `none`), `null` quando não houve pergunta |
 
