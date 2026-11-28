@@ -505,7 +505,11 @@ impl Walk {
         if roles::takes_text(role) && ((secure && value_settable) || self.settable(element, "AXSelectedText")) {
             push(&mut out, "TypeText");
         }
-        if (roles::expandable(role) && self.settable(element, "AXExpanded")) || (has("AXPress") && roles::expandable(role)) {
+        // An outline row that can expand says so by a settable AXDisclosing, which a leaf row has but cannot set.
+        if (roles::expandable(role) && self.settable(element, "AXExpanded"))
+            || (has("AXPress") && roles::expandable(role))
+            || (role == "treeitem" && self.settable(element, "AXDisclosing"))
+        {
             push(&mut out, "Expand");
             push(&mut out, "Collapse");
         }

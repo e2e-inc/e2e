@@ -284,7 +284,7 @@ export function projectSnapshot(
     // A mixed checkbox is neither checked nor unchecked: no state, so check() and uncheck() always reach the control.
     if (CHECKABLE_ROLES.has(node.role) && !rawStates.has('indeterminate')) states.checked = rawStates.has('checked') || node.value === '1';
     else if (rawStates.has('checked')) states.checked = true;
-    if (node.role === 'combobox' || node.role === 'disclosure' || node.role === 'menubutton') {
+    if (node.role === 'combobox' || node.role === 'disclosure' || node.role === 'menubutton' || node.role === 'treeitem') {
       if (node.available_actions?.includes('Expand') === true || node.available_actions?.includes('Collapse') === true) states.expanded = rawStates.has('expanded');
     }
     // The driver marks a text field whose value cannot be set `readonly`, and offers SetValue on one whose value can. A combo box takes text only when its value can be set; a pop-up menu takes none, which is not read-only, so it gets no state, as on a device.

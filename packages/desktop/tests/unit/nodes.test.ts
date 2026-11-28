@@ -43,6 +43,22 @@ describe('projectSnapshot', () => {
     expect(bindings.get(signIn.ref.id)).toMatchObject({ ref: '@s1y1hxmo5pexrl:e5', actions: ['Click', 'SetFocus'] });
   });
 
+  it('reads an outline row that can expand as expanded or collapsed, and a leaf row as neither', () => {
+    const row = (name: string, actions: string[], states: string[] = []) => ({ role: 'treeitem', name, available_actions: actions, states });
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: { role: 'window', name: 'W', children: [row('Fruits', ['Click', 'Expand', 'Collapse'], ['expanded']), row('Apple', ['Click']), row('Vegetables', ['Click', 'Expand', 'Collapse'])] },
+      },
+      minter(),
+    );
+    expect(all(root).filter((node) => node.role === 'treeitem').map((node) => [node.name, node.states?.expanded])).toEqual([
+      ['Fruits', true],
+      ['Apple', undefined],
+      ['Vegetables', false],
+    ]);
+  });
+
   it("reads a heading's level from the app, else from its description", () => {
     const { root } = projectSnapshot(
       {
