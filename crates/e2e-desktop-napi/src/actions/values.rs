@@ -235,8 +235,8 @@ pub(super) fn finite(text: &str) -> Result<f64, ()> {
     text.trim().parse::<f64>().ok().filter(|number| number.is_finite()).ok_or(())
 }
 
-/// Refuses a value the control can never take, before anything is sent or scrolled: no settable value and no steps, or a
-/// number outside the range a stepper reports. `set_value` makes the same checks as it writes.
+/// Refuses a value the control can never take, before anything is sent or scrolled: no settable value and no steps, a
+/// stepper that shows no number or a text that names none, or a number outside the range a stepper reports. `set_value` makes the same checks as it writes.
 pub(super) fn takes_value(element: &Element, text: &str) -> Outcome<()> {
     let (_, role) = role_of(element, "set value")?;
     if settable(element, "AXValue", "set value")? {
@@ -246,16 +246,18 @@ pub(super) fn takes_value(element: &Element, text: &str) -> Outcome<()> {
     if !names.iter().any(|name| name == "AXIncrement" || name == "AXDecrement") {
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("the value of this {role} cannot be set")));
     }
+    // A stepper steps only from a number it shows toward a finite one: `set_value` refuses anything else.
+    let (Some(_), Ok(target)) = (shown_number(element.attribute("AXValue"), "set value")?, finite(text)) else {
+        return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("the value of this {role} cannot be set")));
+    };
     let bound = |name: &str| match element.attribute(name) {
         Ok(Value::Number(number)) => Some(number),
         _ => None,
     };
-    match finite(text) {
-        Ok(target) if outside(target, bound("AXMinValue"), bound("AXMaxValue")) => {
-            Err(Failure::refused(codes::ACTION_FAILED, format!("the value is outside the range of this {role}")))
-        }
-        _ => Ok(()),
+    if outside(target, bound("AXMinValue"), bound("AXMaxValue")) {
+        return Err(Failure::refused(codes::ACTION_FAILED, format!("the value is outside the range of this {role}")));
     }
+    Ok(())
 }
 
 pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
