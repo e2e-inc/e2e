@@ -153,7 +153,7 @@ the way a user would.
   run's environment (`INHERITED_ENV` in `src/launch-ownership.ts`): the driver
   launches through `open -n` with exactly that environment, since
   LaunchServices hands the app the environment of the process that asks.
-  `pnpm --filter @e2e-dev/desktop build:native` (needs `rustup`) builds
+  `pnpm --filter @e2e-dev/desktop build:native` (needs `rustup` and `pnpm install`) builds
   `packages/desktop/desktop.<platform>-<arch>.node`, which the loader takes in a
   checkout, and writes `packages/desktop/src/native.ts`: the driver's functions and
   argument objects as NAPI-RS reads them from the crate's `#[napi]` items. That file

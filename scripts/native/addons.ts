@@ -27,7 +27,8 @@ interface AddonSpec {
   /**
    * The TypeScript file a build with `--types` writes the addon's functions
    * and argument objects into, in the package. The package's loader is
-   * typed by it, so a call the Rust code no longer takes fails the typecheck.
+   * typed by it, so a call or an option the Rust code no longer takes fails
+   * the typecheck wherever the package names it in a call.
    */
   readonly types: string;
   /**

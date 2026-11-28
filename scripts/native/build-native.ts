@@ -13,12 +13,12 @@
  * `--types` also writes the addon's TypeScript types (`types` in `addons.ts`)
  * from the crate's `#[napi]` items, the way `napi build --dts` does. The file
  * is committed, and CI fails when a build changes it. Only this flag needs the
- * workspace installed (`@napi-rs/cli`): a release builds without it.
+ * workspace installed (`pnpm install`, for `@napi-rs/cli`): a release builds
+ * without it.
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { findAddon, addonFile, replaceAddon, scriptArgs } from './addons.ts';
@@ -39,27 +39,33 @@ if (target.endsWith('-apple-darwin') && process.platform !== 'darwin') throw new
 const crate = addon.crateDir;
 const run = cargo(crate);
 const env: NodeJS.ProcessEnv = { ...run.env, MACOSX_DEPLOYMENT_TARGET: DEPLOYMENT_TARGET };
-const typeDefs = values.types ? mkdtempSync(path.join(tmpdir(), `${addon.crate}-types-`)) : undefined;
-if (typeDefs !== undefined) {
+// Before cargo runs: a checkout with nothing installed is told so at once, not after the compile.
+const typeGenerator = values.types
+  ? await import('@napi-rs/cli').catch((cause: unknown) => {
+      throw new Error('--types needs the workspace installed: run `pnpm install` first', { cause });
+    })
+  : undefined;
+// Where cargo writes: `CARGO_TARGET_DIR` or a cargo config can move the target directory off the workspace's `target`.
+const metadata = JSON.parse(execFileSync(run.file, [...run.prefix, 'metadata', '--format-version', '1', '--no-deps'], { cwd: crate, encoding: 'utf8', env })) as { target_directory: string };
+// In cargo's own output, which `cargo clean` removes: a build that is stopped leaves nothing anywhere else.
+const typeDefs = path.join(metadata.target_directory, 'napi-types', target);
+if (typeGenerator !== undefined) {
+  rmSync(typeDefs, { recursive: true, force: true });
+  mkdirSync(typeDefs, { recursive: true });
   // napi-derive writes what each `#[napi]` item looks like from TypeScript into this folder while the crate compiles.
   // Cargo would skip a crate it has already built, and leave the folder empty: `napi-build` reruns the crate's build
   // script when the second variable changes, which compiles the crate again.
   env.NAPI_TYPE_DEF_TMP_FOLDER = typeDefs;
   env[`NAPI_FORCE_BUILD_${addon.crate.replaceAll('-', '_').toUpperCase()}`] = String(Date.now());
-  // On exit, so a build that fails leaves no folder behind either.
-  process.on('exit', () => rmSync(typeDefs, { recursive: true, force: true }));
 }
 // A pinned toolchain installed before (another checkout's, or under a `RUSTUP_TOOLCHAIN` override) may lack this
 // target's standard library; adding one already there is a no-op.
 if (run.toolchain !== undefined) execFileSync('rustup', ['target', 'add', '--toolchain', run.toolchain, target], { cwd: crate, stdio: 'inherit', env });
 execFileSync(run.file, [...run.prefix, 'build', '--release', '--locked', '--target', target], { cwd: crate, stdio: 'inherit', env });
-// Where cargo wrote it: `CARGO_TARGET_DIR` or a cargo config can move the target directory off the workspace's `target`.
-const metadata = JSON.parse(execFileSync(run.file, [...run.prefix, 'metadata', '--format-version', '1', '--no-deps'], { cwd: crate, encoding: 'utf8', env })) as { target_directory: string };
 const built = path.join(metadata.target_directory, target, 'release', library(addon.crate, target));
-if (typeDefs !== undefined) {
-  const { generateTypeDef } = await import('@napi-rs/cli');
+if (typeGenerator !== undefined) {
   const header = [`// Written by \`node scripts/native/build-native.ts ${addon.name} --types\` from crates/${addon.crate}. Do not edit.`, ...addon.typeImports, '', ''].join('\n');
-  const { dts, exports } = await generateTypeDef({ typeDefDir: typeDefs, cwd: crate, dtsHeader: header });
+  const { dts, exports } = await typeGenerator.generateTypeDef({ typeDefDir: typeDefs, cwd: crate, dtsHeader: header });
   if (exports.length === 0) throw new Error(`the build of ${addon.crate} wrote no types`);
   writeFileSync(path.join(addon.packageDir, addon.types), dts);
 }

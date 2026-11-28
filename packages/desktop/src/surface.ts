@@ -37,7 +37,7 @@ import {
   type SemanticNode,
   type ViewportPoint,
 } from '@e2e-dev/core/engine';
-import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
+import { call, DriverFailure, loadNativeDriver, translate, type ActOptions, type DesktopDriver, type Envelope, type Launched, type LaunchOptions, type PointerTarget, type PressOptions, type RawWindow } from './driver.ts';
 import { toCombo } from './keys.ts';
 import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
 import { launchArgumentList } from './launch-arguments.ts';
@@ -400,7 +400,7 @@ export class DesktopSurface {
     const inputId = this.requireDriver().inputId();
     const start = (): Promise<Envelope<Launched>> =>
       (started = driver.launch({
-        ...('path' in target ? { path: target.path } : { bundleId: target.bundleId }),
+        ...(('path' in target ? { path: target.path } : { bundleId: target.bundleId }) satisfies Partial<LaunchOptions>),
         arguments: [...FRESH_STATE_ARGUMENTS, ...launchArgumentList(this.app)],
         environment: this.appEnv,
         token,
@@ -1095,7 +1095,7 @@ export class DesktopSurface {
   }
 
   /** One action on a node's ref, a failure left as the driver reported it so a caller can tell what was sent. */
-  private async tryRef(action: string, binding: NodeBinding, operation: OperationContext, extra: { value?: string; direction?: string; pages?: number; physical?: boolean } = {}): Promise<unknown> {
+  private async tryRef(action: string, binding: NodeBinding, operation: OperationContext, extra: Pick<ActOptions, 'value' | 'direction' | 'pages' | 'physical'> = {}): Promise<unknown> {
     const ref = this.refOf(binding, action);
     // Input still to send once the call is given up is never sent: the app may be another's by then, or the step over.
     const inputId = this.requireDriver().inputId();
@@ -1232,7 +1232,13 @@ export class DesktopSurface {
     // As for `tryRef`: pointer input still unsent once the call is given up is never sent.
     const inputId = this.requireDriver().inputId();
     // The driver checks the window again after the move, before the click: a sheet or window that opens meanwhile would take it.
-    const takes = { pid, windowId: target.id, sheet: sheetNow !== undefined, ...(sheetNow === undefined || sheetNow === UNKNOWN_SHEET ? {} : { sheetId: sheetNow }), ...(content ? { content } : {}) };
+    const takes = {
+      pid,
+      windowId: target.id,
+      sheet: sheetNow !== undefined,
+      ...((sheetNow === undefined || sheetNow === UNKNOWN_SHEET ? {} : { sheetId: sheetNow }) satisfies Partial<PointerTarget>),
+      ...((content ? { content } : {}) satisfies Partial<PointerTarget>),
+    };
     await this.input((driver, timeoutMs) => driver.pointer(focused.x + point.x, focused.y + point.y, kind, inputId, timeoutMs, takes), {
       label: kind,
       input: true,
@@ -1317,7 +1323,7 @@ export class DesktopSurface {
     // As for `tryRef`: a key still unsent once the call is given up is never sent.
     const inputId = this.requireDriver().inputId();
     try {
-      await this.input((driver, timeoutMs) => driver.press({ pid, windowId: window, combo, physical, inputId, timeoutMs, ...(focusedRef === undefined ? {} : { focusedRef }) }), {
+      await this.input((driver, timeoutMs) => driver.press({ pid, windowId: window, combo, physical, inputId, timeoutMs, ...((focusedRef === undefined ? {} : { focusedRef }) satisfies Partial<PressOptions>) }), {
         label,
         input: true,
         signal: operation.signal,

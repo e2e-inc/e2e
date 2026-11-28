@@ -32,7 +32,7 @@ import { EngineError } from '@e2e-dev/core/engine';
 import type * as native from './native.ts';
 import type { Rect } from './nodes.ts';
 
-export type { PointerTarget } from './native.ts';
+export type { ActOptions, LaunchOptions, PointerTarget, PressOptions } from './native.ts';
 
 type Native = typeof native;
 
@@ -89,7 +89,9 @@ export interface Launched {
 
 /**
  * What the driver can do: one function per native call, as the Rust code declares them. `native.ts` is written from
- * the crate by `pnpm build:native`, and CI fails when it is behind, so a call or an option the crate no longer takes fails the typecheck here.
+ * the crate by `pnpm build:native`, and CI fails when it is behind, so a call or an option the crate no longer takes
+ * fails the typecheck where it is written in the call. TypeScript does not check an option that reaches a call through
+ * a spread: give that object one of these types (`satisfies Partial<PressOptions>`), as `surface.ts` does.
  */
 export type DesktopDriver = Native & {
   /** The version of the package the driver came from, or `checkout build` for one built into this package's directory. */
