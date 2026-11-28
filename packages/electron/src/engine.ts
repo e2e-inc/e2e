@@ -59,6 +59,8 @@ export function electron(options: ElectronOptions = {}): ElectronEngine {
     perform: (ref, action, operation) => surface.perform(ref, action, operation),
     actions: [...LOCATOR_ACTION_KINDS, 'blur', 'multiTap', 'setInputFilePayloads'],
     tapModifiers: true,
+    // Chromium paints the whole page past the viewport, and the masks with it.
+    fullPageScreenshots: true,
     performAt: (point, action, operation) => surface.performAt(point, action, operation),
     pointerActions: POINTER_ACTION_KINDS,
     keyboard: {
@@ -75,7 +77,7 @@ export function electron(options: ElectronOptions = {}): ElectronEngine {
       closeTab: (index, operation) => surface.closeTab(index, operation),
     },
     artifacts: {
-      screenshot: (label, operation) => surface.screenshot(label, operation),
+      screenshot: (label, operation, screenshotOptions) => surface.screenshot(label, operation, screenshotOptions),
       startVideo: (operation) => surface.startVideo(operation),
       stopVideo: () => surface.stopVideo(),
     },

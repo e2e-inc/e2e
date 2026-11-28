@@ -64,12 +64,13 @@ describe.each(schemas)('%s schema', (name) => {
       expect(validate.errors).toEqual([expect.objectContaining({ instancePath: '/actions', keyword: 'uniqueItems' })]);
     });
 
-    it('rejects the invalid fixture for viewportIntersection without engine/observe, a non-boolean fileApps, and an unknown action kind', () => {
+    it('rejects the invalid fixture for viewportIntersection without engine/observe, a non-boolean fileApps or fullPageScreenshots, and an unknown action kind', () => {
       expect(validate(readJson('fixtures', 'engine-manifest-v1.invalid.json'))).toBe(false);
       expect(validate.errors).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ instancePath: '/methods', keyword: 'contains' }),
           expect.objectContaining({ instancePath: '/fileApps', keyword: 'type' }),
+          expect.objectContaining({ instancePath: '/fullPageScreenshots', keyword: 'type' }),
           expect.objectContaining({ instancePath: '/actions/1', keyword: 'enum' }),
         ]),
       );
@@ -87,6 +88,13 @@ describe.each(schemas)('%s schema', (name) => {
       const manifest = readJson('fixtures', 'engine-manifest-v1.valid.json') as { methods: string[]; selectsDevice: boolean };
       expect(manifest.selectsDevice).toBe(true);
       manifest.methods = manifest.methods.filter((method) => method !== 'lifecycle/prepare');
+      expect(validate(manifest)).toBe(false);
+    });
+
+    it('rejects fullPageScreenshots without artifacts/screenshot', () => {
+      const manifest = readJson('fixtures', 'engine-manifest-v1.valid.json') as { methods: string[]; fullPageScreenshots: boolean };
+      expect(manifest.fullPageScreenshots).toBe(true);
+      manifest.methods = manifest.methods.filter((method) => method !== 'artifacts/screenshot');
       expect(validate(manifest)).toBe(false);
     });
   }

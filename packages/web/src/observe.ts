@@ -42,6 +42,11 @@ export function maskOptions(masks: readonly Locator[]): Partial<{ mask: Locator[
   return masks.length === 0 ? {} : { mask: [...masks], maskColor: MASK_COLOR };
 }
 
+/** How far the page is scrolled, in CSS pixels. */
+function pageScroll(page: Page): Promise<{ x: number; y: number }> {
+  return page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
+}
+
 export interface PixelCapture {
   readonly pixels: ObservationPixels;
   readonly maskedRegionCount: number;
@@ -50,7 +55,8 @@ export interface PixelCapture {
 }
 
 /**
- * Captures masked viewport pixels.
+ * Captures masked viewport pixels, or with `fullPage` the whole page's, with
+ * `scroll` set to how far the page is scrolled.
  *
  * Secure fields are covered before the image leaves the engine and the covered
  * regions are counted, so the runner can prove the image is at least as redacted
@@ -65,6 +71,7 @@ export async function capturePixels(
   page: Page,
   operation: OperationContext,
   viewport: ViewportSize,
+  { fullPage = false }: { readonly fullPage?: boolean } = {},
 ): Promise<PixelCapture> {
   const deadline = Date.now() + operation.timeoutMs;
   const scope = new CaptureScope(deadline, operation.signal);
@@ -73,20 +80,24 @@ export async function capturePixels(
     // A frame that detaches mid-sweep contributes nothing to the count, which can
     // only push the observation toward withholding the image.
     const counts = await scope.read(() => Promise.allSettled(masks.map((mask) => mask.count())));
+    const scroll = fullPage ? await scope.read(() => pageScroll(page)) : undefined;
     // The adopted stylesheet hides the caret where Playwright's own option would write an inline style a hydrating framework flags.
     const image = await scope.read(() => withHiddenCaret(page, () => page.screenshot({
       type: 'png',
       scale: 'css',
       animations: 'disabled',
       caret: 'initial',
+      ...(fullPage ? { fullPage: true } : {}),
       timeout: Math.max(1, Math.min(deadline - Date.now(), PIXEL_CAPTURE_TIMEOUT_MS)),
       ...maskOptions(masks),
     })));
     const data = new Uint8Array(image);
     // The bytes are the authority on their own size. `scale: 'css'` is asked for
-    // precisely so one image pixel is one CSS pixel, but the ratio is measured
-    // rather than assumed: if a capture ever comes back at device scale, reporting
-    // the viewport instead would displace every coordinate the model reads off it.
+    // precisely so one image pixel is one CSS pixel, but on the viewport the ratio
+    // is measured rather than assumed: if a capture ever comes back at device scale,
+    // reporting the viewport instead would displace every coordinate the model reads
+    // off it. A whole page has no width measured at the same moment as the capture
+    // (Playwright stops animations first), so there the asked-for scale stands.
     const size = readPngSize(data) ?? { width: viewport.width, height: viewport.height };
     return {
       pixels: {
@@ -94,7 +105,8 @@ export async function capturePixels(
         mediaType: 'image/png',
         width: size.width,
         height: size.height,
-        scale: viewport.width > 0 ? size.width / viewport.width : 1,
+        scale: scroll !== undefined || viewport.width <= 0 ? 1 : size.width / viewport.width,
+        ...(scroll === undefined ? {} : { scroll }),
       },
       maskedRegionCount: counts.reduce((total, count) => total + (count.status === 'fulfilled' ? count.value : 0), 0),
       maskingProven: masks.length > 0 && counts.every((count) => count.status === 'fulfilled'),
