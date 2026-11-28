@@ -16,5 +16,6 @@ const versions = {
   '@e2e-dev/core': read('core').version,
   '@e2e-dev/web': read('web').version,
   '@e2e-dev/mobile': read('mobile').version,
+  '@e2e-dev/electron': read('electron').version,
 };
 writeFileSync('dist/cli/init/sibling-versions.json', `${JSON.stringify(versions)}\n`);
