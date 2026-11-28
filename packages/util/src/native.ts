@@ -141,25 +141,28 @@ export function binding(): Binding {
   const failures: string[] = [];
   // A checkout build exists only in a checkout (the package ships `dist` alone), and is the one just built there.
   const candidates = [path.join(import.meta.dirname, '..', `util.${platform}.node`), ...(packageName === undefined ? [] : [packageName])];
-  let missing: unknown;
+  // Why each candidate failed, most telling first: a build that was there and failed to load (built for another
+  // architecture, say); a platform package that is there without its addon (a workspace link before `build:native`, or
+  // a damaged install); a candidate that is not there, which a checkout build usually is not.
   let loadFailure: unknown;
+  let withoutAddon: unknown;
+  let missing: unknown;
   for (const specifier of candidates) {
     try {
       loaded = ownRequire(specifier) as Binding;
       return loaded;
     } catch (error) {
-      // A build that was there and failed to load says the most, so it is the cause; else the last absence, the
-      // platform package's. A checkout build is usually absent, so only when every candidate is was nothing installed.
-      // A platform package whose manifest resolves is there, missing only its addon (a workspace link before
-      // `build:native`, or a damaged install), which no reinstall advice fits.
-      const absent = (error as { code?: unknown }).code === 'MODULE_NOT_FOUND' && !(specifier === packageName && resolves(`${specifier}/package.json`));
-      if (absent) missing = error;
-      else loadFailure = error;
+      if ((error as { code?: unknown }).code !== 'MODULE_NOT_FOUND') loadFailure = error;
+      else if (specifier === packageName && resolves(`${specifier}/package.json`)) withoutAddon = error;
+      else missing = error;
       failures.push(`${specifier}: ${(error instanceof Error ? error.message : String(error)).split('\n', 1)[0] ?? ''}`);
     }
   }
+  const cause = loadFailure ?? withoutAddon ?? missing;
+  // Only a platform package that is not there at all is fixed by installing it.
+  const notInstalled = packageName !== undefined && cause === missing;
   const message = packageName === undefined
     ? `@e2e-dev/util has no native build for ${platform}; it has one for ${[...PLATFORMS].join(', ')}`
     : `@e2e-dev/util could not load its native build for ${platform}; install ${packageName}, which npm installs with @e2e-dev/util on this platform unless it runs with --omit=optional or from a lockfile written on another platform (npm/cli#4828)`;
-  throw new NativeUtilUnavailableError(`${message} (${failures.join('; ')})`, { packageName, platform, notInstalled: packageName !== undefined && loadFailure === undefined }, { cause: loadFailure ?? missing });
+  throw new NativeUtilUnavailableError(`${message} (${failures.join('; ')})`, { packageName, platform, notInstalled }, { cause });
 }
