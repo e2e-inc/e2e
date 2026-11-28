@@ -144,7 +144,7 @@ export function checkCwd(label: string, projectRoot: string, cwd: string | undef
   if (statSync(resolved, { throwIfNoEntry: false })?.isDirectory() !== true) throw refusal(code, `${label} names ${resolved}, which is not a directory`);
 }
 
-const LAUNCH_KEYS = ['args', 'env', 'cwd', 'timeout'];
+const LAUNCH_KEYS = ['launchArguments', 'env', 'cwd', 'timeout'];
 
 /** What `electron.launch()` was given, checked: the arguments, variables, and directory one test adds to its launches. */
 export function checkLaunchOptions(options: unknown, projectRoot: string): { readonly args: readonly string[]; readonly env: Readonly<Record<string, string>>; readonly cwd?: string } {
@@ -152,10 +152,10 @@ export function checkLaunchOptions(options: unknown, projectRoot: string): { rea
   if (options === undefined) return { args: [], env: {} };
   if (typeof options !== 'object' || options === null || Array.isArray(options)) throw refusal('INVALID_ARGUMENT', `${label} takes an object of options`);
   rejectUnknownKeys(`${label} options`, options, LAUNCH_KEYS, 'INVALID_ARGUMENT');
-  const { args = [], env, cwd } = options as { readonly args?: unknown; readonly env?: unknown; readonly cwd?: unknown };
-  if (!Array.isArray(args) || args.some((argument) => typeof argument !== 'string')) throw refusal('INVALID_ARGUMENT', 'electron.launch({ args }) must be a list of strings');
+  const { launchArguments: args = [], env, cwd } = options as { readonly launchArguments?: unknown; readonly env?: unknown; readonly cwd?: unknown };
+  if (!Array.isArray(args) || args.some((argument) => typeof argument !== 'string')) throw refusal('INVALID_ARGUMENT', 'electron.launch({ launchArguments }) must be a list of strings');
   const owned = (args as string[]).map(ownedArgument).find((reason) => reason !== undefined);
-  if (owned !== undefined) throw refusal('INVALID_ARGUMENT', `electron.launch({ args }) ${owned}`);
+  if (owned !== undefined) throw refusal('INVALID_ARGUMENT', `electron.launch({ launchArguments }) ${owned}`);
   checkEnv('electron.launch({ env })', env, 'INVALID_ARGUMENT');
   checkCwdShape('electron.launch({ cwd })', cwd, 'INVALID_ARGUMENT');
   checkCwd('electron.launch({ cwd })', projectRoot, cwd, 'INVALID_ARGUMENT');

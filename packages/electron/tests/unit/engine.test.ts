@@ -76,16 +76,17 @@ describe('checkLaunchOptions', () => {
 
   it('gives a test\'s launch its arguments, variables, and directory, with nothing by default', () => {
     expect(checkLaunchOptions(undefined, root)).toEqual({ args: [], env: {} });
-    expect(checkLaunchOptions({ args: ['--flag'], env: { A: '1' }, cwd: '.', timeout: 1000 }, root)).toEqual({ args: ['--flag'], env: { A: '1' }, cwd: '.' });
+    expect(checkLaunchOptions({ launchArguments: ['--flag'], env: { A: '1' }, cwd: '.', timeout: 1000 }, root)).toEqual({ args: ['--flag'], env: { A: '1' }, cwd: '.' });
   });
 
   it('refuses what the config refuses, as the test\'s own mistake', () => {
     const refused = (options: unknown, message: RegExp): void =>
       expect(() => checkLaunchOptions(options, root)).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT', message: expect.stringMatching(message) }));
     refused({ headless: true }, /headless/);
-    refused({ args: '--flag' }, /args \}\) must be a list of strings/);
-    refused({ args: ['--user-data-dir=/tmp/x'] }, /electron\.launch\(\{ args \}\) must not set --user-data-dir/);
-    refused({ args: ['--inspect=9229'] }, /--inspect/);
+    refused({ args: ['--flag'] }, /args/);
+    refused({ launchArguments: '--flag' }, /launchArguments \}\) must be a list of strings/);
+    refused({ launchArguments: ['--user-data-dir=/tmp/x'] }, /electron\.launch\(\{ launchArguments \}\) must not set --user-data-dir/);
+    refused({ launchArguments: ['--inspect=9229'] }, /--inspect/);
     refused({ env: { A: 1 } }, /string value/);
     refused({ env: { node_options: '--inspect' } }, /node_options: the engine starts the app with its own Node\.js switches/);
     refused({ cwd: '' }, /cwd \}\) must be a path/);

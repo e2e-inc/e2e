@@ -421,7 +421,7 @@ an example test.
 | Playwright | e2e |
 | --- | --- |
 | `_electron.launch({ args })` in a fixture, `electronApp.firstWindow()` | `await app.open()` in `beforeEach`. Arguments the app reads, and Chromium switches, go in the target's `app.launchArguments`, the same for every test |
-| `_electron.launch({ args, env })` with values of one test, a data directory filled before the launch | `await electron.launch({ args, env })` and `electron.userDataDir`, see [per-test arguments](/electron#launch-with-per-test-arguments). The app doesn't inherit the runner's environment: name a variable it reads, such as `PLAYWRIGHT_TEST`, in `electron({ env })` |
+| `_electron.launch({ args, env })` with values of one test, a data directory filled before the launch | `await electron.launch({ launchArguments, env })` and `electron.userDataDir`, see [per-test arguments](/electron#launch-with-per-test-arguments). The app doesn't inherit the runner's environment: name a variable it reads, such as `PLAYWRIGHT_TEST`, in `electron({ env })` |
 | `electronApp.evaluate(fn, arg)` | `electron.evaluate(fn, arg)` |
 | `page.evaluate(fn, arg)` in the renderer, `page.reload()`, `page.url()` | `electron.activeWindow().evaluate(fn, arg)`, `reload()`, `url()` |
 | `page.keyboard`, `page.mouse` | `electron.keyboard`, `electron.mouse` |

@@ -53,7 +53,7 @@ export type ElectronMainModule = typeof import('electron');
 /** What `electron.launch` adds to the target's own launch arguments and the engine's `env`. */
 export interface ElectronLaunchOptions {
   /** Arguments after the target's `app.launchArguments`: the app's own switches and Chromium's. */
-  readonly args?: readonly string[] | undefined;
+  readonly launchArguments?: readonly string[] | undefined;
   /** Variables over the engine's `env`. Never `ELECTRON_RUN_AS_NODE` or `NODE_OPTIONS`. */
   readonly env?: Readonly<Record<string, string>> | undefined;
   /** The directory the app's process starts in, over the engine's `cwd`: absolute, or relative to the project root. */

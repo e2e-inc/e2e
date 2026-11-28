@@ -121,7 +121,7 @@ import path from 'node:path';
 test('opens on saved settings', async ({ electron, screen }) => {
   writeFileSync(path.join(electron.userDataDir, 'settings.json'), '{"theme":"dark"}');
   await electron.launch({
-    args: ['--skip-onboarding'],
+    launchArguments: ['--skip-onboarding'],
     env: { APP_DATA_PATH: electron.userDataDir },
   });
   await expect(screen.getByRole('heading', 'Projects')).toBeVisible();
