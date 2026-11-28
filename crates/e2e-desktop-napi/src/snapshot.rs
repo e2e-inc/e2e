@@ -179,9 +179,9 @@ struct Read {
     help: Option<String>,
     title_element: Option<Element>,
     /// A vertical scroll bar, listed as an attribute.
-    vertical_bar: bool,
+    vertical_bar: Option<Element>,
     /// A horizontal scroll bar, listed as an attribute.
-    horizontal_bar: bool,
+    horizontal_bar: Option<Element>,
     heading_level: Option<u32>,
 }
 
@@ -206,8 +206,8 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
     let help = label(take(13).and_then(|value| value.text().map(str::to_owned)));
     let title_element = take(14).and_then(|value| value.element().cloned());
     // Only an element is a scroll bar: macOS may answer an attribute the area does not support with null.
-    let vertical_bar = matches!(take(15), Some(Value::Element(_)));
-    let horizontal_bar = matches!(take(16), Some(Value::Element(_)));
+    let vertical_bar = take(15).and_then(|value| value.element().cloned());
+    let horizontal_bar = take(16).and_then(|value| value.element().cloned());
     let heading_level = level_of(take(17));
     // An outline row says it is expanded with AXDisclosing, not AXExpanded.
     let expanded = expanded.or_else(|| take(18).and_then(|value| value.boolean()));
@@ -428,15 +428,18 @@ impl Walk {
         })
     }
 
-    /// Whether a scroll area has a scroll bar for the axis. A stall leaves a hole in the read: an area the app did not
-    /// answer about is not one that cannot scroll.
-    fn scroll_bar(&mut self, element: &Element, vertical: bool) -> bool {
-        crate::actions::scroll_bar(element, vertical)
-            .unwrap_or_else(|_| {
-                self.lose();
-                None
-            })
-            .is_some()
+    /// Whether a scroll area has an enabled scroll bar for the axis: the one the batch read listed (`listed`), else one
+    /// among its children. A stall leaves a hole in the read: an area the app did not answer about is not one that cannot
+    /// scroll.
+    fn scroll_bar(&mut self, element: &Element, vertical: bool, listed: Option<&Element>) -> bool {
+        let found = match listed {
+            Some(bar) => crate::actions::bar_enabled(bar),
+            None => crate::actions::scroll_bar(element, vertical).map(|bar| bar.is_some()),
+        };
+        found.unwrap_or_else(|_| {
+            self.lose();
+            false
+        })
     }
 
     /// The actions a control takes, in the raw vocabulary, and the axes it scrolls along when it takes `Scroll`.
@@ -473,7 +476,7 @@ impl Walk {
         // SwiftUI gives every scroll area the page actions, also one whose content fits: only a scroll bar says a scroll
         // area scrolls. A viewport swipe goes to the first node offered Scroll, so one that cannot scroll must not be.
         let (vertical, horizontal) = if role == "scrollarea" {
-            (read.vertical_bar || self.scroll_bar(element, true), read.horizontal_bar || self.scroll_bar(element, false))
+            (self.scroll_bar(element, true, read.vertical_bar.as_ref()), self.scroll_bar(element, false, read.horizontal_bar.as_ref()))
         } else {
             (has("AXScrollDownByPage") || has("AXScrollUpByPage"), has("AXScrollLeftByPage") || has("AXScrollRightByPage"))
         };
@@ -594,8 +597,8 @@ impl Walk {
                     placeholder: None,
                     help: None,
                     title_element: None,
-                    vertical_bar: false,
-                    horizontal_bar: false,
+                    vertical_bar: None,
+                    horizontal_bar: None,
                     heading_level: None,
                 }
             }

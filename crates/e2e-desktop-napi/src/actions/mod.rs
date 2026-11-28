@@ -20,8 +20,8 @@ mod values;
 
 use pointer::*;
 pub use pointer::{PointTarget, Sheet, pointer_at};
-pub use scroll::scroll_bar;
 use scroll::*;
+pub use scroll::{bar_enabled, scroll_bar};
 use select::*;
 use typing::*;
 use values::*;

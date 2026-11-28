@@ -2,10 +2,24 @@
 
 use super::*;
 
-/// A scroll area's scroll bar for one axis. A SwiftUI `List` lists it only as a child, with no `AXVerticalScrollBar`; a
+/// A scroll area's scroll bar for one axis, while it is enabled. A SwiftUI `List` lists it only as a child, with no `AXVerticalScrollBar`; a
 /// scroll area that holds its content directly lists the bar after any number of children, so the last few are read too.
 /// A read the app did not answer in time is `Err(AX_CANNOT_COMPLETE)`: no proof that the area has no bar.
 pub fn scroll_bar(element: &Element, vertical: bool) -> Result<Option<Element>, AXError> {
+    match listed_bar(element, vertical)? {
+        Some(bar) if bar_enabled(&bar)? => Ok(Some(bar)),
+        _ => Ok(None),
+    }
+}
+
+/// Whether a scroll bar moves: AppKit keeps a bar it always shows, disabled, while the content fits, and moving it then
+/// moves nothing. `Err(AX_CANNOT_COMPLETE)` for a read the app did not answer in time.
+pub fn bar_enabled(bar: &Element) -> Result<bool, AXError> {
+    Ok(stalled(bar.attribute("AXEnabled"))?.and_then(|value| value.boolean()) != Some(false))
+}
+
+/// The scroll bar a scroll area lists for one axis, enabled or not.
+fn listed_bar(element: &Element, vertical: bool) -> Result<Option<Element>, AXError> {
     let none_unless_stalled = |error: AXError| if error == ax::AX_CANNOT_COMPLETE { Err(error) } else { Ok(Vec::new()) };
     match element.attribute(if vertical { "AXVerticalScrollBar" } else { "AXHorizontalScrollBar" }) {
         Ok(Value::Element(bar)) => return Ok(Some(bar)),
