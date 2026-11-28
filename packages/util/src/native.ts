@@ -163,6 +163,8 @@ export function binding(): Binding {
   const notInstalled = packageName !== undefined && cause === missing;
   const message = packageName === undefined
     ? `@e2e-dev/util has no native build for ${platform}; it has one for ${[...PLATFORMS].join(', ')}`
-    : `@e2e-dev/util could not load its native build for ${platform}; install ${packageName}, which npm installs with @e2e-dev/util on this platform unless it runs with --omit=optional or from a lockfile written on another platform (npm/cli#4828)`;
+    : notInstalled
+      ? `@e2e-dev/util could not load its native build for ${platform}; install ${packageName}, which npm installs with @e2e-dev/util on this platform unless it runs with --omit=optional or from a lockfile written on another platform (npm/cli#4828)`
+      : `@e2e-dev/util could not load its native build for ${platform}`;
   throw new NativeUtilUnavailableError(`${message} (${failures.join('; ')})`, { packageName, platform, notInstalled }, { cause });
 }

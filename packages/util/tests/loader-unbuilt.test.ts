@@ -30,5 +30,7 @@ describe('a platform package without its addon', () => {
     }
     expect(thrown).toBeInstanceOf(NativeUtilUnavailableError);
     expect((thrown as NativeUtilUnavailableError).notInstalled).toBe(false);
+    // Installing a package that is there would not help.
+    expect((thrown as Error).message).not.toContain('install @e2e-dev/util-');
   });
 });
