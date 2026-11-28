@@ -180,11 +180,11 @@ export class FakeDriver implements DesktopDriver {
     return this.answer('press', [options], ok({}));
   }
 
-  /** The input id and budget of each `focusWindow` call, in order. */
-  readonly focusOptions: { readonly inputId: number | undefined; readonly timeoutMs: number | undefined }[] = [];
+  /** The input id, budget, and keyboard flag of each `focusWindow` call, in order. */
+  readonly focusOptions: { readonly inputId: number | undefined; readonly timeoutMs: number | undefined; readonly keyboard?: boolean | undefined }[] = [];
 
-  focusWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>> {
-    this.focusOptions.push({ inputId, timeoutMs });
+  focusWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number, keyboard?: boolean): Promise<Envelope<unknown>> {
+    this.focusOptions.push({ inputId, timeoutMs, keyboard });
     return this.answer('focusWindow', [pid, windowId], ok({}));
   }
 

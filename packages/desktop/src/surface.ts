@@ -1204,7 +1204,8 @@ export class DesktopSurface {
     // Physical input lands on whatever is frontmost at the point: bring the window forward first.
     // Finding the window can wait on the app: a call given up on must not bring it forward later, over what the user or the next step is doing.
     const focusId = this.requireDriver().inputId();
-    await this.input((driver, timeoutMs) => driver.focusWindow(pid, target.id, focusId, timeoutMs), {
+    // A hover needs the app in front, not the window's focus: a panel that takes focus as it comes forward may leave the point uncovered.
+    await this.input((driver, timeoutMs) => driver.focusWindow(pid, target.id, focusId, timeoutMs, action.kind !== 'hover'), {
       label: 'focus window',
       input: true,
       signal: operation.signal,

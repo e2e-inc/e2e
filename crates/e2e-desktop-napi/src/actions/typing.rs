@@ -20,7 +20,7 @@ pub(super) fn type_text(entry: &Entry, text: &str, physical: bool, deadline: Ins
     // The app owns focus: typing goes into the field that holds it, which the engine read, and never moves focus back
     // to it (a delete's handler, or a window coming forward, may have moved it on).
     let route = if physical {
-        raise(entry.pid, &window)?;
+        raise(entry.pid, &window, true)?;
         Route::Physical
     } else {
         Route::Process(entry.pid)

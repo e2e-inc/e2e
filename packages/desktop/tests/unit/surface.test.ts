@@ -1747,7 +1747,7 @@ describe('DesktopSurface: points', () => {
     await open.surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation());
     expect(open.fake.of('pointer').at(-1)?.args).toEqual([110, 150, 'tap']);
     // Bringing the window forward is input too: the call names it, so a cut-off cancels it.
-    expect(open.fake.focusOptions.at(-1)).toEqual({ inputId: expect.any(Number), timeoutMs: expect.any(Number) });
+    expect(open.fake.focusOptions.at(-1)).toEqual({ inputId: expect.any(Number), timeoutMs: expect.any(Number), keyboard: true });
     // The driver checks the window again after the move: it is told which window, and that its sheet was there.
     expect(open.fake.pointerOptions.at(-1)?.target).toEqual({ pid: open.fake.pid, windowId: 'w-mine', sheet: true, sheetId: 's-1' });
     // A sheet the driver gave no key is never known to be the one the point was taken on.
@@ -1847,6 +1847,8 @@ describe('DesktopSurface: points', () => {
     const list = (panel: boolean) => windows(() => [{ id: 'w-mine', is_focused: !panel, bounds: { x: 100, y: 100, width: 400, height: 300 } }, ...(panel ? [{ id: 'w-panel', is_focused: true, bounds: { x: 100, y: 120, width: 400, height: 200 } }] : [])]);
     const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [list(false), list(false), list(false), list(true)] }, { options: { physicalInput: true } });
     await surface.performAt({ x: 10, y: 250 }, { kind: 'hover' }, operation());
+    // The driver brings the app forward without waiting for the window to take the focus the panel holds.
+    expect(fake.focusOptions.at(-1)?.keyboard).toBe(false);
     expect(fake.of('pointer').at(-1)?.args).toEqual([110, 350, 'hover']);
   });
 

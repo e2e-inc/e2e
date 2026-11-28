@@ -314,8 +314,10 @@ fn center(element: &Element) -> Outcome<(f64, f64)> {
     Ok((x + width / 2.0, y + height / 2.0))
 }
 
-/// Brings the window forward and the app with it, for physical input. A sheet or an alert on it may take focus.
-pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
+/// Brings the window forward and the app with it, for physical input. A sheet or an alert on it may take focus. With
+/// `keyboard`, the window must then hold the app's focus, as keys and clicks need; a hover needs the app in front only,
+/// and checks what is on top at the point itself.
+pub fn raise(pid: i32, window: &Element, keyboard: bool) -> Outcome<()> {
     let app = Element::application(pid);
     // Each write moves the focus: none goes once the caller gave up.
     go("bring the window forward")?;
@@ -329,7 +331,7 @@ pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
     let deadline = refuse_at().map_or(soon, |at| at.min(soon));
     let mut last = Ok(false);
     until(deadline, || {
-        last = forward(&app, window);
+        last = forward(&app, window, keyboard);
         last == Ok(true)
     });
     match last {
@@ -340,10 +342,13 @@ pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
     }
 }
 
-/// Whether the app is frontmost with `window` holding its focus. A stall fails as `AX_CANNOT_COMPLETE`.
-fn forward(app: &Element, window: &Element) -> Result<bool, AXError> {
+/// Whether the app is frontmost, with `window` holding its focus when `keyboard`. A stall fails as `AX_CANNOT_COMPLETE`.
+fn forward(app: &Element, window: &Element, keyboard: bool) -> Result<bool, AXError> {
     if stalled(app.attribute("AXFrontmost"))?.and_then(|value| value.boolean()) != Some(true) {
         return Ok(false);
+    }
+    if !keyboard {
+        return Ok(true);
     }
     match stalled(app.attribute("AXFocusedWindow"))?.and_then(|value| value.element().cloned()) {
         Some(focused) => windows::holds_focus(&focused, window),
@@ -570,7 +575,7 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option
     guarded(input_id, deadline, || {
         let element = windows::find(pid, window)?;
         let route = if physical {
-            raise(pid, &element)?;
+            raise(pid, &element, true)?;
             Route::Physical
         } else {
             key_window(pid, &element)?;
@@ -626,12 +631,12 @@ fn key_window(pid: i32, window: &Element) -> Outcome<()> {
 
 /// Brings a window of `pid` forward, only while `input_id` is not cancelled and `deadline` has not passed: finding the
 /// window can wait on the app, and the caller may have moved on by then.
-pub fn focus_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
+pub fn focus_window(pid: i32, window: u32, keyboard: bool, input_id: Option<u32>, deadline: Instant) -> Outcome<()> {
     guarded(input_id, deadline, || {
         // A call given up on before it began reads nothing either.
         go("bring the window forward")?;
         let element = windows::find(pid, window)?;
-        raise(pid, &element)
+        raise(pid, &element, keyboard)
     })
 }
 
@@ -856,9 +861,9 @@ mod tests {
     fn brings_no_window_forward_once_the_call_was_cancelled() {
         crate::input::cancel_input(1_000_039);
         // No such process: past the guard, the window lookup would answer APP_NOT_FOUND or WINDOW_NOT_FOUND instead.
-        let failure = super::focus_window(-1, 1, Some(1_000_039), later()).expect_err("cancelled first");
+        let failure = super::focus_window(-1, 1, true, Some(1_000_039), later()).expect_err("cancelled first");
         assert_eq!((failure.code, failure.delivery), (crate::failure::codes::TIMEOUT, crate::failure::Delivery::NotDelivered));
-        let late = super::focus_window(-1, 1, Some(1_000_040), Instant::now()).expect_err("out of time");
+        let late = super::focus_window(-1, 1, true, Some(1_000_040), Instant::now()).expect_err("out of time");
         assert_eq!(late.code, crate::failure::codes::TIMEOUT);
     }
 

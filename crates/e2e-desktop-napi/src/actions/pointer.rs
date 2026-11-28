@@ -114,7 +114,7 @@ pub(super) fn aimed(aim: Result<Aim, AXError>, clicks: bool, when: &str) -> Outc
 pub(super) fn physical(entry: &Entry, action: Pointer) -> Outcome<()> {
     let window = windows::find(entry.pid, entry.window)?;
     go("pointer")?;
-    raise(entry.pid, &window)?;
+    raise(entry.pid, &window, !matches!(action, Pointer::Move))?;
     let (x, y) = center(&entry.element)?;
     let clicks = matches!(action, Pointer::Click { .. });
     aimed(aim_at(&entry.element, x, y), clicks, "before the move")?;
