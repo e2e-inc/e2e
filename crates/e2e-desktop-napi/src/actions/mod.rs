@@ -557,6 +557,8 @@ pub fn focus_on(reference: &str, input_id: Option<u32>, deadline: Instant) -> Ou
 /// tap's is, or refused in a minimized window. A failure after the scroll moved the screen.
 fn fill(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
     enabled(element, deadline, "set value")?;
+    // A value the control can never take is refused before the scroll, which would move the list for nothing.
+    takes_value(element, text)?;
     let scrolled = reveal(element, deadline, "set value")?;
     after_scroll(scrolled, set_value(element, text, deadline))
 }
