@@ -5,7 +5,9 @@ import { type CSSProperties, useState } from "react";
 /**
  * A member table where names repeat: two people are called Alex Kim, a third
  * is Alex Kimball, and every row's controls carry the same names ("Suspend",
- * "Remove"). Only the other columns tell the rows apart. The task changes one
+ * "Remove"). Only the other columns tell the rows apart. The member to act on
+ * is named by email only, in the open security alert above the table; a
+ * resolved alert names the other Alex Kim. The task changes one
  * row; touching any other row is recorded (the root's `data-changed-others`,
  * kept off screen like a real app would) and blocks the success state, so
  * picking the first match by name fails.
@@ -52,6 +54,17 @@ export default function TeamDirectory() {
       data-changed-others={collateral.map((member) => member.email).join(" ")}
       style={styles.container}
     >
+      <section aria-label="Security alerts" style={styles.alerts}>
+        <h2 style={styles.alertsTitle}>Security alerts</h2>
+        <article style={styles.alertOpen}>
+          <strong>Open</strong> · Five failed sign-ins, then a sign-in from a new country, for
+          akim@acme.test. Suspend the account until its owner confirms it was them.
+        </article>
+        <article style={styles.alertResolved}>
+          <strong>Resolved</strong> · Password reset requested for alex.kim@acme.test; the owner
+          confirmed it yesterday. No action needed.
+        </article>
+      </section>
       <p style={styles.lead}>
         Members of Acme. Suspending keeps the account but blocks sign-in; removing deletes it.
       </p>
@@ -142,6 +155,23 @@ export default function TeamDirectory() {
 const styles = {
   container: { display: "flex", flexDirection: "column", gap: 14, padding: "24px 0" },
   lead: { margin: 0, fontSize: 14, color: "#555" },
+  alerts: { display: "flex", flexDirection: "column", gap: 6 },
+  alertsTitle: { margin: 0, fontSize: 15 },
+  alertOpen: {
+    padding: "8px 12px",
+    borderRadius: 8,
+    backgroundColor: "#fff1f0",
+    border: "1px solid #f5c2c0",
+    fontSize: 13,
+  },
+  alertResolved: {
+    padding: "8px 12px",
+    borderRadius: 8,
+    backgroundColor: "#f4f4f4",
+    border: "1px solid #e2e2e2",
+    fontSize: 13,
+    color: "#666",
+  },
   table: { width: "100%", borderCollapse: "collapse", fontSize: 13 },
   th: {
     textAlign: "left",

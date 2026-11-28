@@ -153,7 +153,7 @@ const SCENARIOS: readonly Scenario[] = [
   },
   {
     slug: 'team-directory',
-    goal: 'suspend Alex Kim from the Sales team in the Toronto office, and change no other member',
+    goal: 'suspend the member the open security alert is about',
     success: 'Suspended akim@acme.test only',
     unrecorded: UNRECORDED,
     verify: (screen) => expect(screen.getByTestId('team-directory')).toHaveAttribute('data-changed-others', ''),
@@ -200,7 +200,7 @@ test(
   { tags: ['support-refund'], skip: UNRECORDED },
   async ({ app, agent, screen }) => {
     await app.open('/e/support-refund');
-    await agent.act('Issue a full refund for ticket #1042. Change nothing else on the account.');
+    await agent.act('Issue a full refund for ticket #1042.');
     await expect(screen.getByTestId('success-message')).toHaveText('Refund of $25.00 issued for ticket #1042');
     await expect(screen.getByTestId('support-inbox')).toHaveAttribute('data-unrequested', '0');
   },

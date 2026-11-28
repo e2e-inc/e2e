@@ -11,8 +11,9 @@ test.describe('team directory', () => {
     await expect(screen.getByRole('button', 'Suspend')).toHaveCount(6);
   });
 
-  test('suspends the Toronto Alex Kim by matching the office column', async ({ screen }) => {
-    const row = screen.getByRole('row').filter({ has: screen.getByRole('cell', 'Alex Kim') }).filter({ hasText: 'Toronto' });
+  test('suspends the member the open alert names, matched by the email column', async ({ screen }) => {
+    await expect(screen.getByRole('region', 'Security alerts')).toContainText('Open · Five failed sign-ins, then a sign-in from a new country, for akim@acme.test.');
+    const row = screen.getByRole('row').filter({ has: screen.getByRole('cell', 'akim@acme.test') });
     await expect(row).toHaveCount(1);
     await row.getByRole('button', 'Suspend').tap();
     await expect(row).toContainText('Suspended');
