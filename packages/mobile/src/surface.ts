@@ -257,6 +257,10 @@ const GESTURE_STEADY_MS = 2_000;
 /** Pause between the reads that confirm a control stopped moving after a gesture. */
 const GESTURE_STEADY_POLL_MS = 100;
 
+/** Pause between the reads that confirm a toggle took the state a check or uncheck tapped it into. */
+const CHECKED_POLL_MS = 100;
+const CHECKED_MARGIN_MS = 50;
+
 /** How one screenshot is taken. */
 interface ScreenshotCapture {
   /** The status bar in a fixed state (time, battery, signal), for a screenshot compared against a stored one (`comparable`). */
@@ -1662,7 +1666,14 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
             throw unsupported(`agent-device cannot read whether node ${target.id} is checked; tap it instead`);
           }
           if (checked === wanted) return undefined;
-          return input.press(client, { ...this.actionTarget(target, true), ...settle });
+          if (!wanted && target.node.role === 'radio') {
+            throw notActionable('uncheck cannot clear a radio button; select another radio in its group');
+          }
+          await input.press(client, { ...this.actionTarget(target, true), ...settle });
+          // The tap went out whatever the reads find, and the next control's
+          // transition counts from it, not from the end of the reads.
+          this.markAction(before);
+          return this.confirmChecked(target, wanted, operation, input);
         }
         case 'press':
           return this.pressKey(client, target, action.key, settle, input);
@@ -1707,7 +1718,76 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     } catch (cause) {
       throw staleOr(cause, label, this.where);
     }
-    this.markAction(before);
+    // A check or uncheck marks its tap itself, before it reads the state back,
+    // and one that found the control already set sent nothing to mark.
+    if (action.kind !== 'check' && action.kind !== 'uncheck') this.markAction(before);
+  }
+
+  /**
+   * Re-reads a toggle after the tap of a check or uncheck until it reports
+   * the wanted state, as the web engine does after its click: a tap the app
+   * ignores, or one that lands beside the control, fails at the end of the
+   * budget instead of passing. A control gone before any read found it took the tap
+   * (an app that replaces a picked option, or navigates on change), so the
+   * action is done. One that goes later, still in its old state, fails
+   * rather than passing on a tap the app may have rejected. Another read
+   * starts only while one as long as the last still fits the budget, so a
+   * toggle that never changes fails as unchanged rather than as a read the
+   * deadline cut off. Nothing here is retryable: the tap went out, and a
+   * retry reading a state the app has not reported yet would tap it again
+   * and flip it back.
+   */
+  private async confirmChecked(entry: NodeBinding, wanted: boolean, operation: OperationContext, budget: InputBudget): Promise<void> {
+    const verb = wanted ? 'check' : 'uncheck';
+    const unchanged = (detail = ''): EngineError =>
+      notActionable(`${verb} tapped node ${entry.id} but its checked state did not change${detail}`);
+    let seen = false;
+    for (;;) {
+      const startedMs = Date.now();
+      let found: ProjectedNode | undefined;
+      let truncated = false;
+      try {
+        const raw = await this.snapshot(operation.signal, false, budget);
+        const index = this.project(raw).index;
+        truncated = isTruncated(raw);
+        // A toggle whose label spells its state is a new name after the tap:
+        // the same role and test id in the same place, already as wanted. It
+        // goes first, so a sibling toggle that still carries the old label
+        // cannot be mistaken for the control.
+        found =
+          index.find(
+            (candidate) =>
+              candidate.node.role === entry.node.role &&
+              candidate.node.testId === entry.node.testId &&
+              sameRect(candidate.node.rect, entry.node.rect) &&
+              candidate.node.states?.checked === wanted,
+          ) ?? this.refind(entry, index);
+      } catch (cause) {
+        if (operation.signal.aborted) throw cause;
+        // A read the deadline cut off is a toggle that did not change in time.
+        if (cause instanceof EngineError && (cause.code === 'ACTION_MAY_HAVE_COMMITTED' || cause.code === 'OPERATION_TIMEOUT')) {
+          throw unchanged(' before the device answered the last read');
+        }
+        // A capture the app is still drawing says nothing about the toggle.
+        if (!isUnreadableCapture(cause) || budget.remainingMs() < Date.now() - startedMs) throw cause;
+        truncated = true;
+      }
+      const readMs = Date.now() - startedMs;
+      // A truncated or sparse capture may simply omit the control, so a miss
+      // there says nothing about replacement: read again.
+      if (found === undefined && !truncated) {
+        if (!seen) return;
+        throw unchanged(' before the control was replaced');
+      }
+      if (found !== undefined) seen = true;
+      if (found?.node.states?.checked === wanted) return;
+      // Sleep only as long as one more read of this length still fits, with a
+      // margin for timer jitter, so the last poll is a short one, not none.
+      const sleepMs = Math.min(CHECKED_POLL_MS, budget.remainingMs() - readMs - CHECKED_MARGIN_MS);
+      if (sleepMs <= 0) throw unchanged();
+      await sleep(sleepMs, operation.signal);
+      if (operation.signal.aborted) throw new EngineError('CANCELLED', `${verb} cancelled`, { retryable: false });
+    }
   }
 
   /**

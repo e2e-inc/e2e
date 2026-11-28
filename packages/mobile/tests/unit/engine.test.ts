@@ -86,6 +86,23 @@ function named(root: SemanticNode, name: string): SemanticNode {
   return found;
 }
 
+/**
+ * A screen whose toggles flip when pressed, as a device's do, so a check or
+ * uncheck reads its new state back. `flips` maps a pressed ref to the indexes
+ * of the nodes whose `0`/`1` value it flips.
+ */
+function toggling(base: readonly RawNode[], flips: Readonly<Record<string, readonly number[]>>): { nodes: () => readonly RawNode[]; press: (args: unknown) => void } {
+  const flipped = new Set<number>();
+  return {
+    nodes: () => base.map((node) => (node.index !== undefined && flipped.has(node.index) ? { ...node, value: node.value === '1' ? '0' : '1' } : node)),
+    press: (args) => {
+      for (const index of flips[(args as { ref: string }).ref.replace(/-s\d+$/, '')] ?? []) {
+        if (!flipped.delete(index)) flipped.add(index);
+      }
+    },
+  };
+}
+
 /** A whole-id test-id query, as `screen.getByTestId(value)` builds it. */
 function testIdQuery(value: string): LocatorExpression {
   return { kind: 'query', query: { kind: 'testId', value: { kind: 'string', value, exact: true } } };
@@ -1992,6 +2009,9 @@ describe('the trace', () => {
 describe('perform', () => {
   it('maps every supported action onto one agent-device command', async () => {
     const h = harness();
+    const airplane = toggling(SETTINGS_NODES, { '@e6': [6] });
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() }));
+    h.fake.respond('interactions.press', airplane.press);
     await openAttempt(h);
     const op = operation();
     const { root } = await h.engine.observe!(op);
@@ -2030,6 +2050,8 @@ describe('perform', () => {
       ['capture.snapshot', { interactiveOnly: false }],
       ['interactions.fill', { ref: '@e7', text: '', settle: true, settleQuietMs: 150 }],
       ['interactions.press', { ref: '@e6', settle: true, settleQuietMs: 150 }],
+      // A check reads the toggle back to confirm it took the new state.
+      ['capture.snapshot', { interactiveOnly: false }],
       // Enter reaches the field through the soft keyboard, so the unfocused field is tapped first.
       ['interactions.press', { ref: '@e7', settle: true, settleQuietMs: 150 }],
       ['command.keyboard', { action: 'enter' }],
@@ -2081,15 +2103,18 @@ describe('perform', () => {
 
   it.each(['e2', ''])('presses the innermost control even when the row ref is %j', async (rowRef) => {
     const h = harness();
-    h.fake.respond('capture.snapshot', () => ({
-      nodes: [
+    const switches = toggling(
+      [
         { ref: 'e1', index: 0, depth: 0, type: 'Application' },
         { ref: rowRef, index: 1, parentIndex: 0, depth: 1, type: 'Switch', label: 'Haptic Feedback', value: '1' },
         { ref: 'e3', index: 2, parentIndex: 1, depth: 2, type: 'Button', label: 'Haptic Feedback' },
         { ref: 'e4', index: 3, parentIndex: 1, depth: 2, type: 'Switch', value: '1' },
         { ref: 'e5', index: 4, parentIndex: 0, depth: 1, type: 'Switch', label: 'Sound', value: '0' },
       ],
-    }));
+      { '@e4': [1, 3], '@e5': [4] },
+    );
+    h.fake.respond('capture.snapshot', () => ({ nodes: switches.nodes() }));
+    h.fake.respond('interactions.press', switches.press);
     await openAttempt(h);
     const { root } = await h.engine.observe!(operation());
     const haptic = named(root, 'Haptic Feedback');
@@ -2111,6 +2136,269 @@ describe('perform', () => {
       { ref: '@e5', settle: true, settleQuietMs: 150 },
       { ref: '@e4', settle: true, settleQuietMs: 150 },
     ]);
+  });
+
+  it('refuses to uncheck a checked radio without pressing it, and checks it as any toggle', async () => {
+    const h = harness();
+    // React Native spells a radio's state into the iOS accessibility value.
+    let medium = 'unchecked';
+    h.fake.respond('capture.snapshot', () => ({
+      nodes: [
+        { ref: 'e1', index: 0, depth: 0, type: 'Application' },
+        { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'Other', label: 'Small', value: 'radio button, checked', rect: { x: 0, y: 100, width: 100, height: 44 } },
+        { ref: 'e3', index: 2, parentIndex: 0, depth: 1, type: 'Other', label: 'Medium', value: `radio button, ${medium}`, rect: { x: 100, y: 100, width: 100, height: 44 } },
+      ],
+    }));
+    h.fake.respond('interactions.press', () => {
+      medium = 'checked';
+    });
+    await openAttempt(h);
+    const { root } = await h.engine.observe!(operation());
+    await expect(h.engine.perform!(named(root, 'Small').ref, { kind: 'uncheck' }, operation())).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      retryable: false,
+      message: expect.stringContaining('uncheck cannot clear a radio button'),
+    });
+    expect(h.fake.methods()).not.toContain('interactions.press');
+    // An unchecked radio is already in the wanted state: nothing is sent.
+    await h.engine.perform!(named(root, 'Medium').ref, { kind: 'uncheck' }, operation());
+    expect(h.fake.methods()).not.toContain('interactions.press');
+    await h.engine.perform!(named(root, 'Medium').ref, { kind: 'check' }, operation());
+    expect(h.fake.calls.filter((call) => call.method === 'interactions.press').map((call) => call.args)).toEqual([
+      { ref: '@e3', settle: true, settleQuietMs: 150 },
+    ]);
+  });
+
+  it('fails a check whose press the toggle ignores once the budget ends, without pressing again', async () => {
+    const h = harness();
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    const short: OperationContext = { ...operation(), timeoutMs: 400 };
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, short)).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      retryable: false,
+      message: expect.stringContaining('its checked state did not change'),
+    });
+    expect(h.fake.methods().filter((method) => method === 'interactions.press')).toHaveLength(1);
+    expect(h.fake.methods().filter((method) => method === 'capture.snapshot').length).toBeGreaterThan(2);
+  });
+
+  it('stops reading a toggle once another read as long as the last no longer fits, failing it as unchanged', async () => {
+    const h = harness();
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    h.fake.respond('capture.snapshot', () => new Promise((resolve) => setTimeout(() => resolve(SETTINGS_SNAPSHOT), 150)));
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, { ...operation(), timeoutMs: 600 })).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: expect.stringContaining('its checked state did not change'),
+    });
+  });
+
+  it('reads once more in the last stretch of the budget, so a toggle that flips late still counts as checked', async () => {
+    const h = harness();
+    const airplane = toggling(SETTINGS_NODES, { '@e6': [6] });
+    let pressed = false;
+    // 40 ms reads in a 300 ms budget: the poll at ~180 ms leaves 120 ms, enough for one more read only when the sleep is cut short.
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return { ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() };
+      return new Promise((resolve) => setTimeout(() => resolve({ ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() }), 40));
+    });
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+      setTimeout(() => airplane.press({ ref: '@e6' }), 225);
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, { ...operation(), timeoutMs: 300 })).resolves.toBeUndefined();
+  });
+
+  it('checks from a test without settling the tap, then reads the toggle back', async () => {
+    const h = harness({ transition: 0 });
+    const airplane = toggling(SETTINGS_NODES, { '@e6': [6] });
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() }));
+    h.fake.respond('interactions.press', airplane.press);
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    const before = h.fake.calls.length;
+    await h.engine.perform!(toggle.ref, { kind: 'check' }, { ...operation(), origin: 'test' });
+    expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
+      ['interactions.press', { ref: '@e6' }],
+      ['capture.snapshot', { interactiveOnly: false }],
+    ]);
+  });
+
+  it('counts a check that fails as unchanged as an action, so the next control waits out the transition from its tap', async () => {
+    autoAdvanceTimers();
+    const h = harness({ transition: 5_000 });
+    h.fake.respond('capture.snapshot', () => SETTINGS_SNAPSHOT);
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    // The launch's transition is long over when the tap goes out.
+    await new Promise((resolve) => setTimeout(resolve, 6_000));
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, { ...operation(), timeoutMs: 300 })).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    h.fake.respond('capture.snapshot', () => ({
+      ...SETTINGS_SNAPSHOT,
+      nodes: [
+        ...SETTINGS_NODES,
+        { ref: '@e11', index: 10, parentIndex: 0, depth: 1, type: 'button', label: 'Submit', rect: { x: 0, y: 600, width: 390, height: 44 } },
+      ],
+    }));
+    const startedAt = Date.now();
+    const submit = await observed(h, 'Submit');
+    await h.engine.perform!(submit.ref, { kind: 'tap' }, { ...operation(), origin: 'test' });
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(4_000);
+  });
+
+  it('does not read a truncated capture without the toggle as the control being replaced', async () => {
+    const withoutAirplane = SETTINGS_NODES.filter((node) => node.label !== 'Airplane Mode');
+    const h = harness();
+    const airplane = toggling(SETTINGS_NODES, { '@e6': [6] });
+    let pressed = false;
+    let reads = 0;
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return { ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() };
+      reads += 1;
+      // The first read after the tap is cut and lacks the toggle; the second, whole, shows it still unset.
+      return reads === 1 ? { ...SETTINGS_SNAPSHOT, nodes: withoutAirplane, truncated: true } : { ...SETTINGS_SNAPSHOT, nodes: SETTINGS_NODES };
+    });
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    const performed = h.engine.perform!(toggle.ref, { kind: 'check' }, { ...operation(), timeoutMs: 1_000 });
+    await expect(performed).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(reads).toBeGreaterThan(1);
+  });
+
+  it('counts a toggle gone at the first read after the press as checked, and one gone later as a failure', async () => {
+    const withoutAirplane = SETTINGS_NODES.filter((node) => node.label !== 'Airplane Mode');
+    for (const [readsBeforeGone, outcome] of [[0, 'done'], [1, 'NOT_ACTIONABLE']] as const) {
+      const h = harness();
+      let pressed = false;
+      let reads = 0;
+      h.fake.respond('capture.snapshot', () => {
+        if (!pressed) return SETTINGS_SNAPSHOT;
+        reads += 1;
+        return { ...SETTINGS_SNAPSHOT, nodes: reads > readsBeforeGone ? withoutAirplane : SETTINGS_NODES };
+      });
+      h.fake.respond('interactions.press', () => {
+        pressed = true;
+      });
+      await openAttempt(h);
+      const toggle = await observed(h, 'Airplane Mode');
+      const performed = h.engine.perform!(toggle.ref, { kind: 'check' }, operation());
+      if (outcome === 'done') {
+        await expect(performed).resolves.toBeUndefined();
+      } else {
+        await expect(performed).rejects.toMatchObject({
+          code: 'NOT_ACTIONABLE',
+          retryable: false,
+          message: expect.stringContaining('before the control was replaced'),
+        });
+      }
+    }
+  });
+
+  it('follows the toggle that was tapped, not a sibling that still carries the old label', async () => {
+    const h = harness();
+    const rows = (first: boolean) => [
+      ...SETTINGS_NODES.filter((node) => node.label !== 'Airplane Mode'),
+      { ref: '@e6', index: 6, parentIndex: 0, depth: 1, type: 'switch', label: first ? 'On' : 'Off', value: first ? '1' : '0', rect: { x: 0, y: 170, width: 390, height: 44 } },
+      { ref: '@e11', index: 11, parentIndex: 0, depth: 1, type: 'switch', label: 'Off', value: '0', rect: { x: 0, y: 700, width: 390, height: 44 } },
+    ];
+    let pressed = false;
+    h.fake.respond('capture.snapshot', () => ({ ...SETTINGS_SNAPSHOT, nodes: rows(pressed) }));
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+    });
+    await openAttempt(h);
+    const { root } = await h.engine.observe!(operation());
+    const first = [...walk(root)].find((node) => node.role === 'switch')!;
+    await expect(h.engine.perform!(first.ref, { kind: 'check' }, { ...operation(), timeoutMs: 1_000 })).resolves.toBeUndefined();
+    expect(h.fake.methods().filter((method) => method === 'interactions.press')).toHaveLength(1);
+  });
+
+  it('fails a read the deadline cuts off after the tap as an unchanged toggle', async () => {
+    const h = harness({ transition: 0 });
+    let pressed = false;
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return SETTINGS_SNAPSHOT;
+      return new Promise((resolve) => setTimeout(() => resolve(SETTINGS_SNAPSHOT), 500));
+    });
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, { ...operation(), origin: 'test', timeoutMs: 400 })).rejects.toMatchObject({
+      code: 'NOT_ACTIONABLE',
+      message: expect.stringContaining('its checked state did not change'),
+    });
+  });
+
+  it('passes a toggle whose label spells its state when the stale read comes first', async () => {
+    const h = harness();
+    let pressed = false;
+    let reads = 0;
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return SETTINGS_SNAPSHOT;
+      reads += 1;
+      if (reads === 1) return SETTINGS_SNAPSHOT;
+      const nodes = SETTINGS_NODES.map((node) => (node.label === 'Airplane Mode' ? { ...node, label: 'Airplane Mode On', value: '1' } : node));
+      return { ...SETTINGS_SNAPSHOT, nodes };
+    });
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, operation())).resolves.toBeUndefined();
+    expect(reads).toBe(2);
+  });
+
+  it('keeps reading when the first capture after the tap is still unreadable', async () => {
+    const h = harness();
+    const airplane = toggling(SETTINGS_NODES, { '@e6': [6] });
+    let pressed = false;
+    let reads = 0;
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return { ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() };
+      reads += 1;
+      if (reads === 1) {
+        throw new AppError('COMMAND_FAILED', 'Android snapshot helper returned insufficient foreground app content', {
+          androidSnapshotHelperFailureReason: 'content-poor-app-window',
+        });
+      }
+      return { ...SETTINGS_SNAPSHOT, nodes: airplane.nodes() };
+    });
+    h.fake.respond('interactions.press', (args) => {
+      pressed = true;
+      airplane.press(args);
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, operation())).resolves.toBeUndefined();
+    expect(reads).toBe(2);
+  });
+
+  it('counts a toggle gone after a truncated first read as replaced, since it was never seen in its old state', async () => {
+    const withoutAirplane = SETTINGS_NODES.filter((node) => node.label !== 'Airplane Mode');
+    const h = harness();
+    let pressed = false;
+    let reads = 0;
+    h.fake.respond('capture.snapshot', () => {
+      if (!pressed) return SETTINGS_SNAPSHOT;
+      reads += 1;
+      return { ...SETTINGS_SNAPSHOT, nodes: withoutAirplane, truncated: reads === 1 };
+    });
+    h.fake.respond('interactions.press', () => {
+      pressed = true;
+    });
+    await openAttempt(h);
+    const toggle = await observed(h, 'Airplane Mode');
+    await expect(h.engine.perform!(toggle.ref, { kind: 'check' }, operation())).resolves.toBeUndefined();
+    expect(reads).toBe(2);
   });
 
   it('refuses what a device surface cannot express, and reports daemon ref misses as retryable', async () => {
@@ -4011,7 +4299,7 @@ describe('snapshot generations', () => {
    * a pinned ref is refused unless it names the newest capture. The installed
    * SDK owns the pin grammar; the fake must not accept an adapter's old spelling.
    */
-  function generations(h: Harness, nodes: () => readonly RawNode[] = () => SETTINGS_NODES): void {
+  function generations(h: Harness, nodes: () => readonly RawNode[] = () => SETTINGS_NODES, pressed: (args: unknown) => void = () => {}): void {
     let generation = 6;
     h.fake.respond('capture.snapshot', () => {
       generation += 1;
@@ -4023,7 +4311,10 @@ describe('snapshot generations', () => {
         throw new AppError('COMMAND_FAILED', `Ref ${ref} was minted from a superseded snapshot generation`, { reason: 'ref_generation_mismatch', dispatched: 'no' });
       }
     };
-    h.fake.respond('interactions.press', (args) => admit((args as { ref: string }).ref));
+    h.fake.respond('interactions.press', (args) => {
+      admit((args as { ref: string }).ref);
+      pressed(args);
+    });
     h.fake.respond('interactions.fill', (args) => admit((args as { ref: string }).ref));
     h.fake.respond('interactions.drag', (args) => {
       const { source, destination } = args as { source: string; destination: string };
@@ -4035,7 +4326,8 @@ describe('snapshot generations', () => {
   it('pins every ref action to the capture that issued its ref', async () => {
     const h = harness();
     await openAttempt(h);
-    generations(h);
+    const airplane = toggling(SETTINGS_NODES, { '@e6': [6] });
+    generations(h, airplane.nodes, airplane.press);
     const op = operation();
     const { root } = await h.engine.observe!(op);
     const [about, toggle, back] = ['About', 'Airplane Mode', 'Back'].map((name) => named(root, name));
@@ -4046,7 +4338,10 @@ describe('snapshot generations', () => {
     expect(h.fake.calls.slice(before).map((call) => [call.method, call.args])).toEqual([
       ['interactions.press', { ref: formatPinnedRef('@e4', 7), settle: true, settleQuietMs: 150 }],
       ['interactions.press', { ref: formatPinnedRef('@e6', 7), settle: true, settleQuietMs: 150 }],
-      ['interactions.drag', { source: formatPinnedRef('@e4', 7), destination: formatPinnedRef('@e3', 7) }],
+      // The read that confirms the check is a capture of its own, so the
+      // drag's nodes are found again in it and pinned to its generation.
+      ['capture.snapshot', { interactiveOnly: false }],
+      ['interactions.drag', { source: formatPinnedRef('@e4', 8), destination: formatPinnedRef('@e3', 8) }],
     ]);
   });
 

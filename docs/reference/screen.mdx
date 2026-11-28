@@ -939,6 +939,10 @@ On the web engine, a checkbox or radio hidden under its own label (as in
 Element Plus) is clicked through that label. Anything else on top of the
 point the click lands on still fails `ACTION_FAILED`.
 
+| Throws | When |
+| --- | --- |
+| `ACTION_FAILED` | The control's checked state did not change after the click or tap before the timeout. A device control that is gone from the first read that finds it missing took the tap and passes; one that was seen in its old state and then disappears fails. |
+
 #### `uncheck`
 
 ```ts
@@ -952,7 +956,7 @@ await screen.getByRole('checkbox', 'Remember me').uncheck();
 
 | Throws | When |
 | --- | --- |
-| `ACTION_FAILED` | A checked native radio button, which only another radio in its group clears. |
+| `ACTION_FAILED` | A checked radio button (on the web, a native one; on a device, any radio), which only another radio in its group clears, or a control whose checked state did not change after the click or tap before the timeout. A device control that is gone from the first read that finds it missing took the tap and passes; one that was seen in its old state and then disappears fails. |
 
 #### `selectOption`
 

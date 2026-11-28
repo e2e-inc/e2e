@@ -185,6 +185,11 @@ test.describe('control inventory', () => {
     await expect(medium).toBeChecked();
     await expect(small).not.toBeChecked();
     await expect(screen.getByTestId('size-status')).toHaveText('size: Medium');
+    // Only another radio in the group clears one, so uncheck refuses it
+    // instead of tapping it and passing with the radio still checked.
+    expect((await rejection(medium.uncheck()))?.code).toBe('ACTION_FAILED');
+    await expect(medium).toBeChecked();
+    await expect(screen.getByTestId('size-status')).toHaveText('size: Medium');
   });
 
   // React Native 0.86 gives the tab role no UIKit trait and, unlike checkbox
