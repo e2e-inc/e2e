@@ -243,7 +243,7 @@ describe('MCP attachments to held tests', { timeout: 60_000 }, () => {
     expect(await held.exited).toBe(0);
   });
 
-  it('records a frame locator in a held web test without exposing browser to run_code', async () => {
+  it('records and replays a frame locator in a held web test', async () => {
     const app = await startFixtureApp();
     try {
       const dir = project("await app.open('/frame'); await screen.pause();", `import { web } from '@e2e-dev/web';
@@ -258,7 +258,13 @@ export default { targets: [{ name: 'web', engine: web(), app: { url: ${JSON.stri
       expect(tapped.text).toContain('Test line: await browser.frameLocator(');
       const draft = await invoke(client, 'call', { tool: 'test_lines' });
       expect(draft.text).toContain("Include browser in the test's fixtures.");
-      expect((await invoke(client, 'call', { tool: 'run_code', args: { code: 'await browser.frameLocator("iframe").getByRole("button").count();' } })).isError).toBe(true);
+      const line = draft.text.split('\n').find((entry) => entry.startsWith('await browser.frameLocator('));
+      expect(line, draft.text).toBeDefined();
+      await invoke(client, 'call', { tool: 'navigate', args: { url: `${app.url}/frame` } });
+      expect((await invoke(client, 'call', { tool: 'observe' })).text).toContain('button "Frame button"');
+      const replay = await invoke(client, 'call', { tool: 'run_code', args: { code: line } });
+      expect(replay.isError, replay.text).toBe(false);
+      expect((await invoke(client, 'call', { tool: 'observe' })).text).toContain('button "Frame clicked"');
       expect(e2e(dir, 'run', '--step', 'next').status).toBe(0);
       expect(await held.exited).toBe(0);
     } finally {
