@@ -1699,6 +1699,13 @@ describe('DesktopSurface: typing', () => {
     expect(last(physical.fake, 'act')).toMatchObject({ action: 'type', physical: true });
   });
 
+  it('names the depth limit when a window swipe finds nothing that scrolls in a read cut at it', async () => {
+    const deep = screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'group', name: 'Row', bounds: { x: 10, y: 10, width: 100, height: 50 }, children_count: 3 }] });
+    const { surface, fake } = await launched({ snapshot: [deep] }, { observe: false });
+    await expect(surface.perform({ id: 'root', revision: '' }, { kind: 'swipe', direction: 'down' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/deeper than the \d+ levels a snapshot reads/) });
+    expect(inputs(fake)).toEqual([]);
+  });
+
   it('names the depth limit when no field read has focus and the read stopped at it', async () => {
     const deep = screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'group', name: 'Row', bounds: { x: 10, y: 10, width: 100, height: 50 }, children_count: 1 }] });
     const { surface, fake } = await launched({ snapshot: [deep] }, { observe: false });

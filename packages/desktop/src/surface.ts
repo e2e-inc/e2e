@@ -1014,8 +1014,13 @@ export class DesktopSurface {
       if (screen !== undefined) this.remember(screen.bindings.values());
       const axis = action.direction === 'left' || action.direction === 'right' ? 'horizontal' : 'vertical';
       const target = screen?.scrollTargets?.[axis];
-      if (target === undefined && screen?.cutShort === true) throw partialRead(`what in it scrolls ${axis === 'vertical' ? 'up and down' : 'sideways'}`);
-      if (target === undefined) throw notActionable(`the window has nothing that scrolls ${axis === 'vertical' ? 'up and down' : 'sideways'}`);
+      const along = axis === 'vertical' ? 'up and down' : 'sideways';
+      if (target === undefined && screen?.cutShort === true) throw partialRead(`what in it scrolls ${along}`);
+      // A read cut at its depth limit is cut the same way every time: what scrolls may be below it.
+      if (target === undefined && screen?.truncated === true) {
+        throw notActionable(`nothing read in the window scrolls ${along}, and the window is deeper than the ${this.options.maxDepth} levels a snapshot reads, which desktop({ maxDepth }) raises, so what scrolls may be below them`);
+      }
+      if (target === undefined) throw notActionable(`the window has nothing that scrolls ${along}`);
       await this.scroll(this.binding({ id: target, revision: '' }), action.direction, action.momentum, operation);
       return this.settle(operation);
     }
