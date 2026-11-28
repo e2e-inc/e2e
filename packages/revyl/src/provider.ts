@@ -77,7 +77,6 @@ export function revyl(options: RevylOptions): DeviceProvider {
         throw new Error("Revyl installs the app from `app`; leave the target's `app.appPath` out, or leave `app` out to install that build instead");
       }
       const credentials = revylCredentials(request.env);
-      await checkDevice(credentials, request, device, options.osVersion);
       const selectors = {
         device,
         ...(app === undefined ? {} : { providerApp: app }),
@@ -89,6 +88,8 @@ export function revyl(options: RevylOptions): DeviceProvider {
         summary: `${device}, ${options.osVersion ?? request.platform}; Revyl device started`,
         prepareHome: plugin.prepareHome,
         installAppPath: true,
+      }).catch(async (error: unknown) => {
+        throw (await unlisted(credentials, request, device, options.osVersion, error)) ?? error;
       });
     },
     release: (lease, context) => leases.release(lease, context),
@@ -115,21 +116,24 @@ export function revyl(options: RevylOptions): DeviceProvider {
 }
 
 /**
- * Refuses a device model or OS version Revyl does not list for the
- * platform, naming the ones it does, before a device is allocated: Revyl
- * itself answers an unknown one with a bare 422. A catalog Revyl does not
- * answer leaves the check to the allocation.
+ * After Revyl refused a lease, the error naming the models or OS versions
+ * Revyl lists when it lists neither `device` nor `osVersion` for the
+ * platform: Revyl itself answers an unknown one with a bare 422. Asked only
+ * once the allocation failed, since the allocation also takes aliases the
+ * catalog does not list, such as `Pixel7`, a bare API level, or a retired
+ * iOS beta. Nothing when Revyl lists both or does not answer.
  */
-async function checkDevice(credentials: RevylCredentials, request: DeviceRequest, device: string, osVersion: string | undefined): Promise<void> {
+async function unlisted(credentials: RevylCredentials, request: DeviceRequest, device: string, osVersion: string | undefined, cause: unknown): Promise<Error | undefined> {
   const catalog = await new RevylDeviceClient(credentials).catalog(request.platform, request.signal).catch(() => undefined);
-  if (catalog === undefined || catalog.models.length === 0) return;
+  if (catalog === undefined || catalog.models.length === 0) return undefined;
   if (!catalog.models.includes(device)) {
-    throw new Error(`Revyl has no ${request.platform} device "${device}"; set \`device\` to one of: ${catalog.models.join(', ')}`);
+    return new Error(`Revyl has no ${request.platform} device "${device}"; set \`device\` to one of: ${catalog.models.join(', ')}`, { cause });
   }
   const versions = catalog.runtimes[device] ?? [];
   if (osVersion !== undefined && versions.length > 0 && !versions.includes(osVersion)) {
-    throw new Error(`Revyl runs "${device}" on ${versions.join(', ')}, not "${osVersion}"; set \`osVersion\` to one of those, or leave it out for Revyl's default`);
+    return new Error(`Revyl runs "${device}" on ${versions.join(', ')}, not "${osVersion}"; set \`osVersion\` to one of those, or leave it out for Revyl's default`, { cause });
   }
+  return undefined;
 }
 
 /** An `https` URL without credentials in it, the only app source the Revyl plugin accepts. */

@@ -125,9 +125,8 @@ test('opens the cart', async ({ app, screen }) => {
 | `osVersion` | Revyl's default for the model | OS version as Revyl lists it for that model, such as `iOS 27.0` or `Android 14`. |
 
 Unknown or invalid options fail config load with `INVALID_CONFIG`. When
-Revyl answers its device catalog, a `device` or `osVersion` it does not list
-for the platform fails the lease before a device starts, and the error names
-the ones Revyl has.
+Revyl refuses to start a `device` or `osVersion` its device catalog does not
+list for the platform, the error names the ones Revyl has.
 
 ## Limits
 

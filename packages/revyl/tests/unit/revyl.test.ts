@@ -176,27 +176,38 @@ describe('revyl()', () => {
     },
   );
   describe('device check', () => {
-    it("refuses a model Revyl does not list for the platform, naming the ones it does, before a device is allocated", async () => {
-      await expect(revyl({ ...options, device: 'iPhone 16 Pro Max' }).acquire(request({ platform: 'ios' }))).rejects.toThrow(
-        'Revyl has no ios device "iPhone 16 Pro Max"; set `device` to one of: iPhone 17 Pro Max, iPhone 16',
-      );
-      expect(mocks.acquire).not.toHaveBeenCalled();
+    const refused = new Error('Revyl device start failed with HTTP 422');
+
+    it('leases a name Revyl takes without asking the catalog, so an alias the catalog does not list still leases', async () => {
+      await revyl({ ...options, device: 'Pixel7', osVersion: '34' }).acquire(request());
+      await revyl({ device: 'iPhone 17 Pro Max', osVersion: 'iOS 26.0 beta 3' }).acquire(request({ platform: 'ios' }));
+      expect(mocks.acquire).toHaveBeenCalledTimes(2);
+      expect(calls).toEqual([]);
+    });
+
+    it('names the models Revyl lists when it refuses a model it does not list', async () => {
+      mocks.acquire.mockRejectedValueOnce(refused);
+      const failure = revyl({ ...options, device: 'iPhone 16 Pro Max' }).acquire(request({ platform: 'ios' }));
+      await expect(failure).rejects.toThrow('Revyl has no ios device "iPhone 16 Pro Max"; set `device` to one of: iPhone 17 Pro Max, iPhone 16');
+      await expect(failure).rejects.toMatchObject({ cause: refused });
       expect(calls[0]).toMatchObject({ method: 'GET', url: 'https://backend.revyl.ai/api/v1/execution/device-targets' });
       expect(calls[0]!.headers).toMatchObject({ Authorization: 'Bearer revyl-key' });
     });
 
-    it('refuses an OS version Revyl does not run the model on, naming the ones it does', async () => {
+    it('names the OS versions Revyl runs the model on when it refuses one it does not list', async () => {
+      mocks.acquire.mockRejectedValueOnce(refused);
       await expect(revyl({ ...options, device: 'iPhone 16', osVersion: 'iOS 18.5' }).acquire(request({ platform: 'ios' }))).rejects.toThrow(
         'Revyl runs "iPhone 16" on iOS 27.0, not "iOS 18.5"; set `osVersion` to one of those, or leave it out for Revyl\'s default',
       );
-      expect(mocks.acquire).not.toHaveBeenCalled();
     });
 
-    it("asks the run's REVYL_API_URL, and leaves the check to the allocation when Revyl does not answer it", async () => {
+    it("keeps the allocation's error when Revyl lists both names, and when it does not answer its catalog at the run's REVYL_API_URL", async () => {
+      mocks.acquire.mockRejectedValueOnce(refused);
+      await expect(revyl({ ...options, device: 'iPhone 16', osVersion: 'iOS 27.0' }).acquire(request({ platform: 'ios' }))).rejects.toBe(refused);
       routes['GET /api/v1/execution/device-targets'] = () => json({ detail: 'down' }, 503);
-      await revyl(options).acquire(request({ env: { ...env, REVYL_API_URL: 'https://backend-staging.revyl.ai' } }));
-      expect(calls[0]!.url).toBe('https://backend-staging.revyl.ai/api/v1/execution/device-targets');
-      expect(mocks.acquire).toHaveBeenCalledTimes(1);
+      mocks.acquire.mockRejectedValueOnce(refused);
+      await expect(revyl({ ...options, device: 'Pixel 9' }).acquire(request({ env: { ...env, REVYL_API_URL: 'https://backend-staging.revyl.ai' } }))).rejects.toBe(refused);
+      expect(calls.at(-1)!.url).toBe('https://backend-staging.revyl.ai/api/v1/execution/device-targets');
     });
   });
 
