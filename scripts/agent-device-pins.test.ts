@@ -43,6 +43,26 @@ describe('agentDevicePins', () => {
     assert.match(problems[0]!, /@e2e-dev\/e2b peers on @e2e-dev\/mobile ">=0\.12\.6 <1", below @e2e-dev\/limrun's ">=0\.12\.10 <1"/);
   });
 
+  it('reports only the mis-pinned package, not the floors of the ones on the pin', () => {
+    const { problems } = agentDevicePins([
+      engine,
+      provider('@e2e-dev/limrun', 'agent-device', '0.21.44', '0.12.10'),
+      provider('@e2e-dev/revyl', '@agent-device/revyl', '0.21.45', '0.12.11'),
+    ]);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0]!, /@e2e-dev\/revyl depends on @agent-device\/revyl "0\.21\.45"/);
+  });
+
+  it('holds an optional dependency on agent-device to the same pin', () => {
+    const { problems, pinned } = agentDevicePins([
+      engine,
+      { name: '@e2e-dev/cloud', optionalDependencies: { '@agent-device/cloud': '0.21.40' }, peerDependencies: { '@e2e-dev/mobile': '>=0.12.10 <1' } },
+    ]);
+    assert.deepEqual(pinned, ['@e2e-dev/cloud', '@e2e-dev/mobile']);
+    assert.equal(problems.length, 1);
+    assert.match(problems[0]!, /@e2e-dev\/cloud depends on @agent-device\/cloud "0\.21\.40"/);
+  });
+
   it('flags a driver package with no engine peer', () => {
     const { problems } = agentDevicePins([engine, provider('@e2e-dev/limrun', 'agent-device', '0.21.44', undefined)]);
     assert.equal(problems.length, 1);

@@ -55,11 +55,13 @@ export function agentDevicePins(manifests: readonly PackageManifest[]): AgentDev
   const pinned: string[] = [];
   const floors: { name: string; range: string; floor: [number, number, number] }[] = [];
   for (const manifest of manifests) {
-    const drivers = Object.entries(manifest.dependencies ?? {}).filter(([name]) => isAgentDevicePackage(name));
+    // An optional dependency installs and runs the same way, so it is held to the same pin.
+    const drivers = Object.entries({ ...manifest.optionalDependencies, ...manifest.dependencies }).filter(([name]) => isAgentDevicePackage(name));
     if (drivers.length === 0) continue;
     pinned.push(manifest.name);
-    for (const [name, range] of drivers) {
-      if (range !== version) problems.push(`${manifest.name} depends on ${name} ${JSON.stringify(range)}; ${ENGINE} pins agent-device ${JSON.stringify(version)}`);
+    const offPin = drivers.filter(([, range]) => range !== version);
+    for (const [name, range] of offPin) {
+      problems.push(`${manifest.name} depends on ${name} ${JSON.stringify(range)}; ${ENGINE} pins agent-device ${JSON.stringify(version)}`);
     }
     if (manifest.name === ENGINE) continue;
     const range = manifest.peerDependencies?.[ENGINE];
@@ -67,8 +69,9 @@ export function agentDevicePins(manifests: readonly PackageManifest[]): AgentDev
       problems.push(`${manifest.name} drives agent-device but has no ${ENGINE} peer, so nothing keeps the engine it runs beside on the same agent-device`);
       continue;
     }
+    // A package off the pin is reported above; its floor belongs to another pin and would misreport the rest.
     const floor = floorOf(range);
-    if (floor !== undefined) floors.push({ name: manifest.name, range, floor });
+    if (floor !== undefined && offPin.length === 0) floors.push({ name: manifest.name, range, floor });
   }
   const highest = floors.reduce<(typeof floors)[number] | undefined>((top, entry) => (top === undefined || compare(entry.floor, top.floor) > 0 ? entry : top), undefined);
   if (highest !== undefined) {

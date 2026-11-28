@@ -21,6 +21,7 @@ export interface PackageManifest {
   version?: string;
   private?: boolean;
   dependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
 }
 
