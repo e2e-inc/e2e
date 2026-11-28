@@ -55,6 +55,8 @@ export interface ScreenOverOptions {
   readonly tapModifiers?: boolean;
   /** Action and assertion timeout in milliseconds. */
   readonly timeoutMs: number;
+  /** The attempt's signal; default one that never aborts. */
+  readonly signal?: AbortSignal;
 }
 
 /** A screen and the recorder of its steps over the engine `options` describe. */
@@ -90,7 +92,7 @@ export function screenOver(options: ScreenOverOptions): { screen: Screen; steps:
     ...(options.tapModifiers === undefined ? {} : { tapModifiers: options.tapModifiers }),
   });
   const steps = new StepRecorder('attempt');
-  const signal = new AbortController().signal;
+  const signal = options.signal ?? new AbortController().signal;
   const screen = createScreen({
     engine: new LocatorEngine({
       session: createEngineSession({ engine, targetName: 'fake' }),

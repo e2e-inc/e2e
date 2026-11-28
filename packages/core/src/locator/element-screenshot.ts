@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { LocatorExpression, SemanticNode, ViewportSize } from '../engine/surface.ts';
 import { asEngineError, ConfigurationError, isE2EError, TestError } from '../internal/errors.ts';
 import { clipBox, decodePng, pngSize, processPng } from '../internal/image.ts';
-import { pollReads, type ReadWindow } from '../internal/time.ts';
+import { cancelledError, pollReads, withAbort, type ReadWindow } from '../internal/time.ts';
 import { isNodeVisible, locatorDetails, translateLocatorError, type LocatorEngine } from './engine.ts';
 import { describeExpression } from './expression.ts';
 
@@ -82,7 +82,8 @@ export async function captureMatch(
           missing = `locator is outside the screenshot the engine took, so it has no pixels to capture: ${shown}`;
           return false;
         }
-        writeFileSync(file, await cropScreenshot(bytes, box));
+        // The crop runs off the JavaScript thread: an attempt cancelled meanwhile keeps no file.
+        writeFileSync(file, await withAbort(cropScreenshot(bytes, box), engine.signal, cancelledError));
         // The engine's own spelling, with `/`: the report takes no other separator.
         kept = relative;
         return true;

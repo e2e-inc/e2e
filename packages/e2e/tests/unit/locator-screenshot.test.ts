@@ -274,6 +274,29 @@ describe('locator.screenshot', () => {
     });
   });
 
+  it('keeps no file when the attempt is cancelled while the crop runs', async () => {
+    const box = { x: 10, y: 20, width: 30, height: 15 };
+    const controller = new AbortController();
+    const { screen } = screenOver({
+      locate: (expression) => resolveExpression(expression, [card(box)]),
+      observe: () => snapshot([card(box)], { viewport: VIEWPORT }),
+      perform: () => undefined,
+      screenshot: () => {
+        writeFileSync(path.join(artifactsDir, 'screenshots', 'shot.png'), encodePng(screenImage(30, box)));
+        // Cancels after the reads that follow the capture, while the native crop of 3000x1500 pixels runs.
+        setTimeout(() => controller.abort(), 0);
+        return 'screenshots/shot.png';
+      },
+      artifactsDir,
+      timeoutMs: 2_000,
+      signal: controller.signal,
+    });
+    await expect(screen.getByTestId('card').screenshot()).rejects.toMatchObject({ code: 'CANCELLED' });
+    // The crop itself is not stopped: wait for it, then look for what it would have written.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(readdirSync(path.join(artifactsDir, 'screenshots'))).toEqual([]);
+  });
+
   it('refuses anything but a label before it captures', () => {
     const box = { x: 10, y: 20, width: 30, height: 15 };
     const { card: locator, captures } = screenWith(screenImage(1, box), () => card(box));
