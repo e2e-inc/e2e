@@ -6,23 +6,29 @@ use super::*;
 /// scroll area that holds its content directly lists the bar after any number of children, so the last few are read too.
 /// A read the app did not answer in time is `Err(AX_CANNOT_COMPLETE)`: no proof that the area has no bar.
 pub fn scroll_bar(element: &Element, vertical: bool) -> Result<Option<Element>, AXError> {
-    let stalled = |error: AXError| if error == ax::AX_CANNOT_COMPLETE { Err(error) } else { Ok(Vec::new()) };
+    let none_unless_stalled = |error: AXError| if error == ax::AX_CANNOT_COMPLETE { Err(error) } else { Ok(Vec::new()) };
     match element.attribute(if vertical { "AXVerticalScrollBar" } else { "AXHorizontalScrollBar" }) {
         Ok(Value::Element(bar)) => return Ok(Some(bar)),
         Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
         _ => {}
     }
     let orientation = if vertical { "AXVerticalOrientation" } else { "AXHorizontalOrientation" };
-    let first = element.elements("AXChildren", 16).or_else(stalled)?;
-    let last = if first.len() < 16 { Vec::new() } else { element.last_elements("AXChildren", 4).or_else(stalled)? };
-    Ok(first.into_iter().chain(last).find(|child| {
-        child.text("AXRole").as_deref() == Some("AXScrollBar")
-            && match child.text("AXOrientation") {
-                Some(shown) => shown == orientation,
-                // No orientation: a vertical bar is taller than it is wide.
-                None => child.frame().is_some_and(|(_, _, width, height)| (height > width) == vertical),
-            }
-    }))
+    let first = element.elements("AXChildren", 16).or_else(none_unless_stalled)?;
+    let last = if first.len() < 16 { Vec::new() } else { element.last_elements("AXChildren", 4).or_else(none_unless_stalled)? };
+    for child in first.into_iter().chain(last) {
+        if stalled(child.attribute("AXRole"))?.as_ref().and_then(Value::text) != Some("AXScrollBar") {
+            continue;
+        }
+        let along = match stalled(child.attribute("AXOrientation"))?.as_ref().and_then(Value::text) {
+            Some(shown) => shown == orientation,
+            // No orientation: a vertical bar is taller than it is wide.
+            None => child.frame().is_some_and(|(_, _, width, height)| (height > width) == vertical),
+        };
+        if along {
+            return Ok(Some(child));
+        }
+    }
+    Ok(None)
 }
 
 /// Scrolls a scroll area by moving its scroll bar, `pages` of its visible size.
@@ -33,7 +39,7 @@ pub(super) fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<
     let (_, role) = role_of(element, "scroll")?;
     let bar = scroll_bar(element, vertical).map_err(|error| unread(error, "scroll"))?;
     let own = scrolls_itself(role, bar.is_some(), &action_names(element, "scroll")?, direction);
-    let target = if own { None } else { enclosing_scroll_area(element, vertical) };
+    let target = if own { None } else { enclosing_scroll_area(element, vertical).map_err(|error| unread(error, "scroll"))? };
     scroll_by(target.as_ref().unwrap_or(element), direction, pages).map_err(|failure| {
         // An element that takes none of the ways to scroll: say so, not which attribute it lacks. Like a window with
         // nothing to scroll, it is not actionable, not a capability the engine lacks.
@@ -53,16 +59,19 @@ pub(super) fn scrolls_itself(role: &str, bar: bool, actions: &[String], directio
     bar || (role != "scrollarea" && actions.iter().any(|name| name == page_action(direction)))
 }
 
-/// The nearest scroll area above `element`, a few levels up, with a scroll bar for the axis.
-pub(super) fn enclosing_scroll_area(element: &Element, vertical: bool) -> Option<Element> {
-    let mut current = element.element("AXParent")?;
+/// The nearest scroll area above `element`, a few levels up, with a scroll bar for the axis. A read the app did not
+/// answer in time is `Err(AX_CANNOT_COMPLETE)`: skipping the area it was about could move the pane around it instead.
+pub(super) fn enclosing_scroll_area(element: &Element, vertical: bool) -> Result<Option<Element>, AXError> {
+    let parent = |of: &Element| -> Result<Option<Element>, AXError> { Ok(stalled(of.attribute("AXParent"))?.and_then(|value| value.element().cloned())) };
+    let Some(mut current) = parent(element)? else { return Ok(None) };
     for _ in 0..4 {
-        if current.text("AXRole").as_deref() == Some("AXScrollArea") && scroll_bar(&current, vertical).ok().flatten().is_some() {
-            return Some(current);
+        if stalled(current.attribute("AXRole"))?.as_ref().and_then(Value::text) == Some("AXScrollArea") && scroll_bar(&current, vertical)?.is_some() {
+            return Ok(Some(current));
         }
-        current = current.element("AXParent")?;
+        let Some(next) = parent(&current)? else { return Ok(None) };
+        current = next;
     }
-    None
+    Ok(None)
 }
 
 /// The accessibility action that scrolls an element a page in `direction`.
