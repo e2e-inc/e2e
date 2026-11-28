@@ -34,7 +34,7 @@ export interface LaunchedApp {
  * later step would only time out on an empty screen. Any other failure of a
  * read is reported as it is. An app in the background is never brought
  * forward: one that opens no window there (a document-based app opens its
- * first one only when it comes forward) fails the open, and needs `headed`.
+ * first one only when it comes forward) fails the open, and needs `--headed` or `physicalInput`.
  */
 export async function windowReadable(operation: OperationContext, launched: LaunchedApp): Promise<void> {
   const { app } = launched;
@@ -91,7 +91,7 @@ export async function windowReadable(operation: OperationContext, launched: Laun
   if (!sawWindow && listedNone && !launched.foreground) {
     throw new EngineError(
       'ENGINE_FAILURE',
-      `${app} launched in the background and opened no window. Some apps, such as document-based ones, show a window only once they come forward; set desktop({ headed: true }) for them, or run with --headed`,
+      `${app} launched in the background and opened no window. Some apps, such as document-based ones, show a window only once they come forward; run with --headed for them, or set desktop({ physicalInput: true })`,
       { retryable: false },
     );
   }

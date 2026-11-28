@@ -224,19 +224,7 @@ export interface FixtureOperation<Args extends unknown[] = unknown[]> {
   readonly timeout?: number | false | ((...args: Args) => number | undefined);
   /** Assertions verify by default; waits may opt in as well. */
   readonly verifies?: boolean;
-  /**
-   * How a test line `e2e mcp` writes for this call spells it, for an argument
-   * that holds only while the app runs, such as a window id: `args`, the
-   * arguments as a test writes them to find the same thing on the next run,
-   * or `note`, why the arguments as given may not hold, which the line
-   * carries as a comment. Undefined writes the arguments as given. Strings
-   * in the arguments it receives are already redacted.
-   */
-  readonly testLine?: (...args: Args) => FixtureTestLine | undefined;
 }
-
-/** What `FixtureOperation.testLine` writes in place of the arguments as given. */
-export type FixtureTestLine = { readonly args: string } | { readonly note: string };
 
 /** Only declared async methods are recorded. Sync accessors pass through unchanged. */
 export type FixtureOperations<T extends object> = {
@@ -896,7 +884,7 @@ export interface Engine {
    * checked every field's shape.
    */
   validateApp?(app: EngineAppDeclaration, info: EngineAppCheckInfo): void;
-  /** Steering hooks: open, back, restart, reset. */
+  /** Steering hooks: open, openLink, back, resize, switchTab, closeTab, restart, reset. */
   readonly session?: EngineSession;
   /**
    * Once per run and target, in the runner process, before any worker starts

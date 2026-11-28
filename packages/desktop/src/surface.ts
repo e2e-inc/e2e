@@ -4,7 +4,7 @@
  * the background, and every action goes through the accessibility API or
  * into the app's own event queue, so the user's pointer, focus, and typing
  * stay where they are, unless the target opts into physical input with
- * `headed`.
+ * `physicalInput`.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -86,12 +86,15 @@ const MAX_BINDINGS = 4096;
 /** Codes a read fails with while the app has no window to read: not launched yet, still opening, or just closed. */
 const NO_WINDOW_CODES = new Set(['APP_NOT_FOUND', 'WINDOW_NOT_FOUND']);
 
-/** One window of the app under test, as `desktop.windows()` lists it. */
-export interface DesktopWindow {
+/** One open window of the app under test, as the `desktop` fixture's window handles read it. */
+export interface OpenWindow {
   /** The window server's id of the window, valid while the window stays open. */
   readonly id: string;
   readonly title: string;
-  readonly focused: boolean;
+  /** Whether it is the active window, the one `screen` reads. */
+  readonly active: boolean;
+  /** Whether it is a window of the app's own that accessibility reads: not a dialog macOS put over the app, nor one only the window server lists. */
+  readonly readable: boolean;
 }
 
 /** What a target launches: a `.app` bundle on disk, or an installed app by bundle id or name. */
@@ -201,7 +204,7 @@ export class DesktopSurface {
   private projectRoot = process.cwd();
   /** What `app.open()` launches: the target's `appPath` bundle, resolved, else its `bundleId`. */
   private launchTarget: LaunchTarget | undefined;
-  /** Whether the app is launched in the foreground: with `desktop({ headed })`, or a run that asked for a visible surface (`--headed`). Physical input stays with `desktop({ headed })` alone, since the engine declares it when it is created. */
+  /** Whether the app is launched in the foreground: with `desktop({ physicalInput })`, or a run that asked for a visible surface (`--headed`). Physical input stays with `desktop({ physicalInput })` alone, since the engine declares it when it is created. */
   private foreground = false;
   /** The app's name, for messages and the observed location. */
   private appName: string | undefined;
@@ -220,7 +223,7 @@ export class DesktopSurface {
   private attempt: Attempt | undefined;
   /** The launch or quit running now, which the next one waits for. */
   private lifecycle: Promise<unknown> = Promise.resolve();
-  /** The window a test chose with `desktop.useWindow`, which every read and command then uses until the app quits. */
+  /** The window a test made active with `window.activate()`, which every read and command then uses until it closes or the app quits. */
   private chosenWindow: string | undefined;
   /**
    * The window of the newest screen handed to the harness, by observe or locate: the one a point is measured in, the
@@ -263,7 +266,7 @@ export class DesktopSurface {
     this.token = undefined;
     this.pending = undefined;
     this.forget();
-    this.foreground = this.options.headed || info.headed;
+    this.foreground = this.options.physicalInput || info.headed;
     const driver = (this.driver = this.loadDriver());
     this.appEnv = inheritedEnv(info.env);
     // A worker that was killed left its launch record behind, and maybe the app it launched.
@@ -365,7 +368,7 @@ export class DesktopSurface {
 
   /**
    * `app.open()`: the copy of the app the engine launched is quit, and the
-   * app launched fresh, in the background unless `headed` or the run's
+   * app launched fresh, in the background unless `physicalInput` or the run's
    * `--headed`, with the target's launch arguments. A copy the engine did
    * not launch (the developer's own) is left alone, and never read or
    * driven. A launch that failed after the app started still leaves the
@@ -401,7 +404,7 @@ export class DesktopSurface {
         arguments: [...FRESH_STATE_ARGUMENTS, ...launchArgumentList(this.app)],
         environment: this.appEnv,
         token,
-        // In the background unless `headed` or the run's `--headed`: otherwise the app takes the keyboard from whoever is at the Mac.
+        // In the background unless `physicalInput` or the run's `--headed`: otherwise the app takes the keyboard from whoever is at the Mac.
         activate: this.foreground,
         timeoutMs: operation.timeoutMs,
         claimMs: LAUNCH_READY_MS,
@@ -462,28 +465,66 @@ export class DesktopSurface {
   }
 
   /** The windows of the app the engine launched, for the `desktop` fixture; none while it is not running. */
-  async windows(signal: AbortSignal, timeoutMs: number): Promise<readonly DesktopWindow[]> {
-    const windows = await this.ownWindows({ signal, timeoutMs });
-    return windows.map((window) => ({ id: window.id, title: window.title ?? '', focused: window.is_focused === true }));
+  async windows(operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<readonly OpenWindow[]> {
+    const windows = await this.ownWindows(operation);
+    const active = this.activeWindow(windows)?.id;
+    return windows.map((window) => ({ id: window.id, title: window.title ?? '', active: window.id === active, readable: window.system !== true && window.accessible !== false }));
   }
 
   /**
-   * `desktop.useWindow()`: reads and acts in the window `id` names from now
-   * on, until the app quits, rather than the focused one. With no id, goes
-   * back to the focused window.
+   * `window.activate()`: reads and acts in the window `id` names from now
+   * on, rather than the focused one, until it closes or the app quits.
    */
-  async useWindow(id: string | undefined, signal: AbortSignal, timeoutMs: number): Promise<void> {
-    if (id !== undefined) {
-      const windows = await this.ownWindows({ signal, timeoutMs });
-      if (!windows.some((window) => window.id === id)) throw notActionable(`the app has no window ${id}; desktop.windows() lists the ones it has`);
-    }
+  async activateWindow(id: string, operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<void> {
+    const windows = await this.ownWindows(operation);
+    if (!windows.some((window) => window.id === id)) throw notActionable('the window has closed; desktop.windows() lists the open ones');
     this.chosenWindow = id;
     // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
     this.pointWindow = undefined;
   }
 
-  private chosenClosed(): EngineError {
-    return invalidState(`the window desktop.useWindow() chose (${this.chosenWindow ?? ''}) is closed; choose another, or call desktop.useWindow() to go back to the focused one`);
+  /**
+   * `window.close()`: closes the window `id` names as its close button does.
+   * One that already closed is left alone.
+   */
+  async closeWindow(id: string, operation: OperationContext): Promise<void> {
+    const { pid } = this;
+    if (pid === undefined) return;
+    const inputId = this.requireDriver().inputId();
+    await this.input((driver, timeoutMs) => driver.closeWindow(pid, id, inputId, timeoutMs), {
+      label: 'close window',
+      input: true,
+      signal: operation.signal,
+      timeoutMs: operation.timeoutMs,
+      onCutOff: () => this.driver?.cancelInput(inputId),
+    }).catch((cause: unknown) => {
+      // Already closed: the driver found no such window, and pressed nothing. One accessibility cannot read is still open.
+      if (cause instanceof DriverFailure && cause.notDelivered && cause.code === 'WINDOW_NOT_FOUND' && cause.details.kind === undefined) return;
+      // The app is open and the window is there: it has no close button, or accessibility cannot reach it.
+      if (cause instanceof DriverFailure && cause.notDelivered && (cause.code === 'WINDOW_NOT_FOUND' || cause.code === 'ACTION_NOT_SUPPORTED')) throw notActionable(`close window: ${cause.message}`);
+      throw translate(cause, 'close window', true);
+    });
+  }
+
+  /**
+   * The window a test made active, while the app still lists it. Once it
+   * closed, commands follow the focused window again, as a closed tab hands
+   * the screen to another. A locked screen lists no window, which is no proof
+   * that one closed: it is a retryable `NODE_STALE`.
+   */
+  private activeChoice(windows: readonly RawWindow[]): string | undefined {
+    const chosen = this.chosenWindow;
+    if (chosen === undefined || windows.some((window) => window.id === chosen)) return chosen;
+    this.unlessLocked();
+    this.chosenWindow = undefined;
+    this.pointWindow = undefined;
+    return undefined;
+  }
+
+  /** The window a command reads or acts in: the one the test made active, else the first by `byPreference`. */
+  private activeWindow(windows: readonly RawWindow[]): RawWindow | undefined {
+    const chosen = this.activeChoice(windows);
+    return chosen === undefined ? byPreference(windows)[0] : windows.find((window) => window.id === chosen);
   }
 
   /** `desktop.closeApp()`: the app quit, as at the end of every test. */
@@ -670,8 +711,8 @@ export class DesktopSurface {
 
   /**
    * One snapshot of a window of the app the engine launched, projected: the
-   * window `windowId` names, else the one the test chose (and no other while
-   * it is chosen), else the focused one, the visible ones, and the rest, in
+   * window `windowId` names, else the one the test made active (and no other
+   * while it is open), else the focused one, the visible ones, and the rest, in
    * that order, the first one accessibility can read. `forMask` is a
    * read that only places secure fields: it reads every node even with
    * `snapshot: 'interactive'`, which leaves out a secure node with no action
@@ -682,11 +723,11 @@ export class DesktopSurface {
    * `app.open()` and while the running app has no window; a copy of the app
    * the engine did not launch is never read. A read that fails is no empty
    * screen, which would let a negative assertion pass: an app that quit is
-   * `INVALID_STATE`, as is a chosen window that closed, and windows none of
+   * `INVALID_STATE`, and windows none of
    * which could be read, or none listed while the screen is locked, are a
    * retryable `NODE_STALE`, so a locator reads again until its deadline.
    */
-  private async capture(operation: OperationContext, windowId = this.chosenWindow, forMask = false, whole = false): Promise<ProjectedScreen | undefined> {
+  private async capture(operation: OperationContext, windowId?: string, forMask = false, whole = false): Promise<ProjectedScreen | undefined> {
     return this.readable(await this.readWindows(operation, windowId, forMask, whole));
   }
 
@@ -695,7 +736,7 @@ export class DesktopSurface {
     if (screen !== undefined) return screen;
     // Only a dialog macOS put over the app is open: no screen of the app's own, and no empty one either.
     if (candidates === 0 && windows.some((window) => window.system === true)) {
-      throw new EngineError('NODE_STALE', `only a system dialog is over ${this.appName ?? 'the app'}; reading again (desktop.useWindow() reads the dialog itself)`, { retryable: true, cause: UNREADABLE });
+      throw new EngineError('NODE_STALE', `only a system dialog is over ${this.appName ?? 'the app'}; reading again (activate() on its window from desktop.windows() reads the dialog itself)`, { retryable: true, cause: UNREADABLE });
     }
     if (candidates === 0) return undefined;
     // A locked screen still lists the app's windows, none of them readable: say so rather than that each closed.
@@ -704,18 +745,14 @@ export class DesktopSurface {
   }
 
   /** One read for `capture`: the app's windows, and the first of those asked for that accessibility can read. */
-  private async readWindows(operation: OperationContext, windowId = this.chosenWindow, forMask = false, whole = false): Promise<WindowsRead> {
+  private async readWindows(operation: OperationContext, windowId?: string, forMask = false, whole = false): Promise<WindowsRead> {
     const windows = await this.ownWindows(operation, true);
-    const chosen = windowId !== undefined && windowId === this.chosenWindow;
-    if (chosen && !windows.some((window) => window.id === windowId)) {
-      this.unlessLocked();
-      throw this.chosenClosed();
-    }
+    const target = windowId ?? this.activeChoice(windows);
     if (windows.length === 0 && this.pid !== undefined) this.unlessLocked();
     // A window the list no longer has is closed: its identities go, so windows opened and closed one after another do not pile them up.
     const open = new Set(windows.map((window) => window.id));
     for (const identity of this.ids.keys()) if (!open.has(identity.slice(0, identity.indexOf('|')))) this.ids.delete(identity);
-    const candidates = windowId === undefined ? byPreference(windows) : windows.filter((window) => window.id === windowId);
+    const candidates = target === undefined ? byPreference(windows) : windows.filter((window) => window.id === target);
     const read = { windows, candidates: candidates.length };
     const failures: DriverFailure[] = [];
     const { pid } = this;
@@ -738,10 +775,6 @@ export class DesktopSurface {
         // A panel accessibility cannot read, or a window that just closed: try the next one.
         if (cause instanceof DriverFailure && NO_WINDOW_CODES.has(cause.code)) {
           failures.push(cause);
-          if (chosen) {
-            this.unlessLocked();
-            throw this.chosenClosed();
-          }
           continue;
         }
         throw translate(cause, 'snapshot', false);
@@ -797,11 +830,9 @@ export class DesktopSurface {
     }
   }
 
-  /** The window of the launched process a command reads or acts in: the one the test chose, else the first by `byPreference`. */
+  /** The window of the launched process a command reads or acts in. */
   private async ownWindow(operation: OperationContext): Promise<RawWindow | undefined> {
-    const windows = await this.ownWindows(operation);
-    if (this.chosenWindow !== undefined) return windows.find((window) => window.id === this.chosenWindow);
-    return byPreference(windows)[0];
+    return this.activeWindow(await this.ownWindows(operation));
   }
 
   async observe(context: OperationContext, options: EngineObserveOptions | undefined): Promise<EngineSnapshot> {
@@ -845,7 +876,7 @@ export class DesktopSurface {
     }
     const operation = withDeadline(context);
     // A locator reads the whole window whatever `snapshot` says, as on the mobile engine: the interactive read leaves out static text.
-    const screen = await this.capture(operation, this.chosenWindow, false, true);
+    const screen = await this.capture(operation, undefined, false, true);
     if (screen === undefined) return [];
     const sink = this.attempt?.screen;
     if (sink !== undefined) {
@@ -876,9 +907,9 @@ export class DesktopSurface {
   private binding(ref: NodeRef): NodeBinding {
     const binding = this.bindings.get(ref.id);
     if (binding === undefined) throw new EngineError('NODE_STALE', `node ${ref.id} is not on the screen`, { retryable: true });
-    // A node read before desktop.useWindow() chose another window is not on the screen in use: the harness locates it again there.
+    // A node read before a test made another window active is not on the screen in use: the harness locates it again there.
     if (this.chosenWindow !== undefined && binding.windowId !== this.chosenWindow) {
-      throw new EngineError('NODE_STALE', `node ${ref.id} is in another window than the one desktop.useWindow() chose`, { retryable: true });
+      throw new EngineError('NODE_STALE', `node ${ref.id} is in another window than the active one`, { retryable: true });
     }
     return binding;
   }
@@ -944,7 +975,7 @@ export class DesktopSurface {
         await this.refCommand('rightClick', binding, operation);
         break;
       case 'doubleTap':
-        // A double click needs the real pointer; declared with `headed` alone. A node with no ref (a plain view, text) takes it at its center.
+        // A double click needs the real pointer; declared with `physicalInput` alone. A node with no ref (a plain view, text) takes it at its center.
         if (binding.ref === undefined) return await this.pointAtNode(binding, 'doubleTap', operation);
         await this.refCommand('doubleClick', binding, operation);
         break;
@@ -980,10 +1011,10 @@ export class DesktopSurface {
         const window = binding.windowId;
         if (window === undefined) throw notActionable(`node ${binding.id} was read in no window to press a key into`);
         await this.read((driver) => driver.checkCombo(combo), { label: 'press', input: false, signal: operation.signal, timeoutMs: operation.timeoutMs }).catch((cause: unknown) => Promise.reject(translate(cause, 'press', false)));
-        // With `headed` the key goes through the real keyboard to the window in front: the control's window comes forward
-        // first, so a control in a window useWindow() picked while another held the keyboard can take focus. The checks
+        // With `physicalInput` the key goes through the real keyboard to the window in front: the control's window comes forward
+        // first, so a control in a window a test made active while another held the keyboard can take focus. The checks
         // below still run before the key.
-        if (this.options.headed && this.pid !== undefined) {
+        if (this.options.physicalInput && this.pid !== undefined) {
           const pid = this.pid;
           const focusId = this.requireDriver().inputId();
           await this.input((driver, timeoutMs) => driver.focusWindow(pid, window, focusId, timeoutMs), {
@@ -997,7 +1028,7 @@ export class DesktopSurface {
         await this.refCommand('focus', binding, operation);
         try {
           // The key goes to the process, which hands it to its key window: with another window that could be it, the control's must be the one shown focused.
-          // A window on another Space, which the window list shows as not visible, is still the control's: with `headed` the press brings it forward.
+          // A window on another Space, which the window list shows as not visible, is still the control's: with `physicalInput` the press brings it forward.
           const windows = await this.ownWindows(operation);
           const home = windows.find((candidate) => candidate.id === window);
           if (home === undefined) throw notActionable(`the window node ${binding.id} was read in is gone`);
@@ -1146,7 +1177,7 @@ export class DesktopSurface {
     await this.pointerAt(center, { kind }, operation, kind === 'doubleTap');
   }
 
-  /** Physical pointer input at a point in the window: only with `headed`, and only then declared. */
+  /** Physical pointer input at a point in the window: only with `physicalInput`, and only then declared. */
   async performAt(point: ViewportPoint, action: PointerAction, context: OperationContext): Promise<void> {
     await this.pointerAt(point, action, context, false);
   }
@@ -1226,12 +1257,12 @@ export class DesktopSurface {
     if (!focused.actions.includes('TypeText')) {
       throw notActionable(`the ${focused.role ?? 'control'}${focused.name === undefined ? '' : ` "${focused.name}"`} that has keyboard focus takes no text; tap or focus a text field first`);
     }
-    // Keystrokes, so the app's key handlers run; with `headed` they go through the real keyboard.
-    const type = (): Promise<unknown> => this.tryRef('type', focused, operation, { value: text, physical: this.options.headed });
+    // Keystrokes, so the app's key handlers run; with `physicalInput` they go through the real keyboard.
+    const type = (): Promise<unknown> => this.tryRef('type', focused, operation, { value: text, physical: this.options.physicalInput });
     if (options.replace) {
       // Cleared as on a keyboard, select all and then delete: the app's key handlers see the delete, and a field that takes keys but refuses an accessibility write is cleared too.
       const window = focused.windowId ?? (await this.ownWindow(operation))?.id;
-      if (window === undefined) throw this.chosenWindow === undefined ? invalidState('the app is not running; open it with app.open()') : this.chosenClosed();
+      if (window === undefined) throw invalidState('the app is not running; open it with app.open()');
       await this.selectAll(focused, window, operation);
       // The app may move focus on select all, and the delete's handler on from an emptied field: the driver sends the
       // delete, and then types, only while the field's own element still holds the app's focus, and never focuses it back.
@@ -1246,15 +1277,15 @@ export class DesktopSurface {
    * Cmd+A sent to an app in the background goes to its menu bar, not the
    * field, and selects nothing, so the delete after it would remove one
    * character. A field whose selection cannot be set gets the key only with
-   * `headed`, through the real keyboard; without it, nothing is sent.
+   * `physicalInput`, through the real keyboard; without it, nothing is sent.
    */
   private async selectAll(focused: NodeBinding, window: string, operation: OperationContext): Promise<void> {
     try {
       await this.tryRef('selectAll', focused, operation);
     } catch (cause) {
       if (!(cause instanceof DriverFailure && cause.notDelivered && cause.code === 'ACTION_NOT_SUPPORTED')) throw translate(cause, 'select all', true);
-      if (!this.options.headed) {
-        throw notActionable("the focused field's text cannot be selected through accessibility, and Cmd+A sent to an app in the background selects nothing; use fill(), or run headed");
+      if (!this.options.physicalInput) {
+        throw notActionable("the focused field's text cannot be selected through accessibility, and Cmd+A sent to an app in the background selects nothing; use fill(), or set desktop({ physicalInput: true })");
       }
       await this.sendKey('cmd+a', window, 'select all', operation, focused.ref);
     }
@@ -1265,7 +1296,7 @@ export class DesktopSurface {
     const operation = withDeadline(context);
     const combo = toCombo(key);
     const window = await this.ownWindow(operation);
-    if (window === undefined) throw this.chosenWindow === undefined ? invalidState('the app is not running; open it with app.open()') : this.chosenClosed();
+    if (window === undefined) throw invalidState('the app is not running; open it with app.open()');
     await this.sendKey(combo, window.id, `press ${key}`, operation);
     // As after every other agent action: the app reacts to the key before the agent reads the screen again.
     await this.settle(operation);
@@ -1273,16 +1304,16 @@ export class DesktopSurface {
 
   /**
    * Sends one key combo to the launched process's window; with `focusedRef`, only while that control still holds the
-   * app's focus, checked by the driver right before the key goes. Without `headed`
+   * app's focus, checked by the driver right before the key goes. Without `physicalInput`
    * the key goes into the process's event queue, which hands it to its key
    * window, so the driver sends it only while the window named is that one.
-   * With `headed`, the driver brings the window forward and presses the key
+   * With `physicalInput`, the driver brings the window forward and presses the key
    * on the real keyboard.
    */
   private async sendKey(combo: string, window: string, label: string, operation: OperationContext, focusedRef?: string): Promise<void> {
     const pid = this.pid;
     if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
-    const physical = this.options.headed;
+    const physical = this.options.physicalInput;
     // As for `tryRef`: a key still unsent once the call is given up is never sent.
     const inputId = this.requireDriver().inputId();
     try {
@@ -1430,7 +1461,7 @@ function sameNode(candidate: NodeBinding, binding: NodeBinding): boolean {
  * which macOS 27 shows over an app after a press in a SwiftUI sheet, and
  * lists first) is left out, though it may take focus: read in place of an
  * unreadable window of the app, it would let a negative assertion pass.
- * `desktop.useWindow` still picks it.
+ * `activate()` on its window still picks it.
  */
 function byPreference(windows: readonly RawWindow[]): RawWindow[] {
   const rank = (window: RawWindow): number => (window.is_focused === true ? 0 : window.is_main === true ? 1 : window.visible !== false ? 2 : 3);

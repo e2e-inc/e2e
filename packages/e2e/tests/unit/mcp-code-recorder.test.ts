@@ -6,8 +6,6 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { FixtureTestLine } from '@e2e-dev/core/engine';
-import { FixtureRecorder } from '@e2e-dev/core/lib/run/fixture-recording';
 import { KeptFailure, Recorder, type Outcome } from '../../src/session-tools/code-recorder.ts';
 
 /** A recorder over a ledger that knows one secret, numbering names from 1. */
@@ -301,42 +299,6 @@ describe('run_code recorder', () => {
     const held = recorder.wrap({ ready: Promise.resolve('yes') }, 'held');
     expect(await held.ready).toBe('yes');
     expect(recorder.outcomes).toHaveLength(3);
-  });
-
-  it("writes a fixture call as its operation's testLine declares, given the arguments through the ledger", async () => {
-    // Steps run their body at once: the recording policy is not the subject here.
-    const environment = { steps: { run: (_kind: string, _api: string, _label: string, body: () => Promise<unknown>) => body() }, budget: { signal: new AbortController().signal }, config: { actionTimeout: 1_000 } };
-    const windows = [
-      { id: '36086', title: `Inbox ${SECRET}`, focused: true },
-      { id: '36090', title: '', focused: false },
-    ];
-    const seen: unknown[] = [];
-    const testLine = (window?: { readonly id: string; readonly title: string } | string): FixtureTestLine | undefined => {
-      seen.push(window);
-      if (window === undefined) return undefined;
-      if (typeof window === 'object' && window.title !== '') return { args: `byTitle(${JSON.stringify(window.title)})` };
-      return { note: 'an id\nholds only this launch' };
-    };
-    const surface = new FixtureRecorder(environment as unknown as ConstructorParameters<typeof FixtureRecorder>[0]).fixture(
-      'desktop',
-      { windows: async () => windows, useWindow: async (_window?: { readonly id: string; readonly title: string } | string) => undefined },
-      { windows: { kind: 'resource' }, useWindow: { kind: 'resource', testLine } },
-    );
-    const recorder = recording();
-    const desktop = recorder.wrap(surface, 'desktop');
-    const listed = await desktop.windows();
-    await desktop.useWindow(listed[0]);
-    await desktop.useWindow(listed[1]);
-    await desktop.useWindow('36086');
-    await desktop.useWindow();
-    expect(sources(recorder.outcomes).slice(1)).toEqual([
-      'await desktop.useWindow(byTitle("Inbox <secret:apiKey>"));',
-      "await desktop.useWindow({ id: '36090', title: '', focused: false }); // an id holds only this launch",
-      "await desktop.useWindow('36086'); // an id holds only this launch",
-      'await desktop.useWindow();',
-    ]);
-    // The declaration reads the arguments with every string through the ledger, never the secret itself.
-    expect(JSON.stringify(seen)).not.toContain('quoted');
   });
 });
 

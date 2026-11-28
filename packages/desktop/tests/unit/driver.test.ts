@@ -107,6 +107,7 @@ const NATIVE_FUNCTIONS = [
   'press',
   'checkCombo',
   'focusWindow',
+  'closeWindow',
   'pointer',
   'screenshot',
 ] as const satisfies readonly Exclude<keyof DesktopDriver, 'version'>[];

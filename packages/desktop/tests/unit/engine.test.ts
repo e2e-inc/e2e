@@ -4,18 +4,18 @@ import { desktop } from '../../src/engine.ts';
 import { resolveOptions } from '../../src/options.ts';
 
 describe('desktop()', () => {
-  it('offers keys without headed, and the pointer-only actions with headed alone', () => {
+  it('offers keys without physicalInput, and the pointer-only actions with physicalInput alone', () => {
     const plain = desktop();
-    const headed = desktop({ headed: true });
+    const physical = desktop({ physicalInput: true });
     expect(plain.actions).not.toContain('doubleTap');
     expect(plain.actions).not.toContain('hover');
     // A key goes into the app's own event queue, which reaches its key window while it stays in the background.
     expect(plain.actions).toContain('press');
     expect(plain.keyboard).toBeDefined();
     expect(plain.pointerActions).toBeUndefined();
-    expect(headed.actions).toEqual(expect.arrayContaining(['doubleTap', 'hover', 'press']));
-    expect(headed.pointerActions).toEqual(expect.arrayContaining(['tap', 'doubleTap', 'secondaryTap', 'hover']));
-    expect(headed.keyboard).toBeDefined();
+    expect(physical.actions).toEqual(expect.arrayContaining(['doubleTap', 'hover', 'press']));
+    expect(physical.pointerActions).toEqual(expect.arrayContaining(['tap', 'doubleTap', 'secondaryTap', 'hover']));
+    expect(physical.keyboard).toBeDefined();
     expect(plain.workers).toBe(1);
     expect(describeEngine(plain).launchArgumentValues).toBe(true);
   });
@@ -26,7 +26,7 @@ describe('desktop()', () => {
     expect(() => resolveOptions({ binary: '/usr/local/bin/agent-desktop' } as never)).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG' }));
     expect(() => resolveOptions({ snapshot: 'all' as never })).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG' }));
     expect(() => resolveOptions({ bogus: 1 } as never)).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG' }));
-    expect(resolveOptions({ settle: false })).toMatchObject({ settleMs: 0, headed: false, interactiveOnly: false });
+    expect(resolveOptions({ settle: false })).toMatchObject({ settleMs: 0, physicalInput: false, interactiveOnly: false });
     expect(resolveOptions({})).toMatchObject({ maxDepth: 24 });
     expect(resolveOptions({ maxDepth: 50 })).toMatchObject({ maxDepth: 50 });
     for (const maxDepth of [0, 51, 2.5]) expect(() => resolveOptions({ maxDepth })).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG' }));

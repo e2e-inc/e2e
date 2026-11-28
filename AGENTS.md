@@ -360,8 +360,8 @@ the way a user would.
   AppKit app (`app/macos/main.swift`, built by `pnpm build:app` into
   `build/SignInForm.app`): a sign-in form, and a Controls window with one
   control per engine capability the form does not reach. Its e2e suites on
-  `@e2e-dev/desktop`: `tests/` locators only, `tests-headed/` the physical
-  pointer and keyboard (`pnpm test:headed`, which moves your pointer), and
+  `@e2e-dev/desktop`: `tests/` locators only, `tests-physical/` the physical
+  pointer and keyboard (`pnpm test:physical`, which moves your pointer), and
   `tests-agent/` one `agent.act`. Hand-run on a Mac with Accessibility
   permission and the native driver built; no CI job runs it yet.
 - `apps/electron-testbed` (`@e2e-dev/electron-testbed`, private) - a small

@@ -72,7 +72,7 @@ test.describe('sign-in form', () => {
     await screen.getByRole('textbox', 'Username').tap();
     await screen.getByRole('textbox', 'Password').tap();
     await expect(screen.getByRole('textbox', 'Password')).toBeFocused();
-    await desktop.press('x');
+    await desktop.keyboard.press('x');
     await expect(screen.getByRole('textbox', 'Username')).toHaveValue('');
     // The key reached the password field: signing in counts one character there.
     await screen.getByRole('button', 'Sign in').tap();
@@ -94,7 +94,7 @@ test.describe('sign-in form', () => {
     await expect(screen.getByRole('checkbox', 'Remember me')).not.toBeChecked();
     await expect(screen.getByRole('combobox', 'Plan')).toHaveValue('Pro');
     const windows = await desktop.windows();
-    expect(windows.map((window) => window.title)).toEqual(['Sign In']);
+    expect(await Promise.all(windows.map((window) => window.title()))).toEqual(['Sign In']);
   });
 
   test('takes a screenshot of the window with the password field painted over', async ({ app, screen }) => {
