@@ -39,7 +39,7 @@ import {
 } from '@e2e-dev/core/engine';
 import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
 import { toCombo } from './keys.ts';
-import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_POLL_MS, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
+import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killedCarriers, LAUNCH_POLL_MS, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
 import { launchArgumentList } from './launch-arguments.ts';
 import { handOffClause, type WindowsRead } from './launch-report.ts';
 import { LAUNCH_READY_MS, QUIT, windowReadable } from './launch-wait.ts';
@@ -658,17 +658,9 @@ export class DesktopSurface {
     if (this.home !== undefined) await rm(path.join(this.home, APP_FILE), { force: true }).catch(() => undefined);
   }
 
-  /**
-   * Kills `owned`, then looks once more for processes carrying `token`: one of them may have started another as the
-   * processes were listed, and once they are gone none can start more. `running` when one did not exit, `unknown` when
-   * the second look failed.
-   */
-  private async killedAll(owned: readonly number[], token: string | undefined, deadline: number, signal: AbortSignal): Promise<'gone' | 'running' | 'unknown'> {
-    if (!(await killed(owned, deadline, signal))) return 'running';
-    if (owned.length === 0 || token === undefined) return 'gone';
-    const late = await this.requireDriver().processesCarrying(token);
-    if (late === null) return 'unknown';
-    return (await killed(late, deadline, signal)) ? 'gone' : 'running';
+  /** `killedCarriers` through this surface's driver. */
+  private killedAll(owned: readonly number[], token: string | undefined, deadline: number, signal: AbortSignal): Promise<'gone' | 'running' | 'unknown'> {
+    return killedCarriers(owned, token, (carried) => this.requireDriver().processesCarrying(carried), deadline, signal);
   }
 
   /**

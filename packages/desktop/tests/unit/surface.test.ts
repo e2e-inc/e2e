@@ -286,6 +286,23 @@ describe('DesktopSurface: launching', () => {
     expect(await gone(late)).toBe(true);
   });
 
+  it('quits a chain of processes each started as the last was listed', async () => {
+    const { surface, fake } = await launched({}, { observe: false });
+    const { token } = last<{ token: string }>(fake, 'launch')!;
+    const chain = [standIn(), standIn()];
+    const list = fake.processesCarrying.bind(fake);
+    let looks = 0;
+    fake.processesCarrying = async (carried: string) => {
+      const found = await list(carried);
+      const next = chain[looks];
+      looks += 1;
+      if (next !== undefined) fake.carriers.set(next, token);
+      return found;
+    };
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await Promise.all(chain.map((pid) => gone(pid)))).toEqual([true, true]);
+  });
+
   it('keeps the app to quit again when the processes it started cannot be looked up', async () => {
     const { surface, fake } = await launched({}, { observe: false });
     const app = fake.pid;

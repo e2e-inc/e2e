@@ -141,12 +141,9 @@ export async function sweepStateDirectories(driver: DesktopDriver): Promise<void
       typeof pid !== 'number' &&
       owned.length === 0 &&
       (await stat(path.join(directory, APP_FILE)).then((info) => Date.now() - info.mtimeMs < LAUNCH_SETTLE_MS, () => false));
-    let settled = known && !settling && (await killed(owned, Date.now() + 2_000, AbortSignal.timeout(5_000)));
-    // One of them may have started another as the processes were listed: once they are gone, a second look finds it.
-    if (settled && owned.length > 0 && typeof launched.token === 'string' && launched.token !== '') {
-      const late = await driver.processesCarrying(launched.token);
-      settled = late !== null && (await killed(late, Date.now() + 2_000, AbortSignal.timeout(5_000)));
-    }
+    const token = typeof launched.token === 'string' && launched.token !== '' ? launched.token : undefined;
+    const settled =
+      known && !settling && (await killedCarriers(owned, token, (carried) => driver.processesCarrying(carried), Date.now() + 2_000, AbortSignal.timeout(5_000))) === 'gone';
     await (settled ? rm(directory, { recursive: true, force: true }) : keepOnlyRecord(directory)).catch(() => undefined);
   }
 }
@@ -206,7 +203,7 @@ async function keepOnlyRecord(directory: string): Promise<void> {
  * Kills each process and waits until all of them exited; false when one still runs at `until`. A quit cancelled, or out
  * of time, before the kill sends none: the caller gave the app up as running, and keeps it to quit again.
  */
-export async function killed(pids: readonly number[], until: number, signal: AbortSignal): Promise<boolean> {
+async function killed(pids: readonly number[], until: number, signal: AbortSignal): Promise<boolean> {
   if (pids.length > 0 && signal.aborted) throw new EngineError('CANCELLED', 'quitting the app was cancelled before it was killed', { retryable: false });
   if (pids.length > 0 && Date.now() >= until) throw new EngineError('OPERATION_TIMEOUT', 'quitting the app ran out of time before it was killed', { retryable: false });
   for (const pid of pids) {
@@ -221,6 +218,29 @@ export async function killed(pids: readonly number[], until: number, signal: Abo
     await sleep(LAUNCH_POLL_MS, signal);
   }
   return true;
+}
+
+/**
+ * Kills `pids`, then looks again for processes carrying `token` and kills those, until a look finds none: each may have
+ * started another as the processes were listed, and only once all are gone can none start more. `running` when one
+ * did not exit by `until`, `unknown` when a look failed.
+ */
+export async function killedCarriers(
+  pids: readonly number[],
+  token: string | undefined,
+  lookup: (token: string) => Promise<readonly number[] | null>,
+  until: number,
+  signal: AbortSignal,
+): Promise<'gone' | 'running' | 'unknown'> {
+  let batch = pids;
+  while (batch.length > 0) {
+    if (!(await killed(batch, until, signal))) return 'running';
+    if (token === undefined) return 'gone';
+    const late = await lookup(token);
+    if (late === null) return 'unknown';
+    batch = late;
+  }
+  return 'gone';
 }
 
 /** Whether a process still runs: it answers signal 0, or exists but belongs to another user. */
