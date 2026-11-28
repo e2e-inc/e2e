@@ -1,0 +1,172 @@
+---
+title: Tool proyek
+description: "Berikan tool kustom kepada agent AI dengan defineTool, seperti panggilan ke API tes Anda, penyiapan data, dan operasi perangkat, untuk dipakai saat bekerja pada sebuah tujuan."
+"og:image": "https://e2e.com/docs/images/og/tools.png?v=8747047102"
+"twitter:image": "https://e2e.com/docs/images/og/tools.png?v=8747047102"
+---
+
+Tool proyek adalah tool AI SDK yang dapat dipanggil agent selama sebuah
+tujuan, misalnya permintaan ke API tes Anda atau langkah penyiapan data.
+
+## Tambahkan tool
+
+Bungkus tool dengan `defineTool` lalu letakkan di `tools` milik agent:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { defineTool } from 'e2e/agent';
+import { web } from '@e2e-dev/web';
+import { gateway, tool } from 'ai';
+import { z } from 'zod';
+
+const APP_URL = process.env.APP_URL ?? 'http://localhost:3000';
+
+const seedCart = defineTool(
+  tool({
+    description: 'Seed the cart with a SKU via the store test API',
+    inputSchema: z.object({ sku: z.string() }),
+    execute: async ({ sku }) => {
+      const response = await fetch(`${APP_URL}/api/test/cart?sku=${encodeURIComponent(sku)}`);
+      if (!response.ok) throw new Error(`Cart seeding failed: HTTP ${response.status}`);
+      return response.text();
+    },
+  }),
+  { mutates: true },
+);
+
+export default {
+  targets: [{ engine: web(), app: { url: APP_URL } }],
+  agents: { default: { model: gateway('openai/gpt-6-luna-fast'), tools: { seedCart } } },
+} satisfies E2EConfig;
+```
+
+Sekarang agent dapat mengisi keranjang sebelum melakukan checkout:
+
+```ts
+await agent.act('seed the cart with SKU {sku}, then check out', {
+  params: { sku: 'SHIRT-BLUE-M' },
+});
+await expect(screen.getByText('Order confirmed')).toBeVisible();
+```
+
+<Note>
+Hindari menamai tool kustom dengan nama tindakan bawaan (`tap`, `screenshot`,
+`complete_step`, `locate`, `run_code`, `test_lines`, `start_recording`,
+`stop_recording`, atau `report_finding`), karena nama yang dicadangkan
+membuat validasi konfigurasi gagal. Selalu bungkus tool dengan `defineTool`,
+dan jangan gabungkan `tools` dengan `executor` kustom.
+</Note>
+
+## Nyatakan fungsi tool
+
+`defineTool` menerima tool AI SDK beserta anotasi berikut:
+
+| Anotasi | Artinya |
+| --- | --- |
+| `mutates: true` | Mengubah state. Panggilan ini mengambil satu slot dari anggaran tindakan langkah sebelum dijalankan, berhasil atau gagal, dan berjalan berurutan dengan tindakan lain. [Cache replay](/cache) tidak dapat memutarnya ulang, sehingga agent menjalankan bagian langkah itu secara langsung. |
+| `mutates: false` | Hanya-baca. Berjalan tanpa slot tindakan dan boleh mengamati layar atau membaca properti node. |
+| `platforms: ['ios', 'android']` | Menawarkan tool hanya pada platform tersebut. Hilangkan untuk menawarkan tool di setiap target. |
+
+## Amati dari dalam tool
+
+Tool hanya-baca dapat mengamati layar yang sudah disamarkan melalui
+`getToolContext`. Contoh ini menyimpan screenshot yang disamarkan sebagai
+bukti laporan ketika piksel tersedia:
+
+```ts
+import { randomUUID } from 'node:crypto';
+import { defineTool, getToolContext } from 'e2e/agent';
+import { tool } from 'ai';
+import { z } from 'zod';
+
+const captureEvidence = defineTool(
+  tool({
+    description: 'Save a screenshot as evidence in the report',
+    inputSchema: z.object({}),
+    execute: async (_input, executionOptions) => {
+      const context = getToolContext(executionOptions);
+      const observation = await context.observe({ pixels: true });
+      const pixels = observation.pixels;
+      if (pixels === undefined) {
+        return { withheld: observation.pixelsWithheld ?? 'UNSUPPORTED_CAPABILITY' };
+      }
+      const id = await context.attachScreenshot(pixels, `evidence-${randomUUID()}`);
+      return { evidence: id };
+    },
+  }),
+  { mutates: false },
+);
+```
+
+- `observe()` mengembalikan snapshot teks yang sudah disamarkan. `tree: true`
+  menambahkan pohon node dan `pixels: true` menambahkan screenshot yang
+  disamarkan, sesuai aturan agent bawaan.
+- Pada tool `mutates: true`, `observe()` gagal dengan `POLICY_DENIED`.
+  Lakukan pengamatan di tool hanya-baca yang terpisah.
+- `attachScreenshot(pixels, label)` menambahkan gambar ke artefak langkah dan
+  mengembalikan ID artefaknya. Label yang dipakai ulang menimpa gambar
+  sebelumnya.
+
+## Baca gaya terhitung sebuah node
+
+Di tool hanya-baca, gunakan `context.read` untuk mengukur gaya render node
+yang tercantum pada engine web:
+
+```ts
+const context = getToolContext(executionOptions);
+await context.observe();
+const result = await context.read({ id: nodeId }, {
+  style: ['color', 'font-weight', 'visibility', 'opacity'],
+});
+return result.style;
+```
+
+Berikan ID node dari observasi terbaru. Hasilnya hanya berisi properti yang
+diminta, dengan nilai secret disamarkan seperti di pohon. Nilainya memakai
+format CSS terhitung milik browser, seperti `rgb(255, 0, 0)` untuk merah.
+
+Minta properti dari [daftar izin gaya terhitung](/reference/engine#rendered-node-properties).
+Properti kustom, konten yang dihasilkan, selector, dan kode halaman ditolak.
+
+Pembacaan memakai tenggat langkah dan berjalan berurutan dengan observasi dan
+tindakan, tanpa mengambil slot tindakan. Pembacaan mengukur nilai saat ini
+pada elemen aslinya, tidak menyegarkan observasi, dan tidak menunggu nilai
+berubah. `visibility` dan `opacity` terhitung menggambarkan CSS elemen itu,
+bukan apakah elemen lain menutupinya atau elemen induknya membuatnya tidak
+terlihat.
+
+| Error | Kapan |
+| --- | --- |
+| `POLICY_DENIED` | Tool `mutates: true` memanggil `read`, atau engine tidak memiliki metode `readStyle`, seperti pada engine mobile. |
+| `INVALID_ARGUMENT` | Opsi atau nama properti tidak valid. |
+| `LOCATOR_NOT_FOUND` | Tidak ada observasi semantik, observasi terbaru tidak mencantumkan ID tersebut, atau elemen terlepas. Amati lagi sebelum membaca. |
+| `STEP_TIMEOUT` | Pembacaan menghabiskan sisa waktu langkah, termasuk batas waktu engine pada tenggat. Menangkap error pembacaan tidak dapat membuat langkah lolos. |
+
+Gunakan `platforms` pada sebuah tes untuk melewati target yang tidak
+mendukung pembacaan gaya.
+
+## Toolkit perangkat
+
+`@e2e-dev/mobile` memiliki paket tool siap pakai, `mobileTools`, berisi
+`open_app`, `swipe`, dan `alert`. Sebarkan (spread) untuk menambahkan tool
+Anda sendiri di sampingnya:
+
+```ts
+tools: { ...mobileTools(iphone, pixel), seedCart },
+```
+
+Lihat [Tool agent](/mobile#agent-tools) untuk penyiapannya. Tool buatan Anda
+yang memerlukan sesi driver mentah mendapatkan klien perangkat yang sedang
+berjalan dari
+[`unstable_deviceSession`](/reference/mobile#unstable_devicesession).
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Executor kustom" icon="gears" href="/executors">
+    Ganti prompt atau loop keputusan.
+  </Card>
+  <Card title="Cara kerja langkah agent" icon="stairs" href="/agent-steps">
+    Apa yang dilihat model dan apa yang boleh dilakukannya.
+  </Card>
+</CardGroup>

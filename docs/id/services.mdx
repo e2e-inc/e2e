@@ -1,0 +1,360 @@
+---
+title: Services
+description: "Jalankan dependensi yang dibutuhkan aplikasi Anda, seperti API email, provider OAuth, atau database, sebelum aplikasi berjalan, lalu gunakan di tes Anda."
+---
+
+Service adalah dependensi yang dibutuhkan aplikasi Anda, seperti API email,
+provider OAuth, atau database. Saat Anda menjalankan `e2e run` atau
+`e2e explore`, setiap service dimulai sebelum perintah aplikasi dan berhenti
+di akhir eksekusi. Service juga dimulai di
+[`e2e mcp` dan `openHost`](#services-in-e2e-mcp-and-openhost).
+
+## Definisikan service
+
+Panggil `defineService` dengan objek yang properti `start`-nya adalah async
+generator. Generator memulai dependensi sebelum `yield`, dan konfigurasi serta
+tes menerima objek yang di-yield sebagai nilai service. Saat eksekusi
+berakhir, semua kode setelah `yield` menghentikan dependensi:
+
+```ts title="services/email.ts" expandable
+import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
+import { text } from 'node:stream/consumers';
+import { setTimeout } from 'node:timers/promises';
+import { defineService } from 'e2e';
+
+type Email = {
+  to: string;
+  subject: string;
+};
+
+export const email = defineService({
+  async *start({ signal }) {
+    const emails: Email[] = [];
+
+    const server = createServer(async (request, response) => {
+      emails.push(JSON.parse(await text(request)));
+      response.end();
+    });
+
+    server.listen({ port: 0, host: '127.0.0.1', signal });
+
+    await once(server, 'listening', { signal });
+
+    const serverAddress = server.address();
+
+    if (serverAddress === null || typeof serverAddress === 'string') {
+      throw new Error('The email server has no TCP address.');
+    }
+
+    const received = (address: string) => emails.filter((message) => message.to === address);
+
+    yield {
+      url: `http://127.0.0.1:${serverAddress.port}`,
+      createInbox: () => ({ address: `${randomUUID()}@example.com` }),
+      received,
+      waitForEmail: async (address: string, { subject }: { subject: RegExp }) => {
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const match = received(address).find((message) => subject.test(message.subject));
+
+          if (match !== undefined) {
+            return match;
+          }
+
+          await setTimeout(100);
+        }
+
+        throw new Error(`no email to ${address} with a subject matching ${subject} arrived within 10 seconds`);
+      },
+    };
+
+    server.close();
+
+    await once(server, 'close');
+  },
+});
+```
+
+Teruskan `signal` ke semua yang Anda mulai dan hentikan di dalam service.
+Signal dibatalkan dalam kasus berikut:
+
+- Startup dibatalkan (misalnya dengan Ctrl+C), atau service tidak melakukan
+  `yield` dalam `startupTimeout` (bawaannya 60 detik).
+- Saat service tidak lagi dibutuhkan, kode setelah `yield` tidak selesai dalam
+  `shutdownTimeout` (bawaannya 10 detik).
+- Ctrl+C ditekan untuk kedua kalinya di `e2e run` atau `e2e explore`, baik
+  saat tes berjalan maupun saat service dihentikan.
+
+Service mungkin membutuhkan waktu lebih lama untuk mulai atau berhenti
+(seperti service yang menarik image Docker). Atur `startupTimeout` atau
+`shutdownTimeout` (nama yang sama dengan pada
+[`app.command`](/reference/config#command)) dalam milidetik pada objek yang
+Anda berikan ke `defineService`:
+
+```ts
+export const database = defineService({
+  startupTimeout: 180_000, // default: 60000
+  async *start({ signal }) {
+    // ...
+  },
+});
+```
+
+## Teruskan service ke aplikasi
+
+Tambahkan service di bawah `services` pada konfigurasi Anda, lalu teruskan
+alamatnya ke aplikasi dari fungsi `env`:
+
+```ts title="e2e.config.ts"
+import { defineConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { email } from './services/email.ts';
+
+export default defineConfig({
+  projectId: 'dev.example.signup',
+  services: { email },
+  targets: [
+    {
+      name: 'web',
+      engine: web(),
+      app: {
+        url: 'http://127.0.0.1:0',
+        command: {
+          executable: 'node',
+          args: ['app/server.mjs'],
+          env: async ({ services }) => ({
+            PORT: '{port}',
+            EMAIL_API_URL: services.email.url,
+          }),
+        },
+      },
+    },
+  ],
+});
+```
+
+Service dimulai sesuai urutan key sebelum perintah aplikasi apa pun, dan
+berhenti dalam urutan terbalik setelah perintah aplikasi selesai.
+
+Fungsi `env` dipanggil satu kali per eksekusi, setelah service dimulai dan
+sebelum perintah aplikasi apa pun dimulai. Untuk aturan `env` lainnya, lihat
+[`command`](/reference/config#command) di referensi konfigurasi.
+
+Gunakan [`defineConfig`](/reference/config#defineconfig) sebagai ganti
+`satisfies E2EConfig` di sini agar `services` di dalam `env` diberi tipe dari
+konfigurasi Anda.
+
+## Gunakan service di tes
+
+Teruskan tipe konfigurasi Anda ke `test.extend` untuk memberi tipe pada
+fixture `services`:
+
+```ts title="tests/fixtures.ts"
+import { test as base } from 'e2e';
+import type config from '../e2e.config.ts';
+
+export const test = base.extend<{}, {}, typeof config>({});
+```
+
+Anda dapat memakai `services` di tes, hook, dan fixture dengan scope apa pun:
+
+```ts title="tests/signup.e2e.ts"
+import { expect } from 'e2e';
+import { test } from './fixtures.ts';
+
+test('signing up sends one welcome email', async ({ app, screen, services }) => {
+  const inbox = await services.email.createInbox();
+
+  await app.open('/');
+  await screen.getByRole('textbox', { name: 'Email' }).fill(inbox.address);
+  await screen.getByRole('button', { name: 'Sign up' }).click();
+
+  const email = await services.email.waitForEmail(inbox.address, { subject: /welcome/i });
+
+  expect(email.subject).toContain('Welcome');
+  expect(await services.email.received(inbox.address)).toHaveLength(1);
+});
+```
+
+Setiap worker mendapat salinan data yang di-yield. Fungsi apa pun yang Anda
+yield menjadi fungsi async di tes, sehingga `services.email.createInbox()`
+mengembalikan promise. Saat tes memanggilnya, proses yang memulai service
+menjalankan fungsi yang sebenarnya dan mengirim kembali salinan hasilnya.
+Proses itu adalah proses runner di `e2e run`, server di `e2e mcp`, dan proses
+host di `openHost`.
+
+Di `e2e run` dan `e2e explore`, semua worker berbagi instance service yang
+sama, sehingga satu tes dapat melihat email yang dikirim oleh tes lain. Dengan
+`openHost`, setiap host memulai instance-nya sendiri. Jika Anda mereset
+service bersama di antara tes (misalnya menghapus semua email di
+`afterEach`), Anda juga menghapus data untuk tes yang berjalan di worker lain
+pada saat yang sama. Sebagai gantinya, minta service memberi setiap tes ID
+unik dan pisahkan data setiap tes berdasarkan ID itu. Pada tes di atas,
+`createInbox()` mengembalikan inbox dengan alamat unik, dan tes hanya membaca
+email yang dikirim ke alamat tersebut.
+
+## Apa yang dapat di-yield service
+
+Yield objek biasa dengan bentuk apa pun. Data di dalamnya disalin dengan
+[`v8.serialize`](https://nodejs.org/api/v8.html#v8serializevalue). Yang
+berfungsi di dalamnya:
+
+- Objek biasa, array, map, dan set dapat bersarang pada kedalaman berapa pun.
+- String, angka, boolean, bigint, `null`, `undefined`, tanggal, ekspresi
+  reguler, error bawaan (seperti `TypeError`), `ArrayBuffer`, dan typed array
+  (seperti `Buffer`) mempertahankan tipenya.
+- Fungsi dapat muncul pada kedalaman berapa pun di objek biasa dan array,
+  tetapi tidak di dalam map atau set.
+
+Nilai lain ditolak. Jika Anda memiliki instance class kustom, ambil data dan
+fungsi yang dibutuhkan tes ke dalam objek biasa.
+
+Dengan `defineService`, sebagian besar nilai yang ditolak berupa error tipe
+(seperti `URL`, `Promise`, fungsi yang menerima callback, atau fungsi di dalam
+`Map` atau `Set`). Instance class yang hanya memiliki field data atau instance
+subclass `Error` buatan Anda tetap lolos pemeriksaan tipe (TypeScript
+membandingkan bentuk, bukan class), tetapi eksekusi gagal dengan
+`INVALID_SERVICE_VALUE` saat dimulai.
+
+Fungsi yang di-yield berjalan dengan `this` bernilai `undefined`. Jika sebuah
+metode bergantung pada `this`, bungkus dalam arrow function (seperti
+`sent: () => inbox.sent()`). Saat Anda memanggil fungsi service di tes,
+argumen dan nilai kembaliannya dapat berupa tipe data apa pun di atas, tetapi
+tidak boleh berisi fungsi.
+
+## Saat service gagal
+
+| Kode | Kapan |
+| --- | --- |
+| [`SERVICE_START_FAILED`](/reference/errors#runner-codes) | `start` melempar error, selesai tanpa melakukan yield, bukan async generator, atau tidak melakukan yield dalam `startupTimeout`-nya. Service yang sudah dimulai dihentikan, dan eksekusi gagal. Di `e2e mcp`, `open_session` yang gagal. `openHost()` menolak dengan error ini. |
+| [`INVALID_SERVICE_VALUE`](/reference/errors#runner-codes) | Nilai yang di-yield bukan objek biasa, atau berisi nilai yang tidak dapat disalin. |
+| [`SERVICE_STOP_FAILED`](/reference/errors#runner-codes) | Kode setelah `yield` melempar error, melakukan yield kedua kalinya, atau tidak selesai dalam `shutdownTimeout` service. Eksekusi gagal dengan error pembersihan. Di `e2e mcp`, ringkasan penutupan sesi terakhir menyertakannya sebagai baris pembersihan. `openHost` mengembalikannya dari `host.close()`. |
+
+## Service di e2e mcp dan openHost
+
+`e2e mcp` memulai service milik file konfigurasi saat sesi pertama pada file
+itu dibuka dan menghentikannya saat sesi terakhir ditutup. Semua sesi pada
+file itu berbagi service tersebut. Jika Anda mengedit konfigurasi saat sesi
+pada file itu masih terbuka, service yang berjalan tidak berubah. Perubahan
+Anda pada service berlaku setelah sesi terakhir pada file itu ditutup dan
+sesi baru dibuka.
+
+[`openHost`](/reference/runner#openhost) memulai service saat host dibuka.
+`host.close()` menghentikannya setelah proses aplikasi berhenti.
+
+## Jalankan emulator API lokal
+
+Service dapat menjalankan paket apa pun yang meniru API pihak ketiga. Salah
+satu pilihannya adalah [emulate](https://emulate.dev), yang menjalankan
+emulator lokal untuk API seperti GitHub, Resend, dan Stripe. Contoh di bawah
+memakai emulator Resend miliknya, jadi pasang emulate sebagai dev dependency:
+
+<CodeGroup>
+```bash npm
+npm install --save-dev emulate
+```
+
+```bash pnpm
+pnpm add -D emulate
+```
+
+```bash bun
+bun add -d emulate
+```
+</CodeGroup>
+
+Mulai emulator dengan `createEmulator`, dan jangan yield seluruh objek
+emulator. Jika Anda melakukannya, tes apa pun dapat memanggil `close()`-nya
+dan menghentikan emulator untuk semua worker. Sebagai gantinya, yield hanya
+yang dibutuhkan tes (seperti `url`-nya):
+
+```ts title="services/resend.ts"
+import { createEmulator } from 'emulate';
+import { defineService } from 'e2e';
+
+export const resend = defineService({
+  async *start() {
+    const emulator = await createEmulator({ service: 'resend', port: 0 });
+
+    yield { url: emulator.url };
+
+    await emulator.close();
+  },
+});
+```
+
+<Accordion title="Konfigurasi dan tes untuk emulator Resend">
+
+```ts title="e2e.config.ts"
+import { defineConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { resend } from './services/resend.ts';
+
+export default defineConfig({
+  projectId: 'dev.example.signup',
+  services: { resend },
+  targets: [
+    {
+      name: 'web',
+      engine: web(),
+      app: {
+        url: 'http://127.0.0.1:0',
+        command: {
+          executable: 'node',
+          args: ['app/server.mjs'],
+          env: ({ services }) => ({
+            PORT: '{port}',
+            RESEND_API_KEY: 're_test',
+            RESEND_BASE_URL: services.resend.url,
+          }),
+        },
+      },
+    },
+  ],
+});
+```
+
+```ts title="tests/fixtures.ts"
+import { test as base } from 'e2e';
+import type config from '../e2e.config.ts';
+
+export const test = base.extend<{}, {}, typeof config>({});
+```
+
+Tes membaca email yang terkirim dari API Resend milik emulator:
+
+```ts title="tests/signup.e2e.ts"
+import { randomUUID } from 'node:crypto';
+import { expect } from 'e2e';
+import { test } from './fixtures.ts';
+
+test('signing up sends a welcome email through Resend', async ({ app, screen, services }) => {
+  const address = `ada+${randomUUID()}@example.com`;
+
+  await app.open('/');
+  await screen.getByRole('textbox', { name: 'Email' }).fill(address);
+  await screen.getByRole('button', { name: 'Sign up' }).click();
+  await expect(screen.getByRole('heading', { name: 'Check your inbox' })).toBeVisible();
+
+  const response = await fetch(`${services.resend.url}/emails`);
+  const { data } = await response.json();
+
+  expect(data.filter((email: { to: string[] }) => email.to.includes(address))).toEqual([
+    expect.objectContaining({ to: [address], subject: 'Welcome' }),
+  ]);
+});
+```
+
+</Accordion>
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Menulis fixture" icon="puzzle-piece" href="/fixtures">
+    Siapkan data tes sebelum setiap tes dan bersihkan setelahnya.
+  </Card>
+  <Card title="Referensi konfigurasi" icon="code" href="/reference/config#services">
+    Key `services` dan fungsi `env`.
+  </Card>
+</CardGroup>

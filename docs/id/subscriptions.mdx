@@ -1,0 +1,416 @@
+---
+title: Langganan
+description: "Jalankan langkah tes AI dengan paket yang sudah Anda bayar, seperti ChatGPT Plus atau Pro, GitHub Copilot, OpenCode Console, SuperGrok, kredit Claude Max atau Team, atau login Claude Code atau Codex."
+"og:image": "https://e2e.com/docs/images/og/subscriptions.png?v=174d49a0e9"
+"twitter:image": "https://e2e.com/docs/images/og/subscriptions.png?v=174d49a0e9"
+---
+
+Jalankan langkah agent dengan paket yang sudah Anda bayar. Masuk sekali, lalu
+pasang model dari paket itu ke `e2e.config.ts`.
+
+| Paket | Cara menghubungkan |
+| --- | --- |
+| ChatGPT Plus atau Pro | `npx e2e login openai` |
+| GitHub Copilot | `npx e2e login github-copilot` |
+| OpenCode Console (OpenCode Zen dan OpenCode Go) | `npx e2e login opencode-console` |
+| SuperGrok atau X Premium+ | `npx e2e login spacexsi` |
+| Claude Max atau Team (Claude Code) | API key, dibayar dari kredit API bulanan paket, bukan dari batas penggunaannya |
+| Login Claude Code atau Codex | [Jalankan langkah pada coding agent Anda](#use-your-coding-agent) |
+
+## Penyiapan
+
+Untuk proyek baru, jalankan `e2e init` dan pilih paket Anda
+([quickstart](/quickstart)). Untuk proyek yang sudah ada, pasang paketnya,
+masuk, lalu atur `agents: { default: agent }` di `e2e.config.ts`.
+
+<Tabs>
+  <Tab title="ChatGPT">
+<CodeGroup>
+```bash npm
+npm install -D ai @ai-sdk/openai
+npx e2e login openai
+```
+
+```bash pnpm
+pnpm add -D ai @ai-sdk/openai
+pnpm exec e2e login openai
+```
+
+```bash bun
+bun add -d ai @ai-sdk/openai
+bunx e2e login openai
+```
+</CodeGroup>
+
+```ts title="Model setup"
+import { chatgpt } from 'e2e/oauth/chatgpt';
+
+const agent = { model: chatgpt('gpt-6-luna') };
+```
+  </Tab>
+  <Tab title="GitHub Copilot">
+<CodeGroup>
+```bash npm
+npm install -D ai @ai-sdk/openai-compatible @ai-sdk/openai
+npx e2e login github-copilot
+```
+
+```bash pnpm
+pnpm add -D ai @ai-sdk/openai-compatible @ai-sdk/openai
+pnpm exec e2e login github-copilot
+```
+
+```bash bun
+bun add -d ai @ai-sdk/openai-compatible @ai-sdk/openai
+bunx e2e login github-copilot
+```
+</CodeGroup>
+
+```ts title="Model setup"
+import { copilot } from 'e2e/oauth/copilot';
+
+const agent = { model: copilot('claude-sonnet-5') };
+```
+
+Model mana yang dilayani paket Anda ditentukan oleh GitHub; lihat [Pilih model](#pick-a-model).
+  </Tab>
+  <Tab title="OpenCode Console">
+<CodeGroup>
+```bash npm
+npm install -D ai @ai-sdk/openai-compatible @ai-sdk/openai @ai-sdk/anthropic @ai-sdk/google
+npx e2e login opencode-console
+```
+
+```bash pnpm
+pnpm add -D ai @ai-sdk/openai-compatible @ai-sdk/openai @ai-sdk/anthropic @ai-sdk/google
+pnpm exec e2e login opencode-console
+```
+
+```bash bun
+bun add -d ai @ai-sdk/openai-compatible @ai-sdk/openai @ai-sdk/anthropic @ai-sdk/google
+bunx e2e login opencode-console
+```
+</CodeGroup>
+
+```ts title="Model setup"
+import { opencodeConsole } from 'e2e/oauth/opencode-console';
+
+// OpenCode Zen, billed to the workspace's credits
+const agent = { model: opencodeConsole('deepseek-v4.1-flash') };
+// OpenCode Go, billed to your Go subscription
+const goAgent = { model: opencodeConsole('go/deepseek-v4.1-flash') };
+```
+
+Pada rute Anthropic, permintaan memakai `maxOutputTokens` 8192 secara bawaan
+bila tidak diatur, agar Anthropic SDK tidak membatasi ID model OpenCode yang
+tidak dikenal pada 4096.
+  </Tab>
+  <Tab title="SuperGrok">
+<CodeGroup>
+```bash npm
+npm install -D ai @ai-sdk/xai
+npx e2e login spacexsi
+```
+
+```bash pnpm
+pnpm add -D ai @ai-sdk/xai
+pnpm exec e2e login spacexsi
+```
+
+```bash bun
+bun add -d ai @ai-sdk/xai
+bunx e2e login spacexsi
+```
+</CodeGroup>
+
+```ts title="Model setup"
+import { grok } from 'e2e/oauth/grok';
+
+const agent = { model: grok('grok-4') };
+```
+  </Tab>
+  <Tab title="Claude Max atau Team">
+Paket Claude tidak menyediakan login untuk aplikasi lain. Untuk menjalankan
+langkah agent pada Claude Code itu sendiri, dengan loginnya sendiri, lihat
+[coding agent Anda](#use-your-coding-agent). Untuk memakai kredit API paket
+pada proyek baru, pilih **Skip for now** pada bagian model di `e2e init`.
+Kemudian:
+
+1. Di claude.ai, tautkan organisasi Claude Console. Pada Max, buka
+   Settings > Billing. Pada Team, Owner atau Primary Owner membuka
+   Organization settings > Billing. Lihat [panduan Anthropic](https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-and-team-plans).
+2. Di organisasi itu, buat API key. Atur sebagai `ANTHROPIC_API_KEY`.
+3. Pasang paketnya dan atur modelnya:
+
+<CodeGroup>
+```bash npm
+npm install -D ai @ai-sdk/anthropic
+```
+
+```bash pnpm
+pnpm add -D ai @ai-sdk/anthropic
+```
+
+```bash bun
+bun add -d ai @ai-sdk/anthropic
+```
+</CodeGroup>
+
+```ts title="Model setup"
+import { anthropic } from '@ai-sdk/anthropic';
+
+const agent = { model: anthropic('claude-sonnet-5-5') };
+```
+
+Atur `agents: { default: agent }` di `e2e.config.ts`.
+
+Kredit yang tidak terpakai kedaluwarsa di akhir setiap siklus penagihan.
+Paket Claude lainnya tidak memiliki kredit API. Pada paket tersebut, gunakan
+[provider API](/models), atau model Claude melalui paket Copilot Anda.
+  </Tab>
+</Tabs>
+
+## Pilih model
+
+`e2e models` mencantumkan id model yang dapat dipakai login Anda:
+
+<CodeGroup>
+```bash npm
+npx e2e models            # every stored login
+npx e2e models openai     # one provider
+```
+
+```bash pnpm
+pnpm exec e2e models            # every stored login
+pnpm exec e2e models openai     # one provider
+```
+
+```bash bun
+bunx e2e models            # every stored login
+bunx e2e models openai     # one provider
+```
+</CodeGroup>
+
+Id tidak selalu sama dengan nama yang ditampilkan aplikasi vendor.
+
+Dengan `OPENCODE_API_KEY` diatur, `e2e models opencode-console` mencantumkan
+id yang dilayani key itu, key yang sama yang dipakai `opencodeConsole()`
+sebagai pengganti login.
+
+- **Copilot** menandai model yang `not enabled` (aktifkan di pengaturan
+  GitHub Copilot Anda atau minta admin organisasi) atau `no chat or responses`
+  (pilih model lain). Copilot Free hanya melayani model melalui
+  [pemilihan model otomatis](https://docs.github.com/en/copilot/get-started/plans),
+  sehingga memanggil ID model tertentu biasanya gagal; pilih ID lain atau
+  [provider API](/models).
+- **OpenCode Console** mencantumkan model `go/` hanya jika Anda memiliki Go,
+  dan menyembunyikan model Zen yang dinonaktifkan atau gratis. Kunci
+  `providerOptions` dengan `opencode` untuk model chat completions, atau
+  dengan `openai`, `anthropic`, atau `google` untuk yang lain.
+
+## Bantuan masuk
+
+- **ChatGPT** membuka browser Anda. Berikan `--device` untuk memakai kode
+  perangkat sebagai gantinya.
+- **Copilot** memakai ulang login GitHub CLI (`gh`) Anda. Tanpa `gh`, berikan
+  `--client-id` untuk aplikasi GitHub OAuth Anda sendiri dengan device flow
+  diaktifkan (tambahkan `--enterprise-url` untuk GitHub Enterprise).
+- **OpenCode Console** mencetak kode perangkat untuk disetujui di workspace
+  Anda. Untuk berpindah workspace nanti, jalankan
+  `npx e2e logout opencode-console` dan masuk lagi.
+- **SuperGrok** mencetak kode perangkat dan URL verifikasi.
+
+Jalankan `npx e2e login` tanpa argumen untuk melihat akun mana yang
+terhubung, dan `npx e2e logout` untuk menghapus salah satunya. Token yang
+kedaluwarsa disegarkan secara otomatis (termasuk di antara worker paralel).
+Jika login tersimpan berhenti berfungsi, e2e memberi tahu perintah
+`npx e2e login <provider>` mana yang perlu dijalankan ulang. Lihat
+[referensi CLI](/reference/cli#e2e-login) untuk semua flag.
+
+## CI
+
+Gunakan API key di CI. Claude Max atau Team sudah memakainya. Untuk OpenCode
+Console, atur `OPENCODE_API_KEY` ke API key langganan OpenCode Go, atau ke
+API key service account yang dibuat di Console (Service Accounts, lalu API
+Keys). Untuk ChatGPT, Copilot, dan SuperGrok, gunakan
+[provider API](/models).
+
+[`E2E_OAUTH_CREDENTIALS`](/reference/environment) dapat memberikan login
+tersimpan ke CI, tetapi e2e tidak menyimpan token yang disegarkan kembali ke
+sana. Login dengan refresh token yang berotasi hanya bekerja di sana untuk
+waktu yang terbatas.
+
+## Gunakan coding agent Anda
+
+`@e2e-dev/acp` menjalankan setiap langkah agent dan
+[`e2e explore`](/explore) pada Claude Code atau Codex melalui
+[Agent Client Protocol](https://agentclientprotocol.com). Agent masuk dengan
+login atau API key miliknya sendiri, sehingga e2e tidak memerlukan provider
+model.
+
+Agent mendapat `complete_step` dan tool tindakan milik agent bawaan untuk
+verb yang didukung engine target. Runner merekam setiap tindakan, sehingga
+langkah diputar ulang dari [cache](/cache) tanpa agent. Tes Anda tidak
+berubah.
+
+<Tabs>
+  <Tab title="Claude Code">
+Pasang paketnya dan adapter Claude Code dari Zed. Masuk dengan `claude`,
+atau atur `ANTHROPIC_API_KEY`.
+
+<CodeGroup>
+```bash npm
+npm install -D @e2e-dev/acp @agentclientprotocol/claude-agent-acp
+```
+
+```bash pnpm
+pnpm add -D @e2e-dev/acp @agentclientprotocol/claude-agent-acp
+```
+
+```bash bun
+bun add -d @e2e-dev/acp @agentclientprotocol/claude-agent-acp
+```
+</CodeGroup>
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { claudeCode } from '@e2e-dev/acp';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+  agents: { default: { executor: claudeCode({ model: 'sonnet' }) } },
+} satisfies E2EConfig;
+```
+  </Tab>
+  <Tab title="Codex">
+Pasang paketnya dan adapter Codex, lalu masuk dengan `codex login`, atau atur
+`OPENAI_API_KEY` atau `CODEX_API_KEY`. Ketika Codex tidak memiliki login,
+`codex()` memasukkannya dengan key itu dan Codex menyimpannya sebagai
+loginnya (di `CODEX_HOME/auth.json` dengan penyimpanan bawaan) sampai Anda
+menjalankan `codex logout`. Ketika `APP_SERVER_LOGS` diatur, `codex()`
+melewati login dengan API key agar log adapter tidak menulis kredensial dalam
+teks biasa (login yang tersimpan tetap berfungsi). Berikan
+`env: { OPENAI_API_KEY: '' }` untuk menyembunyikan key dari Codex ketika
+aplikasi Anda memakainya, dan jalankan sesi pertama pada `CODEX_HOME` baru
+sendirian agar Codex menginisialisasi state lokalnya dengan bersih.
+
+<CodeGroup>
+```bash npm
+npm install -D @e2e-dev/acp @agentclientprotocol/codex-acp
+```
+
+```bash pnpm
+pnpm add -D @e2e-dev/acp @agentclientprotocol/codex-acp
+```
+
+```bash bun
+bun add -d @e2e-dev/acp @agentclientprotocol/codex-acp
+```
+</CodeGroup>
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { codex } from '@e2e-dev/acp';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+  agents: { default: { executor: codex() } },
+} satisfies E2EConfig;
+```
+  </Tab>
+</Tabs>
+
+`claudeCode()` dan `codex()` menerima opsi berikut:
+
+| Opsi | Fungsinya |
+| --- | --- |
+| `model` | Model yang dipakai (misalnya `'sonnet'`). Bawaannya adalah default milik agent; jika tidak didukung, error mencantumkan model yang tersedia. |
+| `env` | Variabel environment tambahan untuk proses agent. |
+| `system` | Instruksi tambahan yang ditambahkan ke prompt awal agent. |
+| `name` | Label yang ditampilkan untuk executor ini di laporan. |
+
+### Yang dapat dipakai agent
+
+Karena tindakan yang dilakukan dengan tool milik coding agent sendiri (shell,
+filesystem, pencarian web) tidak direkam dan tidak dapat diputar ulang dengan
+aman, e2e membatasi agent secara ketat hanya pada tool langkah:
+
+- Sesi dibuka di direktori temp kosong tanpa akses filesystem atau terminal.
+- Hanya permintaan izin untuk tool langkah yang disetujui; semua yang lain
+  ditolak.
+- Jika agent tetap memanggil salah satu tool miliknya, e2e langsung
+  menggagalkan langkah dan menutup sesi agar langkah berikutnya dimulai dari
+  keadaan bersih.
+
+Kedua preset juga menonaktifkan tool milik agent, server MCP pengguna, dan
+akses shell/web untuk sesi ini.
+
+<Accordion title="Detail isolasi per preset">
+- **Claude Code:** tanpa tool bawaan, tanpa pengaturan user/project/local,
+  tanpa server MCP selain tool langkah, tanpa sesi tersimpan, dan tanpa
+  bypass permission prompt.
+- **Codex:** mode hanya-baca, tanpa shell, pencarian web, aplikasi, plugin,
+  browser, computer use, atau snapshot shell (yang akan menyalin key
+  environment ke disk), dan semua server MCP Codex milik pengguna dimatikan
+  untuk sesi ini. Jika Codex memunculkan subagent, e2e menggagalkan langkah
+  seperti tool tidak berizin lainnya.
+</Accordion>
+
+### Secret
+
+Param secret sampai ke agent hanya berupa nama. Ketika engine target dapat
+mengisi secret, agent memanggil `type_secret` dan runner mengetik nilainya,
+seperti pada agent bawaan.
+
+Proses agent mendapat environment Anda tanpa variabel `E2E_SECRET_*` dan
+`E2E_USER_*`.
+
+<Warning>
+Secret di variabel lain sampai ke agent. Contohnya `API_KEY` di balik
+`secrets: { apiKey: process.env.API_KEY }`, atau variabel tempat nilai
+`E2E_SECRET_*` disalin. Simpan secret hanya di `E2E_SECRET_*` dan
+`E2E_USER_*`.
+</Warning>
+
+<AccordionGroup>
+  <Accordion title="Cara sebuah tes berjalan">
+Satu sesi agent melayani satu attempt tes. Langkah agent pertama yang tidak
+dapat diputar ulang cache memulainya. Setiap langkah berikutnya adalah satu
+pesan lagi dalam percakapan yang sama, dan sesi ditutup ketika attempt
+berakhir, atau lebih awal pada langkah `POLICY_DENIED`.
+
+Setiap pesan membawa langkah, param non-secret-nya, langkah yang sudah
+selesai, dan layar saat ini. Hasil tindakan menyebutkan apa yang berubah di
+layar, dan `screenshot` sampai ke agent sebagai gambar.
+
+Assertion tidak dapat mengubah layar. `observe`, `screenshot`, scroll, dan
+hover tetap berfungsi. Agent mengakhiri setiap langkah dengan
+`complete_step`: `passed`, `failed`, atau `blocked` dengan kode error, seperti
+yang dilakukan agent bawaan.
+  </Accordion>
+  <Accordion title="Batasan">
+  - Agent Client Protocol tidak melaporkan permintaan model. Setiap giliran
+    prompt dihitung sebagai satu panggilan model terhadap `maxModelCalls`,
+    beserta token dan biayanya bila agent melaporkannya. `maxSteps` dan batas
+    waktu langkah membatasi giliran.
+  - `waitFor` dan `extract` berjalan pada `judge` atau `model` milik entri
+    agents bila ada. Jika tidak, agent menjawabnya dalam sesi kedua per
+    attempt tes yang tidak memiliki tool. Di sana, `vision` memerlukan agent
+    yang menerima gambar dalam prompt.
+  - Entri agents dengan `executor` tidak menerima `tools`, sehingga agent
+    tidak mendapat tool proyek dari `defineTool`.
+  </Accordion>
+</AccordionGroup>
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Model" icon="brain" href="/models">
+    Gunakan API key, gateway, atau model lokal sebagai gantinya.
+  </Card>
+  <Card title="Agent dan persona" icon="users" href="/agents">
+    Beri tes model dan instruksi yang berbeda.
+  </Card>
+</CardGroup>

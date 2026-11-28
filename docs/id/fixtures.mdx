@@ -1,0 +1,242 @@
+---
+title: Menulis fixture
+description: "Tulis fixture tes dengan test.extend untuk membuat data tes dan resource lain sebelum setiap tes dan membersihkannya setelahnya, bahkan ketika tes gagal."
+"og:image": "https://e2e.com/docs/images/og/fixtures.png?v=a85d0155da"
+"twitter:image": "https://e2e.com/docs/images/og/fixtures.png?v=a85d0155da"
+---
+
+Fixture adalah nilai yang diterima sebuah tes, disiapkan sebelum tes dan
+dibongkar setelahnya, bahkan ketika tes gagal. Gunakan fixture untuk membuat
+data tes. Untuk masuk, gunakan [sesi tersimpan](/authentication).
+
+## Definisikan fixture dalam satu file
+
+Perluas `test` milik engine Anda lalu ekspor. Fixture dapat memakai `agent`,
+sehingga dapat membuat datanya lewat aplikasi dengan
+[tujuan](/core-concepts#goals):
+
+```ts title="tests/fixtures.ts" expandable
+import { test as base } from '@e2e-dev/web';
+import { expect, unique } from 'e2e';
+
+export const test = base.extend<{ project: string; task: string }>({
+  /** A fresh project, created and deleted through the app. */
+  project: async ({ app, agent, screen }, use) => {
+    const name = `Launch plan ${Date.now()}`;
+    await app.open('/projects');
+    await agent.act('create a project named {name}', { params: { name: unique(name) } });
+    await expect(screen.getByRole('heading', name)).toBeVisible();
+    await use(name);
+    await app.open('/projects');
+    await agent.act('delete the project {name}', { params: { name: unique(name) } });
+    await expect(screen.getByRole('link', name)).toBeHidden();
+  },
+  /** One task in that project. Deleting the project deletes it too. */
+  task: async ({ project, agent, screen }, use) => {
+    const title = 'Write the announcement';
+    await agent.act('add a task {title} to the project {project}', { params: { title, project } });
+    await expect(screen.getByRole('checkbox', title)).toBeVisible();
+    await use(title);
+  },
+});
+```
+
+Kode sebelum `await use(value)` adalah penyiapan, dan kode setelahnya adalah
+pembongkaran. Impor `test` yang sudah diperluas di file tes Anda:
+
+```ts title="tests/tasks.e2e.ts"
+import { expect } from 'e2e';
+import { test } from './fixtures.ts';
+
+test('completes a task', { session: 'admin' }, async ({ screen, task }) => {
+  await screen.getByRole('checkbox', task).check();
+  await expect(screen.getByRole('checkbox', task)).toBeChecked();
+});
+```
+
+Sesi tersimpan dipulihkan sebelum fixture dijalankan.
+
+<Note>
+Langkah agent di dalam fixture dijalankan untuk setiap tes yang memakainya.
+Jika aplikasi Anda memiliki API tes, panggilan `fetch` lebih cepat.
+</Note>
+
+## Bangun satu fixture di atas fixture lain
+
+Fixture menyebutkan fixture yang dibutuhkannya pada parameter pertama, dan e2e
+menyiapkan fixture tersebut lebih dulu. `task` menyebut `project`, sehingga
+tes yang menyebut `task` mendapatkan project juga. Pembongkaran berjalan dalam
+urutan terbalik.
+
+Fixture dapat menyebut fixture dari `test` yang diperluasnya dan fixture yang
+dideklarasikan di sampingnya, dalam urutan apa pun. Fixture yang tidak
+membutuhkan apa pun menerima `({}, use)`.
+
+## Siapkan hanya yang disebut tes
+
+e2e menyiapkan fixture hanya untuk tes yang menyebutnya: di badan tes, di
+hook `beforeEach` atau `afterEach`, atau di fixture lain yang dipakai tes itu.
+Tes yang tidak menyebut fixture apa pun tidak menyiapkan apa pun, sehingga
+satu `test` dapat memuat semua fixture di rangkaian tes.
+
+Sebutkan fixture dengan destructuring pada parameter pertama. e2e membaca
+namanya dari sana, sehingga `async (fixtures) => {}` dan properti rest
+(`{ app, ...rest }`) gagal saat file dikumpulkan.
+
+## Jalankan fixture untuk setiap tes
+
+Atur `auto: true` pada fixture yang dibutuhkan tes tetapi tidak disebut,
+seperti fixture yang mereset data:
+
+```ts title="tests/fixtures.ts"
+export const test = base.extend<{ cleanData: void }>({
+  cleanData: [async ({ app }, use) => {
+    await fetch(`${app.baseUrl}/api/test/reset`, { method: 'POST' });
+    await use();
+  }, { auto: true }],
+});
+```
+
+Dengan `{ scope: 'worker', auto: true }`, fixture berjalan sekali per worker.
+
+## Perluas fixture bawaan
+
+Beri fixture nama yang sama dengan fixture bawaan, seperti `app` atau
+`device`, untuk menjalankan kode di sekitarnya. Di dalam fungsi, nama itu
+merujuk ke fixture bawaan. Tes dan hook yang menyebutnya mendapatkan nilai
+yang Anda berikan ke `use`:
+
+```ts title="tests/fixtures.ts"
+export const test = base.extend({
+  device: async ({ device }, use) => {
+    await device?.setPermission('camera', 'deny');
+    await use(device);
+  },
+});
+```
+
+Override ini adalah fixture tes, sehingga berjalan untuk setiap tes yang
+memakai `device`. Agar berjalan sekali per worker dan dapat dipakai di
+`beforeAll`, definisikan sebagai `[fn, { scope: 'worker' }]`. Lihat
+[Memperluas fixture](/reference/test#extending-a-fixture).
+
+## Jalankan satu tes di web dan mobile
+
+Anda dapat menjalankan tes yang sama pada target yang engine-nya memiliki
+fixture berbeda. Misalnya, pada konfigurasi dengan target web dan iOS,
+`device` bernilai `undefined` di web.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { mobile } from '@e2e-dev/mobile';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [
+    { engine: web(), app: { url: 'http://localhost:3000' } },
+    { engine: mobile({ platform: 'ios' }), app: { bundleId: 'com.example.app' } },
+  ],
+} as const satisfies E2EConfig;
+```
+
+Gunakan `as const satisfies E2EConfig` atau
+[`defineConfig`](/reference/config#defineconfig) agar tipe hasil inferensi
+konfigurasi tetap terjaga. Dengan anotasi tipe seperti
+`const config: E2EConfig`, `typeof config` hanyalah `E2EConfig` biasa,
+sehingga tipe target tidak diinferensikan. Jika Anda meneruskan tipe itu ke
+`test.extend<{}, {}, typeof config>()`, Anda mendapat error tipe.
+
+Teruskan `typeof config` sebagai argumen tipe ketiga `test.extend`. Periksa
+`platform === 'ios'` untuk mempersempit `device` menjadi `Device`:
+
+```ts title="tests/fixtures.ts"
+import { test as base } from 'e2e';
+import type config from '../e2e.config.ts';
+
+export const test = base.extend<{ signedOut: void }, {}, typeof config>({
+  /** Signs the app out. On iOS, the keychain is cleared first, since `app.clearState()` doesn't clear it. */
+  signedOut: async ({ app, platform, device }, use) => {
+    if (platform === 'ios') {
+      await device.clearKeychain();
+    }
+
+    await app.clearState();
+    await use();
+  },
+});
+```
+
+Dengan `platforms` pada sebuah tes, fixture-nya diberi tipe sesuai target yang
+menjalankannya:
+
+```ts title="tests/menu.e2e.ts"
+import { test } from './fixtures.ts';
+
+test('closes the menu with Escape', { platforms: ['web'] }, async ({ browser }) => {
+  await browser.keyboard.press('Escape');
+});
+```
+
+Jika Anda [memperluas `device`](#extend-a-built-in-fixture), override Anda
+juga dipanggil di web, dengan `device` bernilai `undefined`.
+
+## Bagikan fixture ke seluruh worker
+
+Fixture worker disiapkan sekali per worker dan target (pada tes atau hook
+suite pertama yang memakainya) dan dibongkar saat worker keluar. Gunakan untuk
+database, server, atau klien API yang dibagikan ke banyak tes. Deklarasikan
+dengan `{ scope: 'worker' }` dan beri tipe pada argumen tipe kedua:
+
+```ts title="tests/fixtures.ts"
+export const test = base.extend<{}, { database: Database }>({
+  database: [async ({}, use) => {
+    const database = await startDatabase();
+    await use(database);
+    await database.stop();
+  }, { scope: 'worker' }],
+});
+```
+
+Fixture worker hidup lebih lama dari setiap tes, sehingga hanya dapat melihat
+fixture worker: sejenisnya, dan [fixture bawaan](/reference/test#fixtures)
+yang scope-nya worker pada target tersebut.
+
+Deklarasikan di modul yang diimpor file tes Anda, bukan di dalam file tes.
+File tes dimuat lagi setelah tes yang gagal dan untuk setiap grup serial dan
+tes penyiapan, dan fixture worker yang dideklarasikannya mendapat instance
+baru setiap kali. Instance lama tetap aktif sampai worker berakhir.
+
+## Baca fixture di hook
+
+Daftarkan hook pada `test` yang sudah diperluas agar mendapatkan tipe
+fixture. Hook menyebutkan fixture-nya seperti tes:
+
+```ts
+test.beforeEach(async ({ screen, project }) => {
+  await expect(screen.getByRole('heading', project)).toBeVisible();
+});
+```
+
+`beforeAll` dan `afterAll` hanya mendapat fixture worker. Perangkat menyimpan
+state-nya di antara tes, sehingga di mobile fixture bawaan `device`, `app`,
+dan `screen` juga merupakan fixture worker. Tes browser mendapat context
+baru, jadi letakkan penyiapan UI di `beforeEach`. Lihat scope setiap
+[fixture bawaan](/reference/test#fixtures).
+
+## Saat fixture gagal
+
+Error pada penyiapan menggagalkan tes di `beforeEach`, dan hook `afterEach`
+yang menyebut fixture yang gagal dilewati. Error pada pembongkaran
+dilaporkan di `afterEach`. Lihat
+[daftar lengkap kesalahan](/reference/test#your-own-fixtures).
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Referensi tes" icon="code" href="/reference/test#your-own-fixtures">
+    Kontrak fixture, tipe, dan setiap kegagalan.
+  </Card>
+  <Card title="Autentikasi" icon="key" href="/authentication">
+    Simpan sesi sekali lalu pulihkan di setiap tes.
+  </Card>
+</CardGroup>

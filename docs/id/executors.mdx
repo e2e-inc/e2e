@@ -1,0 +1,325 @@
+---
+title: Executor kustom
+description: "Sesuaikan loop agent yang menjalankan agent.act dan agent.assert, atau gantikan dengan step executor Anda sendiri ketika prompt system dan tool tidak cukup."
+"og:image": "https://e2e.com/docs/images/og/executors.png?v=283f7962bb"
+"twitter:image": "https://e2e.com/docs/images/og/executors.png?v=283f7962bb"
+---
+
+Step executor menjalankan langkah `agent.act` dan `agent.assert` milik sebuah
+agent. Tulis sendiri bila prompt `system` dan [tool proyek](/tools) tidak
+cukup.
+
+| Opsi | Yang Anda tulis | Yang dipertahankan runner |
+| --- | --- | --- |
+| `createToolLoopExecutor` dari `e2e/agent` | Tool dan prompt. Loop hanya menambahkan `complete_step`. | Anggaran, deteksi panggilan berulang, verdict, akuntansi penggunaan, dan transkrip debug |
+| `StepExecutor` | `runStep(ctx)`. Model bersifat opsional, dan tipe `e2e` serta `e2e/engine` dapat dikompilasi tanpa paket `ai`. | Tenggat langkah, observasi yang disamarkan, tindakan yang diperiksa, dan catatan verdict |
+
+Atur salah satunya sebagai `executor` pada entri agents. Entri tetap membaca
+`model`, `judge`, `context`, dan anggaran, serta menolak `system` dan
+`tools`: berikan keduanya ke `createToolLoopExecutor`. Untuk provider yang
+mengembalikan pilihan terbatas, lihat [decision executor](/decision-models).
+
+## Pertahankan loop, ubah kosakatanya
+
+Agent ini memiliki dua tool: satu membaca layar, satu mengetuk node
+berdasarkan id-nya.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { createToolLoopExecutor } from 'e2e/agent';
+import { web } from '@e2e-dev/web';
+import { gateway, tool } from 'ai';
+import { z } from 'zod';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+  agents: {
+    default: {
+      model: gateway('openai/gpt-6-luna-fast'),
+      maxModelCalls: 15,
+      executor: createToolLoopExecutor({
+        name: 'tap-only',
+        system: 'Read the screen before acting. Tap controls by their id from the latest read.',
+        buildPrompt: (ctx) => ctx.step.instruction,
+        tools: (ctx, { guard }) => ({
+          read_screen: tool({
+            description: 'Read the screen as text, one node per line as #id role "name"',
+            inputSchema: z.object({}),
+            execute: () => guard(async () => (await ctx.observe()).text),
+          }),
+          tap: tool({
+            description: 'Tap a node by its id from the latest read_screen',
+            inputSchema: z.object({ id: z.string() }),
+            execute: ({ id }) =>
+              guard(async () => {
+                await ctx.actions.tap({ id: id.replace(/^#/, '') });
+                return `Tapped ${id}.`;
+              }),
+          }),
+        }),
+      }),
+    },
+  },
+} satisfies E2EConfig;
+```
+
+Loop berjalan paling banyak `maxModelCalls` giliran model per langkah dengan
+`model` milik entri, atau `model` miliknya sendiri dari
+`createToolLoopExecutor({ model })`. Executor juga dapat membawa `judge`.
+Ketika entri mengatur opsi yang sama, keduanya harus menyebut provider dan
+model yang sama, atau pemuatan konfigurasi gagal dengan `INVALID_CONFIG`.
+
+`buildPrompt` mengembalikan string atau riwayat pesan, dan `prepareMessages`
+memungkinkan Anda memangkas riwayat di antara giliran atau berhenti lebih awal
+jika sebuah langkah macet. Jika provider menolak permintaan karena panjang
+konteks, loop memadatkan riwayat dan mencoba sekali lagi sebelum gagal (atur
+`inconclusiveOnOverflow: true` untuk loop assertion yang seharusnya berakhir
+sebagai tidak meyakinkan). `guard()` memblokir panggilan tool baru begitu
+langkah hampir selesai dan menyampaikan error kembali ke model sebagai teks.
+Tindakan yang dijalankan melalui `ctx.actions` diotorisasi, dianggarkan, dan
+direkam sehingga bekerja dengan [cache replay](/cache) di engine mana pun
+yang mendukungnya.
+
+Untuk mempertahankan tindakan bawaan di samping tool Anda, sebarkan (spread)
+`createGrammarTools(ctx, { guard })` ke dalam toolset. Fungsi ini
+mengembalikan tool tindakan agent bawaan untuk verb yang didukung engine
+target, dan setiap hasilnya melaporkan apa yang berubah di layar.
+`BASE_RULES` adalah panduan agent bawaan untuk tool tersebut; awali `system`
+Anda dengannya.
+
+```ts
+import { BASE_RULES, createGrammarTools, createToolLoopExecutor } from 'e2e/agent';
+
+createToolLoopExecutor({
+  name: 'with-inbox',
+  system: `${BASE_RULES}\n\nCheck the inbox with read_inbox when a step mentions an email.`,
+  buildPrompt: (ctx) => ctx.step.instruction,
+  tools: (ctx, { guard }) => ({ ...createGrammarTools(ctx, { guard }), read_inbox: readInbox }),
+});
+```
+
+Di luar loop, tool grammar mengembalikan `ScreenOutput`: teks, atau teks
+beserta screenshot. Ketika tool melempar error yang diterima oleh
+`isRuntimeHardStop(error)`, akhiri langkah dan lempar kembali error itu.
+
+Tool yang bekerja di luar `ctx.actions`, seperti panggilan ke API tes Anda,
+membungkus badannya dalam `ctx.budgets.runTool({ name, mutates })`, yang
+mengambil satu slot tindakan dan merekam hasilnya. Jangan panggil
+`ctx.actions` atau `ctx.observe` di dalam `runTool`: panggilan itu menunggu
+dirinya sendiri dan mengalami deadlock.
+
+## Ganti executor
+
+Executor ini tidak memakai model dan mendukung satu assertion,
+`agent.assert('the screen says Ready')`. Langkah lain mengembalikan verdict
+blocked.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig, StepExecutor } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+const scripted: StepExecutor = {
+  name: 'scripted',
+  version: '1',
+  cache: 'off',
+  async runStep(ctx) {
+    if (ctx.step.kind !== 'assert' || ctx.step.instruction !== 'the screen says Ready') {
+      return {
+        status: 'blocked',
+        errorCode: 'AUTOMATION_UNSUPPORTED',
+        summary: 'This executor only checks whether the screen says Ready.',
+      };
+    }
+    const screen = await ctx.observe();
+    const ready = screen.text.includes('Ready');
+    return {
+      status: ready ? 'passed' : 'failed',
+      summary: ready ? 'The screen says Ready.' : 'Ready is absent from the screen.',
+    };
+  },
+};
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+  agents: { default: { executor: scripted } },
+} satisfies E2EConfig;
+```
+
+## Isi context
+
+| Anggota | Isinya |
+| --- | --- |
+| `ctx.step` | `kind`, instruksi, param, dan `index` pada timeline attempt. Nilai secret terkonfigurasi di instruksi atau param terbaca `<secret:name>`. Handle `secrets.get()` tiba sebagai placeholder berisi nama saja yang diisi oleh `typeSecret` |
+| `ctx.observe({ tree, pixels })` | Teks layar yang disamarkan, dengan pohon node opsional dan screenshot yang disamarkan |
+| `ctx.read({ id }, { style })` | Gaya terhitung dari node yang saat ini tercantum, dengan secret disamarkan. Lihat [Tool proyek](/tools#read-a-nodes-computed-style) |
+| `ctx.actions` | Tindakan yang diperiksa dan direkam: `tap`, `doubleTap`, `longPress`, `secondaryTap`, `hover`, `type`, `typeSecret`, `press`, `select`, `check`, `drag`, `scrollTo`, `scrollUntil`, `upload`, `scroll`, `navigate`, `back`, `resize`, `switchTab`, `closeTab`, serta tindakan titik dan keyboard di bawah |
+| `ctx.target` | `name`, `platform`, dan `verbs` milik target, yaitu tindakan yang didukung engine-nya. Tawarkan hanya ini kepada model. `tapModifiers` bernilai true ketika `tap`, `doubleTap`, dan `secondaryTap` menerima `{ modifiers }` |
+| `ctx.signal` | Dibatalkan saat pembatalan, pada tenggat langkah, atau pada hard stop lainnya. Tenggat tidak dapat menghentikan pekerjaan yang mengabaikannya |
+| `ctx.replayedPrefix` | Terisi ketika replay cache menjalankan sebagian langkah lebih dulu. Lihat [Cache replay](#replay-cache) |
+| `ctx.model`, `ctx.providerOptions` | Model dan `providerOptions` terkonfigurasi milik agent, bila diatur |
+| `ctx.agentContext` | `context` milik agent ditambah `agentContext` milik tes |
+| `ctx.ledger` | Langkah tes yang sudah selesai |
+| `ctx.attempt` | ID tes dan attempt, `titlePath` tes (kosong di luar `e2e run`), indeks percobaan ulang, abort signal, dan peta `memory` yang tidak pernah dilaporkan |
+| `ctx.budgets` | Akuntansi untuk tool kustom (`runTool`) dan panggilan model (`recordModelCall`) |
+| `ctx.attachTranscript(text)` | Dengan `--debug`, melampirkan transkrip model sebagai artefak `log`. Panggil sekali, di akhir |
+| `ctx.attachTurns(turns)` | Menyimpan catatan singkat giliran model (`{ index, calls, outcome }`) pada langkah. Laporan menampilkan yang terakhir di bawah langkah yang gagal |
+| `ctx.attachScreenshot(pixels, label)` | Menyimpan piksel yang diamati sebagai artefak `screenshot` pada langkah dan mengembalikan ID laporannya |
+
+`tapAt(point)` dan `hoverAt(point)` memanggil tindakan koordinat milik engine,
+atau bertindak pada kontrol tercantum di titik itu bila engine tidak
+memilikinya. `dragAt(from, to)` menyeret di antara kedua titik melalui jenis
+pointer `dragTo` milik engine. Tanpanya, engine dengan tindakan `dragTo`
+menyeret berdasarkan id ketika kedua titik jatuh pada dua kontrol tercantum
+yang berbeda. `dragAt` lainnya gagal dengan `UNSUPPORTED_CAPABILITY`.
+`hitTest(point)` menemukan kontrol di sebuah titik tanpa bertindak. Engine
+dengan keyboard menambahkan `typeText`, `pressKey`, dan `dismissKeyboard`
+untuk kontrol yang difokuskan. `upload(target, paths)` menerima jalur relatif
+terhadap proyek dan file `sample:` yang tercantum di bawah
+[kebijakan unggahan](/reference/agent#action-tools), menolak jalur di luar
+root proyek atau yang tersembunyi dengan `POLICY_DENIED`, dan file yang tidak
+ada dengan `INVALID_ARGUMENT`.
+
+`keyboardVisible` pada observasi menyatakan apakah keyboard di layar sedang
+tampil, dan tidak ada bila engine tidak dapat mengetahuinya.
+
+Ketika pengambilan semantik gagal, observasi mengatur
+`treeUnavailable: true`, tidak memiliki `tree`, dan menyertakan screenshot
+jika kebijakan mengizinkan. ID node sebelumnya tidak valid, dan pohon yang
+hilang tidak membuktikan bahwa sebuah kontrol tidak ada.
+
+## Yang ditangani executor
+
+`act` dan `assert` sampai ke `runStep` dengan `maxSteps`, `maxModelCalls`,
+dan `timeout` milik agent. Pada `assert`, `vision` tiba sebagai
+`ctx.step.vision` hanya ketika executor mendeklarasikan `vision: true`; jika
+tidak, panggilan gagal dengan `UNSUPPORTED_CAPABILITY`. `screenshot` tetap
+melampirkan bukti setelah verdict Anda.
+
+`waitFor` dan `extract` memakai penilaian bawaan, pada `judge` atau `model`
+milik agent. Jika keduanya tidak dikonfigurasi, keduanya sampai ke
+`answer(question)` opsional milik executor: e2e mengirim layar yang
+disamarkan dan instruksi sebagai teks, ditambah screenshot di `images` ketika
+panggilan meminta `vision`, lalu memeriksa JSON yang dikembalikan. Tanpa
+`answer`, keduanya gagal dengan `MODEL_UNAVAILABLE`.
+
+```ts
+const own: StepExecutor = {
+  name: 'house-brain',
+  runStep,
+  async answer({ system, prompt, signal }) {
+    return { text: await complete(system, prompt, signal) };
+  },
+};
+```
+
+[`e2e explore`](/explore) berjalan pada executor yang memiliki
+`extend(extension)`, yang mengembalikan salinan yang mengikuti
+`extension.system` dan menawarkan `extension.tools`.
+`createProjectTools(ctx, tools)` dari `e2e/agent` menjalankan tool tersebut di
+bawah akuntansi langkah. Tanpa `extend`, explore menjalankan agent bawaan
+sebagai pengganti executor.
+
+## Verdict
+
+Kembalikan `passed`, `failed`, atau `blocked` beserta ringkasan. Verdict
+blocked memerlukan kode error, dan verdict passed tidak memilikinya.
+[Cara kerja langkah agent](/agent-steps#how-a-step-ends) mencantumkan
+kodenya. Kembalikan `STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT`, atau `CANCELLED`
+hanya ketika anggaran itu habis, tenggat terlewati, atau tes dibatalkan.
+Runner menolak pemakaian lainnya, dan verdict passed yang memiliki kode,
+dengan `MODEL_OUTPUT_INVALID`.
+
+Untuk model yang Anda kendalikan sendiri dari executor,
+`createVerdictTool(ctx.step.kind)` dari `e2e/agent` adalah `complete_step`
+milik agent bawaan. Berikan `tool` dan `VERDICT_RULES`-nya kepada model, lalu
+kembalikan `verdict()`. Pada langkah `act`, fungsi ini menghapus
+`ASSERTION_INCONCLUSIVE` dari verdict yang gagal.
+
+## Cache replay
+
+`cache` pada `StepExecutor` menentukan bagaimana langkah `act`-nya memakai
+[cache replay](/cache). Langkah `assert` tidak pernah di-cache.
+
+`'inherit'`, yang menjadi bawaan, mengikuti mode cache yang dikonfigurasi:
+langkah yang sudah direkam diputar ulang tanpa memanggil `runStep`. `'off'`
+tidak pernah memutar ulang atau merekam. Gunakan bila riwayat atau memori
+executor sendiri adalah sumber kebenaran.
+
+Ketika replay berhenti di tengah jalan, runner memanggil `runStep` dengan
+`ctx.replayedPrefix`: tindakan yang sudah diputar ulang dan alasan replay
+berhenti. Lanjutkan dari layar saat ini tanpa mengulanginya.
+
+Cache merekam apa yang dilakukan langkah melalui `ctx.actions`. Panggilan tool
+yang bermutasi meninggalkan celah yang diisi executor saat replay. Entri
+dikunci oleh agent terkonfigurasi dan konteksnya, bukan executor, sehingga
+mengganti executor sebuah agent mempertahankan entrinya.
+
+## Mengendalikan halaman sendiri
+
+Pada engine web, `surfaceOf(handle)` dari `@e2e-dev/web` memberi Anda `Page`
+dan `BrowserContext` milik attempt saat ini. Kedua accessor melempar
+`INVALID_STATE` di luar attempt yang aktif atau pada handle yang tidak
+dijalankan target mana pun, dan `page()` juga melakukannya ketika tidak ada
+halaman yang terbuka.
+
+```ts
+import type { E2EConfig, StepExecutor } from 'e2e';
+import { web, surfaceOf } from '@e2e-dev/web';
+
+const engine = web();
+const own: StepExecutor = {
+  name: 'own-tools',
+  version: '1',
+  cache: 'off',
+  async runStep(ctx) {
+    const page = surfaceOf(engine)!.page();   // the page app.open() navigated
+    await ctx.budgets.runTool({ name: 'click', mutates: true }, () =>
+      page.getByRole('button', { name: 'Save' }).click(),
+    );
+    return { status: 'passed', summary: 'saved' };
+  },
+};
+
+export default {
+  targets: [{ engine, app: { url: 'http://localhost:3000' } }],
+  agents: { default: { executor: own } },
+} satisfies E2EConfig;
+```
+
+Panggilan Playwright langsung melewati otorisasi tindakan dan cache replay,
+dan tidak meninggalkan artefak. Tenggat langkah dan catatan verdict tetap
+berlaku.
+
+## Provider key
+
+Eksekusi menyamarkan [provider key](/reference/security#provider-keys) yang
+ditemukannya di environment dari apa pun yang dikembalikan executor. Lima
+fungsi dari `e2e/agent` mencakup sisanya:
+
+| Fungsi | Kegunaan |
+| --- | --- |
+| `registerProviderKey(name, value)` | Key yang dipakai agent Anda untuk masuk yang tidak dipegang oleh variabel tercantum mana pun, seperti yang dibacanya dari file login miliknya sendiri. Sejak itu tampil sebagai `<secret:name>`. `name` menerima huruf, angka, `_`, `.`, dan `-`; nilai yang lebih pendek dari 20 karakter, lebih panjang dari 8.192, atau bukan string dibiarkan. |
+| `registerProviderKeys(env)` | Variabel tercantum dari environment yang Anda pakai untuk memulai agent, bila bukan environment milik eksekusi. |
+| `redactSecrets(text)` | Teks yang Anda potong atau simpan sebelum dikembalikan. Samarkan lebih dulu: setengah key tidak lagi cocok. |
+| `redactProviderKeys(text)` | Teks yang sudah disamarkan oleh eksekusi, seperti pertanyaan `answer`, tepat sebelum keluar: hanya provider key yang diketahui saat ini. |
+| `redactStepText(ctx, text)` | Teks yang Anda kirim ke agent yang tidak dibangun oleh eksekusi, seperti prompt dengan `system` Anda sendiri: secret milik langkah dan provider key yang diketahui saat ini, tanpa nilai yang dipelajari tes sebelumnya. Panggil tepat sebelum teks keluar. |
+
+Model yang dibuat dengan key di dalam kode dapat mendaftarkannya juga di
+`e2e.config.ts`:
+
+```ts
+import { registerProviderKey } from 'e2e/agent';
+
+registerProviderKey('llm-key', apiKey);
+```
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Referensi agent" icon="wand-magic-sparkles" href="/reference/agent">
+    Setiap metode, opsi, dan anggaran.
+  </Card>
+  <Card title="Menulis engine" icon="plug" href="/writing-an-engine">
+    Tambahkan dukungan untuk platform lain.
+  </Card>
+</CardGroup>

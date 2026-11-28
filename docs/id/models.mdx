@@ -1,0 +1,313 @@
+---
+title: Model
+description: "Pilih model AI untuk langkah agent di e2e.config.ts, dari gateway, provider AI SDK dengan API key Anda sendiri, server lokal, atau langganan yang sudah Anda miliki."
+"og:image": "https://e2e.com/docs/images/og/models.png?v=5d360f2457"
+"twitter:image": "https://e2e.com/docs/images/og/models.png?v=5d360f2457"
+keywords: [LLM, API key, OpenAI, Claude, GPT, AI Gateway, OpenRouter]
+---
+
+import { ModelProvider } from '../snippets/model-provider.jsx';
+
+Langkah agent memakai model yang Anda atur di `e2e.config.ts`. Tidak ada
+bawaan. Model berasal dari provider [AI SDK](https://ai-sdk.dev/providers/ai-sdk-providers):
+gateway, API key langsung, server lokal, atau
+[langganan](/subscriptions) Anda. Untuk penyiapan pertama, `e2e init`
+menuliskan konfigurasinya. Lihat [quickstart](/quickstart#use-a-subscription-or-api-key).
+
+Tes tanpa langkah agent tidak memerlukan model. Agent bawaan memerlukan model
+yang mendukung pemanggilan tool dan gambar. [Model keputusan](/decision-models)
+seperti Clef atau Jev berjalan melalui executor kustom.
+
+## Pilih gateway atau provider
+
+Agent bawaan memerlukan paket `ai`, apa pun providernya:
+
+<CodeGroup>
+```bash npm
+npm install -D ai
+```
+
+```bash pnpm
+pnpm add -D ai
+```
+
+```bash bun
+bun add -d ai
+```
+</CodeGroup>
+
+Provider membaca key-nya sendiri dari environment. Gateway menjangkau banyak
+provider dengan satu key. Untuk berpindah, ganti impor model dan nilai
+`model`. Di mana snippet mendefinisikan `agent`, pakai sebagai
+`agents.default`:
+
+<Tabs>
+  <Tab title="Vercel AI Gateway">
+
+`gateway` sudah termasuk dalam paket `ai`. Atur `AI_GATEWAY_API_KEY`, atau
+gunakan [token OIDC Vercel](#vercel-oidc-instead-of-a-key) tanpa key.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { gateway } from 'ai';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+  agents: { default: { model: gateway('openai/gpt-6-luna-fast') } },
+} satisfies E2EConfig;
+```
+  </Tab>
+  <Tab title="OpenRouter">
+
+Pasang `@openrouter/ai-sdk-provider` dan atur `OPENROUTER_API_KEY`:
+
+```ts title="Model setup"
+import { openrouter } from '@openrouter/ai-sdk-provider';
+
+const agent = { model: openrouter('openai/gpt-6-luna-fast') };
+```
+  </Tab>
+  <Tab title="API key provider">
+
+Pasang paket AI SDK milik provider dan atur API key-nya. Untuk OpenAI, pasang
+`@ai-sdk/openai` dan atur `OPENAI_API_KEY`:
+
+```ts title="Model setup"
+import { openai } from '@ai-sdk/openai';
+
+const agent = { model: openai('gpt-6-luna') };
+```
+
+Provider lain bekerja dengan cara yang sama, dengan paket, ID model, dan
+kredensialnya sendiri. Lihat [Provider AI SDK](#ai-sdk-providers).
+  </Tab>
+  <Tab title="Lokal atau self-hosted">
+
+Pasang `@ai-sdk/openai-compatible`. Atur URL endpoint dan ID model yang
+dilayani endpoint itu. Tambahkan `apiKey` jika server memerlukannya. Atur
+`supportsStructuredOutputs: true` ketika server menerima format respons JSON
+schema, seperti Ollama. Tanpanya, AI SDK membuang schema dengan peringatan
+`responseFormat` dan langkah agent bisa memerlukan lebih banyak panggilan
+model:
+
+```ts title="Model setup"
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+
+const local = createOpenAICompatible({
+  name: 'local',
+  baseURL: 'http://127.0.0.1:11434/v1',
+  supportsStructuredOutputs: true,
+  // apiKey: process.env.LLM_API_KEY,
+});
+
+const agent = { model: local.chatModel('your-model-id') };
+```
+  </Tab>
+</Tabs>
+
+Gateway biasanya memakai ID `provider/model`. Provider langsung memakai ID
+miliknya sendiri.
+
+### Vercel OIDC sebagai pengganti key
+
+Jika `AI_GATEWAY_API_KEY` tidak diatur, `gateway()` melakukan autentikasi
+dengan token OIDC Vercel berumur pendek dan menyegarkannya secara otomatis.
+Masuk ke Vercel CLI dan tautkan proyek Anda sekali:
+
+<CodeGroup>
+```bash npm
+npx vercel login
+npx vercel link
+npx e2e run
+```
+
+```bash pnpm
+pnpm dlx vercel login
+pnpm dlx vercel link
+pnpm exec e2e run
+```
+
+```bash bun
+bunx vercel login
+bunx vercel link
+bunx e2e run
+```
+</CodeGroup>
+
+Gateway memakai `VERCEL_OIDC_TOKEN` jika valid; jika tidak, gateway meminta
+token untuk proyek di `.vercel/project.json`. e2e tidak memuat file `.env`
+sendiri, jadi ekspor token di shell Anda atau panggil
+[`process.loadEnvFile()`](/reference/config#loading) di `e2e.config.ts`.
+
+## Provider AI SDK
+
+Setiap provider AI SDK yang mendukung pemanggilan tool dapat dipakai. Paket
+dan variabel setiap provider ada di
+[halaman provider AI SDK](https://ai-sdk.dev/providers/ai-sdk-providers)-nya.
+Pilih provider Anda:
+
+<ModelProvider show="select" />
+
+Provider yang tidak ada dalam daftar juga dapat dipakai jika
+mengimplementasikan spesifikasi language model AI SDK v2 atau yang lebih
+baru.
+
+<Steps>
+  <Step title="Pasang paket provider">
+  Pasang `ai` dan paket provider:
+
+  <ModelProvider show="install" />
+  </Step>
+  <Step title="Atur kredensial">
+  Ekspor variabel di shell atau CI Anda, atau muat file `.env` di
+  konfigurasi dengan [`process.loadEnvFile()`](/reference/config#loading).
+
+  <ModelProvider show="env" />
+  </Step>
+  <Step title="Tambahkan model ke konfigurasi">
+  Atur model di `agents.default`. ID model hanyalah contoh.
+
+  <ModelProvider show="config" />
+  </Step>
+</Steps>
+
+<Accordion title="Model yang menolak pilihan tool yang dipaksakan">
+Langkah agent meminta setiap model untuk memanggil tool pada setiap giliran.
+Claude Opus 5.5, Sonnet 5.5, dan Fable 5.1 menolak bentuk permintaan itu,
+model V4 milik DeepSeek (`@ai-sdk/deepseek`) menolaknya karena berpikir secara
+bawaan, dan model Muse Spark hanya menerima `auto`. e2e melanjutkan dengan
+`auto`, dan langkah berikutnya pada model itu dimulai dengan cara yang sama.
+Mode berpikir dapat tetap menyala.
+</Accordion>
+
+<Accordion title="Claude Opus 5.5, Sonnet 5.5, dan Fable 5.1">
+Model-model ini mengikat setiap blok berpikir pada system prompt dan pesan
+sebelumnya, dan menolak permintaan yang memutar ulang blok itu setelah
+salah satunya berubah. Langkah agent menjaga prompt-nya tetap, dan begitu
+langkah itu menghilangkan layar atau screenshot yang sudah digantikan dari
+pesan sebelumnya, langkah itu berhenti mengirim proses berpikir dari pesan
+tersebut dan seterusnya. Transkrip `--debug` langkah mencatatnya.
+</Accordion>
+
+## Beberapa model dalam satu konfigurasi
+
+Beri setiap model nama agent sendiri, lalu pilih satu dengan `--agent` atau
+di tes. Lihat [Agent dan persona](/agents). Untuk mengganti model tanpa
+mengedit konfigurasi, baca variabel environment:
+
+```ts title="Agent setup"
+const agent = {
+  model: gateway(process.env.MODEL ?? 'openai/gpt-6-luna-fast'),
+};
+```
+
+### Pilih model berdasarkan key yang diatur
+
+Ketika rekan tim memegang key yang berbeda, pilih model berdasarkan variabel
+yang diatur. Pertahankan satu nama agent agar semua orang memutar ulang
+rekaman yang sama:
+
+```ts title="Agent setup"
+import { anthropic } from '@ai-sdk/anthropic';
+import { gateway } from 'ai';
+
+const agent = {
+  model: process.env.ANTHROPIC_API_KEY
+    ? anthropic('claude-sonnet-5-5')
+    : gateway('openai/gpt-6-luna-fast'),
+};
+```
+
+Jadikan `gateway()` sebagai cadangan: [Vercel OIDC](#vercel-oidc-instead-of-a-key)
+memasukkannya tanpa variabel yang perlu diuji. Key di `.env` hanya dihitung
+bila [`process.loadEnvFile()`](/reference/config#loading) dijalankan sebelum
+kode ini.
+
+Langkah yang direkam dengan model lain tetap diputar ulang dan menyebut model
+itu. Lihat [Yang harus cocok](/cache#what-must-match).
+
+### Judge tersendiri
+
+Secara bawaan, satu model menjalankan `agent.act` dan menjawab
+`agent.assert`, `agent.waitFor`, dan `agent.extract`. Atur `judge` untuk
+memakai model lain pada pemeriksaan tersebut:
+
+```ts title="Agent setup"
+const agent = {
+  model: gateway('openai/gpt-6-luna-fast'),
+  judge: gateway('anthropic/claude-sonnet-5'),
+};
+```
+
+`agent.assert` bawaan dengan `explore: true` menjalankan loop tool pada
+`agents.<name>.model`, bahkan ketika `judge` diatur.
+
+Laporan menyebut model untuk setiap penilaian. `judge` menerima language
+model AI SDK. Untuk Clef atau Jev, gunakan
+[decision executor](/decision-models). Lihat
+[yang dilihat sebuah penilaian](/agent-steps#what-the-model-sees).
+
+## Retensi data dan kepatuhan
+
+e2e mengirim layar yang disamarkan, instruksi langkah, dan screenshot yang
+diminta ke provider model Anda, dan tidak pernah bergantung pada penyimpanan
+percakapan di sisi server. Setiap permintaan mengirim `User-Agent`
+`e2e/<version>` (ditambah header `HTTP-Referer` dan `X-Title` untuk Vercel AI
+Gateway dan OpenRouter).
+
+<AccordionGroup>
+<Accordion title="OpenAI dan Azure OpenAI: zero data retention">
+Setiap permintaan ke model Responses (`openai(...)`, `azure(...)`, atau
+`openai/*` di gateway) membawa `store: false` dan prompt cache key. Model Chat
+Completions dan provider yang kompatibel dengan OpenAI tidak mendapat
+keduanya. Provider tidak menyimpan salinan percakapan, dan prompt cache tetap
+berfungsi. Organisasi dengan zero data retention tidak memerlukan konfigurasi.
+
+Untuk menyimpan respons, atur `store` di `providerOptions`. Untuk Azure
+OpenAI, key-nya adalah `azure`:
+
+```ts title="Agent setup"
+const agent = {
+  model: openai('gpt-6-luna'),
+  providerOptions: { openai: { store: true } },
+};
+```
+</Accordion>
+<Accordion title="Anthropic di bawah BAA">
+Langkah agent memakai Messages API dengan tool use, prompt caching, gambar,
+dan structured outputs. Semuanya memenuhi syarat di bawah kesiapan HIPAA
+Anthropic.
+
+Perjanjian ini hanya mencakup `api.anthropic.com`. Panggil dengan
+`@ai-sdk/anthropic`, bukan melalui gateway atau OpenRouter. Biarkan `judge`
+tidak diatur, sehingga satu perjanjian mencakup setiap permintaan. Covered
+Models milik Anthropic memerlukan retensi 30 hari, sehingga organisasi dengan
+zero data retention tidak dapat memakainya.
+</Accordion>
+</AccordionGroup>
+
+## Apa yang gagal, dan di mana
+
+| Masalah | Kode | Perbaikan |
+| --- | --- | --- |
+| Model berupa string, bukan instance AI SDK | `INVALID_CONFIG` | Buat instance-nya, misalnya `gateway('openai/gpt-6-luna-fast')`. |
+| Agent bawaan tidak memiliki model | `MODEL_UNAVAILABLE` | Atur `agents.<name>.model`. |
+| GitHub Copilot tidak melayani model untuk akun Anda | `MODEL_UNAVAILABLE` | Pilih id yang dilayani paket Anda. Lihat [Pilih model](/subscriptions#pick-a-model). |
+| Provider yang membaca key-nya saat konfigurasi dimuat tidak memilikinya | `CONFIG_LOAD_FAILED` | Atur key. |
+| Variabel key model tidak diatur | `MODEL_PROVIDER_FAILED` | Atur variabel yang disebut pesan, seperti `AI_GATEWAY_API_KEY`. Hanya langkah yang memanggil model yang gagal. Langkah `agent.act` yang sudah direkam dan tes tanpa panggilan agent tetap berjalan. |
+| Autentikasi gagal pada panggilan model pertama | `MODEL_PROVIDER_FAILED` | Periksa API key provider, atau jalankan `npx e2e login` untuk langganan. Untuk Vercel OIDC, pesan hanya menyebut `AI_GATEWAY_API_KEY`. Periksa `vercel login` dan `.vercel/project.json`. |
+| Paket `ai` tidak ada | `MODEL_UNAVAILABLE` | Pasang `ai`. Lihat [Pilih gateway atau provider](#pick-a-gateway-or-a-provider). |
+| Giliran kedua sebuah langkah gagal dengan `Item with id 'rs_…' not found` | `MODEL_PROVIDER_FAILED` | Biarkan `store` mati di `providerOptions`, yang merupakan bawaan, atau panggil OpenAI langsung, bukan melalui gateway. |
+| `model` atau `judge` milik executor kustom berbeda dari entri agents | `INVALID_CONFIG` | Lihat [Executor kustom](/executors#keep-the-loop-change-the-vocabulary). |
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Langganan" icon="key" href="/subscriptions">
+    Masuk dengan ChatGPT, Copilot, OpenCode Console, atau SuperGrok.
+  </Card>
+  <Card title="Agent dan persona" icon="users" href="/agents">
+    Pilih agent untuk tes dan pengguna yang sudah masuk.
+  </Card>
+</CardGroup>

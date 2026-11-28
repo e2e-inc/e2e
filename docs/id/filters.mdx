@@ -1,0 +1,283 @@
+---
+title: Filter tes
+description: "Percepat CI dengan filter tes yang hanya menjalankan tes yang dapat terpengaruh oleh pull request melalui --changed-since, dan menjalankan lebih dulu tes yang paling mungkin terpengaruh."
+"og:image": "https://e2e.com/docs/images/og/filters.png?v=2de53e0ea4"
+"twitter:image": "https://e2e.com/docs/images/og/filters.png?v=2de53e0ea4"
+---
+
+import { Video } from '../snippets/video.jsx';
+
+Dengan `--changed-since <ref>`, filter tes menyisihkan tes yang tidak dapat
+terpengaruh oleh perubahan sejak ref itu, dan menjalankan file tes yang paling
+mungkin gagal lebih dulu. Filter keputusan menanyakan
+[model keputusan](/decision-models), seperti Jev, tentang setiap tes. Tanpa
+flag ini, seperti di `main` dan secara lokal, semua tes dijalankan.
+
+<Video>
+  <video src="/images/filters.mp4" aria-label="Dua eksekusi berdampingan. Dengan --changed-since, filter keputusan menyisihkan 25 dari 27 tes dan eksekusi lolos dalam 12 detik. Eksekusi penuh masih berjalan setelah 30 detik." muted loop playsInline controls />
+
+  Dengan `--changed-since origin/main`, filter keputusan menyisihkan 25 dari 27 tes.
+</Video>
+
+## Tambahkan filter keputusan
+
+<CodeGroup>
+```bash npm
+npm install -D @e2e-dev/decision ai
+```
+
+```bash pnpm
+pnpm add -D @e2e-dev/decision ai
+```
+
+```bash bun
+bun add -d @e2e-dev/decision ai
+```
+</CodeGroup>
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { gateway } from 'ai';
+import { decisionFilter } from '@e2e-dev/decision';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+  filters: [decisionFilter({ model: gateway.decisionModel('typesafe-ai/jev') })],
+} satisfies E2EConfig;
+```
+
+Di CI, teruskan `--changed-since` pada pull request, dan berikan key AI
+Gateway ke langkah e2e:
+
+```yaml title=".github/workflows/e2e.yml"
+steps:
+  - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    with:
+      fetch-depth: 0
+  # ...
+  - run: npx e2e run ${{ github.event_name == 'pull_request' && format('--changed-since origin/{0}', github.base_ref) || '' }}
+    env:
+      AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+```
+
+Teruskan `--changed-since` hanya pada event `pull_request` agar push, merge
+queue, dan eksekusi terjadwal tetap menjalankan seluruh rangkaian tes. Jangan
+pernah memakainya pada `pull_request_target` (tempat diff fork yang tidak
+tepercaya berjalan bersama secret Anda). `fetch-depth: 0` memberi git riwayat
+branch dasar yang dibutuhkan untuk menghitung merge base; tanpanya, eksekusi
+gagal.
+
+Filter keputusan membandingkan commit branch Anda dengan merge base, membaca
+diff beserta file tes dan file penyiapan Anda (dengan secret statis
+disamarkan, kecuali nilai yang dikembalikan oleh secret provider), lalu
+melewati tes yang dinilai kurang dari 20% kemungkinan terpengaruh. Apa pun
+yang tidak dapat dinilai model (diff yang sangat besar, file tes yang terlalu
+besar, atau panggilan yang gagal seperti API key yang hilang pada PR fork)
+tetap dijalankan, dengan peringatan di output dan tes yang diedit langsung
+diprioritaskan lebih dulu. Memerlukan `ai` 7.0.134+.
+
+[Model keputusan](/decision-models) apa pun yang menjawab pertanyaan `boolean` dapat dipakai
+(misalnya `typeSafeAi.decisionModel('jev-latest')` langsung melalui
+`@ai-sdk/typesafe-ai` dengan `TYPESAFE_AI_API_KEY`). Berikan `providerOptions`
+untuk pengaturan gateway seperti `{ gateway: { zeroDataRetention: true } }`.
+
+## Pratinjau secara lokal
+
+<CodeGroup>
+```bash npm
+npx e2e list --changed-since origin/main
+```
+
+```bash pnpm
+pnpm exec e2e list --changed-since origin/main
+```
+
+```bash bun
+bunx e2e list --changed-since origin/main
+```
+</CodeGroup>
+
+`e2e list` mencetak setiap tes yang dilewati filter beserta alasannya. Perintah
+ini tidak memulai aplikasi Anda, dan melakukan panggilan model yang sama
+seperti eksekusi. Commit perubahan Anda lebih dulu agar filter dapat membaca
+diff.
+
+## Yang selalu dijalankan
+
+- Seluruh rangkaian tes setiap kali `--changed-since` tidak diberikan (atau
+  tidak ada yang berubah sejak merge base).
+- Eksekusi ulang `--last-failed` dan eksekusi ulang `--watch` berikutnya.
+
+Filter keputusan juga selalu menjalankan:
+
+- Tes apa pun yang file tes, file penyiapan, atau screenshot tersimpannya
+  berubah.
+- Seluruh rangkaian tes setiap kali `e2e.config.*` atau lockfile dependensi
+  berubah (seperti `pnpm-lock.yaml`, `Podfile.lock`, `gradle.lockfile`,
+  `Gemfile.lock`, `go.sum`, `Cargo.lock`, atau `libs.versions.toml`).
+
+Jika sebuah filter melempar error, mengembalikan hasil yang tidak valid, atau
+melewati batas waktu 5 menit, e2e mencatat peringatan dan filter itu tidak
+menyisihkan apa pun (filter berikutnya dalam rantai tetap berjalan). Pada
+layanan CI lain, teruskan `--changed-since origin/main` pada build PR dengan
+riwayat git yang cukup untuk merge base (lihat
+[GitLab](/ci/gitlab#run-only-affected-tests)). Dengan `--shard`, setiap shard
+hanya memfilter bagiannya sendiri.
+
+## Jalankan yang paling mungkin lebih dulu
+
+Filter keputusan memberi skor pada setiap tes yang dipertahankan berdasarkan
+seberapa mungkin tes itu terpengaruh (100% untuk tes, penyiapan, dan snapshot
+yang diedit langsung; selain itu, probabilitas dari model), dan menjalankan
+file yang paling berisiko lebih dulu agar kegagalan cepat terlihat, terutama
+dengan `--max-failures` atau bawaan CI yang memakai satu worker. Dalam setiap
+pita prioritas, eksekusi multi-worker juga mengurutkan berdasarkan
+[riwayat timing](/ci#cache-the-timings-history).
+
+Filter kustom dapat memberikan urutan yang sama dengan mengembalikan skor
+`relevance` antara 0 dan 1 ([lihat di bawah](#write-your-own)).
+
+## Yang Anda lihat
+
+- **Terminal**: satu baris per filter, seperti
+  `decision kept 7 of 77 tests, left out 70 (1 call, 17.6k tokens, $0.0007)`.
+  Catatan filter keputusan diakhiri dengan biayanya: panggilan model, token,
+  dan biaya bila provider melaporkannya, seperti AI Gateway. Baris seperti
+  `ranked 7 of 7 tests by relevance, likeliest first` menyusul ketika skor
+  menempatkan tes pada lebih dari satu pita. Baris `Left out` menyusul di
+  ringkasan. Jika filter tidak menyisakan apa pun untuk dijalankan, eksekusi
+  lolos dan tidak memulai aplikasi.
+- **[Komentar pull request](/github) dan `summary.md`**: judul
+  `7 passed, 70 left out by filters`, dan tabel terlipat berisi tes beserta
+  alasannya.
+- **`junit.xml` dan `report.json`**: setiap tes yang disisihkan menjadi kasus
+  yang dilewati, dengan `skip.filter` di laporan, di samping `run.filters`
+  dan `run.changes`. Lihat [Reporter](/reference/reporters#test-filters).
+
+## Atur filter keputusan
+
+Bungkus filter keputusan untuk mengubah apa yang dinilainya. Contoh ini
+menjalankan semua tes saat `infra/` berubah, mengeluarkan `apps/mobile/`,
+yang tidak dijangkau tes ini, dari perubahan, dan selalu menjalankan tes
+`smoke`:
+
+```ts title="tuned-filter.ts"
+import type { TestFilter } from 'e2e';
+import { gateway } from 'ai';
+import { decisionFilter } from '@e2e-dev/decision';
+
+const decision = decisionFilter({ model: gateway.decisionModel('typesafe-ai/jev') });
+
+export const tuned = {
+  name: 'decision',
+  filter(tests, context) {
+    if (context.changes.files.some((file) => file.startsWith('infra/'))) return { exclude: {}, note: 'infra/ changed' };
+    const judged = tests.filter((test) => !test.tags.includes('smoke'));
+    const files = context.changes.files.filter((file) => !file.startsWith('apps/mobile/'));
+    if (files.length === 0) return { exclude: Object.fromEntries(judged.map((test) => [test.id, 'only apps/mobile/ changed'])) };
+    return decision.filter(judged, { ...context, changes: { ...context.changes, files } });
+  },
+} satisfies TestFilter;
+```
+
+Letakkan `tuned` di `filters` sebagai pengganti `decisionFilter(...)`. Untuk
+menjalankan semua tes pada satu pull request, hilangkan `--changed-since`
+ketika PR itu memiliki label `all-tests`. Tambahkan `labeled` ke daftar event
+agar penambahan label memulai eksekusi:
+
+```yaml title=".github/workflows/e2e.yml"
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+# ...
+      - run: npx e2e run ${{ github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'all-tests') && format('--changed-since origin/{0}', github.base_ref) || '' }}
+```
+
+## Tulis filter sendiri
+
+Filter adalah `{ name, filter }`: `filter` menerima tes dan perubahan, lalu
+mengembalikan tes yang disisihkan beserta alasan untuk masing-masing. Filter
+juga dapat memberi skor 0 sampai 1 pada sisanya dengan `relevance`. Contoh ini
+memetakan jalur yang berubah ke tag tes, dan menjalankan lebih dulu tes yang
+areanya dijangkau perubahan:
+
+```ts title="areas-filter.ts"
+import type { TestFilter } from 'e2e';
+
+/** The test tags each part of the app reaches, by path from the repository root. */
+const AREAS: Readonly<Record<string, readonly string[]>> = {
+  'src/todos/': ['todos'],
+  'src/auth/': ['auth', 'smoke'],
+  'src/checkout/': ['checkout'],
+};
+/** Every tag an area reaches; a test without one always runs. */
+const AREA_TAGS: ReadonlySet<string> = new Set(Object.values(AREAS).flat());
+
+export const areas = {
+  name: 'areas',
+  filter(tests, { changes }) {
+    const reached = new Set<string>();
+    let unmapped: string | undefined;
+    for (const file of changes.files) {
+      const area = Object.keys(AREAS).find((prefix) => file.startsWith(prefix));
+      if (area === undefined) unmapped = file;
+      else for (const tag of AREAS[area] ?? []) reached.add(tag);
+    }
+    const exclude: Record<string, string> = {};
+    const relevance: Record<string, number> = {};
+    for (const test of tests) {
+      const tags = test.tags.filter((tag) => AREA_TAGS.has(tag));
+      if (tags.some((tag) => reached.has(tag))) relevance[test.id] = 1;
+      else if (tags.length > 0 && unmapped === undefined) exclude[test.id] = 'the change reaches none of its areas';
+    }
+    if (unmapped === undefined) return { exclude, relevance };
+    return { exclude, relevance, note: `${unmapped} is in no area, so areas leaves nothing out` };
+  },
+} satisfies TestFilter;
+```
+
+Letakkan sebelum filter keputusan, sehingga model hanya menilai tes yang
+dipertahankan `areas`:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { gateway } from 'ai';
+import { decisionFilter } from '@e2e-dev/decision';
+import { areas } from './areas-filter.ts';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+  filters: [areas, decisionFilter({ model: gateway.decisionModel('typesafe-ai/jev') })],
+} satisfies E2EConfig;
+```
+
+- Tes apa pun yang tidak Anda cantumkan di `exclude` akan dijalankan (beserta
+  tes yang disisihkan tetapi berbagi grup serial dengan tes yang
+  dipertahankan).
+- `relevance` memetakan ID tes ke skor 0 sampai 1 (skor tertinggi menang di
+  antara beberapa filter). Bahkan filter yang melempar error dapat melampirkan
+  peta `relevance` pada error-nya agar tes yang diubah langsung tetap
+  dijalankan lebih dulu.
+- Filter berantai sesuai urutan, sehingga setiap filter hanya melihat tes yang
+  dipertahankan filter sebelumnya.
+- Teruskan `signal` ke pekerjaan async apa pun, dan teruskan prompt melalui
+  `redact` sebelum mengirimnya ke model. `redact` menyamarkan secret statis
+  dan kata sandi kredensial (termasuk substring sepanjang 8+ karakter dari
+  salah satunya), tetapi nilai yang dikembalikan oleh secret provider lolos.
+- Simpan pekerjaan pemfilteran di dalam `filter()`, bukan di tingkat atas
+  modul, karena proses worker juga mengimpor file konfigurasi Anda.
+
+Lihat [`TestFilter`](/reference/config#testfilter) untuk tipenya.
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Integrasi berkelanjutan" icon="rotate" href="/ci">
+    Jaga pull request, bagi dengan shard, dan jalankan ulang kegagalan.
+  </Card>
+  <Card title="Reporter" icon="file-lines" href="/reference/reporters">
+    Baca `run.changes`, `run.filters`, dan `skip.filter` dari reporter Anda sendiri.
+  </Card>
+</CardGroup>

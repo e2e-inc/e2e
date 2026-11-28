@@ -1,0 +1,275 @@
+---
+title: Model keputusan
+description: "Jalankan agent.act dan agent.assert melalui model keputusan dan model teks kecil dengan @e2e-dev/decision, sebagai pengganti agent LLM penuh."
+"og:image": "https://e2e.com/docs/images/og/decision-models.png?v=bc0d69c206"
+"twitter:image": "https://e2e.com/docs/images/og/decision-models.png?v=bc0d69c206"
+---
+
+`@e2e-dev/decision` menjalankan `agent.act` dan `agent.assert` melalui model
+keputusan sebagai pengganti agent LLM. Untuk setiap tindakan, model keputusan
+memilih operasi, lalu elemen, berdasarkan tujuan, tindakan terbaru, dan pohon
+semantik terbaru. Model ini tidak pernah menulis teks bebas: model teks kecil
+yang menulis nilai field. Runner tetap mengotorisasi setiap tindakan.
+
+Model keputusan AI SDK apa pun yang menjawab pertanyaan `choice` dengan
+probabilitas dapat dipakai, seperti TypeSafe Jev atau OpenAI `gpt-6-luna`
+(termasuk instance `evaluationModel()`). Memberikan string biasa atau language
+model standar membuat validasi konfigurasi gagal.
+
+`decisionFilter()` dari paket yang sama hanya menjalankan tes yang dapat
+terpengaruh oleh sebuah pull request. Lihat [Filter tes](/filters).
+
+## Pasang dan konfigurasikan
+
+Pasang paketnya, provider model keputusan, dan provider model teks. Model
+keputusan memerlukan `ai` 7.0.134 atau yang lebih baru.
+
+<CodeGroup>
+```bash npm
+npm install -D @e2e-dev/decision @ai-sdk/typesafe-ai @openrouter/ai-sdk-provider
+```
+
+```bash pnpm
+pnpm add -D @e2e-dev/decision @ai-sdk/typesafe-ai @openrouter/ai-sdk-provider
+```
+
+```bash bun
+bun add -d @e2e-dev/decision @ai-sdk/typesafe-ai @openrouter/ai-sdk-provider
+```
+</CodeGroup>
+
+Atur executor pada entri agents:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { decisionExecutor } from '@e2e-dev/decision';
+import { typeSafeAi } from '@ai-sdk/typesafe-ai';
+import { openrouter } from '@openrouter/ai-sdk-provider';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+  agents: {
+    default: {
+      executor: decisionExecutor({
+        model: typeSafeAi.decisionModel('jev-latest'),
+        textModel: openrouter('inception/mercury-2.5'),
+      }),
+    },
+  },
+} satisfies E2EConfig;
+```
+
+Tes berupa panggilan `agent.act` dan `agent.assert` biasa:
+
+```ts title="tests/todos.e2e.ts"
+import { test, expect } from 'e2e';
+
+test('adds a todo', async ({ app, screen, agent }) => {
+  await app.open('/todos');
+  await agent.act('Add a todo named Buy coffee.');
+  await expect(screen.getByTestId('todo')).toContainText('Buy coffee');
+  await agent.assert('The todo list contains Buy coffee.');
+});
+```
+
+<Accordion title="Gunakan OpenAI gpt-6-luna">
+
+Gunakan `@ai-sdk/openai` 4.0.90 atau yang lebih baru, yang menerima
+screenshot [vision](#vision). Atur `OPENAI_API_KEY`.
+
+<CodeGroup>
+```bash npm
+npm install -D @ai-sdk/openai
+```
+
+```bash pnpm
+pnpm add -D @ai-sdk/openai
+```
+
+```bash bun
+bun add -d @ai-sdk/openai
+```
+</CodeGroup>
+
+```ts title="e2e.config.ts"
+import { openai } from '@ai-sdk/openai';
+
+const executor = decisionExecutor({
+  model: openai.decisionModel('gpt-6-luna'),
+  textModel: openai('gpt-6-luna-fast'),
+  vision: true,
+});
+```
+
+</Accordion>
+
+## Yang dapat dilakukan model
+
+Setiap giliran menawarkan operasi yang didukung engine pada elemen di layar
+terbaru: `tap`, `type`, `typeSecret`, `submit`, `select`, `check`, `upload`,
+`hover`, `secondary_tap` (klik kanan), `double_tap`, `long_press`, `drag`,
+`scroll_to`, `scroll_up`, `scroll_down`, dan `back`. Hover, klik kanan, drag,
+dan scroll-to juga menjangkau node berlabel yang bukan kontrol, seperti kartu
+yang membuka menu saat di-hover, dan drag dapat dijatuhkan ke salah satunya.
+`tap` juga menjangkau field teks, untuk membuka pemilih tanggal atau daftar
+saran. Selama keyboard di layar tampil pada engine yang dapat menutupnya,
+seperti engine mobile, executor juga menawarkan `dismiss_keyboard`, bahkan
+ketika keyboard tidak ada di pohon.
+
+Setiap operasi yang bertindak pada elemen menanyakan targetnya, bahkan ketika
+hanya satu elemen yang cocok. Setiap pertanyaan target memiliki opsi `none`,
+sehingga provider yang tidak menemukan target yang cocok menjawab `none`
+alih-alih menolak. `none` memblokir langkah.
+
+## Cara teks diketik
+
+Ketika model keputusan memilih `type`, model teks menulis nilainya dari
+tujuan, param, label field, dan teks halaman. Executor mengetik persis string
+itu. Tanpa nilai di tujuan, executor tidak mengetik apa pun dan model
+keputusan memilih lagi. Untuk `upload`, model teks mencantumkan jalur relatif
+terhadap proyek yang disebut tujuan atau param, dan runner mengotorisasi
+masing-masing. Output model tidak pernah menjadi selector, URL, atau key.
+
+Field kata sandi tidak pernah sampai ke model teks, kecuali skrip halaman
+menyembunyikannya dari e2e. Dalam kasus itu model teks melihat nilainya, dan
+`type` dapat mengisinya
+([di mana penyamaran berhenti](/reference/security#where-redaction-stops)).
+Hanya `typeSecret` yang mengisi secret terkonfigurasi, dari handle yang
+dideklarasikannya.
+
+Model teks juga menjawab `waitFor` dan `extract`. Sebagai pengganti
+`textModel`, Anda dapat mengatur `model` pada entri agents. Tanpa keduanya,
+executor tidak pernah menawarkan `type`, `upload`, `tap_at`, atau `type_at`.
+
+## Menyelesaikan langkah
+
+Ketika model keputusan menyatakan `done` atau `failed`, executor memeriksa
+ulang pada layar yang segar apakah tugas benar-benar selesai (tanpa melihat
+penalaran model atau secret). Hasil yang terkonfirmasi menyelesaikan langkah;
+klaim yang tidak terkonfirmasi dikembalikan ke model sekali sebelum langkah
+gagal atau diblokir.
+
+## Gate
+
+Kedua gate nonaktif secara bawaan, sehingga executor mengikuti pilihan yang
+paling mungkin. Atur `minProbability` atau `minConfidence` untuk memblokir
+tindakan yang lebih lemah, menolak pemeriksaan penyelesaian yang lebih lemah,
+dan menggagalkan assertion yang lebih lemah sebagai tidak meyakinkan:
+
+```ts title="Executor setup"
+const executor = decisionExecutor({ model, minProbability: 0.9, minConfidence: 0.8 });
+```
+
+Probabilitas adalah porsi opsi terpilih dalam distribusi jawaban. Confidence
+adalah statistik milik provider sendiri, 0 bila provider tidak melaporkannya.
+OpenAI membulatkan keduanya hingga dua desimal. Ukur akurasi pada tes Anda
+sendiri sebelum menetapkan ambang batas.
+
+## Vision
+
+`vision: true` menambahkan screenshot yang disamarkan pada setiap observasi.
+Assertion dan pemeriksaan penyelesaian melihatnya, sehingga model dapat
+menilai konten yang digambar yang tidak ditampilkan pohon. Pertanyaan operasi
+dan target hanya membaca pohon. `agent.assert(..., { vision: true })` dan
+`vision: 'only'` juga berfungsi.
+
+Model harus menerima gambar dan menjawab pertanyaan `score`. TypeSafe Jev
+melakukannya dengan `@ai-sdk/typesafe-ai` 3.0.19 atau yang lebih baru dan API
+key TypeSafe di `TYPESAFE_AI_API_KEY`:
+
+```ts title="e2e.config.ts"
+import { typeSafeAi } from '@ai-sdk/typesafe-ai';
+import { openrouter } from '@openrouter/ai-sdk-provider';
+
+const executor = decisionExecutor({
+  model: typeSafeAi.decisionModel('jev-latest'),
+  textModel: openrouter('inception/mercury-2.5'),
+  vision: true,
+});
+```
+
+`openai.decisionModel('gpt-6-luna')` juga menerima gambar. Vercel AI Gateway
+menolak screenshot untuk setiap model keputusan, jadi biarkan `vision` mati di
+sana.
+
+Dengan model teks, vision juga menawarkan `tap_at` untuk kontrol yang tidak
+dicantumkan pohon. Model teks menyebut kontrolnya, seperti "tombol 3 pada
+keypad", dan model keputusan menemukannya di screenshot, lalu di dua potongan
+yang diperbesar. Satu ketukan titik memerlukan empat panggilan decide dan satu
+panggilan teks, atau masing-masing satu untuk mengulang ketukan pada halaman
+yang sama.
+
+Ketika engine dapat mengetik ke apa pun yang sedang fokus, vision juga
+menawarkan `type_at` untuk field yang digambar. Model teks menyebut field dan
+nilainya dari tujuan, model keputusan menemukan field di screenshot, dan
+executor mengetuknya lalu mengetik nilai di posisi caret, setelah teks yang
+sudah ada. Biayanya dua panggilan decide dan satu panggilan teks.
+
+## Opsi provider
+
+`providerOptions` milik executor menyertai setiap panggilan decide, termasuk
+pemeriksaan penyelesaian, dan hanya sampai ke model keputusan. Gunakan untuk
+opsi seperti zero data retention di Vercel AI Gateway:
+
+```ts title="Executor setup"
+import { gateway } from 'ai';
+
+const executor = decisionExecutor({
+  model: gateway.decisionModel('typesafe-ai/jev'),
+  textModel: gateway('openai/gpt-6-luna-fast'),
+  providerOptions: { gateway: { zeroDataRetention: true } },
+});
+```
+
+Model teks memakai `providerOptions` milik entri agents, sehingga pengaturan
+untuk satu model, seperti daftar fallback gateway, tidak pernah sampai ke
+model lainnya.
+
+AI Gateway dapat menjalankan ulang keputusan yang tidak pasti pada model lain.
+Tambahkan entri bersyarat ke `gateway.models`; entri itu berlaku pada setiap
+panggilan decide, dan fallback yang terpicu menagih kedua model:
+
+```ts title="Executor setup"
+const executor = decisionExecutor({
+  model: gateway.decisionModel('typesafe-ai/jev'),
+  textModel: gateway('openai/gpt-6-luna-fast'),
+  providerOptions: {
+    gateway: { models: [{ model: 'openai/gpt-6-luna-decisions', when: { confidenceBelow: 0.6 } }] },
+  },
+});
+```
+
+Fallback model keputusan mempertahankan gate: executor membaca probabilitas
+dan confidence dari model fallback. Fallback language model, seperti
+`openai/gpt-6-luna-fast`, menjawab dengan pilihan tanpa distribusi. Executor
+menerima pilihan itu dengan probabilitas 1 dan confidence 0, sehingga gate
+`minConfidence` memblokir setiap jawaban yang dieskalasi.
+
+## Batasan
+
+- Tidak ada tool `navigate`: klik tautan di dalam aplikasi, dan tulis URL di
+  kode tes (`app.open`, `browser.goto`).
+- Tidak ada `listbox` multi-pilih atau `scrollUntil`, dan `type_at` tidak
+  pernah mengosongkan field yang digambar lebih dulu (cocok untuk field
+  kosong).
+- Model teks tidak melihat screenshot, sehingga tidak dapat membaca instruksi
+  yang hanya ada sebagai piksel yang digambar (seperti prompt di canvas).
+- Setiap panggilan decide dan panggilan teks dihitung terhadap
+  `maxModelCalls`.
+- Tiga tindakan berturut-turut yang gagal atau tidak mengubah apa pun
+  memblokir langkah.
+- Setiap pertanyaan dibatasi 255 opsi (batas TypeSafe); pada halaman yang
+  sangat besar, elemen yang terlihat didahulukan agar model dapat men-scroll
+  untuk menjangkau sisanya.
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Executor kustom" icon="gears" href="/executors">
+    Cara executor terhubung ke runner.
+  </Card>
+  <Card title="Model" icon="brain" href="/models">
+    Gunakan agent LLM dengan pemanggilan tool sebagai gantinya.
+  </Card>
+</CardGroup>
