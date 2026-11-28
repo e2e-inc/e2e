@@ -25,9 +25,10 @@ export interface ResolveExpressionOptions {
    */
   readonly selector?: (selector: string, candidates: readonly SemanticNode[]) => readonly SemanticNode[];
   /**
-   * What a `text` query reads. `'nameOrText'`, the default, matches a node's
-   * name as well as its text, for a tree that keeps what a node says in its
-   * name (a device's). `'text'` matches the text alone, as a browser's text
+   * What a `text` query reads. `'nameOrText'`, the default, matches what a
+   * node shows (`shownText`): its text, or its name when it has no text of its
+   * own, for a tree that keeps what a node says in its name (a device's).
+   * `'text'` matches the text alone, as a browser's text
    * query does, for a tree that carries every element's text: a field named
    * by its label is then no second match for the label's words, and a text
    * query scoped to an element whose own text matches answers with that
@@ -38,20 +39,32 @@ export interface ResolveExpressionOptions {
 }
 
 /**
+ * The text a `text` query reads a node by: its `text`, or its `name` when it
+ * has no text of its own (`text` omitted, empty, or all whitespace). So a
+ * value named by the label beside it (a `5` named `Words`) is found by `5`,
+ * and an icon button by its name.
+ */
+export function shownText(node: Pick<SemanticNode, 'name' | 'text'>): string | undefined {
+  return node.text !== undefined && /\S/u.test(node.text) ? node.text : node.name;
+}
+
+/**
  * Resolves one expression to the nodes it currently matches, in document
  * order. `nodes` are the tree's top-level nodes (an observation root's
  * children, or the root itself); every node under them is a candidate.
  *
  * Query kinds: `role` compares the role exactly, then the name, the requested
  * states, and the heading level, and never matches a hidden node; `label`
- * and `text` match the name (`text` the visible text too, or alone with
- * `textQuery: 'text'`) and answer with
- * the innermost match, since a container echoing a descendant's text is not
- * a second match; `placeholder`, `displayValue`, and `testId` compare their
- * one field. `visible` drops hidden nodes from any kind. `scope` searches
- * strict descendants of the scope's matches; `filter` keeps a match whose
- * own or descendants' name, text, or value matches `hasText`, and whose
- * descendants answer `has`; `index` picks `first`, `last`, or a position.
+ * matches the name and `text` what the node shows (`shownText`, or the text
+ * alone with `textQuery: 'text'`), and both answer with the innermost match,
+ * since a container echoing a descendant's text is not a second match;
+ * `placeholder`, `displayValue`, and `testId` compare their one field.
+ * `visible` drops hidden nodes from any kind. `scope` searches strict
+ * descendants of the scope's matches; `filter` keeps a match whose own or
+ * descendants' name, text, or value matches `hasText`, so it also keeps a
+ * node a `text` query skips (one that shows other text under that name), and
+ * whose descendants answer `has`; `index` picks `first`, `last`, or a
+ * position.
  * `frame` is `FRAME_NOT_FOUND`: a semantic tree has no nested documents.
  */
 export function resolveExpression(
@@ -351,7 +364,10 @@ function compileKindMatcher(query: SemanticQuery, textQuery: NonNullable<Resolve
     }
     case 'text': {
       const matches = compileTextMatcher(query.value);
-      return (node) => (textQuery === 'nameOrText' && node.name !== undefined && matches(node.name)) || (node.text !== undefined && matches(node.text));
+      return (node) => {
+        const shown = textQuery === 'text' ? node.text : shownText(node);
+        return shown !== undefined && matches(shown);
+      };
     }
     case 'displayValue': {
       const matches = compileTextMatcher(query.value);

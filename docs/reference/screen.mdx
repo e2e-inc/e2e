@@ -204,6 +204,21 @@ getByText(text: TextMatch, options?: TextMatchOptions): Locator;
 screen.getByText('Welcome back', { exact: false });
 ```
 
+On a device or a desktop app, `getByText` matches the text a node shows, not
+its accessible name. A text that an app gives another accessible name (`5`
+named `Words`, or an Android text with a content description) answers
+`getByText('5')` and `getByLabel('Words')`, never `getByText('Words')`. Only a
+node that shows no text, such as an icon button, matches by its accessible
+name. In a browser `getByText` reads text content only.
+
+What a text field shows depends on the platform:
+
+| Platform | `getByText` finds a field by |
+| --- | --- |
+| Android | What it holds, or its hint while it is empty. Its content description answers `getByLabel`. |
+| iOS | Its label, the one string iOS reports for it. |
+| macOS | Its accessible name: a field has no text of its own. |
+
 ##### Echoed text
 
 `getByText` answers with the innermost matching node, so a container that
@@ -317,7 +332,9 @@ await row.getByRole('button', 'Void').tap();
 
 - `hasText` with a string is a case-insensitive substring match over the
   match and its descendants, unlike a query text, which matches exactly. Pass
-  a `RegExp` for anything stricter.
+  a `RegExp` for anything stricter. On a device or a desktop app it reads
+  accessible names and values as well as text, so it keeps a node that
+  `getByText` does not find by that string.
 - `hasNotText` excludes matches with that subtree text, using the same
   substring or `RegExp` rules.
 - `has` keeps a match whose subtree resolves the inner locator.

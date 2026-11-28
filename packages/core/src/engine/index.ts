@@ -40,7 +40,7 @@ export { rejectUnknownKeys, rejectUnknownOptions } from '../internal/options.ts'
 export { appleUserDefaults, checkLaunchArguments } from '../internal/launch-arguments.ts';
 export { validateJsonValue, type JsonValueRules } from '../internal/json-value.ts';
 export { describePattern, matchesText, toTextPattern } from '../internal/text.ts';
-export { expressionSelectors, resolveExpression, type ResolveExpressionOptions } from './resolve.ts';
+export { expressionSelectors, resolveExpression, shownText, type ResolveExpressionOptions } from './resolve.ts';
 export type { TextMatch } from '../types.ts';
 export { raceAbort } from './timing.ts';
 export { isProviderRecording, stopProviderRecording } from './recording.ts';
@@ -884,7 +884,7 @@ export interface Engine {
    * checked every field's shape.
    */
   validateApp?(app: EngineAppDeclaration, info: EngineAppCheckInfo): void;
-  /** Steering hooks: open, back, restart, reset. */
+  /** Steering hooks: open, openLink, back, resize, switchTab, closeTab, restart, reset. */
   readonly session?: EngineSession;
   /**
    * Once per run and target, in the runner process, before any worker starts
