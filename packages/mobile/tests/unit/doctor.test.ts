@@ -3,13 +3,15 @@
  * doctor per configured device, mapped to e2e checks, and the build check.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { EngineDoctorInfo } from '@e2e-dev/core/engine';
-import { parsePlist } from '../../src/plist.ts';
+import { parsePlist, parsePlistDict } from '../../src/plist.ts';
 import { harness, PROJECT_ROOT, type Harness, type HarnessOptions } from '../helpers/harness.ts';
+
+const SIMULATOR_UDID = '0F5D8E2A-6B7C-4D3E-9A1B-2C3D4E5F6A7B';
 
 const MACHINE = [
   { id: 'agent-device', status: 'pass', summary: 'agent-device 0.21.35' },
@@ -21,6 +23,8 @@ const MACHINE = [
 /** A harness whose doctor answers per selected device: found when its name is in `known`. */
 function doctorHarness(options: HarnessOptions, known: readonly string[] = []): Harness {
   const h = harness(options);
+  // agent-device's inventory: one booted iPhone simulator, so the build check knows the target drives simulators.
+  h.fake.respond('devices.list', () => [{ platform: 'ios', id: SIMULATOR_UDID, name: 'iPhone 17', kind: 'simulator', booted: true }]);
   h.fake.respond('command.doctor', (args) => {
     const { device, targetApp } = args as { device?: string; targetApp?: string };
     const found = device === undefined || known.includes(device);
@@ -225,6 +229,52 @@ describe('doctor', () => {
       id: 'app-path',
       status: 'pass',
       message: appDir,
+    });
+  });
+
+  it('counts a tvOS simulator build as a simulator build, and names the tvOS SDK for a tvOS device build', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const tvSimulator = writeAppBundle(dir, 'TvSim.app', xmlPlist('com.example.tv', ['AppleTVSimulator']));
+    const sim = doctorHarness({ appPath: 'TvSim.app', bundleId: 'com.example.tv' });
+    expect((await sim.engine.doctor!(info(sim, dir)))[0]).toEqual({ id: 'app-path', status: 'pass', message: tvSimulator });
+
+    const tvDevice = writeAppBundle(dir, 'TvDevice.app', xmlPlist('com.example.tv', ['AppleTVOS']));
+    const device = doctorHarness({ appPath: 'TvDevice.app', bundleId: 'com.example.tv' });
+    expect((await device.engine.doctor!(info(device, dir)))[0]).toEqual({
+      id: 'app-path',
+      status: 'fail',
+      message: `app.appPath ${tvDevice} is a device build (AppleTVOS); build for the simulator (-sdk appletvsimulator) or point app.appPath at a Debug-appletvsimulator build`,
+    });
+  });
+
+  it('trusts the build when the configured device is not in the inventory', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const appDir = writeAppBundle(dir, 'Unlisted.app', xmlPlist('com.example.app', ['iPhoneOS']));
+    const h = doctorHarness({ device: 'iPhone 99', appPath: 'Unlisted.app', bundleId: 'com.example.app' });
+    expect((await h.engine.doctor!(info(h, dir)))[0]).toEqual({ id: 'app-path', status: 'pass', message: appDir });
+  });
+
+  it('stops when the doctor is cancelled while it reads the inventory', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    writeAppBundle(dir, 'Cancelled.app', xmlPlist('com.example.app', ['iPhoneOS']));
+    const h = doctorHarness({ appPath: 'Cancelled.app', bundleId: 'com.example.app' });
+    const controller = new AbortController();
+    h.fake.respond('devices.list', () => {
+      controller.abort();
+      throw new Error('aborted');
+    });
+    await expect(h.engine.doctor!({ ...info(h, dir), signal: controller.signal })).rejects.toBeDefined();
+  });
+
+  it('reads a binary Info.plist that plutil wrote, with UTF-16 strings and nested containers', () => {
+    // tests/fixtures/plist/tvos-simulator-utf16.plist: `plutil -convert binary1` output, not this suite's encoder.
+    const dict = parsePlistDict(readFileSync(path.join(import.meta.dirname, '../fixtures/plist/tvos-simulator-utf16.plist')));
+    expect(dict).toMatchObject({
+      CFBundleIdentifier: 'dev.e2e.café',
+      CFBundleDisplayName: 'Café ✓ Résumé',
+      CFBundleSupportedPlatforms: ['AppleTVSimulator'],
+      CFBundleIcons: { CFBundlePrimaryIcon: { CFBundleIconFiles: ['AppIcon60x60', ['nested']] } },
+      MinimumOSVersion: '26.0',
     });
   });
 
