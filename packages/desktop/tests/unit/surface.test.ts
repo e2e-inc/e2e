@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { EngineAppInfo, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
@@ -2135,7 +2135,7 @@ describe('DesktopSurface: sweeping what killed workers left', () => {
     fake.carriers.set(leaked, 'token-1');
     // Written before the launch: the token alone, since the worker may be killed before it learns the process id.
     const first = leftDirectory(String(dead), { token: 'token-1' });
-    const second = leftDirectory(String(dead), { pid: theirs, token: 'token-1' });
+    const second = leftDirectory(String(dead), { pid: theirs, token: 'token-2' });
     try {
       await initialized(fake);
       expect(await gone(leaked)).toBe(true);
@@ -2144,6 +2144,28 @@ describe('DesktopSurface: sweeping what killed workers left', () => {
       expect(existsSync(second)).toBe(false);
     } finally {
       for (const directory of [first, second]) rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the record of a launch its worker was killed in, until its app could have started, and quits the app that starts late', async () => {
+    const dead = await deadPid();
+    const fresh = leftDirectory(String(dead), { token: 'token-late' });
+    const old = leftDirectory(String(dead), { token: 'token-never' });
+    const minutesAgo = new Date(Date.now() - 5 * 60_000);
+    utimesSync(path.join(old, 'app.json'), minutesAgo, minutesAgo);
+    try {
+      const fake = fakeDriver();
+      await initialized(fake);
+      // No process carries either token yet: the fresh launch may still start its app, the old one never will.
+      expect([existsSync(path.join(fresh, 'app.json')), existsSync(old)]).toEqual([true, false]);
+      const late = standIn();
+      const next = fakeDriver();
+      next.carriers.set(late, 'token-late');
+      await initialized(next);
+      expect(await gone(late)).toBe(true);
+      expect(existsSync(fresh)).toBe(false);
+    } finally {
+      for (const directory of [fresh, old]) rmSync(directory, { recursive: true, force: true });
     }
   });
 

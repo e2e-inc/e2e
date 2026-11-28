@@ -38,6 +38,9 @@ export const APP_FILE = 'app.json';
 /** How old a state directory with no owner file must be before a sweep removes it. */
 const ORPHAN_AGE_MS = 24 * 60 * 60 * 1000;
 
+/** How long after a launch record of the token alone was written the app it launched may still start: LaunchServices can take this long on a slow or busy Mac. */
+const LAUNCH_SETTLE_MS = 60_000;
+
 /**
  * The variables of the run's environment the app under test gets, and
  * nothing else: the run's secrets, model keys, and CI tokens never reach a
@@ -93,7 +96,8 @@ export function inheritedEnv(env: Readonly<Record<string, string | undefined>>):
  * is a day old. One still in use is never touched. A process shown to be
  * the launch's by neither is left alone. When the processes cannot be
  * looked up, or one does not exit, the record stays for the next run to try
- * again. The agent-desktop engine's directories, which hold the text of
+ * again, and so does a record of the token alone that no process carries yet
+ * while the launch it was written for could still start its app. The agent-desktop engine's directories, which hold the text of
  * fields, are swept the same way.
  */
 export async function sweepStateDirectories(driver: DesktopDriver): Promise<void> {
@@ -129,7 +133,15 @@ export async function sweepStateDirectories(driver: DesktopDriver): Promise<void
       if (same === undefined) known = false;
       else if (same && !owned.includes(pid)) owned.push(pid);
     }
-    const settled = known && (await killed(owned, Date.now() + 2_000, AbortSignal.timeout(5_000)));
+    // A record of the token alone is a launch its worker was killed in the middle of: the app may start a moment after
+    // this look. Until the launch could have settled, a look that finds none keeps the record for the next sweep.
+    const settling =
+      entry.startsWith(STATE_PREFIX) &&
+      typeof launched.token === 'string' &&
+      typeof pid !== 'number' &&
+      owned.length === 0 &&
+      (await stat(path.join(directory, APP_FILE)).then((info) => Date.now() - info.mtimeMs < LAUNCH_SETTLE_MS, () => false));
+    const settled = known && !settling && (await killed(owned, Date.now() + 2_000, AbortSignal.timeout(5_000)));
     await (settled ? rm(directory, { recursive: true, force: true }) : keepOnlyRecord(directory)).catch(() => undefined);
   }
 }
