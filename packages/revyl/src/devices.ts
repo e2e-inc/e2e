@@ -48,8 +48,8 @@ export class RevylDeviceClient {
 
   /**
    * Starts the worker's screen recording of session `sessionId`'s device.
-   * The worker keeps one recording per session, and caps it at 3 minutes and
-   * 40 MiB.
+   * The worker keeps one recording per session, and stops it at 3 minutes or
+   * at its size cap.
    */
   async startRecording(sessionId: string, signal: AbortSignal): Promise<DeviceRecording> {
     const session = await json(await this.#request('GET', `/api/v1/execution/device-sessions/${encodeURIComponent(sessionId)}`, undefined, signal), 'device session');
