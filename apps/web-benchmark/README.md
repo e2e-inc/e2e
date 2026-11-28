@@ -136,8 +136,9 @@ Their agentic tests are declared and skipped with the `UNRECORDED` reason
 (`tests-agent/recordings.ts`) until a keyed `test:agent` run records them: CI
 replays read-only and would otherwise call the model live for them on every
 pull request. In the bug-book tests an act only reaches the view that shows
-the bug, deterministic checks confirm it is that view, and only a failed
-judgment there counts as catching it; each has a healthy twin on the same page
+the bug, deterministic checks confirm it is that view, and a failed judgment
+there, or an act that already reported the bug, counts as catching it; each
+has a healthy twin on the same page
 (the time zone that does save, page 4, which matches its footer) where the
 judgment must pass, so a flow that calls everything broken scores nothing.
 

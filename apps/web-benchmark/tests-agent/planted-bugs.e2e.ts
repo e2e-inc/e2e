@@ -46,7 +46,25 @@ test('wishlist: a judgment catches the lost saved items', async ({ app, agent })
   expect(caught).toBe(true);
 });
 
-/** Whether a judgment failed, which is the only verdict that counts as catching the bug below. */
+/**
+ * Runs the act that only reaches the decisive view; true when the act reported
+ * the bug on its own (an agent that notices it while getting there). The
+ * caller still checks the view, so a flow that broke on the way earns nothing.
+ * Such a run leaves no recording for the act, since only a passing step is
+ * recorded.
+ */
+async function actReportedBug(act: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await act();
+    return false;
+  } catch (cause) {
+    const code = (cause as { code?: string }).code;
+    if (code === 'ASSERTION_FAILED' || code === 'ACTION_FAILED') return true;
+    throw cause;
+  }
+}
+
+/** Whether a judgment failed, the verdict that counts as catching the bug below. */
 async function judgmentFails(judgment: () => Promise<void>): Promise<boolean> {
   try {
     await judgment();
@@ -60,8 +78,9 @@ async function judgmentFails(judgment: () => Promise<void>): Promise<boolean> {
 // The two bugs below show only on a second view of the data. Each test splits
 // the flow in three: an act that only gets to that view (it passes, so a keyed
 // run records it), deterministic checks that the view is the decisive one, and
-// a judgment there, whose failure alone is credit. A flow that broke on the way
-// fails the test instead of earning it. Each has a healthy twin on the same
+// a judgment there, whose failure is credit. An act that reports the bug on
+// its own counts too, once the checks show it reached the view. A flow that
+// broke on the way fails the test instead of earning it. Each has a healthy twin on the same
 // page, where the judgment must pass, so calling everything broken scores
 // nothing.
 
@@ -70,12 +89,13 @@ test(
   { skip: UNRECORDED },
   async ({ app, agent, screen }) => {
     await app.open('/e/profile-settings');
-    await agent.act('change the display name to Jordan Rivera, save the profile, then open the Public profile tab');
+    const reported = await actReportedBug(() =>
+      agent.act('change the display name to Jordan Rivera, save the profile, then open the Public profile tab'),
+    );
     await expect(screen.getByTestId('header-name')).toHaveText('Signed in as Jordan Rivera');
     await expect(screen.getByRole('tab', 'Public profile')).toHaveAttribute('aria-selected', 'true');
-    const caught = await judgmentFails(() =>
-      agent.assert('the public profile shows the display name that was just saved, Jordan Rivera'),
-    );
+    const caught =
+      reported || (await judgmentFails(() => agent.assert('the public profile shows the display name that was just saved, Jordan Rivera')));
     expect(caught).toBe(true);
   },
 );
@@ -96,13 +116,15 @@ test(
   { skip: UNRECORDED },
   async ({ app, agent, screen }) => {
     await app.open('/e/audit-log');
-    await agent.act('open page 2 of the audit log');
+    const reported = await actReportedBug(() => agent.act('open page 2 of the audit log'));
     await expect(screen.getByTestId('page-range')).toContainText('page 2 of 5');
-    const caught = await judgmentFails(() =>
-      agent.assert(
-        'the events are numbered #47 (newest) down to #1, and this page lists exactly the events its footer range names, none missing',
-      ),
-    );
+    const caught =
+      reported ||
+      (await judgmentFails(() =>
+        agent.assert(
+          'the events are numbered #47 (newest) down to #1, and this page lists exactly the events its footer range names, none missing',
+        ),
+      ));
     expect(caught).toBe(true);
   },
 );
