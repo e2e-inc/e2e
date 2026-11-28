@@ -219,11 +219,13 @@ jobs:
       - run: cargo test --locked --workspace
       # The notices of the crates the addon links, committed in each platform package, must match Cargo.lock.
       - run: node scripts/native/native-licenses.ts desktop --check
-      - run: node scripts/native/build-native.ts desktop --target aarch64-apple-darwin
-      - run: node scripts/native/build-native.ts desktop --target x86_64-apple-darwin
-      # Each build writes the driver's TypeScript types from the crate; the engine is typechecked against the copy in git.
+      # `--types` needs the workspace: it writes the driver's TypeScript types from the crate, and the engine is
+      # typechecked against the copy in git.
+      - uses: ./.github/actions/workspace-install
+      - run: node scripts/native/build-native.ts desktop --target aarch64-apple-darwin --types
       - name: Check the committed driver types match the crate
         run: git diff --exit-code -- packages/desktop/src/native.ts
+      - run: node scripts/native/build-native.ts desktop --target x86_64-apple-darwin
       - name: Check each build's architecture
         working-directory: packages/desktop
         run: |
@@ -236,7 +238,6 @@ jobs:
         with:
           addon: packages/desktop/desktop.darwin-x64.node
       # The engine's loader on the addon just built: the test that runs it is skipped wherever no addon was built.
-      - uses: ./.github/actions/workspace-install
       - name: Load the addon through the engine
         env:
           REQUIRE_DESKTOP_NATIVE: '1'

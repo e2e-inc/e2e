@@ -1,4 +1,4 @@
-// Written by `node scripts/native/build-native.ts desktop` from crates/e2e-desktop-napi. Do not edit.
+// Written by `node scripts/native/build-native.ts desktop --types` from crates/e2e-desktop-napi. Do not edit.
 import type { Envelope, Launched, RawWindow } from './driver.ts';
 import type { RawSnapshot } from './nodes.ts';
 

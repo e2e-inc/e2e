@@ -159,7 +159,7 @@ the way a user would.
   argument objects as NAPI-RS reads them from the crate's `#[napi]` items. That file
   types the loader, is never edited by hand, and is committed with any change to those
   items (CI's `native` job fails on a difference). What a call resolves with is still
-  written by hand in `driver.ts` and `nodes.ts`, named by `ts_return_type` in the crate; a release ships it in `@e2e-dev/desktop-darwin-arm64` and
+  written by hand in `driver.ts` and `nodes.ts`, named by `ts_return_type` in the crate. A release ships the addon in `@e2e-dev/desktop-darwin-arm64` and
   `@e2e-dev/desktop-darwin-x64` (`packages/desktop/npm/<platform>`, where
   every native addon's platform packages live), optional dependencies with `os`/`cpu` set,
   in a changesets `fixed` group with the engine, each with a
