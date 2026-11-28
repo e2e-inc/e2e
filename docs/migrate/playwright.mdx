@@ -96,6 +96,16 @@ The agent does the checkout steps and adapts when the form changes. A test
 can also stay fully deterministic, with a `screen.getBy*` line for every
 `page.getBy*` line.
 
+While you port a spec, give actions a short timeout, so a locator that
+matches nothing fails in seconds instead of the default 30. Rerun a failure
+with `--last-failed`: it keeps the failed run's trace, where a plain run
+starts `results/` empty.
+
+```bash
+npx e2e run tests/checkout.e2e.ts --action-timeout 5000
+npx e2e run --last-failed
+```
+
 ## Map each API
 
 Every row works today. For an API that is not here, check
