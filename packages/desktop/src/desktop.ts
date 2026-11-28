@@ -167,7 +167,10 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
         waitMs - (Date.now() - begun),
         () => `no window opened within ${waitMs}ms; the trigger resolved after ${triggerMs}ms`,
       );
-      await surface.activateWindow(opened.id, operation);
+      // Activating it reads the windows again, within what is left of the call: a trigger that used all of it took the
+      // one look with the operation's own budget, and so does its activation.
+      const left = waitMs - (Date.now() - begun);
+      await surface.activateWindow(opened.id, left > 0 ? { ...operation, timeoutMs: left } : operation);
       return handle(opened);
     },
     async window(which, options) {

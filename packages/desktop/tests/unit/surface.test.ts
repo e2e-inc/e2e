@@ -1125,6 +1125,16 @@ describe('desktop fixture: windows', () => {
     expect(await opened.isActive()).toBe(true);
   });
 
+  it('activates the window it found within what is left of the timeout', async () => {
+    const alone = windows(() => [mine]);
+    const both = windows(() => [mine, panel]);
+    const { surface } = await launched({ listWindows: [alone, alone, alone, both, windows(() => [mine, panel], 700)] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const started = Date.now();
+    await expect(desktop.waitForWindow(() => new Promise((resolve) => setTimeout(resolve, 300)), { timeout: 800 })).rejects.toBeDefined();
+    expect(Date.now() - started).toBeLessThan(950);
+  });
+
   it('counts the read of the windows before the trigger toward the timeout', async () => {
     const stalled = failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer its window list in time', { retryable: true });
     const alone = windows(() => [mine]);
