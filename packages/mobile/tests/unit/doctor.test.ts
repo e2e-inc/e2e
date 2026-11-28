@@ -75,6 +75,25 @@ describe('doctor', () => {
     ]);
   });
 
+  it.each(['HDC-A', 'Phone A'])('resolves the selected HarmonyOS phone %s to its HDC serial', async (device) => {
+    const h = doctorHarness({ platform: 'harmonyos', device });
+    const phone = { platform: 'harmonyos', kind: 'device', target: 'mobile', booted: true };
+    h.fake.respond('devices.list', () => [
+      { ...phone, id: 'HDC-B', name: 'Phone B' }, { ...phone, id: 'HDC-A', name: 'Phone A' },
+    ]);
+    await h.engine.doctor!(info(h));
+    expect(h.fake.lastArgs('command.doctor')).toMatchObject({ platform: 'harmonyos', serial: 'HDC-A' });
+    expect(h.fake.lastArgs('command.doctor')).not.toHaveProperty('device');
+  });
+
+  it('reports a missing HarmonyOS phone as a failed device check', async () => {
+    const h = doctorHarness({ platform: 'harmonyos', device: 'HDC-A' });
+    h.fake.respond('devices.list', () => []);
+    expect(await h.engine.doctor!(info(h))).toEqual([
+      { id: 'device', status: 'fail', message: expect.stringContaining('HDC-A') },
+    ]);
+  });
+
   it('selects a device by UDID', async () => {
     const udid = '78D5CEB4-D3A1-48E2-9AFD-6F8A99A824DA';
     const h = doctorHarness({ device: udid });
