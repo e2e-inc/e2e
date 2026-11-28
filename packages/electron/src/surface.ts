@@ -168,7 +168,7 @@ export class ElectronSurface {
   /** `app.clearState()`: quits the app, empties its data, and launches it again. */
   async reset(operation: OperationContext): Promise<void> {
     this.failOnDialog();
-    const budget = new Budget(operation, 'app.open');
+    const budget = new Budget(operation, 'app.clearState');
     return await this.app.serialized(async () => {
       budget.check();
       await this.app.quit(operation, DISCARD_CLOSE_MS);
