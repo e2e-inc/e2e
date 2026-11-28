@@ -156,7 +156,7 @@ import { expect } from 'e2e';
 
 test('Calculator opens', ${options}async ({ app, screen }) => {
   await app.open();
-  await expect(screen.getByRole('button', 'All Clear')).toBeVisible();
+  await expect(screen.getByRole('button', '7')).toBeVisible();
 });
 `,
       aiExample: (options: string) => `

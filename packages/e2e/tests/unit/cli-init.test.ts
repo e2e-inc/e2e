@@ -290,6 +290,8 @@ describe('e2e init', () => {
     expect(read('tests/example.e2e.ts').includes("import { test } from '@e2e-dev/electron';")).toBe(engine === 'electron');
     expect(read('e2e.config.ts').includes("{ name: 'macos', engine: desktop(), app: { bundleId: 'com.apple.calculator' } }")).toBe(engine === 'desktop');
     expect(read('tests/example.e2e.ts').includes("import { test } from '@e2e-dev/desktop';")).toBe(engine === 'desktop');
+    // A digit key reads the same in every system language, where a named key such as All Clear is translated.
+    expect(read('tests/example.e2e.ts').includes("await expect(screen.getByRole('button', '7')).toBeVisible();")).toBe(engine === 'desktop');
     expect(read('tests/example.e2e.ts').includes("// test('the agent adds two numbers', async ({ agent, app }) => {")).toBe(engine === 'desktop');
     expect(read('e2e.config.ts').includes('APP_URL')).toBe(engine === 'web');
     expect(output()).toContain(`Next: npm install, then ${engine === 'web' || engine === 'none' ? 'APP_URL=http://localhost:3000 ' : ''}npm run test:e2e`);
