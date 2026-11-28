@@ -535,7 +535,7 @@ describe('DesktopSurface: the launch wait', () => {
     expect(Date.now() - started).toBeLessThan(4_500);
   });
 
-  it('gives each read of the launch wait what is left of that wait, not of the whole open', async () => {
+  it("gives the launch wait's reads the wait's time, not the whole open's", async () => {
     const { fake } = await launched({}, { openTimeoutMs: 60_000, observe: false });
     expect(last<{ timeoutMs: number }>(fake, 'snapshot')!.timeoutMs).toBeLessThanOrEqual(10_000);
   });

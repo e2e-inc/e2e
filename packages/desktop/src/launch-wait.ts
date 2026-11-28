@@ -31,15 +31,24 @@ export interface LaunchedApp {
  * after the launch, but its accessibility element can arrive a moment
  * later, and an observation then would show the agent an empty screen. A
  * window that stays unreadable for `LAUNCH_READY_MS` fails the open: every
- * later step would only time out on an empty screen. Any other failure of a
- * read is reported as it is. An app in the background is never brought
- * forward: one that opens no window there (a document-based app opens its
- * first one only when it comes forward) fails the open, and needs `--headed` or `physicalInput`.
+ * later step would only time out on an empty screen. The last read gets as
+ * long as the slowest finished read, within the operation's budget, so a
+ * read that runs out of time was slow, not one the wait ended mid-read.
+ * Any other failure of a read is reported as it is. An app in the
+ * background is never brought forward: one that opens no window there (a
+ * document-based app opens its first one only when it comes forward)
+ * fails the open, and needs `--headed` or `physicalInput`.
  */
 export async function windowReadable(operation: OperationContext, launched: LaunchedApp): Promise<void> {
   const { app } = launched;
-  const budgetBound = operation.timeoutMs < LAUNCH_READY_MS;
-  const deadline = Date.now() + Math.min(operation.timeoutMs, LAUNCH_READY_MS);
+  const operationMs = operation.timeoutMs;
+  const budgetBound = operationMs < LAUNCH_READY_MS;
+  const startedAt = Date.now();
+  const deadline = startedAt + Math.min(operationMs, LAUNCH_READY_MS);
+  // No read runs past the operation's own deadline: the extra time a last read gets comes from the operation's budget, never beyond it.
+  const cap = startedAt + operationMs;
+  // How long the slowest read that finished took: the time a read starting at the deadline still gets, as in core's `ReadWindow`.
+  let slowestMs = 0;
   let sawWindow = false;
   // Whether a read finished and listed no window of the app: only that shows it opened none. A read that ran out of time saw nothing.
   let listedNone = false;
@@ -52,9 +61,12 @@ export async function windowReadable(operation: OperationContext, launched: Laun
     if (operation.signal.aborted) throw new EngineError('CANCELLED', `opening ${app} was cancelled`, { retryable: false });
     let screen: ProjectedScreen | undefined;
     let current: WindowsRead | undefined;
+    const readStartedAt = Date.now();
+    // Each read may run until the wait's deadline plus the slowest finished read, capped by the operation's deadline, so a slow last read still finishes.
+    const budgetMs = Math.max(1, Math.min(Math.max(0, cap - readStartedAt), deadline + slowestMs - readStartedAt));
     try {
-      // Each read gets what is left of the readiness wait, not of the whole operation.
-      current = await launched.read(Math.max(deadline - Date.now(), 0));
+      current = await launched.read(budgetMs);
+      slowestMs = Math.max(slowestMs, Date.now() - readStartedAt);
       last = current;
       screen = launched.readable(current);
     } catch (cause) {
@@ -62,14 +74,18 @@ export async function windowReadable(operation: OperationContext, launched: Laun
       if (current === undefined && answered !== undefined) last = answered;
       // The last read ran out of budget: the window never became readable in time.
       if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') {
-        timedOut = true;
+        // A read the operation's deadline left less than one poll tick, or the slowest finished read, and that gave no answer timed out because the wait did, not because the app stopped answering: the read before it stays the last one reported. A read granted a slowest read's time that still timed out was slower than every finished read.
+        const waitEnded = current === undefined && answered === undefined && last !== undefined && budgetMs < Math.max(LAUNCH_POLL_MS, slowestMs);
+        timedOut = !waitEnded;
         // A read the deadline cut off answered nothing, so the newest read that finished stays the one reported.
-        cutOff = current === undefined && answered === undefined;
+        cutOff = current === undefined && answered === undefined && !waitEnded;
         break;
       }
       // A window not readable yet, or one replaced while it was read, is what this wait looks at below; so is an app that quit.
       const stale = cause instanceof EngineError && cause.code === 'NODE_STALE' && cause.retryable;
       if (!(cause instanceof EngineError && (stale || cause.cause === QUIT))) throw cause;
+      // A read that answered with a retryable failure finished too: its time counts toward the slowest read, as a resolved read's does.
+      slowestMs = Math.max(slowestMs, Date.now() - readStartedAt);
       if (stale) sawWindow = true;
     }
     // A window whose root the app did not answer for is there but not readable yet, which is what this wait is for.
