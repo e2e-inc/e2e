@@ -1093,6 +1093,14 @@ describe('desktop fixture: windows', () => {
     await controls.close();
   });
 
+  it('closes no window the driver did not find while the screen is locked, which hides it', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [mine, panel])], closeWindow: [failure('WINDOW_NOT_FOUND', 'not_delivered', 'the app has no window')] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const controls = (await desktop.windows())[1]!;
+    fake.locked = true;
+    await expect(controls.close()).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
+  });
+
   it('leaves a window alone once the app quit with it, as an app does when its last window closes', async () => {
     const { surface, fake } = await launched({ listWindows: [windows(() => [mine])], closeWindow: [failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer')] });
     const desktop = createDesktopFixture(surface, fixtureContext());
