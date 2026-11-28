@@ -642,10 +642,11 @@ pub fn close_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Inst
         // A call given up on before it began reads nothing either.
         go("close the window")?;
         let element = windows::find(pid, window)?;
-        let Some(button) = element.element("AXCloseButton") else {
+        // A read the app did not answer in time is no proof the window lacks the button, or that it is enabled.
+        let Some(button) = element_attribute(&element, "AXCloseButton", "close the window")? else {
             return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "the window has no close button"));
         };
-        if button.boolean("AXEnabled") == Some(false) {
+        if stalled(button.attribute("AXEnabled")).map_err(|error| unread(error, "close the window"))?.and_then(|value| value.boolean()) == Some(false) {
             return Err(Failure::refused(codes::ACTION_FAILED, "the window's close button is disabled, as it is while a sheet is open on the window"));
         }
         // A press that closes its own window may answer with an error: the window lists tell whether it closed.
