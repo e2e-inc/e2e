@@ -134,9 +134,10 @@ pub(super) fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outco
         };
         let (_, _, width, height) = element.frame().unwrap_or((0.0, 0.0, 0.0, 0.0));
         let visible = if vertical { height } else { width };
-        let content = match element.element("AXContents") {
-            Some(contents) => contents.frame().map(|(_, _, width, height)| if vertical { height } else { width }),
-            None => children_span(element, vertical),
+        // AXContents is a list of elements: one is the document the area scrolls through.
+        let content = match element.elements("AXContents", 2).ok().as_deref() {
+            Some([contents]) => contents.frame().map(|(_, _, width, height)| if vertical { height } else { width }),
+            _ => children_span(element, vertical),
         }
         .unwrap_or(0.0);
         let step = if content > visible && visible > 0.0 { pages * visible / (content - visible) } else { pages * 0.25 };
