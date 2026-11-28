@@ -441,6 +441,16 @@ describe('telemetry events', () => {
     expect(properties['model_id']).toBe('gpt-5.4-mini');
   });
 
+  it('folds a gateway or vendor name that is not a plain token into other', () => {
+    const report = sampleReport();
+    const [first] = report.run.results[0]!.attempts[0]!.steps;
+    (first as { model: { provider: string; model: string } }).model.provider = 'https://gateway.acme.test/team-a';
+    (first as { model: { provider: string; model: string } }).model.model = 'gpt-5.4-mini';
+    const { properties } = runCompletedEvent(report, RUN);
+    expect(properties['model_gateway']).toBe('other');
+    expect(properties['model_provider']).toBe('other');
+  });
+
   it('folds a fine-tuned or routed model id into other', () => {
     const report = sampleReport();
     const [first] = report.run.results[0]!.attempts[0]!.steps;
