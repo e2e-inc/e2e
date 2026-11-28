@@ -61,8 +61,6 @@ export interface NodeOps {
   takesText(): boolean;
   /** The element's computed value of each named CSS property. */
   readStyle(names: readonly string[]): Record<string, string>;
-  /** The element's `class` attribute as written, or null when it has none. */
-  className(): string | null;
   /** How much of the element's box is inside the window, past what its scrolling ancestors clip. */
   viewportIntersection(): { readonly intersects: boolean; readonly ratio: number };
 }
@@ -323,9 +321,6 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
     isFileInput() {
       const target = live();
       return target instanceof HTMLInputElement && target.type === 'file';
-    },
-    className() {
-      return live().getAttribute('class');
     },
     readStyle(names) {
       const computed = getComputedStyle(live());

@@ -1,5 +1,5 @@
 /**
- * `expect(electron)` and the fixture's waits: conditions of the active
+ * `expect(electron)` and `electron.waitForURL`: conditions of the active
  * window polled against the assertion timeout, as `expect(browser)` polls a
  * tab's on the web. Each failure reports the last read.
  */
@@ -15,11 +15,11 @@ import {
   TestError,
   toTextPattern,
   urlMatches,
+  withTimeout,
   type EngineFixtureContext,
   type FixtureOperations,
   type Locator,
 } from '@e2e-dev/core/engine';
-import { checkJsonArgument, functionSource } from './evaluate.ts';
 import type { ElectronExpectation } from './fixtures.ts';
 import type { ElectronSurface } from './surface.ts';
 
@@ -91,21 +91,6 @@ export class WindowConditions {
     return this.url({ api: 'electron.waitForURL', name: 'electron.waitForURL', negated: false }, expected, options?.timeout);
   }
 
-  /** `electron.waitForFunction()`: runs `fn` in the active window's page until what it returns is truthy, and returns that. */
-  async waitForFunction<R, A>(fn: (arg: A) => R | Promise<R>, arg: A, options: { readonly timeout?: number } | undefined): Promise<R> {
-    const caller = 'electron.waitForFunction';
-    rejectUnknownOptions(caller, options, ['timeout']);
-    // Refused before the wait starts, in the wait's own name.
-    checkJsonArgument(arg, caller);
-    functionSource(fn, caller);
-    let value: R | undefined;
-    await this.poll({ api: caller, name: caller, negated: false }, 'a truthy result', async (deadline) => {
-      value = await this.surface.evaluateInWindow(this.surface.shownWindow(), fn, arg, this.context.operation(deadline.remaining()), caller);
-      return { matches: Boolean(value), observed: `result ${JSON.stringify(value) ?? 'undefined'}` };
-    }, options?.timeout);
-    return value as R;
-  }
-
   /** The `expect(electron)` matchers, or their negations. */
   expectation(negated = false): ElectronExpectation {
     const call = (api: string): PollCall => ({ api, name: `expect.${negated ? 'not.' : ''}${api}`, negated });
@@ -129,49 +114,39 @@ export class WindowConditions {
       toHaveClass: (target, expected, options) => {
         const pattern = toTextPattern(expected, { exact: true });
         return this.poll(call('toHaveClass'), `class ${describePattern(pattern)}`, async (deadline) => {
-          const value = await this.read(target, 'class', deadline);
+          let value: string | null | undefined;
+          try {
+            // A locator read takes the action timeout; the poll's deadline is the tighter bound.
+            value = await withTimeout(readClass(target), deadline.remaining(), () => new EngineError('OPERATION_TIMEOUT', 'class read timed out', { retryable: false }));
+          } catch (cause) {
+            if ((cause as { readonly code?: unknown }).code === 'LOCATOR_NOT_FOUND') return { matches: undefined, observed: 'no node' };
+            throw cause;
+          }
           if (value === undefined) return { matches: undefined, observed: 'no node' };
           // An absent attribute is no class list at all, which '' does not match, as on the web.
           if (value === null) return { matches: false, observed: 'no class attribute' };
           return { matches: matchesText(value.trim().split(/\s+/).join(' '), pattern), observed: `class ${JSON.stringify(value)}` };
         }, timeoutOf('toHaveClass', options));
       },
-      toHaveCSS: (target, property, expected, options) => {
-        if (typeof property !== 'string' || property === '') throw new TestError('INVALID_ARGUMENT', `expect.${negated ? 'not.' : ''}toHaveCSS takes a CSS property name, such as "opacity"`);
-        const pattern = toTextPattern(expected, { exact: true });
-        return this.poll(call('toHaveCSS'), `${property} ${describePattern(pattern)}`, async (deadline) => {
-          const value = await this.read(target, { css: property }, deadline);
-          if (value === undefined || value === null) return { matches: undefined, observed: 'no node' };
-          return { matches: matchesText(value, pattern), observed: `${property} ${JSON.stringify(value)}` };
-        }, timeoutOf('toHaveCSS', options));
-      },
     };
-  }
-
-  /**
-   * The class attribute or a computed style of the one node `target`
-   * matches, read from the element itself; undefined while it matches none,
-   * which is one more poll. Several matches fail at once.
-   */
-  private async read(target: Locator, what: 'class' | { readonly css: string }, deadline: Deadline): Promise<string | null | undefined> {
-    const expression = this.context.expression(target);
-    const nodes = await this.surface.locate(expression, this.context.operation(deadline.remaining()));
-    if (nodes.length === 0) return undefined;
-    const [node] = nodes;
-    if (nodes.length > 1 || node === undefined) throw new TestError('LOCATOR_AMBIGUOUS', `the locator matched ${nodes.length} nodes: expect(electron) reads one`);
-    // What is left of the deadline now: the locate before it spent some.
-    return await this.surface.readElement(node.ref, what, this.context.operation(deadline.remaining()));
   }
 }
 
-const label = (_target: unknown, ...rest: readonly unknown[]): string => rest.filter((part) => typeof part === 'string' || part instanceof RegExp).map(String).join(' ');
+/**
+ * The class attribute of one match, undefined while nothing matches. A read
+ * waits for its match until the action timeout, so the poll samples absence
+ * first: a node that never arrives stays an assertion failure.
+ */
+async function readClass(target: Locator): Promise<string | null | undefined> {
+  if ((await target.count()) === 0) return undefined;
+  return target.getAttribute('class');
+}
 
 /** How the harness records each matcher: an assertion that owns its deadline. */
 export const EXPECTATION_OPERATIONS: FixtureOperations<ElectronExpectation> = {
   toHaveURL: { kind: 'assertion', timeout: false, label: (expected) => String(expected) },
   toHaveTitle: { kind: 'assertion', timeout: false, label: (expected) => String(expected) },
-  toHaveClass: { kind: 'assertion', timeout: false, label },
-  toHaveCSS: { kind: 'assertion', timeout: false, label },
+  toHaveClass: { kind: 'assertion', timeout: false, label: (_target, expected) => String(expected) },
   get not() {
     return EXPECTATION_OPERATIONS;
   },

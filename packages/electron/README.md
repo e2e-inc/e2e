@@ -60,8 +60,8 @@ test('signs in', async ({ app, screen }) => {
   `launch` (per-test arguments and environment), `userDataDir`, `evaluate`
   (main process), `windows`, `activeWindow`, `waitForWindow`, `window`,
   `waitForDownload`, `onDialog`, `locator` (CSS), `keyboard`, `mouse`,
-  `waitForURL`, and `waitForFunction`, and `expect(electron)` asserts the
-  window's URL, title, and an element's class and computed style. A window
+  and `waitForURL`, and `expect(electron)` asserts the window's URL and
+  title, and an element's class. A window
   has `evaluate` (its page) and `reload`.
 - **Video.** The shown window's screencast, encoded to one `.webm` by ffmpeg,
   which the engine downloads on the first recording when the machine has none.

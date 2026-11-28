@@ -207,7 +207,6 @@ assertion timeout, as [`expect(browser)`](/reference/expect) does on the web:
 await expect(electron).toHaveURL(/\/settings$/);
 await expect(electron).toHaveTitle('Settings');
 await expect(electron).toHaveClass(screen.getByRole('row', 'Draft'), /selected/);
-await expect(electron).toHaveCSS(screen.getByRole('row', 'Draft'), 'opacity', '0.4');
 await expect(electron).not.toHaveTitle('Sign in');
 ```
 
@@ -215,20 +214,19 @@ await expect(electron).not.toHaveTitle('Sign in');
   as a URL and resolves against the window's current one, so `'settings.html'`
   matches a sibling file. A glob such as `'**/settings'` isn't one: use a
   `RegExp`.
-- `toHaveClass` and `toHaveCSS` take the locator first. A string is the whole
-  class list, or the computed value as `getComputedStyle` reports it, such as
-  `'rgb(255, 0, 0)'`. An element with no `class` attribute matches no string,
-  `''` included.
+- `toHaveClass` takes the locator first. A string is the whole class list. An
+  element with no `class` attribute matches no string, `''` included.
 - Every matcher takes `{ timeout }`.
 
-`electron.waitForURL()` waits the same way without asserting, and
-`electron.waitForFunction()` runs a function in the window's page until it
-returns something truthy, then returns that value:
+`electron.waitForURL()` waits the same way without asserting:
 
 ```ts
 await electron.waitForURL(/\/workspace\/[^/]+\/debug$/);
-const count = await electron.waitForFunction(() => document.querySelectorAll('li').length);
 ```
+
+For any other condition of the page, such as a computed style, poll
+[`window.evaluate()`](#run-code-in-a-window) with
+[`expect.poll`](/reference/expect#polling-a-value).
 
 ## Keyboard and mouse
 

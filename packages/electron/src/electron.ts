@@ -58,10 +58,6 @@ export function createElectronFixture(surface: ElectronSurface, context: EngineF
   const conditions = new WindowConditions(surface, context);
   const electron: Omit<Electron, keyof Expectable<ElectronExpectation>> = {
     waitForURL: (url, options) => conditions.waitForURL(url, options),
-    async waitForFunction<R, A>(fn: (arg: A) => R | Promise<R>, arg?: A, options?: { readonly timeout?: number }): Promise<R> {
-      if (holdsSecret(arg)) throw new ConfigurationError('POLICY_DENIED', 'electron.waitForFunction cannot take a secret as its argument');
-      return await conditions.waitForFunction(fn, arg as A, options);
-    },
     get userDataDir() {
       return surface.dataDirectory();
     },
@@ -147,7 +143,6 @@ export function createElectronFixture(surface: ElectronSurface, context: EngineF
   const input: FixtureOperation = { kind: 'resource' };
   return context.fixture('electron', context.expectable(electron, () => context.fixture('expect', conditions.expectation(), EXPECTATION_OPERATIONS)), {
     waitForURL: { kind: 'resource', timeout: false, verifies: true, label: (url) => String(url) },
-    waitForFunction: { kind: 'resource', timeout: false, verifies: true },
     launch: { kind: 'resource', timeout: false },
     keyboard: {
       press: { ...input, label: (key) => String(key) },

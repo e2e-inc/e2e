@@ -466,18 +466,18 @@ export class ElectronSurface {
   }
 
   /** `window.evaluate()`: runs test code in the window's page, with the app's own globals. */
-  async evaluateInWindow<R, A>(window: AppWindow, fn: (arg: A) => R | Promise<R>, arg: A, operation: OperationContext, caller = 'window.evaluate'): Promise<R> {
+  async evaluateInWindow<R, A>(window: AppWindow, fn: (arg: A) => R | Promise<R>, arg: A, operation: OperationContext): Promise<R> {
     this.failOnDialog();
-    if (window.page.isClosed()) throw new TestError('ACTION_FAILED', `${caller}: the window has closed`);
-    checkJsonArgument(arg, caller);
+    if (window.page.isClosed()) throw new TestError('ACTION_FAILED', 'window.evaluate: the window has closed');
+    checkJsonArgument(arg, 'window.evaluate');
     // Its message is the test's, never read for a pattern.
-    const run = window.page.evaluateInPage(functionSource(fn, caller), arg).catch((cause: unknown) => {
-      throw cause instanceof EvaluateError ? new TestError('EVALUATE_FAILED', `${caller}: ${cause.message}`, { cause }) : cause;
+    const run = window.page.evaluateInPage(functionSource(fn, 'window.evaluate'), arg).catch((cause: unknown) => {
+      throw cause instanceof EvaluateError ? new TestError('EVALUATE_FAILED', `window.evaluate: ${cause.message}`, { cause }) : cause;
     });
     // A cancelled step never awaits it.
     run.catch(() => undefined);
     // Not input: a timeout is the function's, and nothing the engine sent may have committed.
-    return (await withBudget(operation, caller, () => run)) as R;
+    return (await withBudget(operation, 'window.evaluate', () => run)) as R;
   }
 
   /** `window.reload()`: the window's document loaded again. */
@@ -572,20 +572,6 @@ export class ElectronSurface {
     const requested = validateComputedStyleProperties(properties);
     const { window, backendNodeId } = this.windowList.bind(ref);
     return await withBudget(operation, 'read computed style', () => this.devtools.callOn(window.page, backendNodeId, 'readStyle', requested));
-  }
-
-  /**
-   * `expect(electron).toHaveClass` and `toHaveCSS`: the class attribute (null
-   * when the element has none), or one computed style, of a node the test
-   * names. Any CSS property: the test is trusted with what it reads, as with
-   * `window.evaluate`.
-   */
-  async readElement(ref: NodeRef, what: 'class' | { readonly css: string }, operation: OperationContext): Promise<string | null> {
-    const { window, backendNodeId } = this.windowList.bind(ref);
-    return await withBudget(operation, 'read element', async () => {
-      if (what === 'class') return await this.devtools.callOn(window.page, backendNodeId, 'className');
-      return (await this.devtools.callOn(window.page, backendNodeId, 'readStyle', [what.css]))[what.css] ?? '';
-    });
   }
 
   async viewportIntersection(ref: NodeRef, operation: OperationContext): Promise<ViewportIntersection> {

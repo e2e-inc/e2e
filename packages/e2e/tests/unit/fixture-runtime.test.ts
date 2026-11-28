@@ -315,28 +315,6 @@ describe('explicit fixture operations', () => {
     await expect(gadget.plain()).rejects.toThrow('plain failure');
   });
 
-  it('gives a fixture the expression of a locator the session made, and refuses any other value', () => {
-    let expressionOf: ((locator: unknown) => unknown) | undefined;
-    const engine = defineEngine({ name: 'reader', version: '1', spiVersion: 1, fixtures: {
-      gadget: (context) => {
-        expressionOf = (locator) => context.expression(locator as never);
-        return context.fixture('gadget', { made: context.locator({ kind: 'selector', selector: '.made' }) }, {});
-      },
-    } });
-    const first = runtime(engine);
-    const { made } = (first.fixtures as unknown as { gadget: { made: unknown } }).gadget;
-    const read = expressionOf;
-    if (read === undefined) throw new Error('the fixture was not created');
-    expect(read(made)).toEqual({ kind: 'selector', selector: '.made' });
-    expect(read((first.fixtures as unknown as { screen: { getByRole(role: string, name: string): unknown } }).screen.getByRole('button', 'Save'))).toMatchObject({ kind: 'query' });
-    expect(() => read({})).toThrow(expect.objectContaining({ code: 'INVALID_LOCATOR' }));
-    expect(() => read('button')).toThrow(expect.objectContaining({ code: 'INVALID_LOCATOR' }));
-    // A locator of another session's screen names a node this session cannot read.
-    const other = runtime(engine);
-    const foreign = (other.fixtures as unknown as { screen: { getByText(text: string): unknown } }).screen.getByText('x');
-    expect(() => read(foreign)).toThrow(expect.objectContaining({ code: 'INVALID_LOCATOR' }));
-  });
-
   it('rejects a factory that returns a surface it did not declare through context.fixture', () => {
     const engine = defineEngine({ name: 'undeclared', version: '1', spiVersion: 1, fixtures: {
       gadget: () => ({ async capture() {} }),

@@ -163,24 +163,7 @@ test.describe('expect(electron) and the fixture\'s waits', () => {
     expect(await failure(expect(electron).toHaveURL(/x/, { ignoreCase: true } as never))).toMatchObject({ code: 'INVALID_ARGUMENT' });
   });
 
-  test('waits for a function in the page to return something truthy, and returns it', async ({ electron }) => {
-    await electron.activeWindow().evaluate(() => {
-      setTimeout(() => {
-        (globalThis as { ready?: number }).ready = 42;
-      }, 200);
-    });
-    expect(await electron.waitForFunction(() => (globalThis as { ready?: number }).ready)).toBe(42);
-    expect(await electron.waitForFunction((least: number) => ((globalThis as { ready?: number }).ready ?? 0) >= least, 42)).toBe(true);
-    expect(await failure(electron.waitForFunction(() => (globalThis as { never?: boolean }).never, undefined, { timeout: 300 }))).toMatchObject({ code: 'ASSERTION_FAILED' });
-    expect(await failure(electron.waitForFunction(() => { throw new Error('from the page'); }))).toMatchObject({ code: 'EVALUATE_FAILED', message: expect.stringContaining('electron.waitForFunction') });
-    expect(await failure(electron.waitForFunction('document.title' as never))).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('electron.waitForFunction') });
-    // The page loads another document under the wait, which goes on in the new one.
-    const loaded = electron.waitForFunction(() => (globalThis as unknown as { document: { title: string } }).document.title === 'Controls');
-    await electron.evaluate(() => (globalThis as unknown as { testbedOpen: (page: string) => Promise<void> }).testbedOpen('controls.html'));
-    expect(await loaded).toBe(true);
-  });
-
-  test('waits for an element\'s class and computed style', async ({ screen, electron }) => {
+  test('waits for an element\'s class', async ({ screen, electron }) => {
     await electron.evaluate(() => (globalThis as unknown as { testbedOpen: (page: string) => Promise<void> }).testbedOpen('controls.html'));
     await expect(screen.getByRole('heading', 'Controls')).toBeVisible();
     const scan = screen.getByTestId('glyph-button');
@@ -189,22 +172,16 @@ test.describe('expect(electron) and the fixture\'s waits', () => {
     await expect(electron).not.toHaveClass(scan, 'glyph');
     // An element with no class attribute has no class list, which the empty one does not match.
     expect(await failure(expect(electron).toHaveClass(scan, '', { timeout: 300 }))).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('observed: no class attribute') });
-    await expect(electron).toHaveCSS(screen.getByTestId('label-cover'), 'position', 'absolute');
-    await expect(electron).toHaveCSS(scan, 'opacity', '1');
-    // Both poll: the page changes them a moment later.
+    // It polls: the page sets the class a moment later.
     await electron.activeWindow().evaluate(() => {
-      const page = globalThis as unknown as { document: { querySelector(selector: string): { className: string; style: { opacity: string } } } };
+      const page = globalThis as unknown as { document: { querySelector(selector: string): { className: string } } };
       setTimeout(() => {
-        const button = page.document.querySelector('[data-testid="glyph-button"]');
-        button.className = 'dimmed  busy';
-        button.style.opacity = '0.4';
+        page.document.querySelector('[data-testid="glyph-button"]').className = 'dimmed  busy';
       }, 200);
     });
-    await expect(electron).toHaveCSS(scan, 'opacity', '0.4');
     await expect(electron).toHaveClass(scan, 'dimmed busy');
     // A node that never comes is the assertion's failure; several are the locator's.
     expect(await failure(expect(electron).toHaveClass(electron.locator('.no-such'), 'x', { timeout: 300 }))).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('observed: no node') });
-    expect(await failure(expect(electron).toHaveCSS(scan, 'opacity', '1', { timeout: 300 }))).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('observed: opacity "0.4"') });
-    expect(await failure(expect(electron).toHaveCSS(electron.locator('button'), 'opacity', '1'))).toMatchObject({ code: 'LOCATOR_AMBIGUOUS' });
+    expect(await failure(expect(electron).toHaveClass(electron.locator('button'), 'x'))).toMatchObject({ code: 'LOCATOR_AMBIGUOUS' });
   });
 });

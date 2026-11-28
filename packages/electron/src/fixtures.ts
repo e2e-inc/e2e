@@ -98,8 +98,6 @@ export interface ElectronExpectation {
   toHaveTitle(expected: TextMatch, options?: { readonly timeout?: number }): Promise<void>;
   /** The `class` attribute of the one node `target` matches: a string is the whole class list, a `RegExp` is tested against it. */
   toHaveClass(target: Locator, expected: TextMatch, options?: { readonly timeout?: number }): Promise<void>;
-  /** A computed CSS property of the one node `target` matches, as `getComputedStyle` reports it: `'0.4'`, `'rgb(255, 0, 0)'`. */
-  toHaveCSS(target: Locator, property: string, expected: TextMatch, options?: { readonly timeout?: number }): Promise<void>;
 }
 
 /** Deterministic Electron app management exposed to tests as `electron`. */
@@ -126,13 +124,6 @@ export interface Electron extends Expectable<ElectronExpectation> {
    * `timeout` milliseconds, or else the assertion timeout.
    */
   waitForURL(url: string | RegExp, options?: { readonly timeout?: number }): Promise<void>;
-  /**
-   * Runs `fn` in the active window's page until what it returns is truthy,
-   * and resolves with that. `fn` is sent as source text, as `evaluate`'s is.
-   */
-  waitForFunction<R>(fn: () => R | Promise<R>, arg?: undefined, options?: { readonly timeout?: number }): Promise<R>;
-  /** Runs `fn` with `arg`, which must be JSON, until what it returns is truthy. */
-  waitForFunction<R, A>(fn: (arg: A) => R | Promise<R>, arg: A, options?: { readonly timeout?: number }): Promise<R>;
   /** Keyboard input to the active window. */
   readonly keyboard: ElectronKeyboard;
   /** Pointer input to the active window. */

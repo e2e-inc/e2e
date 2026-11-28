@@ -264,7 +264,6 @@ test('opens on saved settings', async ({ electron, screen }) => {
 | [`keyboard`](#keyboard) | `ElectronKeyboard` |
 | [`mouse`](#mouse) | `ElectronMouse` |
 | [`waitForURL`](#waitforurl) | `Promise<void>` |
-| [`waitForFunction`](#waitforfunction) | `Promise<R>` |
 | [`expect(electron)`](#window-matchers) | `ElectronExpectation` |
 
 Every async member is a recorded step named `electron.<method>`. The
@@ -635,30 +634,6 @@ await electron.waitForURL(/\/workspace\/[^/]+\/debug$/);
 | `INVALID_ARGUMENT` | `url` is neither a string nor a `RegExp`, or an option other than `timeout`. |
 | `ASSERTION_FAILED` | The URL did not match in time. The error has the last URL read. |
 
-#### `waitForFunction`
-
-```ts
-waitForFunction<R>(fn: () => R | Promise<R>, arg?: undefined, options?: { timeout?: number }): Promise<R>;
-waitForFunction<R, A>(fn: (arg: A) => R | Promise<R>, arg: A, options?: { timeout?: number }): Promise<R>;
-```
-
-```ts
-const count = await electron.waitForFunction(() => document.querySelectorAll('li').length);
-await electron.waitForFunction((least) => window.items.length >= least, 3);
-```
-
-- Runs `fn` in the active window's page until it returns something truthy,
-  and resolves with that value. It follows the rules of a window's
-  `evaluate`: `fn` is sent as source text, and `arg` and the result are JSON.
-- The wait goes on in the new document when the page navigates.
-
-| Throws | When |
-| --- | --- |
-| `INVALID_ARGUMENT` | `fn` is not a function, `arg` is not JSON, or an option other than `timeout`. |
-| `POLICY_DENIED` | `arg` holds a secret. |
-| `EVALUATE_FAILED` | `fn` threw. The wait ends at once. |
-| `ASSERTION_FAILED` | Nothing truthy came back in time. |
-
 #### Window matchers
 
 `expect(electron)` asserts on the active window.
@@ -667,7 +642,6 @@ await electron.waitForFunction((least) => window.items.length >= least, 3);
 await expect(electron).toHaveURL(/\/settings$/);
 await expect(electron).toHaveTitle('Settings');
 await expect(electron).toHaveClass(screen.getByRole('row', 'Draft'), /selected/);
-await expect(electron).toHaveCSS(screen.getByRole('row', 'Draft'), 'opacity', '0.4');
 await expect(electron).not.toHaveTitle('Sign in');
 ```
 
@@ -676,7 +650,6 @@ await expect(electron).not.toHaveTitle('Sign in');
 | `toHaveURL(expected, { timeout }?)` | The active window's URL, by the rules of [`waitForURL`](#waitforurl) |
 | `toHaveTitle(expected, { timeout }?)` | The window's title: the document's, or the OS window's when the document has none |
 | `toHaveClass(target, expected, { timeout }?)` | The `class` attribute of the one node `target` matches |
-| `toHaveCSS(target, property, expected, { timeout }?)` | A computed CSS property of that node, as `getComputedStyle` reports it |
 | `not` | The same matchers, negated |
 
 - Each matcher is a recorded `expect.<matcher>` step that polls until the
@@ -684,14 +657,11 @@ await expect(electron).not.toHaveTitle('Sign in');
 - For `toHaveClass`, a string is the whole class list with its white space
   collapsed, and a `RegExp` is tested against that list. An element with no
   `class` attribute matches no string, `''` included.
-- For `toHaveCSS`, a string is the whole computed value, such as
-  `'rgb(255, 0, 0)'`.
 - A `target` that matches nothing yet is one more poll.
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | An option other than `timeout`, or a `property` that is not a string. |
-| `INVALID_LOCATOR` | `target` is not a locator of this test. |
+| `INVALID_ARGUMENT` | An option other than `timeout`. |
 | `LOCATOR_AMBIGUOUS` | `target` matches several nodes. |
 | `ASSERTION_FAILED` | The condition did not hold in time. The error has the last value read. |
 

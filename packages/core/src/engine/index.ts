@@ -272,12 +272,6 @@ export interface EngineFixtureContext {
   attachViewport(viewport: { width: number; height: number; scale: number }): void;
   /** Mints a public locator from a raw expression (a platform selector, say). */
   locator(expression: LocatorExpression): Locator;
-  /**
-   * The expression of a locator this session made, from `locator`, `screen`,
-   * or a `screen` query: for a fixture that reads of the matched node what
-   * no locator read gives. Throws `INVALID_LOCATOR` for anything else.
-   */
-  expression(locator: Locator): LocatorExpression;
   /** Mints a screen scope whose every query is wrapped by `scope` (a nested document, say). */
   screen(scope: (expression: LocatorExpression) => LocatorExpression): Screen;
   /**
