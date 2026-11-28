@@ -9,7 +9,7 @@ import { processSecrets, redactProviderKeys, registerProviderKey, registerProvid
 import type { StepExecutorContext } from './executor.ts';
 import { executorRedactors } from './redaction.ts';
 
-export { registerProviderKey, registerProviderKeys };
+export { redactProviderKeys, registerProviderKey, registerProviderKeys };
 
 /**
  * `text` with every secret and provider key the process knows replaced by

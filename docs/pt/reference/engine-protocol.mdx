@@ -6,7 +6,7 @@ description: Rode uma engine em outro processo, em outra máquina ou em outra li
 O protocolo de engine é o [contrato de engine](/reference/engine) em forma de
 mensagens JSON-RPC. O runner controla toda engine por meio dele. Para rodar
 uma engine em outro processo, em outra máquina ou em outra linguagem, veja
-[Servidores de engine](/engine-servers).
+[Servidores de engine](/reference/engine-protocol).
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -88,7 +88,7 @@ Com `resolveLocators`, cada `locate` observa e resolve a expressão com
 [`resolveExpression`](/reference/engine#resolveexpression).
 `fixtures`, `validateApp`, `secrets` e os hooks de `session` rodam no cliente;
 um hook de `session` substitui o método de mesmo nome do servidor. Veja
-[Mantenha o trabalho do host no cliente](/engine-servers#keep-host-work-on-the-client).
+[Mantenha o trabalho do host no cliente](/reference/engine-protocol).
 
 <Warning>
 `lifecycle/prepare`, `lifecycle/init`, `lifecycle/finish` e `lifecycle/doctor` levam o
@@ -115,7 +115,7 @@ export function serveEngine(
 ```
 
 Mantenha os logs do próprio servidor no stderr: o stdout carrega o protocolo.
-Veja [Sirva uma engine TypeScript](/engine-servers#serve-a-typescript-engine).
+Veja [Sirva uma engine TypeScript](/reference/engine-protocol).
 
 ### `describeEngine`
 
@@ -328,7 +328,7 @@ o mesmo formato, para que os relatórios mostrem onde a engine falhou.
 ## Tipos
 
 Um transporte abre os streams de bytes de uma conexão. Veja
-[Escreva um transporte](/engine-servers#write-a-transport).
+[Escreva um transporte](/reference/engine-protocol).
 
 ```ts
 export interface EngineTransport {
@@ -361,5 +361,5 @@ export interface TransportConnection {
 
 [Engines](/engines) compara as formas de construir uma.
 [`e2e/engine`](/reference/engine) é o contrato que cada mensagem carrega.
-[Servidores de engine](/engine-servers) e [Escrever uma engine](/writing-an-engine)
+[Servidores de engine](/reference/engine-protocol) e [Escrever uma engine](/writing-an-engine)
 mostram passo a passo como construir uma.

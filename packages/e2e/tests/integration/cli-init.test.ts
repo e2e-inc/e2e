@@ -284,7 +284,7 @@ describe('initializing standalone projects', () => {
       const coreVersion = (JSON.parse(readFileSync(path.resolve(PACKAGE_ROOT, '..', 'core', 'package.json'), 'utf8')) as { version: string }).version;
       expect(manifest.devDependencies['@e2e-dev/core']).toBe(dependencyRange(coreVersion));
       const recorded = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'dist', 'cli', 'init', 'sibling-versions.json'), 'utf8')) as Record<string, string>;
-      expect(Object.keys(recorded).toSorted()).toEqual(['@e2e-dev/core', '@e2e-dev/mobile', '@e2e-dev/web']);
+      expect(Object.keys(recorded).toSorted()).toEqual(['@e2e-dev/core', '@e2e-dev/electron', '@e2e-dev/mobile', '@e2e-dev/web']);
       expect(manifest.devDependencies).not.toHaveProperty('playwright');
       expect(manifest.devDependencies.ai).toBe('^7.0.0');
       expect(manifest.scripts).toEqual({ 'test:e2e': 'e2e run' });

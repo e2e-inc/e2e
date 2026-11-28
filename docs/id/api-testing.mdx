@@ -1,0 +1,99 @@
+---
+title: API
+description: Uji API dengan fixture request dan pencocok nilai, dalam file serta eksekusi yang sama dengan tes UI.
+"og:image": "https://e2e.com/docs/images/og/api-testing.png?v=bd427bf4fd"
+"twitter:image": "https://e2e.com/docs/images/og/api-testing.png?v=bd427bf4fd"
+---
+
+Tes API menggunakan fixture [`request`](/reference/request) dan pencocok
+nilai berdampingan dengan tes UI, tanpa memanggil model.
+
+```ts title="tests/users-api.e2e.ts"
+import { test, expect } from 'e2e';
+import { z } from 'zod';
+
+const User = z.object({ id: z.number(), name: z.string() });
+
+test('GET /api/users returns the seeded users', async ({ request }) => {
+  const response = await request.get('/api/users');
+  expect(response).toBeOK();
+  expect(response.headers['content-type']).toContain('application/json');
+  const users = expect(await response.json()).toMatchSchema(z.array(User));
+  expect(users).toHaveLength(3);
+  expect(users.map((user) => user.name)).toEqual(['Ada', 'Grace', expect.any(String)]);
+});
+```
+
+Setiap panggilan menjadi langkah dalam laporan, seperti `GET /api/users`, dan
+tes gagal jika panggilan melewati `actionTimeout`.
+
+[`toBeOK`](/reference/expect#tobeok) mensyaratkan status 2xx. Jika gagal,
+matcher ini menyebutkan status, asal, dan jalur respons.
+
+`toMatchSchema` menerima [Standard Schema](/reference/expect#matching-a-schema)
+apa pun, seperti Zod, Valibot, atau ArkType, lalu mengembalikan nilai dengan
+tipenya. Gunakan skema yang dipakai aplikasi untuk mem-parsing API; tes akan
+gagal jika respons API tidak lagi sesuai dengan skema tersebut.
+
+## Lokasi eksekusi API
+
+Jalur seperti `/api/users` diarahkan ke `app.url` milik target, menggunakan
+port yang dipilih untuk eksekusi jika URL menetapkan port `0`. Jadi satu file
+dapat dijalankan terhadap `app.command` yang dimulai oleh konfigurasi maupun
+terhadap preview yang sudah di-deploy. Garis miring di awal berarti jalur
+dimulai dari origin. Jika `app.url` memiliki jalur, misalnya `/shop`, tulis
+``request.get(`${app.baseUrl}/api/users`)``.
+
+Jika API mengubah state setelah merespons, gunakan
+[`expect.poll`](/reference/expect#polling-a-value) untuk membaca ulang sampai
+sebuah matcher terpenuhi.
+
+## Permintaan dengan sesi masuk
+
+`request` tidak mengirim cookie browser. Untuk memanggil API sebagai pengguna
+yang sudah masuk lewat tes, kirim cookie yang disimpan browser untuk URL itu
+di dalam header. `browser` memerlukan target web:
+
+```ts title="tests/orders-api.e2e.ts"
+import { expect } from 'e2e';
+import { test } from '@e2e-dev/web';
+
+test('lists my orders', async ({ app, browser, request }) => {
+  await app.open('/sign-in');
+  // ...sign in through the UI...
+  const cookies = await browser.cookies('/api/orders');
+  const headers = { cookie: cookies.map((c) => `${c.name}=${c.value}`).join('; ') };
+  expect(await request.get('/api/orders', { headers })).toBeOK();
+});
+```
+
+[`browser.cookies(url)`](/reference/web#cookies) hanya mengembalikan cookie
+yang akan dikirim browser ke URL tersebut. Cookie dari situs lain, seperti
+penyedia sign-in, tidak disertakan di header. Jika URL tidak diberikan,
+fungsi ini mengembalikan semua cookie browser.
+
+## Tanpa browser
+
+Pada target web, tes API tetap membuka konteks browser. Jika Anda hanya ingin
+menjalankan tes API tanpa beban browser, hilangkan engine dari target dan
+berikan URL absolut dari variabel lingkungan:
+
+```ts
+const response = await request.get(`${process.env.API_URL}/api/users`);
+```
+
+`e2e init` dapat membuatkan target tanpa engine.
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="request" icon="plug" href="/reference/request">
+    Semua method, opsi, dan kolom respons.
+  </Card>
+  <Card title="Pencocok nilai" icon="circle-check" href="/reference/expect#value-matchers">
+    Semua matcher, `toMatchSchema`, dan `expect.poll`.
+  </Card>
+  <Card title="Autentikasi" icon="key" href="/authentication">
+    Masuk sekali dan gunakan kembali sesi di setiap tes.
+  </Card>
+</CardGroup>

@@ -4,7 +4,7 @@ sidebarTitle: Notte
 description: 使用 @e2e-dev/notte 的 notte() 浏览器提供方，在 Notte 云浏览器中运行网页端测试目标。
 ---
 
-`@e2e-dev/notte` 的 `notte()` 是 [Notte](https://notte.cc) 的[浏览器提供方](/browser#hosted-browsers)。每次测试尝试都有独立的云浏览器会话。测试代码保持不变，只需修改测试目标的 `browser`。
+`@e2e-dev/notte` 的 `notte()` 是 [Notte](https://notte.cc) 的[浏览器提供方](/reference/web)。每次测试尝试都有独立的云浏览器会话。测试代码保持不变，只需修改测试目标的 `browser`。
 
 ## 设置
 
@@ -60,7 +60,7 @@ web({
 
 ## 每次尝试一个会话
 
-提供方仅支持 `attempt` 作用域的租约。Notte 会话拥有一个浏览器上下文，拒绝创建新上下文，而 `worker` 作用域需要新上下文来隔离测试。每次尝试（包括重试）都在全新会话的默认上下文中，使用第一个标签页运行。每个测试都需要等待会话启动，并受[每次尝试独立租约的限制](/browser#hosted-browsers)约束，包括会话相关限制。
+提供方仅支持 `attempt` 作用域的租约。Notte 会话拥有一个浏览器上下文，拒绝创建新上下文，而 `worker` 作用域需要新上下文来隔离测试。每次尝试（包括重试）都在全新会话的默认上下文中，使用第一个标签页运行。每个测试都需要等待会话启动，并受[每次尝试独立租约的限制](/reference/web)约束，包括会话相关限制。
 
 ## 查看和清理会话
 
@@ -83,7 +83,7 @@ web({
 ## 下一步
 
 <CardGroup cols={2}>
-  <Card title="托管浏览器" icon="globe" href="/browser#hosted-browsers">
+  <Card title="托管浏览器" icon="globe" href="/reference/web">
     了解浏览器提供方如何租用浏览器，以及 `'attempt'` 作用域的限制。
   </Card>
   <Card title="持续集成" icon="rotate" href="/ci">

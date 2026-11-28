@@ -8,7 +8,7 @@ description: Rode testes de apps mobile nos simuladores iOS e emuladores Android
 Ele inicia um dispositivo do Revyl para cada worker, instala o seu app nele e libera o dispositivo quando a execução termina.
 Use as APIs padrão `app`, `screen` e `expect` para testar os fluxos de usuário do seu app.
 Para sites, `revylBrowsers()` de `@e2e-dev/revyl/web` é um
-[provedor de navegadores](/browser#hosted-browsers) que roda cada teste no
+[provedor de navegadores](/reference/web) que roda cada teste no
 Chrome do Revyl ([Rode alvos web em navegadores](#run-web-targets-in-browsers)).
 
 ## Instale e autentique-se
@@ -232,7 +232,7 @@ com `INVALID_CONFIG`.
 - Toda tentativa, incluindo as novas tentativas, inicia uma sessão nova e
   roda no único contexto de navegador dessa sessão, na primeira aba desse
   contexto. Cada teste arca com o custo de iniciar uma sessão, e os
-  [limites de uma reserva por tentativa](/browser#pick-a-lease-scope) se
+  [limites de uma reserva por tentativa](/reference/web) se
   aplicam.
 - O `viewport` da engine web precisa ser `null`. O Revyl se recusa a
   redimensionar o navegador, então `browser.setViewport` e um `viewport`

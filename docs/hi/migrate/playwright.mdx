@@ -164,7 +164,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | Playwright | e2e |
 | --- | --- |
 | `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | `browser` पर वही; पैटर्न एक `RegExp`, ऐप URL के हिसाब से रिज़ॉल्व होने वाला URL ग्लॉब, या एक HTTP मेथड के लिए `{ method, url }` होता है |
-| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | वही, हर मेथड के ऑप्शन के लिए [`route`](/reference/web#route) देखें |
+| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | वही, हर मेथड के ऑप्शन के लिए [`route`](/reference/web) देखें |
 | `page.waitForResponse(pattern)` | उन्हीं URL ग्लॉब के साथ `browser.waitForResponse(pattern)` |
 | `page.on('dialog')`, `page.waitForEvent('download')` | `browser.onDialog('accept')` या कोई हैंडलर; `browser.waitForDownload(() => trigger)` |
 | `page.waitForEvent('popup')` | `browser.waitForPopup(() => trigger)`, जो नए टैब को एक्टिव कर देता है, [टैब](/reference/web#tabs) देखें |
@@ -349,7 +349,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | टैग के लिए `--grep @smoke`, रेगेक्स पोज़िशनल, `file:line:column` | `--tag smoke`; ग्लॉब या सीधा नाम; `file:line` |
 | `getByTitle()` | `browser.locator('[title="Close"]')`। title एक DOM एट्रीब्यूट है, इसलिए इसकी कोई `screen` क्वेरी नहीं है |
 | `page.waitForLoadState()` | अगले पेज पर जो दिखता है उस पर असर्शन। नेविगेशन `load` का इंतज़ार करता है, और हर एक्शन और असर्शन अपने नोड का |
-| `npx playwright codegen`, Inspector | [`npx e2e mcp`](/mcp-server) से कोडिंग एजेंट टेस्ट लिखते समय ऐप चला सकता है; `screen.debug()` ट्री प्रिंट करता है |
+| `npx playwright codegen`, Inspector | [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) से कोडिंग एजेंट टेस्ट लिखते समय ऐप चला सकता है; `screen.debug()` ट्री प्रिंट करता है |
 | `{ force: true }`, `{ trial: true }` | `tap({ position })` एक्शनबिलिटी जाँच छोड़ देता है; ट्रायल के लिए `toBeVisible()` और `toBeEnabled()` |
 | `ariaSnapshot()`, `toMatchAriaSnapshot()`, `toMatchSnapshot()` | `expect(await screen.tree()).toContain(...)`; एक फ़िक्स्चर फ़ाइल और `toEqual` |
 | `keyboard.insertText()`, `<label>` पर `inputValue()` | `fill()`; `getByLabel` से ढूँढा गया खुद कंट्रोल |

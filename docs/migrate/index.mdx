@@ -1,7 +1,7 @@
 ---
 title: Migrating to e2e
 sidebarTitle: Overview
-description: Move a Playwright, Cypress, Selenium, Appium, Detox, Maestro, or TesterArmy suite to e2e one test at a time.
+description: "Migrate a Playwright, Cypress, Selenium, Appium, Detox, Maestro, or TesterArmy test suite to e2e one test at a time, by hand or with a coding agent."
 ---
 
 A migration guide maps one test runner's config, API, and commands to e2e.
@@ -57,9 +57,34 @@ Each guide follows the same steps:
 ## Let an agent migrate the suite
 
 To move one test with a coding agent, copy the agent prompt at the top of
-your runner's guide. For a migration over many sessions, use the
-[`migrate-to-e2e` skill](/coding-agents#migrate-an-existing-suite). It
-records progress in a `MIGRATION.md` file and keeps the old suite running.
+your runner's guide. For a migration over many sessions, install the
+`migrate-to-e2e` skill, which the [e2e plugin](/coding-agents#install-the-skill)
+also ships:
+
+<CodeGroup>
+```bash npm
+npx skills add e2e-inc/e2e --skill migrate-to-e2e
+```
+
+```bash pnpm
+pnpm dlx skills add e2e-inc/e2e --skill migrate-to-e2e
+```
+
+```bash bun
+bunx skills add e2e-inc/e2e --skill migrate-to-e2e
+```
+</CodeGroup>
+
+Then ask the agent for `/migrate-to-e2e`. It moves the suite one slice per
+session, and the old suite keeps running beside the new tests, so you can
+stop after any session.
+
+- It reads the migration guide for your runner first, then ports the slice
+  you pick and runs each ported test three times on every target.
+- A `MIGRATION.md` file records progress for the next session.
+- It asks first, and only when you agree plants a temporary bug in the app,
+  such as a wrong checkout total, and checks whether both suites fail on it.
+- It deletes an old test only when you confirm.
 
 ## Migrate from a runner with no guide
 

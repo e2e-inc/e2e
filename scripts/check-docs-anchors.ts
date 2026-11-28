@@ -33,8 +33,17 @@ const LINK = /\]\(((?:\/[^)\s#?]*)?)(?:\?[^)\s#]*)?#([^)\s]+)\)|href="((?:\/[^"#
 const PAGE_LINK = /\]\((\/[^)\s#?]*)[^)\s]*\)|href="(\/[^"#?]*)[^"]*"/g;
 const FILE = /\.[a-z0-9]+$/i;
 
+/** A sidebar group; a group among its pages is a labelled run of pages inside it. */
+interface DocsGroup {
+  pages: (string | DocsGroup)[];
+}
+
+function groupFiles(group: DocsGroup): string[] {
+  return group.pages.flatMap((entry) => (typeof entry === 'string' ? [entry] : groupFiles(entry)));
+}
+
 interface DocsJson {
-  navigation: { tabs: { pages?: string[]; groups?: { pages: string[] }[] }[] };
+  navigation: { tabs: { pages?: string[]; groups?: DocsGroup[] }[] };
   redirects?: { source: string; destination: string }[];
 }
 
@@ -171,7 +180,7 @@ for (const page of all) {
 
 const config = JSON.parse(readFileSync(join(DOCS, 'docs.json'), 'utf8')) as DocsJson;
 for (const tab of config.navigation.tabs) {
-  for (const file of [...(tab.pages ?? []), ...(tab.groups ?? []).flatMap((group) => group.pages)]) {
+  for (const file of [...(tab.pages ?? []), ...(tab.groups ?? []).flatMap(groupFiles)]) {
     if (!existsSync(join(DOCS, `${file}.mdx`))) problems.push(`docs/docs.json: navigation page ${file} has no file`);
   }
 }

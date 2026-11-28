@@ -18,7 +18,9 @@
     "Migrate": "迁移",
     "Test API": "测试 API",
     "Project": "项目",
-    "Web": "网页端",
-    "Mobile": "移动端"
+    "Browsers": "浏览器",
+    "Devices": "设备",
+    "Browsers and devices": "浏览器与设备",
+    "Ecosystem": "生态系统"
   }
 }

@@ -45,14 +45,14 @@ Só o `browser` ou o `device` do alvo na configuração muda.
     `@e2e-dev/e2b`: sandboxes Android 16 para alvos mobile, e sandboxes Chromium para alvos web.
   </Card>
   <Card title="Revyl" icon="/images/integrations/revyl.svg" href="/integrations/revyl">
-    `@e2e-dev/revyl`: simuladores iOS e emuladores Android hospedados para alvos mobile, com o app instalado a partir de uma URL `https`.
+    `@e2e-dev/revyl`: simuladores iOS e emuladores Android hospedados para alvos mobile, com o app instalado a partir de uma URL `https`, e Chrome hospedado para alvos web.
   </Card>
 </CardGroup>
 
 ## Use um serviço sem integração
 
 Para qualquer outro serviço, escreva um pequeno provedor no seu projeto: um
-[`BrowserProvider`](/browser#hosted-browsers) para a engine web ou um
+[`BrowserProvider`](/reference/web) para a engine web ou um
 [`DeviceProvider`](/mobile#hosted-devices) para a engine mobile.
 
 Para rodar o e2e em um serviço de CI como GitHub Actions, Expo Workflows ou

@@ -7,6 +7,7 @@ import { CI_IDS } from '../../src/cli/init/choices.ts';
 import {
   CI_SERVICES,
   ciJobs,
+  targetsWithoutJob,
   configRunsScript,
   configStartsApp,
   configTargets,
@@ -308,6 +309,14 @@ describe('ciJobs', () => {
       android: { targets: ['pixel'], build: builds.android },
     });
     expect(ciJobs([{ name: 'ios', platform: 'ios' }, { name: 'ipad', platform: 'ios' }], builds)).toEqual({ ios: { targets: ['ios', 'ipad'], build: builds.ios } });
+  });
+
+  it('leaves an Electron target out of every job, and names the web job\'s targets once it does', () => {
+    const targets = [{ name: 'web', platform: 'web' }, { name: 'electron', platform: 'electron' }];
+    expect(ciJobs(targets, builds)).toEqual({ web: ['web'] });
+    expect(ciJobs([{ name: 'electron', platform: 'electron' }], builds)).toEqual({});
+    expect(targetsWithoutJob(targets)).toEqual([{ name: 'electron', platform: 'electron' }]);
+    expect(targetsWithoutJob([{ name: 'web', platform: 'web' }, { name: 'ios', platform: 'ios' }])).toEqual([]);
   });
 
   it('runs targets of other platforms, such as HTTP tests, in the web job, beside phone jobs too', () => {

@@ -1,0 +1,220 @@
+---
+title: Menjelajahi tanpa tes
+description: Berikan agent sebuah tujuan, bukan file tes. Agent menyusun langkah, menggunakan aplikasi, dan melaporkan temuannya.
+"og:image": "https://e2e.com/docs/images/og/explore.png?v=8969611dd1"
+"twitter:image": "https://e2e.com/docs/images/og/explore.png?v=8969611dd1"
+---
+
+import { Video } from '../snippets/video.jsx';
+
+`e2e explore` menjalankan agent pada aplikasi Anda dengan sebuah tujuan,
+bukan file tes. Agent menyusun langkah, menjalankannya, dan mencatat temuan
+sampai tujuan tercakup atau batas anggaran tercapai, lalu menulis penilaian.
+Fitur ini memakai model, tool, dan aturan tindakan yang sama dengan
+`agent.act()`.
+
+<Video>
+  <video src="/images/explore.mp4" aria-label="e2e explore mengendalikan aplikasi di browser headed dan melaporkan temuan di terminal." muted loop playsInline controls />
+
+  `e2e explore --headed` mengendalikan aplikasi dan melaporkan temuan selama proses berlangsung.
+</Video>
+
+## Mulai eksplorasi
+
+Sebutkan alur dan tujuan pengguna, lalu tambahkan batas jika diperlukan:
+
+<CodeGroup>
+```bash npm
+npx e2e explore 'Explore the checkout flow like a first-time buyer and report anything off'
+```
+
+```bash pnpm
+pnpm exec e2e explore 'Explore the checkout flow like a first-time buyer and report anything off'
+```
+
+```bash bun
+bunx e2e explore 'Explore the checkout flow like a first-time buyer and report anything off'
+```
+</CodeGroup>
+
+Tambahkan batas langsung di prompt (misalnya, "berhenti sebelum membuat
+pesanan"). Tanpa prompt, default `e2e explore` adalah `"Explore the app and
+find bugs"`. Langkah yang gagal tidak menghentikan eksplorasi.
+
+Jika belum memiliki `e2e.config.ts`, `explore` menjalankan wizard
+[`e2e init`](/reference/cli#e2e-init) terlebih dahulu lalu langsung memulai
+eksplorasi setelah penyiapan selesai. Di lingkungan non-interaktif seperti
+CI, perintah ini justru keluar dengan error konfigurasi yang belum tersedia.
+
+## Baca hasilnya
+
+Terminal menampilkan setiap temuan dan langkah yang selesai saat hal itu terjadi:
+
+```text
+ ❯  web  Exploring  Explore this bookshop like a careful first-time buyer: browse the catalog, ...
+   ⚑ medium issue  Home greeting exposes an unresolved userName template (/)
+   ⚑ high issue  Neuromancer shows an impossible negative stock availability (/catalog)
+   ✓ 1  Catalog browsing 31.46s · 7 actions · 4 findings
+   ⚑ high issue  Cart total does not update when Hyperion quantity increases (/cart)
+   ⚑ trivial warning  Checkout newsletter label misspells Receive (/checkout)
+   ✓ 2  Cart quantities and removal 19.47s · 4 actions · 3 findings
+   ended: the agent covered the goal
+```
+
+`issue` menggagalkan eksekusi dengan exit code 1, sedangkan `warning` tidak.
+Laporan akhir menempatkan issue paling serius di urutan pertama. Setiap temuan
+menyertakan langkah untuk mereproduksinya dan, jika memungkinkan, screenshot.
+Bandingkan setiap temuan dengan buktinya sebelum menindaklanjutinya. Untuk exit
+code lain, laporan JSON, dan jalur artefak, lihat [referensi CLI](/reference/cli#e2e-explore).
+
+## Periksa ukuran layar lain
+
+Jika engine target dapat mengubah ukuran viewport (engine web bisa), tujuan
+eksplorasi dapat meminta pemeriksaan layout pada lebar lain:
+
+<CodeGroup>
+```bash npm
+npx e2e explore 'Check the pricing page at desktop, tablet, and phone widths for broken layouts'
+```
+
+```bash pnpm
+pnpm exec e2e explore 'Check the pricing page at desktop, tablet, and phone widths for broken layouts'
+```
+
+```bash bun
+bunx e2e explore 'Check the pricing page at desktop, tablet, and phone widths for broken layouts'
+```
+</CodeGroup>
+
+## Mulai dalam keadaan masuk
+
+Tambahkan `--session <name>` dengan nama sesi yang disimpan oleh
+[tes penyiapan](/authentication):
+
+<CodeGroup>
+```bash npm
+npx e2e explore --session admin 'Explore the admin settings and find bugs'
+```
+
+```bash pnpm
+pnpm exec e2e explore --session admin 'Explore the admin settings and find bugs'
+```
+
+```bash bun
+bunx e2e explore --session admin 'Explore the admin settings and find bugs'
+```
+</CodeGroup>
+
+Explore hanya menjalankan tes penyiapan tersebut lalu memulihkan sesi.
+Explorer mengetahui bahwa aplikasi sudah dalam keadaan masuk, sehingga tidak
+merencanakan langkah sign-in.
+
+Screenshot menyamarkan field kata sandi. Nilai yang ditampilkan aplikasi di
+tempat lain akan dikirim ke model. Lihat
+[screenshot setelah pengisian secret](/reference/security#screenshots-after-a-secret-fill).
+
+## Jelajahi perubahan pull request
+
+Tambahkan `--changed-since <ref>` untuk menjelajahi perubahan pada branch.
+Planner membaca pesan commit dan diff yang sudah di-commit sejak merge base
+dengan ref tersebut. Langkah eksplorasi difokuskan pada layar yang mungkin
+terpengaruh perubahan.
+
+<CodeGroup>
+```bash npm
+npx e2e explore --changed-since origin/main
+```
+
+```bash pnpm
+pnpm exec e2e explore --changed-since origin/main
+```
+
+```bash bun
+bunx e2e explore --changed-since origin/main
+```
+</CodeGroup>
+
+Hanya cacat yang mungkin disebabkan oleh perubahan tersebut dihitung sebagai
+`issue`; issue lain yang tidak berkaitan dilaporkan sebagai `warning` dan
+tidak menggagalkan eksekusi.
+
+Tanpa prompt eksplisit, `explore` berfokus pada perubahan di diff Anda dan
+mungkin melewati perubahan yang tidak terlihat oleh pengguna (seperti PR yang
+hanya mengubah docs atau tes) jika working tree bersih dan seluruh diff dapat
+diperiksa. Eksekusi yang dilewati tetap dianggap berhasil; pesan commit,
+teks PR, dan kode pada branch dapat memengaruhi keputusan itu (baca
+`run.explore.ended` untuk membedakan eksplorasi yang dilewati dari eksplorasi
+yang selesai tanpa temuan). Lihat [Keamanan](/reference/security#mcp-and-explore)
+untuk mengetahui data yang dikirim ke model.
+
+Di GitHub Actions, jalankan `explore` di job `pull_request` tersendiri. Dengan
+[GitHub reporter](/github), temuan langsung diposting sebagai komentar PR
+(temuan dari PR fork tidak diposting; lihat [kondisi saat tidak ada yang diposting](/github#when-nothing-is-posted)).
+
+```yaml title=".github/workflows/explore.yml"
+on: pull_request
+
+jobs:
+  explore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    # An issue exits 1. Keep the findings as a review aid, not a merge gate.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # ...install, browsers
+      - run: npx e2e explore --changed-since origin/${{ github.base_ref }} --max-steps 4
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+```
+
+`fetch-depth: 0` memberikan riwayat branch dasar yang diperlukan git untuk
+membandingkan branch Anda; tanpa ini, eksekusi gagal. Pada pull request
+GitHub dan merge request GitLab, planner juga membaca judul dan deskripsi PR,
+jadi jelaskan perubahan yang seharusnya terlihat.
+
+Jaga working tree tetap bersih setelah instalasi dan build agar PR yang hanya
+mengubah docs tetap dapat dilewati (jalankan `npx`, bukan `pnpm exec`, jika
+`pnpm` mengubah lockfile Anda).
+
+<Warning>
+Jangan pernah menjalankannya pada `pull_request_target`. Job tersebut memiliki
+akses ke secret Anda, sementara model membaca diff, pesan commit, dan deskripsi
+pull request yang ditulis oleh fork.
+</Warning>
+
+## Jika eksekusi berhenti terlalu cepat
+
+Eksekusi berhenti setelah 8 langkah atau 10 menit. Agar eksplorasi dapat
+menjangkau bagian alur yang lebih jauh, naikkan `--max-steps <n>` (maksimal
+100) atau `--timeout <ms>` (maksimal `7200000`, yaitu 2 jam).
+
+Jika masih ada waktu setelah menjelajahi alur utama, agent akan kembali dengan
+input kasus tepi, filter gabungan, pemuatan ulang, dan, jika beberapa akun
+dikonfigurasi tanpa `--session`, akun lain. Eksekusi hanya berakhir lebih cepat
+jika tidak ada hal baru yang dapat dijangkau.
+
+## Pilih target dan agent
+
+Explore menggunakan target, perintah aplikasi, model, dan agent dari
+`e2e.config.ts`. Pilih dengan `--target <name>` dan `--agent <name>`. Jika
+`--target` tidak diberikan, explore menggunakan target pertama.
+
+## Jalankan eksplorasi dari kode
+
+Untuk memulai eksplorasi dari kode Anda sendiri dengan nilai konfigurasi,
+pembatalan, dan event progres, panggil
+[`explore` from `e2e/runner`](/reference/runner#explore).
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Agent dan persona" icon="users" href="/agents">
+    Agent yang dapat digunakan Explore.
+  </Card>
+</CardGroup>

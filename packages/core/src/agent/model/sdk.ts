@@ -21,8 +21,9 @@ import { providerHints, type ProviderModelRef } from './provider-hints.ts';
 import { withStallGuard } from './stall.ts';
 import { isToolChoiceViolation } from './tool-choice.ts';
 import {
-  imageTokenUpperBound,
+  inputUpperBound,
   ModelOutputInvalidError,
+  parseValidated,
   tokenUpperBound,
   type ModelAdapter,
   type ModelCall,
@@ -69,16 +70,7 @@ export function createModelAdapter(model: ResolvedModel | undefined, agentName =
       requestModel ??= withStallGuard(ai, withMissingCredentialNamed(ai, languageModel));
       const hints = providerHints(languageModel as ProviderModelRef);
       const images = call.images ?? [];
-      const inputBound =
-        tokenUpperBound(call.system) +
-        tokenUpperBound(call.prompt) +
-        images.reduce((total, image) => total + imageTokenUpperBound(image), 0);
-      if (inputBound > call.maxInputTokens) {
-        throw new AgentError(
-          'STEP_BUDGET_EXHAUSTED',
-          `model input upper bound ${inputBound} exceeds the agent's maxInputTokens ${call.maxInputTokens}`,
-        );
-      }
+      const inputBound = inputUpperBound(call, call.prompt, images);
       let issue: string | undefined;
       const schema = call.schema;
       // The policy prefix is what every judgment call of a run shares, so it
@@ -106,12 +98,7 @@ export function createModelAdapter(model: ResolvedModel | undefined, agentName =
           const result = await generateText(settings);
           finished = result;
           if (result.finishReason === 'error') throw errorFinish(result);
-          const parsed = parseJsonObject(result.text);
-          const validation = call.validate(parsed);
-          if (!validation.ok) {
-            throw new ModelOutputInvalidError(validation.issue, { rawText: result.text });
-          }
-          return { value: validation.value, usage: readUsage(result, inputBound), reasoning: result.finalStep.reasoningText };
+          return { value: parseValidated(call, result.text), usage: readUsage(result, inputBound), reasoning: result.finalStep.reasoningText };
         }
         const result = await generateText({
           ...settings,
@@ -243,24 +230,6 @@ function errorFinish(result: FinishedCall): AgentError {
     'MODEL_PROVIDER_FAILED',
     `model provider failed: the call ended on an error finish (raw finish reason: ${result.rawFinishReason ?? result.finishReason})`,
   );
-}
-
-/**
- * Parses exactly one JSON object from response text, tolerating a code fence.
- * Model text is never evaluated as code.
- */
-function parseJsonObject(text: string): unknown {
-  const trimmed = text.trim();
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```$/.exec(trimmed);
-  const body = (fenced?.[1] ?? trimmed).trim();
-  try {
-    return JSON.parse(body);
-  } catch (cause) {
-    throw new ModelOutputInvalidError('response text is not a single JSON value', {
-      rawText: text,
-      cause,
-    });
-  }
 }
 
 /**

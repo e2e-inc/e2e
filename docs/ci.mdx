@@ -1,9 +1,10 @@
 ---
 title: Continuous integration
 sidebarTitle: Setting up CI
-description: Run e2e on GitHub Actions, Vercel deployments, GitLab CI/CD, Expo Workflows, Bitrise, Codemagic, Norrix, or any CI service that runs Node.
+description: "Run e2e tests in CI on GitHub Actions, Vercel, GitLab CI/CD, Expo Workflows, Bitrise, Codemagic, Norrix, or any CI service that runs Node, with reports and sharding."
 "og:image": "https://e2e.com/docs/images/og/ci.png?v=01be716140"
 "twitter:image": "https://e2e.com/docs/images/og/ci.png?v=01be716140"
+keywords: [CI, continuous integration, pipeline, sharding]
 ---
 
 e2e works on any CI provider that runs Node 24.8+ (22.22.3+ on Node 22), or
@@ -186,7 +187,7 @@ These rules apply on each service:
 Any non-zero exit fails the job, including failed agent steps. Make the e2e
 job a required check to block merges on failures; don't rely solely on
 counting failed tests from a report file, since that misses run-level errors.
-See [Debugging a run](/debugging#read-the-failure) for the exit codes.
+See [Errors](/reference/errors#exit-codes) for the exit codes.
 
 To keep PR checks fast and predictable:
 

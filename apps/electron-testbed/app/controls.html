@@ -31,6 +31,9 @@
       <label>Attachment <input type="file" data-testid="attachment" /></label>
       <output data-testid="attachment-count">0 files</output>
       <output data-testid="attachment-text"></output>
+      <label for="">Unbound label</label>
+      <label for="">Wrapping unbound <input type="checkbox" data-testid="wrapped-ghost" aria-label="Wrapped ghost" style="position: absolute; width: 0; height: 0; margin: 0; border: 0; padding: 0" /></label>
+      <input type="checkbox" data-testid="ghost-box" aria-label="Ghost" style="position: absolute; width: 0; height: 0; margin: 0; border: 0; padding: 0" />
       <details><summary>More options</summary><select data-testid="folded-select"><option>A</option><option>B</option></select></details>
       <label>Size
         <select data-testid="size">
@@ -55,10 +58,13 @@
       <button type="button" aria-pressed="false">Italic</button>
       <section aria-label="Tips"><span tabindex="0" id="tip-anchor">Hover for tip</span> <output data-testid="tip">No tip</output></section>
       <a download="note.txt" href="data:text/plain,downloaded%20note">Download note</a>
+      <a download="NOTE.txt" href="data:text/plain,downloaded%20note">Download shouting note</a>
       <h2 aria-level="4">Levels</h2>
       <label data-testid="drawn-label"><input type="checkbox" style="position: absolute; width: 0; height: 0; margin: 0; border: 0; padding: 0" /> Drawn by its label</label>
       <div data-testid="toast">Saved draft</div>
       <progress aria-label="Sync" value="70" max="100"></progress>
+      <progress aria-label="Overfull" value="25" max="10"></progress>
+      <progress aria-label="Waiting"></progress>
       <label>Tracked <input data-testid="tracked" value="abc" /></label>
       <output data-testid="tracked-event">none</output>
       <output data-testid="scheme">unknown</output>
@@ -74,6 +80,8 @@
       <div>Order <strong>ABC123</strong></div>
       <span>Ref <em>R77</em></span>
       <div aria-hidden="true">Unlisted directions</div>
+      <div aria-hidden="true"><span data-testid="north">North gate</span> <span>South gate</span></div>
+      <div inert>Background task</div>
       <label id="replace-label"><input type="checkbox" data-testid="replace-box" /> Replace me</label>
       <input type="date" data-testid="hidden-date" style="display: none" />
       <input type="file" id="picked" style="display: none" />

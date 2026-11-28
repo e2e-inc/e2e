@@ -23,7 +23,7 @@ export interface EnginePreset {
   /** Whether the run hint sets APP_URL, for engines that drive a URL. */
   readonly needsAppUrl: boolean;
   /** The platform the target drives, which is also its name in the config, for the CI job that runs it. */
-  readonly platform: 'web' | 'ios' | 'android';
+  readonly platform: 'web' | 'ios' | 'android' | 'electron';
 }
 
 /** Builds prompt choices and scaffolds with defaults for the machine running init. */
@@ -104,6 +104,35 @@ test('Settings opens', ${options}async ({ app, screen }) => {
 `,
       needsAppUrl: false,
       platform: ios ? 'ios' : 'android',
+    },
+    {
+      id: 'electron',
+      label: 'Electron',
+      hint: 'desktop app',
+      dependencies: siblingDependency('@e2e-dev/electron'),
+      imports: ["import { electron } from '@e2e-dev/electron';"],
+      targetComment: "appPath is your app's directory or main script.",
+      target: "{ name: 'electron', engine: electron(), app: { appPath: '.' } }",
+      settings: [],
+      file: 'electron',
+      example: (options: string) => `import { test } from '@e2e-dev/electron';
+import { expect } from 'e2e';
+
+test('app opens', ${options}async ({ app, electron }) => {
+  await app.open();
+  expect(electron.windows().length).toBeGreaterThan(0);
+});
+`,
+      aiExample: (options: string) => `
+// With the model key in the environment, uncomment:
+// test('the agent drives a flow', ${options}async ({ app, agent }) => {
+//   await app.open();
+//   await agent.act('one goal in natural language');
+//   await agent.assert('one question about the window');
+// });
+`,
+      needsAppUrl: false,
+      platform: 'electron',
     },
   ] as const satisfies readonly EnginePreset[];
 }

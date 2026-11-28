@@ -716,7 +716,7 @@ await screen.pause();
   depois de `n`, `a` ou `e2e run --step rest`.
 - O tempo em pausa não conta para nenhum tempo limite.
 - Um teste não é pausado em uma sessão aberta por um `open_session {test}` do
-  [MCP](/mcp-server), em um programa sobre `@e2e-dev/core` ou `openHost`, nem
+  [MCP](/coding-agents#let-the-agent-use-the-app), em um programa sobre `@e2e-dev/core` ou `openHost`, nem
   em `run()` de `e2e/runner`. Com `CI` definida, o teste falha mesmo assim com
   `PAUSE_UNAVAILABLE` em `run()`, como em `e2e run`.
 - Em `e2e run --watch`, só a execução atual é cancelada quando `q` é

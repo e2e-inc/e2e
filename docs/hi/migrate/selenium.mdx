@@ -44,7 +44,7 @@ Java या Python टेस्ट सूट को दोबारा लिख
 | हर `driver.get` में दिया URL | टारगेट पर `app: { url }`, फिर रिलेटिव पाथ |
 | किसी स्क्रिप्ट में ऐप शुरू करना | `app: { url, command }`, [ऐप शुरू करना](/web#starting-your-app) देखें |
 | हर ब्राउज़र के लिए एक ड्राइवर | हर `web({ browser })` बिल्ड के लिए एक टारगेट: `chromium`, `firefox`, या `webkit`, न कि Chrome, Edge, या Safari |
-| Selenium Grid | पैरेलल रन के लिए `workers`, होस्टेड Chromium के लिए [ब्राउज़र प्रोवाइडर](/browser#hosted-browsers) |
+| Selenium Grid | पैरेलल रन के लिए `workers`, होस्टेड Chromium के लिए [ब्राउज़र प्रोवाइडर](/reference/web) |
 | `System.getenv` से पासवर्ड | कॉन्फ़िग में `credentials` या `secrets`, [ऑथेंटिकेशन](/authentication) देखें |
 
 ## एक फ़्लो दोबारा लिखें
@@ -110,7 +110,7 @@ test('signs in', async ({ app, screen, browser }) => {
 | `element.findElement(By.cssSelector)`, WebdriverIO `$('a').$('b')` | एक `browser.locator('a >> b')` सेलेक्टर, या चेन की हुई `getBy*` क्वेरी |
 | `ChromeOptions.addArguments`, `setBinary`, `Proxy`, `acceptInsecureCerts` | Chrome या Edge को उन फ़्लैग के साथ शुरू करें, फिर `web({ connect })` से अटैच करें |
 | `@BeforeSuite`, `@AfterSuite`, pytest सेशन-स्कोप्ड फ़िक्स्चर, WebdriverIO `onPrepare` | रन के लिए एक बार: `app.command` जो स्क्रिप्ट चलाए, या `e2e run` के आसपास एक रैपर। फ़ाइल के लिए एक बार: `beforeAll` और `afterAll`। साइन इन: टॉप-लेवल `test.setup` जो सेशन सेव करे |
-| वेब के लिए BrowserStack या Sauce Labs | आपका अपना [ब्राउज़र प्रोवाइडर](/browser#write-a-provider), अगर वेंडर CDP एंडपॉइंट देता हो |
+| वेब के लिए BrowserStack या Sauce Labs | आपका अपना [ब्राउज़र प्रोवाइडर](/reference/web), अगर वेंडर CDP एंडपॉइंट देता हो |
 | `manage().logs()`, रिक्वेस्ट लिसनर, जियोलोकेशन | `browser.addInitScript` में पेज पैच करें, `browser.route` में रिक्वेस्ट रिकॉर्ड करें |
 | `setNetworkConditions` | ऑफ़लाइन के लिए `browser.route` में रिक्वेस्ट रोकें। थ्रॉटलिंग या लेटेंसी नहीं है, वे टेस्ट Selenium में ही रहने दें |
 

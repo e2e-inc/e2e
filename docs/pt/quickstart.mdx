@@ -36,8 +36,8 @@ código no diretório do seu app:
 
 </SetupPrompt>
 
-O agente instala a [skill do e2e](/coding-agents), então prompts seguintes,
-como “adicione um teste para o checkout”, não precisam de mais configuração.
+O agente instala a [skill do e2e](/coding-agents), então prompts futuros,
+como “adicione um teste para o checkout”, não precisam de configuração extra.
 
 <Note>
 Use o Node.js 24.8 ou mais recente (22.22.3 ou mais recente no Node.js 22) ou, para testes web, o [Bun](/reference/cli#bun) 1.4.3 ou mais recente. No Windows, rode dentro do WSL. Testes mobile também
@@ -153,9 +153,9 @@ test('Settings opens', async ({ app, screen }) => {
   ```
   </CodeGroup>
 
-  O e2e baixa um navegador ou faz o boot do simulador ou do emulador, verifica
-  se o app abre e exibe o resultado. O exemplo não faz chamadas ao modelo,
-  então não precisa de login nem de chave de API.
+  O e2e baixa um navegador (ou faz o boot do seu simulador ou emulador),
+  verifica se o app abre e exibe o resultado. O exemplo não chama um modelo,
+  então você ainda não precisa de login nem de chave de API.
   </Step>
 </Steps>
 
@@ -203,9 +203,8 @@ test('Settings opens', async ({ app, screen }) => {
 
 ### Adicione um passo do agente
 
-Passe um [objetivo atômico](/core-concepts#goals) por chamada para
-`agent.act` e depois verifique o resultado. Adapte o exemplo a um fluxo do
-seu app:
+Passe para `agent.act` os passos rumo a um [objetivo](/core-concepts#goals)
+e depois verifique o resultado. Adapte o exemplo a um fluxo do seu app:
 
 <Tabs>
   <Tab title="Web">
@@ -239,14 +238,14 @@ test('the agent opens General', async ({ agent, app, device }) => {
 });
 ```
 
-  `app.open()` inicia o app do zero. Sem ele, um teste começa onde o anterior
-  deixou o dispositivo. `device.locator` aceita
+  `app.open()` inicia o app do zero para que cada teste comece limpo, em vez
+  de continuar de onde o anterior parou. `device.locator` aceita
   [seletores do agent-device](/mobile#the-device-fixture).
   </Tab>
 </Tabs>
 
-Os `params` preenchem os placeholders do objetivo. `agent.assert` avalia a
-tela. `expect` verifica um valor exato.
+Os `params` preenchem os placeholders do objetivo, `agent.assert` verifica a
+tela com o modelo e `expect` verifica um valor exato.
 
 <CodeGroup>
 ```bash npm
@@ -263,13 +262,13 @@ bunx e2e run tests/agent.e2e.ts
 </CodeGroup>
 
 Se você escolheu **Skip for now** no assistente, [adicione um modelo](/models)
-primeiro. Adicione `--headed` para assistir a um teste web. Adicione
+primeiro. Passe `--headed` para assistir à execução de um teste web, ou
 `--no-cache` para chamar o modelo em vez de reproduzir ações em cache.
 
 ### Configure o projeto
 
-O `e2e.config.ts` contém as opções. Estas são as que a maioria dos projetos
-muda depois do `init`:
+O `e2e.config.ts` contém as configurações do seu projeto. A maioria dos
+projetos ajusta algumas destas depois do `init`:
 
 | Para | Defina | Veja |
 | --- | --- | --- |

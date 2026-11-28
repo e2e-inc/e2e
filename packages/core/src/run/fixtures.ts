@@ -223,8 +223,8 @@ export function createFixtures(environment: AttemptEnvironment): AttemptFixtures
       // Built on first use: a run whose `agent.act()` steps go to a custom
       // executor may have no model at all and must not fail on a
       // MODEL_UNAVAILABLE it would never hit; a judgment still fails with it
-      // on its first call.
-      judge: lazily(() => environment.models.build(resolved.judge, name)),
+      // on its first call, unless the executor answers judgments itself.
+      judge: lazily(() => environment.models.judge(resolved, name, environment.attempt)),
       agentContext: joinAgentContext(resolved.context, environment.agentContext),
     };
     selections.set(name, selection);

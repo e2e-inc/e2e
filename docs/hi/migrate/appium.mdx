@@ -363,7 +363,7 @@ bunx e2e run --target ios --reporter list,junit
 | सेव किए हुए सेशन, `test.setup` और `{ session }` | हर टेस्ट में साइन इन करें या ऐप सीड करें। डिवाइस में सेव करने के लिए कोई सेशन नहीं होता, [वेब से क्या अलग है](/mobile#what-differs-from-the-web) देखें |
 | डिवाइस ग्रिड या हब, बाकी डिवाइस क्लाउड | कोई होस्टेड प्रोवाइडर, या आपका लिखा हुआ `DeviceProvider` |
 | `sauce:options` | एक [`DeviceProvider`](/mobile#hosted-devices) लिखें |
-| Appium Inspector | `screen.debug()`, या कोडिंग एजेंट के लाइव सेशन के लिए [`npx e2e mcp`](/mcp-server) |
+| Appium Inspector | `screen.debug()`, या कोडिंग एजेंट के लाइव सेशन के लिए [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) |
 | `driver.updateSettings()`, `appium:settings[...]` | [`mobile()`](/reference/mobile#engine) पर `snapshot`, `settle` और `transition` |
 | `.getAttribute('clickable')`, `.isClickable()` | सीधे एलिमेंट पर एक्शन करें। एक्शन तब तक इंतज़ार करता है जब तक एलिमेंट पर एक्शन न किया जा सके |
 | रिमोट Appium सर्वर (`hostname`, `port`) | e2e को उसी मशीन पर चलाएँ जहाँ डिवाइस हैं |

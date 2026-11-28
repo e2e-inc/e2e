@@ -39,7 +39,7 @@ import type {
 } from '@e2e-dev/core/engine';
 import { performAtPoint, performOnNode, pressKey, swipeWindow, typeText, type ActionContext } from './actions.ts';
 import { AppProcess, DISCARD_CLOSE_MS, RESTART_CLOSE_MS, type AppDownload, type LaunchExtra } from './app-process.ts';
-import { answerWithin, withBudget, type Budget } from './budget.ts';
+import { answerWithin, Budget, withBudget } from './budget.ts';
 import { screenshotFile, screenshotName, withPixels } from './capture.ts';
 import { DevTools } from './devtools.ts';
 import { DialogRouter, type DialogHandler } from './dialogs.ts';
@@ -97,11 +97,11 @@ export class ElectronSurface {
   // --- run and worker lifecycle ---
 
   async prepare(info: EnginePrepareInfo): Promise<void> {
-    await ensureElectronBinary(info.projectRoot, this.options.executablePath, info.log, info.signal);
+    await ensureElectronBinary(info.projectRoot, this.options.executablePath, info.env, info.log, info.signal);
   }
 
   doctor(info: EngineDoctorInfo): Promise<readonly EngineDoctorCheck[]> {
-    const executable = describeExecutable(info.projectRoot, this.options.executablePath);
+    const executable = describeExecutable(info.projectRoot, this.options.executablePath, info.env);
     const checks: EngineDoctorCheck[] = [{ id: 'electron', status: executable.status, message: executable.message }];
     const problem = info.app.appPath === undefined ? undefined : appPathProblem(info.projectRoot, info.app.appPath);
     if (problem !== undefined) checks.push({ id: 'electron-app', status: 'fail', message: problem });
@@ -112,7 +112,7 @@ export class ElectronSurface {
     this.projectRoot = info.projectRoot;
     this.appInfo = info.app;
     this.runEnv = info.env;
-    this.executable = resolveExecutable(info.projectRoot, this.options.executablePath);
+    this.executable = resolveExecutable(info.projectRoot, this.options.executablePath, info.env);
     // Checked once here, so a wrong path is one error rather than every test's launch failing.
     const problem = info.app.appPath === undefined ? undefined : appPathProblem(info.projectRoot, info.app.appPath);
     if (problem !== undefined) throw new ConfigurationError('INVALID_CONFIG', problem);
@@ -142,11 +142,14 @@ export class ElectronSurface {
     if (this.uploadsDir !== undefined) rmSync(this.uploadsDir, { recursive: true, force: true });
     this.uploadsDir = undefined;
     this.attempt = undefined;
-    // A dialog the test's last step opened has no next step to fail: the attempt's end is it.
-    await answerWithin(this.dialogs.settled(), context.timeoutMs);
-    const unhandled = this.dialogs.take();
+    // settleAttempt reported what the attempt's dialogs left; its handlers go with it.
     this.dialogs.reset();
-    if (unhandled !== undefined) throw unhandled;
+  }
+
+  /** A dialog the test's last step opened has no next step to fail: the attempt fails with it, as a step would. */
+  async settleAttempt(context: EngineCleanupContext): Promise<void> {
+    await answerWithin(this.dialogs.settled(), context.timeoutMs);
+    this.failOnDialog();
   }
 
   async dispose(context: EngineCleanupContext): Promise<void> {
@@ -156,23 +159,34 @@ export class ElectronSurface {
   // --- the app ---
 
   /** `app.open()` and `app.restart()`: quits the app if it runs and launches it again on the attempt's app data. */
-  restart(operation: OperationContext): Promise<void> {
-    return this.app.serialized(async () => {
+  async restart(operation: OperationContext): Promise<void> {
+    // A dialog the app left unanswered is this step's failure, not one of the next app's.
+    this.failOnDialog();
+    // Started now: the quit, and a launch or quit ahead in the queue, spend the operation's time too.
+    const budget = new Budget(operation, 'app.open');
+    return await this.app.serialized(async () => {
+      // A call cancelled, or out of time, while it waited for its turn does nothing to the app.
+      budget.check();
       await this.app.quit(operation, RESTART_CLOSE_MS);
-      await this.launch(operation);
+      await this.launch(operation, budget);
     });
   }
 
   /** `app.clearState()`: quits the app, empties its data, and launches it again. */
-  reset(operation: OperationContext): Promise<void> {
-    return this.app.serialized(async () => {
+  async reset(operation: OperationContext): Promise<void> {
+    this.failOnDialog();
+    const budget = new Budget(operation, 'app.clearState');
+    return await this.app.serialized(async () => {
+      budget.check();
       await this.app.quit(operation, DISCARD_CLOSE_MS);
+      // A quit that took the rest of the time leaves the app's data as it was.
+      budget.check();
       if (this.userDataDir !== undefined) {
         rmSync(this.userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
         // As private as mkdtemp made it: the app's data is no other local user's to list.
         mkdirSync(this.userDataDir, { recursive: true, mode: 0o700 });
       }
-      await this.launch(operation);
+      await this.launch(operation, budget);
     });
   }
 
@@ -183,12 +197,15 @@ export class ElectronSurface {
   }
 
   /** `electron.launch()`: a fresh launch as `app.open()` does, with `extra` added to this and every later launch of the attempt. */
-  launchWith(extra: LaunchExtra, operation: OperationContext): Promise<void> {
-    return this.app.serialized(async () => {
+  async launchWith(extra: LaunchExtra, operation: OperationContext): Promise<void> {
+    this.failOnDialog();
+    const budget = new Budget(operation, 'electron.launch');
+    return await this.app.serialized(async () => {
+      budget.check();
       // Set in turn with the launches: one already under way starts with what it was asked for.
       this.launchExtra = extra;
       await this.app.quit(operation, RESTART_CLOSE_MS);
-      await this.launch(operation);
+      await this.launch(operation, budget);
     });
   }
 
@@ -197,11 +214,11 @@ export class ElectronSurface {
     return this.projectRoot;
   }
 
-  private async launch(operation: OperationContext): Promise<void> {
+  private async launch(operation: OperationContext, budget: Budget): Promise<void> {
     const { attempt, userDataDir, executable } = this;
     if (attempt === undefined || userDataDir === undefined) throw invalidState('app.open() runs inside a test: no attempt is running');
     if (executable === undefined) throw invalidState('the electron engine was not initialized');
-    await this.app.launch({ executable, projectRoot: this.projectRoot, app: this.appInfo, env: this.runEnv, userDataDir, attempt, extra: this.launchExtra }, operation);
+    await this.app.launch({ executable, projectRoot: this.projectRoot, app: this.appInfo, env: this.runEnv, userDataDir, attempt, extra: this.launchExtra }, operation, budget);
     await this.recorder?.snap();
   }
 
@@ -633,10 +650,8 @@ export class ElectronSurface {
     const attempt = this.attempt;
     if (attempt === undefined) throw invalidState('a screenshot is taken inside a test');
     return await withBudget(operation, 'screenshot', async () => {
-      const left = this.leftApp(window);
-      if (left !== undefined) throw new ConfigurationError('POLICY_DENIED', left);
       this.artifactCounter += 1;
-      return await screenshotFile(this.devtools, window, attempt.artifactsDir, screenshotName(this.artifactCounter, label));
+      return await screenshotFile(this.devtools, window, attempt.artifactsDir, screenshotName(this.artifactCounter, label), () => this.leftApp(window));
     });
   }
 

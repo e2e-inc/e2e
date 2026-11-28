@@ -731,7 +731,7 @@ video: 'retain-on-failure', // default: 'off'
 | --- | --- |
 | 浏览器引擎，Playwright 屏幕录制 | `video/video.webm`，尝试中显示的每个页面各一个片段，后续片段为 `video/video-part<n>.webm`。[`web({ screencast })`](/reference/web#options) 设置帧尺寸和质量 |
 | 移动端引擎，agent-device | `video/video.mp4` |
-| 提供方自己的录制（[`BrowserProvider.record`](/browser#recording-on-the-provider)、[`DeviceProvider.record`](/mobile#hosted-devices)） | 提供方写入的文件，保存为 `video/<file>`：Kernel 的文件为 `video/replay.mp4`。也可以是服务保存的录制链接，以 `url` 代替 `path` 记录；运行器不会下载它 |
+| 提供方自己的录制（[`BrowserProvider.record`](/reference/web)、[`DeviceProvider.record`](/mobile#hosted-devices)） | 提供方写入的文件，保存为 `video/<file>`：Kernel 的文件为 `video/replay.mp4`。也可以是服务保存的录制链接，以 `url` 代替 `path` 记录；运行器不会下载它 |
 
 - 每个片段都带有 `startedAt`，因此 `step.startedAt - artifact.startedAt` 就是步骤在该片段中的时间偏移。
 - 录制不遮罩任何内容，并以 `redaction: 'incomplete'` 记录。

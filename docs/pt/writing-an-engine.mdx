@@ -12,7 +12,7 @@ pública `defineEngine` e são exemplos completos.
 
 Esta página constrói uma em TypeScript, servida no processo do runner. Para
 rodar uma em outro processo ou em outra linguagem, veja
-[Servidores de engine](/engine-servers).
+[Servidores de engine](/reference/engine-protocol).
 
 Engines controlam apenas interfaces de usuário. Para uma caixa de entrada, um
 banco de dados ou uma API de teste, escreva uma fixture com
@@ -265,7 +265,7 @@ delas com `context.fixture` para registrar cada chamada como um passo
 `<fixture>.<method>`, com artefatos e falhas próprios. As fixtures rodam no
 processo do runner, ao lado do teste. Um servidor de engine as recebe de
 `connectEngine`; veja
-[Mantenha o trabalho do host no cliente](/engine-servers#keep-host-work-on-the-client).
+[Mantenha o trabalho do host no cliente](/reference/engine-protocol).
 
 ```ts
 fixtures: {
@@ -334,7 +334,7 @@ tem exemplos dessas verificações.
   <Card title="Referência da engine mobile" icon="mobile-screen" href="/reference/mobile">
     Uma engine de dispositivo completa para ler junto.
   </Card>
-  <Card title="Servidores de engine" icon="network-wired" href="/engine-servers">
+  <Card title="Servidores de engine" icon="network-wired" href="/reference/engine-protocol">
     Rode a engine em outro processo, outra máquina ou outra linguagem.
   </Card>
 </CardGroup>

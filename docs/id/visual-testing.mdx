@@ -1,0 +1,149 @@
+---
+title: Perbandingan visual
+description: Bandingkan layar atau satu elemen dengan screenshot tersimpan di web, iOS, dan Android menggunakan tes yang sama.
+"og:image": "https://e2e.com/docs/images/og/visual-testing.png?v=4929216b19"
+"twitter:image": "https://e2e.com/docs/images/og/visual-testing.png?v=4929216b19"
+---
+
+import { Video } from '../snippets/video.jsx';
+
+`toHaveScreenshot` membandingkan tampilan aplikasi dengan file PNG yang
+disimpan di samping file tes. Fitur ini bekerja pada setiap engine yang
+mengambil gambar layar, sehingga satu tes dapat memeriksa browser, simulator
+iOS, dan emulator Android.
+
+<Video>
+  <video src="/images/visual-testing.mp4" aria-label="Assertion toHaveScreenshot yang gagal di terminal, lalu gambar expected, actual, dan diff ditampilkan berdampingan." muted loop playsInline controls />
+
+  Perbandingan yang gagal, lalu gambar expected, actual, dan diff.
+</Video>
+
+```ts title="tests/checkout.e2e.ts"
+import { test, expect } from 'e2e';
+
+test('checkout looks right', async ({ app, screen }) => {
+  await app.open('/checkout');
+  await expect(screen).toHaveScreenshot('checkout.png');
+  await expect(screen.getByRole('button', 'Pay')).toHaveScreenshot('pay-button.png');
+});
+```
+
+`expect(screen)` membandingkan seluruh layar. `expect(locator)` menggulir satu
+hasil yang cocok ke dalam tampilan lalu membandingkan kotaknya.
+
+## Screenshot tersimpan
+
+Commit screenshot bersama tes. Pada eksekusi pertama belum ada pembanding,
+sehingga e2e menyimpan screenshot lalu menggagalkan tes. Periksa gambarnya,
+commit, lalu jalankan kembali.
+
+```text
+tests/checkout.e2e.ts
+tests/checkout.e2e.ts-snapshots/checkout-web-linux.png
+tests/checkout.e2e.ts-snapshots/checkout-ios-darwin.png
+tests/checkout.e2e.ts-snapshots/pay-button-web-linux.png
+```
+
+Setiap target dan sistem operasi memiliki file sendiri karena font dan hasil
+render berbeda. Jika nama tidak ditentukan, file memakai nama tes:
+`checkout-looks-right-1-web-linux.png`.
+
+Saat aplikasi sengaja diubah, perbarui screenshot yang berbeda dan simpan
+screenshot yang belum ada. Setelah itu eksekusi akan berhasil:
+
+<CodeGroup>
+```bash npm
+npx e2e run --update-snapshots
+```
+
+```bash pnpm
+pnpm exec e2e run --update-snapshots
+```
+
+```bash bun
+bunx e2e run --update-snapshots
+```
+</CodeGroup>
+
+## Di CI
+
+Ambil screenshot di mesin yang melakukan render di CI: runner Linux untuk web
+dan Android, serta runner macOS dengan simulator yang sama untuk iOS.
+
+Tanpa `--update-snapshots`, CI tidak pernah menulis ke repo Anda. Snapshot yang
+hilang menggagalkan tes dan menyimpan gambar baru di
+`.e2e/results/.../snapshots/` agar dapat Anda unduh dan commit. Untuk membuat
+ulang semua baseline sekaligus, tambahkan workflow manual dengan
+`--update-snapshots`:
+
+```yaml title=".github/workflows/screenshots.yml"
+name: Update screenshots
+on: workflow_dispatch
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      # the same checkout, setup, and install steps as the test job
+      - run: npx e2e run --update-snapshots
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screenshots
+          path: tests/**/*-snapshots/
+```
+
+Unduh artefak ke proyek, periksa gambarnya, lalu commit.
+
+## Jika gagal
+
+Matcher mengambil screenshot sampai ada yang cocok atau sampai batas waktu
+assertion (`assertionTimeout`, 5 detik) tercapai. Jika tidak cocok, error
+menampilkan jumlah piksel yang berbeda dan tiga gambar pada hasil tes:
+`-diff` dengan piksel yang berubah berwarna merah, `-actual`, dan `-expected`.
+
+```text
+2173 pixels (0.24% of the image) differ from tests/home.e2e.ts-snapshots/screen-web-darwin.png; run with --update-snapshots to keep this run's
+diff: .e2e/results/home-1a2b3c4d5e6f7a8b/attempt-1/screenshots/screen-diff.png
+actual: .e2e/results/home-1a2b3c4d5e6f7a8b/attempt-1/screenshots/screen-actual.png
+expected: .e2e/results/home-1a2b3c4d5e6f7a8b/attempt-1/screenshots/screen-expected.png
+```
+
+Untuk menyimpan screenshot, matcher menunggu dua gambar berturut-turut yang
+sama. Layar yang tidak pernah stabil akan menyebabkan tes gagal, dengan dua
+screenshot terakhir dan diff-nya.
+
+## Toleransi dan mask
+
+```ts
+await expect(screen).toHaveScreenshot('dashboard.png', {
+  maxDiffPixelRatio: 0.01,
+  mask: [screen.getByTestId('last-updated')],
+});
+```
+
+| Opsi | Bawaan | Keterangan |
+| --- | --- | --- |
+| `threshold` | `0.2` | Seberapa jauh warna satu piksel boleh berubah dan tetap dianggap sama, dari 0 sampai 1 |
+| `maxDiffPixels` | `0` | Jumlah piksel yang boleh berbeda |
+| `maxDiffPixelRatio` | `0` | Proporsi piksel yang boleh berbeda, dari 0 sampai 1 |
+| `mask` | tidak ada | Locator yang ditutupi sebelum perbandingan untuk konten yang berubah antar-eksekusi |
+| `maskColor` | `#ff00ff` | Warna kotak mask |
+| `timeout` | `assertionTimeout` | Anggaran waktu assertion dalam milidetik |
+
+Di web, e2e menghentikan animasi dan menyembunyikan kursor teks. Di iOS dan
+Android, e2e menjaga status bar tetap sama agar jam dan baterai cocok pada
+setiap eksekusi.
+
+e2e menyamarkan field aman pada setiap screenshot, termasuk setelah secret
+diisikan. Jika engine tidak dapat memastikan semua field aman telah disamarkan,
+assertion akan gagal alih-alih menyimpan gambar tanpa mask.
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Matcher screenshot" icon="circle-check" href="/reference/expect#screenshot-matchers">
+    `toHaveScreenshot` dan `.not`, beserta semua opsinya.
+  </Card>
+  <Card title="Keamanan" icon="shield-halved" href="/security">
+    Cara menjaga secret agar tidak masuk ke laporan dan input teks model, serta hal yang masih dapat bocor.
+  </Card>
+</CardGroup>

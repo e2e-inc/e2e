@@ -196,13 +196,22 @@ function readOnlyOf(node: AXNode | undefined, facts: DomFacts | undefined, role:
   return node?.properties?.some((entry) => entry.name === 'editable') === true ? false : undefined;
 }
 
-/** As written, as the web reads it: Chromium clamps aria-valuenow, drops aria-valuetext, and makes up a midpoint. */
-function rangeValueOf(facts: DomFacts | undefined): string {
+/**
+ * A range widget's value as the web reads it. An ARIA value reads as written,
+ * since Chromium clamps aria-valuenow, drops aria-valuetext, and makes up a
+ * midpoint; a blank one is none. Without one, a native progress or meter
+ * element with a value attribute reads its `.value`, clamped to its range,
+ * which is what Chromium reports for it. A slider or spinbutton with no value
+ * reads as empty; any other range widget, an indeterminate progress element
+ * among them, has none.
+ */
+function rangeValueOf(node: AXNode | undefined, facts: DomFacts | undefined, role: string): string | undefined {
   const filled = (value: string | undefined): string | undefined => (value === undefined || value.trim() === '' ? undefined : value);
   const attributes = facts?.attributes ?? {};
-  // A native progress or meter element's value is its value attribute; an empty attribute counts as none.
-  const native = facts?.nodeName === 'PROGRESS' || facts?.nodeName === 'METER' ? filled(attributes['value']) : undefined;
-  return filled(attributes['aria-valuetext']) ?? filled(attributes['aria-valuenow']) ?? native ?? '';
+  const aria = filled(attributes['aria-valuetext']) ?? filled(attributes['aria-valuenow']);
+  if (aria !== undefined) return aria;
+  const native = (facts?.nodeName === 'PROGRESS' || facts?.nodeName === 'METER') && 'value' in attributes ? stringOf(node?.value) : undefined;
+  return native ?? (role === 'slider' || role === 'spinbutton' ? '' : undefined);
 }
 
 function valueOf(node: AXNode | undefined, facts: DomFacts | undefined, role: string, policy: ProjectionPolicy): string | undefined {
@@ -213,7 +222,7 @@ function valueOf(node: AXNode | undefined, facts: DomFacts | undefined, role: st
   if (isSecure(facts)) return undefined;
   // A field's value is the element's own, whatever role Chromium gives it (a date input is no textbox).
   if (isTextField(facts)) return (facts!.nodeName === 'INPUT' ? facts!.inputValue : facts!.textValue) ?? '';
-  if (RANGE_ROLES.has(role)) return rangeValueOf(facts);
+  if (RANGE_ROLES.has(role)) return rangeValueOf(node, facts, role);
   // An editing host or an ARIA widget has no DOM value: its value is the one Chromium computes. A combobox that only
   // shows its choice (a div) has none, as on the web; Chromium would echo its text.
   if (VALUE_ROLES.has(role) && (role !== 'combobox' || isEditingHost(facts))) return stringOf(node?.value) ?? '';

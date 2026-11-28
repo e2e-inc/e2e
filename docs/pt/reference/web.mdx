@@ -95,7 +95,7 @@ web({ browser: 'firefox' }); // default: 'chromium'
   [Lightpanda](/integrations/lightpanda) ou o [Moli](/integrations/moli).
 - Um provedor com `scope: 'attempt'` usa um contexto persistente, com os
   limites descritos em [Recuperar um transporte CDP](#recovering-a-cdp-transport).
-- [Navegadores hospedados](/browser#hosted-browsers) traz o contrato de
+- [Navegadores hospedados](/reference/web#hosted-browsers) traz o contrato de
   `BrowserProvider` e um provedor de exemplo.
 
 | Lança | Quando |
@@ -655,16 +655,22 @@ await browser.waitForURL('**/checkout');
 await browser.waitForURL(/\/orders\/\d+$/, { timeout: 15_000 });
 ```
 
-- Uma string é um glob, lido como o Playwright lê um glob de URL: `*`
-  corresponde dentro de um segmento do caminho, `**` atravessa `/`, `{a,b}`
+- Uma string usa a gramática de glob de URL do Playwright: `*` corresponde
+  dentro de um segmento do caminho, `**` atravessa `/`, `{a,b}`
   corresponde a qualquer um dos dois, e `\` escapa o próximo caractere. `?` é
   literal, então uma query string é lida como escrita, e uma string sem curinga
   corresponde exatamente àquela URL. Um glob é resolvido em relação à URL base,
   a menos que comece com `*` ou seja uma URL absoluta, como
   `https://x.test/**` ou `about:blank`, e o esquema e o host de um glob
-  resolvido correspondem sem diferenciar maiúsculas de minúsculas. Texto não ASCII e
-  espaços no caminho e na query string de um glob correspondem à URL como o navegador a codifica. A string vazia
-  corresponde a qualquer URL.
+  resolvido correspondem sem diferenciar maiúsculas de minúsculas. Os globs
+  correspondem a texto não ASCII e a espaços em caminhos e query strings na
+  forma como o navegador os codifica.
+  Em strings que usam sintaxe de glob, o e2e também faz `"`, `<` e `>`
+  corresponderem às formas codificadas deles em caminhos, query strings e
+  fragmentos. O mesmo vale para `` ` `` em caminhos e fragmentos, `^` e as chaves
+  escapadas `\{` e `\}` em caminhos, e `'` em query strings de URLs especiais, como
+  HTTP e HTTPS.
+  A string vazia corresponde a qualquer URL.
 - `expect(browser).toHaveURL` lê `*` e `{` literalmente, como o do Playwright;
   [`route`](#route), `unroute`, `waitForResponse` e `waitForRequest` leem os
   mesmos globs que esta espera.
@@ -701,7 +707,7 @@ nome, texto, rótulo e atributo do próprio Playwright, e cada nó é encontrado
 uma vez. Um controle que a árvore observada lista dentro de um root fechado é
 resolvido e aceita ações e leituras. `locator`, `frameLocator` e
 `filter({ hasText })` mantêm o alcance do Playwright e não passam de um root
-fechado; o [guia do navegador](/browser#shadow-dom) tem os detalhes.
+fechado; o [guia do navegador](/reference/web#shadow-dom) tem os detalhes.
 </Note>
 
 #### `frameLocator`
@@ -716,7 +722,7 @@ await payment.getByLabel('Card number').fill('4242424242424242');
 Retorna um `FrameScreen`, um `Screen` cujas consultas respondem de dentro do
 frame. Use o `locator` do frame só quando o controle não tem nome acessível,
 rótulo, placeholder nem test id. O
-[guia do navegador](/browser#reach-into-an-iframe) mostra quando isso se aplica.
+[guia do navegador](/reference/web#framelocator) mostra quando isso se aplica.
 
 ```ts
 export interface FrameScreen extends Screen {
@@ -1310,7 +1316,7 @@ const file = await browser.waitForDownload(() =>
 - Use `absolutePath` com APIs de arquivo para inspecionar o conteúdo, inclusive
   em um navegador hospedado.
 - Em um navegador hospedado, o arquivo volta pelo
-  [`downloads`](/browser#downloads-on-the-provider) do provedor.
+  [`downloads`](/reference/web#downloads-on-the-provider) do provedor.
 - A espera inclui o tempo do próprio gatilho.
 
 | Lança | Quando |
@@ -1640,6 +1646,11 @@ export interface WebOptions {
    */
   readonly browser?: BrowserName | BrowserProvider;
   /**
+   * Whether a locally launched Chromium runs with its OS sandbox on; default
+   * `true` on macOS and Windows, `false` on Linux.
+   */
+  readonly chromiumSandbox?: boolean;
+  /**
    * Initial viewport of every attempt's page; default 1280 by 720. `null`
    * emulates no size: the page fills the browser window, whatever size the
    * window has (a hosted browser's live view, a headed run), and
@@ -1917,6 +1928,6 @@ export type JsonValue =
 
 ## Relacionados
 
-O [guia do navegador](/browser) mostra estes membros em receitas e cobre os
-[navegadores hospedados](/browser#hosted-browsers). As operações portáveis
+O [guia do navegador](/web) mostra estes membros em receitas e cobre os
+[navegadores hospedados](/reference/web#hosted-browsers). As operações portáveis
 ficam na fixture [`app`](/reference/app).

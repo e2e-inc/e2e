@@ -212,10 +212,22 @@ class TreeProjector {
   placeAbsent(roots: Draft[]): void {
     const wanted = new Set(this.options.keep ?? []);
     if (this.policy.hiddenTestIds) {
+      // Content under aria-hidden or inert is out of the accessibility tree and on screen all the same: a text query
+      // finds it, as on the web, on the element that holds the text, each one under the element that hides them. It
+      // has no role, so a role query still does not.
+      const hides = (facts: DomFacts): boolean => facts.attributes['aria-hidden']?.toLowerCase() === 'true' || facts.attributes['inert'] !== undefined;
+      const hiding = new Set<number>();
+      for (const [backend, facts] of this.snapshot.elements()) if (hides(facts)) hiding.add(backend);
+      /** Whether the element hides itself or sits under one that does; a page that hides nothing is not walked. */
+      const hidden = (backend: number, index: number): boolean => {
+        if (hiding.size === 0) return false;
+        if (hiding.has(backend)) return true;
+        for (const ancestor of this.snapshot.ancestors(index)) if (hiding.has(ancestor)) return true;
+        return false;
+      };
       for (const [backend, facts] of this.snapshot.elements()) {
-        // Content under aria-hidden is out of the accessibility tree and on screen all the same: a text query finds
-        // it, as on the web, on the element that hides it. It has no role, so a role query still does not.
-        const offTree = facts.attributes['aria-hidden']?.toLowerCase() === 'true' && facts.bounds !== undefined;
+        // Elements only: their text runs fold into them, so a locator answers with the element that holds the text.
+        const offTree = !facts.nodeName.startsWith('#') && facts.bounds !== undefined && hidden(backend, facts.index);
         if (facts.attributes[this.testIdAttribute] !== undefined || offTree) wanted.add(backend);
       }
     }

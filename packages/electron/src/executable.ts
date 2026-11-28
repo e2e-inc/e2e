@@ -25,8 +25,11 @@ interface ElectronPackage {
   readonly override?: string;
 }
 
+/** The environment a lookup reads and a download runs in: the run's, which a host may hand other than this process's own. */
+type RunEnv = Readonly<Record<string, string | undefined>>;
+
 /** The project's `electron` package, or undefined when the project has none. */
-function electronPackage(projectRoot: string): ElectronPackage | undefined {
+function electronPackage(projectRoot: string, env: RunEnv): ElectronPackage | undefined {
   let manifest: string;
   try {
     manifest = createRequire(path.join(projectRoot, 'package.json')).resolve('electron/package.json');
@@ -39,7 +42,7 @@ function electronPackage(projectRoot: string): ElectronPackage | undefined {
   const pathFile = path.join(directory, 'path.txt');
   const relative = existsSync(pathFile) ? readFileSync(pathFile, 'utf8').trim() : '';
   // Electron's own index.js takes the binary from ELECTRON_OVERRIDE_DIST_PATH when it is set (a build of your own, Nix).
-  const override = process.env['ELECTRON_OVERRIDE_DIST_PATH'];
+  const override = env['ELECTRON_OVERRIDE_DIST_PATH'];
   const overridden = override !== undefined && override !== '';
   const binary = overridden ? path.join(override, relative === '' ? 'electron' : relative) : relative === '' ? undefined : path.join(directory, 'dist', relative);
   return { directory, binary: binary !== undefined && existsSync(binary) ? binary : undefined, version, ...(overridden && binary !== undefined ? { override: binary } : {}) };
@@ -139,7 +142,7 @@ type Executable =
   | { readonly kind: 'undownloaded'; readonly package: ElectronPackage }
   | { readonly kind: 'misconfigured'; readonly problem: string };
 
-function locateExecutable(projectRoot: string, executablePath: string | undefined, platform: NodeJS.Platform): Executable {
+function locateExecutable(projectRoot: string, executablePath: string | undefined, env: RunEnv, platform: NodeJS.Platform): Executable {
   if (executablePath !== undefined) {
     const resolved = path.resolve(projectRoot, executablePath);
     if (!isExecutableFile(resolved, platform)) {
@@ -151,7 +154,7 @@ function locateExecutable(projectRoot: string, executablePath: string | undefine
     }
     return { kind: 'named', file: resolved };
   }
-  const installed = electronPackage(projectRoot);
+  const installed = electronPackage(projectRoot, env);
   if (installed === undefined) {
     return {
       kind: 'misconfigured',
@@ -167,8 +170,8 @@ function locateExecutable(projectRoot: string, executablePath: string | undefine
 }
 
 /** The executable a launch starts, checked: an `executablePath` that runs, or the project's downloaded Electron binary. */
-export function resolveExecutable(projectRoot: string, executablePath: string | undefined, platform: NodeJS.Platform = process.platform): string {
-  const found = locateExecutable(projectRoot, executablePath, platform);
+export function resolveExecutable(projectRoot: string, executablePath: string | undefined, env: RunEnv, platform: NodeJS.Platform = process.platform): string {
+  const found = locateExecutable(projectRoot, executablePath, env, platform);
   switch (found.kind) {
     case 'named':
     case 'installed':
@@ -188,25 +191,25 @@ export function resolveExecutable(projectRoot: string, executablePath: string | 
  * with `executablePath`, or with the binary in place; a wrong path fails
  * here, once for the run rather than once per test.
  */
-export async function ensureElectronBinary(projectRoot: string, executablePath: string | undefined, log: (line: string) => void, signal: AbortSignal): Promise<void> {
-  const found = locateExecutable(projectRoot, executablePath, process.platform);
+export async function ensureElectronBinary(projectRoot: string, executablePath: string | undefined, env: RunEnv, log: (line: string) => void, signal: AbortSignal): Promise<void> {
+  const found = locateExecutable(projectRoot, executablePath, env, process.platform);
   if (found.kind === 'misconfigured') throw new ConfigurationError('INVALID_CONFIG', found.problem);
   if (found.kind !== 'undownloaded') return;
-  await download(found.package, log, signal);
-  if (electronPackage(projectRoot)?.binary === undefined) {
+  await download(found.package, env, log, signal);
+  if (electronPackage(projectRoot, env)?.binary === undefined) {
     throw new InfrastructureError('ELECTRON_INSTALL_FAILED', `electron ${found.package.version}'s install.js finished, but its binary is still missing at ${found.package.directory}`);
   }
 }
 
 /** Runs the package's own `install.js` (what its first `require` would run), its output sent to `log`. */
-async function download(installed: ElectronPackage, log: (line: string) => void, signal: AbortSignal): Promise<void> {
+async function download(installed: ElectronPackage, env: RunEnv, log: (line: string) => void, signal: AbortSignal): Promise<void> {
   const script = path.join(installed.directory, 'install.js');
   if (!existsSync(script)) {
     throw new InfrastructureError('ELECTRON_INSTALL_FAILED', `electron ${installed.version} at ${installed.directory} has no binary and no install.js to download it with; reinstall the electron package`);
   }
   log(`downloading the Electron ${installed.version} binary`);
   const failure = await new Promise<string | undefined>((resolve) => {
-    const child = spawn(process.execPath, [script], { cwd: installed.directory, stdio: ['ignore', 'pipe', 'pipe'], signal });
+    const child = spawn(process.execPath, [script], { cwd: installed.directory, env, stdio: ['ignore', 'pipe', 'pipe'], signal });
     let tail = '';
     const read = (chunk: Buffer): void => {
       const text = chunk.toString('utf8');
@@ -222,8 +225,8 @@ async function download(installed: ElectronPackage, log: (line: string) => void,
 }
 
 /** For `e2e doctor`: what a run would start, without downloading anything. */
-export function describeExecutable(projectRoot: string, executablePath: string | undefined, platform: NodeJS.Platform = process.platform): { readonly status: 'pass' | 'warn' | 'fail'; readonly message: string } {
-  const found = locateExecutable(projectRoot, executablePath, platform);
+export function describeExecutable(projectRoot: string, executablePath: string | undefined, env: RunEnv, platform: NodeJS.Platform = process.platform): { readonly status: 'pass' | 'warn' | 'fail'; readonly message: string } {
+  const found = locateExecutable(projectRoot, executablePath, env, platform);
   switch (found.kind) {
     case 'named':
       return { status: 'pass', message: `starts ${found.file}` };

@@ -10,7 +10,7 @@ description: वेब टारगेट को Lightpanda में चला�
 नया लिखा गया है, बिना Chromium के। यह मिलीसेकंड में शुरू हो जाता है, Chrome की
 मेमोरी का छोटा-सा हिस्सा लेता है, और Chrome DevTools Protocol समझता है।
 `@e2e-dev/lightpanda` का `lightpanda()` इसके लिए एक
-[ब्राउज़र प्रोवाइडर](/browser#hosted-browsers) है। हर वर्कर स्लॉट को अपना
+[ब्राउज़र प्रोवाइडर](/reference/web) है। हर वर्कर स्लॉट को अपना
 `lightpanda serve` मिलता है। यह रन शुरू होने पर किसी खाली पोर्ट पर शुरू होता है,
 और रन ख़त्म होने पर बंद हो जाता है। टेस्ट और CI वैसे ही रहते हैं। कॉन्फ़िग में
 सिर्फ़ टारगेट का `browser` बदलता है।
@@ -141,7 +141,7 @@ e2e टेस्टबेड के लोकल सूट में से Ligh
   `check`, `select`, `press`, और कीबोर्ड इनपुट।
 - टेक्स्ट, वैल्यू, काउंट और स्टेट पर पोलिंग असर्शन।
 - `browser.route` मॉक और रिक्वेस्ट का इंतज़ार।
-- `browser.waitForDownload` के साथ [डाउनलोड](/browser#download-a-file)।
+- `browser.waitForDownload` के साथ [डाउनलोड](/reference/web)।
 - टेस्ट से `browser.setCookies`।
 - [सेशन](/authentication): `session.save` के साथ `test.setup`, और टेस्ट पर
   `session:`।
@@ -166,12 +166,12 @@ Lightpanda की तरफ़ हैं, और उसका
 
 | फ़ीचर | क्या होता है | क्यों |
 | ------- | ------------ | --- |
-| [डायलॉग](/browser#handle-a-dialog) | `browser.onDialog` चलता है, फिर `ENGINE_FAILURE` के साथ टेस्ट फ़ेल कर देता है: `Page.handleJavaScriptDialog` बताता है कि कोई डायलॉग नहीं है। | Lightpanda `alert`, `confirm` (`false`) और `prompt` (`null`) का जवाब खुद दे देता है, क्लाइंट के कुछ कर पाने से पहले। |
+| [डायलॉग](/reference/web) | `browser.onDialog` चलता है, फिर `ENGINE_FAILURE` के साथ टेस्ट फ़ेल कर देता है: `Page.handleJavaScriptDialog` बताता है कि कोई डायलॉग नहीं है। | Lightpanda `alert`, `confirm` (`false`) और `prompt` (`null`) का जवाब खुद दे देता है, क्लाइंट के कुछ कर पाने से पहले। |
 | ऐसे बटन से [फ़ाइल अपलोड](/reference/screen#setinputfiles) जो छिपा हुआ फ़ाइल इनपुट खोलता है | बटन पर `setInputFiles` एक्शन टाइमआउट के बाद फ़ेल होता है: क्लिक से कोई फ़ाइल चूज़र नहीं खुलता। सीधे इनपुट पर `setInputFiles` काम करता है। | Lightpanda `Page.setInterceptFileChooserDialog` ले लेता है, लेकिन `Page.fileChooserOpened` कभी नहीं भेजता। |
-| [आईफ़्रेम](/browser#reach-into-an-iframe) | `frameLocator` को कुछ नहीं मिलता। | आईफ़्रेम डिफ़ॉल्ट रूप से लोड नहीं होते। `loadResources: ['stylesheet', 'iframe']` उन्हें लोड करता है। तब क्वेरी और फ़िल काम करते हैं, लेकिन फ़्रेम के बनाए एलिमेंट पर होस्ट पेज का लिसनर नहीं चलता। |
+| [आईफ़्रेम](/reference/web) | `frameLocator` को कुछ नहीं मिलता। | आईफ़्रेम डिफ़ॉल्ट रूप से लोड नहीं होते। `loadResources: ['stylesheet', 'iframe']` उन्हें लोड करता है। तब क्वेरी और फ़िल काम करते हैं, लेकिन फ़्रेम के बनाए एलिमेंट पर होस्ट पेज का लिसनर नहीं चलता। |
 | ड्रैग एंड ड्रॉप: `locator.swipeTo`, या किसी ड्रॉप टारगेट तक `screen.swipe` पाथ | पॉइंटर हिलता है, लेकिन कुछ ड्रॉप नहीं होता: ड्रैग किया गया नोड वहीं रहता है। | Lightpanda में माउस इनपुट से अभी HTML ड्रैग शुरू नहीं होता। |
 | `browser.setViewport` | पेज नया साइज़ नापता है, लेकिन `resize` लिसनर कभी नहीं चलता। | कोई `resize` इवेंट डिस्पैच नहीं होता। |
-| [मीडिया एम्युलेशन](/reference/web#media-emulation): `colorScheme`, `reducedMotion`, `browser.emulateMedia` | पेज `light` और फ़ुल मोशन ही बताता रहता है। | `Emulation.setEmulatedMedia` से `matchMedia` का जवाब नहीं बदलता। |
+| [मीडिया एम्युलेशन](/reference/web): `colorScheme`, `reducedMotion`, `browser.emulateMedia` | पेज `light` और फ़ुल मोशन ही बताता रहता है। | `Emulation.setEmulatedMedia` से `matchMedia` का जवाब नहीं बदलता। |
 | स्क्रॉलिंग: `scrollIntoView`, `scrollUntilVisible`, और "outside of the viewport" वाले नोड पर कोई एक्शन | स्क्रॉल कुछ नहीं करता, और actionability का इंतज़ार टाइमआउट हो सकता है। | लेआउट के बिना कोई स्क्रॉल पोज़ीशन ही नहीं होती जिसे हिलाया जाए। सादा रेंडर हर ब्लॉक को एक ही कॉलम में ऊपर से नीचे रखता है। इसलिए Chrome के मुकाबले पेज का ज़्यादा हिस्सा फ़ोल्ड के नीचे होता है, और वहाँ की किसी चीज़ तक पहुँचा नहीं जा सकता। |
 | `<canvas>` कंटेंट: 2D कॉन्टेक्स्ट से बना पिन, कीपैड या चार्ट | स्क्रीनशॉट में कोई ड्रॉइंग नहीं दिखती, और कैनवस कोई जगह नहीं लेता। एजेंट के पिक्सल टियर (`tap_at`, `type_at`, विज़न परख) को देखने के लिए कुछ नहीं मिलता। | `getContext('2d')` ऐसा कॉन्टेक्स्ट लौटाता है जिसमें ऐसा कुछ रिकॉर्ड नहीं होता जिसे पेंटर बनाए। |
 

@@ -1,6 +1,6 @@
 ---
 title: From Playwright
-description: Run e2e alongside Playwright and migrate tests one file at a time.
+description: "Migrate from Playwright to e2e by running both side by side, porting the config, and moving tests one file at a time with a map of each Playwright API."
 "og:image": "https://e2e.com/docs/images/og/migrate/playwright.png?v=e01f34cedb"
 "twitter:image": "https://e2e.com/docs/images/og/migrate/playwright.png?v=e01f34cedb"
 ---
@@ -32,7 +32,7 @@ at a time. `@e2e-dev/web` brings its own pinned `playwright-core`, so your
 
 </SetupPrompt>
 
-For a migration that spans several sessions, the [`migrate-to-e2e` skill](/coding-agents#migrate-an-existing-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
+For a migration that spans several sessions, the [`migrate-to-e2e` skill](/migrate#let-an-agent-migrate-the-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
 
 ## Port the config
 
@@ -377,7 +377,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | `locator.locator(selector)` | A `screen` query inside the scope, such as `card.getByRole('button', { name: 'Close' })`, or one `browser.locator` selector, such as `'.card >> .close'` |
 | `getByTitle()` | `browser.locator('[title="Close"]')`. A title is a DOM attribute, so it has no `screen` query |
 | `page.waitForLoadState()` | An assertion on what the next page shows. A navigation waits for `load`, and each action and assertion waits for its node |
-| `npx playwright codegen`, the Inspector | [`npx e2e mcp`](/mcp-server) lets a coding agent drive the app while it writes the test; `screen.debug()` prints the tree |
+| `npx playwright codegen`, the Inspector | [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) lets a coding agent drive the app while it writes the test; `screen.debug()` prints the tree |
 | `{ force: true }`, `{ trial: true }` | `tap({ position })` skips the actionability checks; `toBeVisible()` and `toBeEnabled()` for a trial |
 | `ariaSnapshot()`, `toMatchAriaSnapshot()`, `toMatchSnapshot()` | `expect(await screen.tree()).toContain(...)`; a fixture file and `toEqual` |
 | `keyboard.insertText()`, `inputValue()` on a `<label>` | `fill()`; the control itself, located with `getByLabel` |
@@ -437,8 +437,8 @@ purpose. Use the workaround, or keep the test in Playwright.
 A suite that drives an Electron app with Playwright's `_electron` moves to the
 [Electron engine](/electron), not the web one: a target with
 `engine: electron()` and `app: { appPath: '.' }`, and `test` from
-`@e2e-dev/electron`. `e2e init` has no Electron preset yet, so write the
-config by hand.
+`@e2e-dev/electron`. `npx e2e init --yes --engine electron` writes that config and
+an example test.
 
 | Playwright | e2e |
 | --- | --- |

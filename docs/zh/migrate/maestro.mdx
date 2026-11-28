@@ -185,7 +185,7 @@ test('asks for the email', async ({ app, agent, screen }) => {
 | `retryTapIfNoChange` | 断言结果，然后在测试中再次点击。盲目执行第二次点击可能触发控件两次 |
 | `waitToSettleTimeoutMs` | 操作后使用带独立 `timeout` 的断言；该断言就是等待 |
 | `toggleAirplaneMode`、`toggleDarkMode` | 设置所需状态：`device.setAirplaneMode(true)`、`device.setAppearance('dark')` |
-| Maestro Studio | 通过 [`npx e2e mcp`](/mcp-server) 使用编码智能体，或将 `screen.debug()` 与 `npx e2e run --watch` 或 `--step` 配合使用 |
+| Maestro Studio | 通过 [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) 使用编码智能体，或将 `screen.debug()` 与 `npx e2e run --watch` 或 `--step` 配合使用 |
 | `waitForAnimationToEnd` | 对动画结束后出现的内容调用 `await expect(locator).toBeVisible()` |
 | `below`、`above`、`leftOf`、`rightOf` | `getByLabel`、测试 ID、共享容器上的 `filter({ has })`，或 `agent.act` 目标 |
 

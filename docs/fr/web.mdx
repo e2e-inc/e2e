@@ -6,7 +6,7 @@ description: Indiquez au moteur web l'URL de votre app ou laissez le runner la d
 ---
 
 `@e2e-dev/web` exécute les tests dans un navigateur sur l'URL de votre app. Pour les routes,
-les cookies, les boîtes de dialogue et les téléchargements, consultez [Utiliser le navigateur](/browser).
+les cookies, les boîtes de dialogue et les téléchargements, consultez [Utiliser le navigateur](/reference/web).
 
 ## Démarrer votre app
 
@@ -57,7 +57,7 @@ du répertoire temporaire, `inheritEnv` et `env`.
 
 | Option | Rôle |
 | --- | --- |
-| `reuseExisting: true` | Utilise un serveur déjà en cours d'exécution, par exemple celui qu'une [session MCP](/mcp-server#run-tests-next-to-a-session) a démarré. En CI, e2e l'ignore, et un serveur qui répond déjà donne `APP_ALREADY_RUNNING`. |
+| `reuseExisting: true` | Utilise un serveur déjà en cours d'exécution, par exemple celui qu'une [session MCP](/coding-agents) a démarré. En CI, e2e l'ignore, et un serveur qui répond déjà donne `APP_ALREADY_RUNNING`. |
 | `log` | Enregistre le stdout et le stderr de l'app dans un fichier relatif au projet. Une erreur de démarrage, ou un arrêt inattendu pendant `e2e run`, cite les lignes qu'un processus a ajoutées au fichier depuis le démarrage de la commande. Un log de 40 lignes au plus et de moins de 8 Kio est cité en entier ; sinon, la citation garde jusqu'à 20 lignes de chaque extrémité, séparées par `[startup output omitted]`, et pour un log de plus de 8 Kio, ces lignes viennent de ses 4 premiers et 4 derniers Kio. Les valeurs de `command.env` et `inheritEnv` d'au moins quatre caractères sont masquées dans la citation. Le fichier lui-même n'est pas masqué. |
 | `env` | Variables d'environnement de l'app. |
 | `inheritEnv` | Variables de l'hôte à transmettre quand elles sont définies, par nom ou par préfixe : `['DATABASE_URL', 'STRIPE_*']`. `env` l'emporte sur elles. |
@@ -289,7 +289,7 @@ Un viewport étroit teste uniquement la mise en page responsive. Le navigateur r
 navigateur desktop : facteur d'échelle 1, pointeur desktop et son user agent habituel.
 Il n'émule pas le tactile. Pour tester sur un simulateur ou un émulateur, utilisez le
 [moteur mobile](/mobile). Pour le mode sombre et la réduction des animations, consultez
-[Émuler le mode sombre et la réduction des animations](/browser#emulate-dark-mode-and-reduced-motion).
+[Émuler le mode sombre et la réduction des animations](/reference/web).
 
 Une vidéo garde la taille qu'avait la page au début de l'enregistrement. Définissez
 `web({ screencast: { size } })` pour une taille fixe. Un fournisseur de navigateur qui
@@ -321,9 +321,6 @@ l'app d'utiliser le presse-papiers, accordez-la sur la cible :
 ## Pour aller plus loin
 
 <CardGroup cols={2}>
-  <Card title="Utiliser le navigateur" icon="globe" href="/browser">
-    Simulez des routes, définissez des cookies, gérez les boîtes de dialogue et téléchargez des fichiers.
-  </Card>
   <Card title="Référence du moteur web" icon="masks-theater" href="/reference/web">
     Chaque option de `web()` et chaque méthode de `browser`.
   </Card>

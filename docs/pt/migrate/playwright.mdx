@@ -48,6 +48,7 @@ Uma chave do Playwright como `testDir`, `baseURL`, `use`, `webServer` ou
 | --- | --- |
 | `use.baseURL`, `webServer` | `app: { url, command }` no alvo, veja [Iniciar seu app](/web#starting-your-app) |
 | `webServer.reuseExistingServer` | `app.command: { reuseExisting: true }`; a CI ignora essa opção |
+| `globalSetup`, `globalTeardown`, um array `webServer` | [Serviços](/services) para as dependências, ou um script em volta da execução |
 | `projects` | `targets`, uma instância de engine em cada |
 | `testDir`, `testMatch`, `testIgnore` | `tests`, globs a partir da raiz do projeto; um `!` no início exclui |
 | `retries`, `workers`, `timeout` | os mesmos nomes, com [outros padrões](#defaults-that-differ); `workers` é um inteiro |
@@ -139,6 +140,7 @@ só rodam em um navegador, então um teste que faz essas chamadas declara
 | --- | --- |
 | `toBeVisible()`, `toBeHidden()`, `toBeEnabled()`, `toBeDisabled()`, `toBeChecked()`, `toBeFocused()`, `toBeAttached()`, `toBeInViewport()`, `toHaveText()`, `toContainText()`, `toHaveValue()`, `toHaveAttribute()`, `toHaveCount()`, `toHaveAccessibleName()`, `toHaveRole()`, `toBeEditable()` | igual, com `{ visible }`, `{ enabled }`, `{ editable }`, `{ checked }`, `{ attached }`, `{ ratio }` e `{ ignoreCase }`; `toBeInViewport` considera fora do viewport um elemento de tamanho zero e [é diferente em um dispositivo](/reference/expect#tobeinviewport) |
 | `toBeEmpty()` | igual, com `{ timeout }` |
+| `.not` em um matcher de localizador ou de `expect(page)` | igual em um matcher de localizador ou de `expect(browser)`: passa na primeira leitura que satisfaz a negação |
 | `toHaveId(id)`, `toContainClass(name)` | `toHaveAttribute('id', id)`, `toHaveAttribute('class', RegExp)` |
 | `expect(page).toHaveURL()`, `toHaveTitle()` | `expect(browser).toHaveURL()`, `toHaveTitle()` |
 | `expect(page).toHaveScreenshot()`, `expect(locator).toHaveScreenshot()` | `expect(screen).toHaveScreenshot()` e a forma com localizador, veja [Comparação visual](/visual-testing) |
@@ -167,16 +169,18 @@ só rodam em um navegador, então um teste que faz essas chamadas declara
 | Playwright | e2e |
 | --- | --- |
 | `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | igual em `browser`; um padrão é uma `RegExp`, um glob de URL resolvido em relação à URL do app, ou `{ method, url }` para um método HTTP |
-| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | igual, veja [`route`](/reference/web#route) para as opções de cada um |
-| `page.waitForResponse(pattern)` | `browser.waitForResponse(pattern)` com os mesmos globs de URL |
+| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | igual, veja [`route`](/reference/web) para as opções de cada um |
+| `page.waitForResponse(urlOrPredicate)`, `page.waitForRequest(urlOrPredicate)` | `browser.waitForResponse` e `browser.waitForRequest` com um glob de URL, uma `RegExp`, `{ method, url }` ou um predicado. Só `body()`, `text()` e `json()` são métodos; `response.status`, `response.request.method` e `request.postData` são propriedades. `timeout` é a única opção |
 | `page.on('dialog')`, `page.waitForEvent('download')` | `browser.onDialog('accept')` ou um handler; `browser.waitForDownload(() => trigger)` |
 | `page.waitForEvent('popup')` | `browser.waitForPopup(() => trigger)`, que torna ativa a nova aba, veja [Abas](/reference/web#tabs) |
 | `context.pages()`, `context.newPage()`, `page.bringToFront()` | `browser.tabs()`, `browser.newTab()`, `tab.activate()`; sem o evento `context.on('page')` |
 | `page.evaluate(fn, arg)` | `browser.evaluate(fn, arg)`, JSON na entrada e na saída |
 | `page.webmcp.tools()`, `page.webmcp.callTool(name, input)` | igual em `browser.webmcp`, com `web({ webmcp: true })` no lugar do argumento de inicialização ou das preferências; só o frame principal, veja [WebMCP](/reference/web#webmcp) |
 | `page.addInitScript()`, `page.emulateMedia({ colorScheme, reducedMotion })` | `browser.addInitScript()` ou `web({ initScripts })`; `browser.emulateMedia()` |
+| `page.clock.install()`, `pauseAt()`, `runFor()`, `fastForward()`, `resume()`, `setFixedTime()`, `setSystemTime()` | `browser.clock`, com os mesmos métodos e argumentos; ele cobre todas as abas, como `context.clock` |
 | `context.addCookies()`, `cookies(urls)`, `clearCookies()` | `browser.setCookies()`, `browser.cookies(urls)`, `browser.clearCookies()` |
-| `context.setOffline(true)` | [`browser.setNetwork('offline')`](/reference/web#setnetwork), `'online'` para voltar |
+| A fixture `browserName`, `browser.browserType().name()`, `browser.version()` | [`browser.name`](/reference/web#name-version), `browser.version`; `test.skip(browser.name === 'firefox', reason)` no corpo |
+| `context.setOffline(true)` | [`browser.setNetwork('offline')`](/reference/web), `'online'` para voltar |
 | A fixture `request`: `get()`, `post()`, `put()`, `patch()`, `delete()`, `head()`, `fetch()` | igual em [`request`](/reference/request): `{ json }` para `data` (essa opção recusa um valor `undefined` ou uma `Date`), os parâmetros de consulta na URL para `params`, `{ redirect: 'manual' }` para `maxRedirects: 0`, `status` e `headers` como propriedades. A fixture não guarda cookies entre chamadas: passe um token ou um cookie de sessão em `headers` |
 | `page.request`, que compartilha os cookies da página | `request` com um cabeçalho `cookie` vindo de `browser.cookies(url)`, veja [Requisições autenticadas](/api-testing#signed-in-requests) |
 
@@ -195,6 +199,7 @@ só rodam em um navegador, então um teste que faz essas chamadas declara
 | `fullyParallel` na configuração ou em um projeto, `--fully-parallel` | igual, na configuração ou em um alvo |
 | `describe.configure({ mode: 'parallel' })`, `test.describe.parallel` | `describe.configure({ parallel: true })` ou `{ parallel: true }` em um `describe`, veja [`parallel`](/reference/test#parallel) |
 | `describe.configure({ mode: 'default' })` | `describe.configure({ parallel: false })` ou `{ parallel: false }` em um `describe` |
+| `test.step(title, body)` | [igual](/reference/test#test-step), mas não em volta do `use()` de uma fixture, e um `expect.soft` que falha dentro do passo não faz o passo falhar; não há as opções `box`, `location` ou `timeout`, nem argumento de passo, nem `test.step.skip` |
 | `test.fail()` em um describe | `test.describe.fail(title, fn)` ou `{ fail: 'reason' }` no grupo; para uma condição, `test.fail(condition, 'reason')` em um `beforeEach` |
 | `test.describe.only()` | igual, ou `{ only: true }` no grupo; a CI o rejeita com `ONLY_IN_CI`, como faz com `test.only` |
 | `{ tag: '@smoke' }` | `{ tags: ['smoke'] }` em um teste ou grupo |
@@ -285,7 +290,6 @@ Playwright.
 | `expect.configure()` | `{ timeout }` em cada chamada |
 | `@axe-core/playwright` | axe-core por meio de `browser.addInitScript({ path: 'node_modules/axe-core/axe.min.js' })`, depois `axe.run()` em `browser.evaluate` |
 | `.resolves`, `.rejects`, `toThrow()`, `toStrictEqual()`, `toContainEqual()`, `toBeInstanceOf()`, `expect.closeTo()` | `await` primeiro, ou capture o erro e faça uma asserção sobre ele; `toEqual`; `toContain`, que compara por igualdade profunda; `toBeCloseTo` |
-| Um matcher de localizador com `.not` que passa na primeira leitura | Ele passa depois que a condição se mantém por 1 s. O inverso positivo passa na primeira leitura: `toBeHidden()`, `toBeDisabled()`, `toBeChecked({ checked: false })` |
 | `expect.extend()` | Uma função auxiliar assíncrona que chama `expect` |
 
 </Accordion>
@@ -295,10 +299,10 @@ Playwright.
 | --- | --- |
 | `devices['iPhone 15']`, `isMobile`, `hasTouch` | `web({ viewport, userAgent, deviceScaleFactor })`; um alvo mobile para toque real |
 | `waitForFunction()` | `expect.poll` sobre `browser.evaluate` |
-| `waitForResponse(predicate)`, `waitForRequest()`, `page.on('request')`, `response.ok()` | `browser.waitForResponse(pattern)`, ou `{ method, url }` para filtrar pelo método da requisição, depois verifique a resposta no teste, `status` para `ok()`. Para requisições, um handler de `browser.route` que registra `route.request` e depois chama `route.fallback()` |
-| `route.fulfill({ response })`, `route.abort(code)`, `route.fetch(options)`, `request.postDataJSON()` | `status`, `headers` e `body` de `route.fetch()`; `JSON.parse(route.request.postData)` |
+| `page.on('request')`, `response.ok()` | Espere uma requisição com `browser.waitForRequest` ou `browser.waitForResponse`. Para observar todas as requisições, registre `route.request` em um handler de `browser.route` e chame `route.fallback()`. Para `response.ok()`, use `expect(response).toBeOK()` ou verifique `response.status` |
+| `route.fulfill({ response })`, `route.abort(code)`, `route.fetch(options)`, `request.postDataJSON()` | Passe `status`, `headers` e `body` de `route.fetch()` para `route.fulfill()`. Para `postDataJSON()`, leia `postData` no `WebRequest`: `undefined` quando não há corpo, onde o Playwright retorna `null`; aplique `JSON.parse` para JSON e `Object.fromEntries(new URLSearchParams(postData))` para um formulário |
 | `page.addLocatorHandler()` | Feche o overlay em `beforeEach`, ou defina o cookie de consentimento do overlay com `browser.setCookies` |
-| `page.on('console')`, `page.on('pageerror')`, `page.clock` | Um `browser.addInitScript` que registra em um array de `window`, ou que substitui `Date` por um stub |
+| `page.on('console')`, `page.on('pageerror')` | Um `browser.addInitScript` que registra em um array de `window` |
 | `setGeolocation()`, `grantPermissions()` | Um stub com `browser.addInitScript`; `app.permissions` no alvo |
 | `ignoreHTTPSErrors`, `proxy`, `channel`, `launchOptions` | Sirva o app por `http`; inicie o navegador você mesmo e conecte-se com `web({ connect })` |
 
@@ -307,16 +311,15 @@ Playwright.
 
 | Playwright | Use hoje |
 | --- | --- |
-| `test.step()`, `testInfo.attach()` | Cada chamada já é um passo nomeado no relatório; `app.screenshot(label)` anexa uma captura de tela |
+| `testInfo.attach()` | `app.screenshot(label)` anexa uma captura de tela |
 | `test.info()`, `testInfo` em hooks e fixtures, `annotations` | Sua própria fixture ou um estado de módulo; um id de issue no título ou em uma tag |
 | `mergeTests()` | Uma cadeia de chamadas de `extend` |
-| `globalSetup`, `globalTeardown`, um array `webServer` | Um script em volta da execução, ou um `app.command` que inicia todos os processos |
 | `projects[].testMatch`, `testDir`, `testIgnore`, `grep` | `platforms` ou tags nos testes, ou uma execução para cada alvo |
 | `--ui`, `npx playwright show-report`, `--reporter html` | `--watch --headed`; `npx e2e report` (abre o `<output>/report.html` escrito por `htmlReporter()`) |
 | `test.describe.fixme()`, `test.fixme(title, details, body)` | `{ timeout }` ou `{ skip: 'fixme' }` no teste ou grupo, com as eventuais `tags` dos detalhes ao lado, registrado no relatório com a causa do skip `explicit`, não `fixme` |
 | `test.skip(callback, description)`, `test.fixme(callback, description)` | `test.skip(condition, reason)` ou `test.fixme(condition, reason)` dentro do corpo, ou `platforms` no teste |
 | `failOnFlakyTests`, `use.navigationTimeout`, `--timeout`, `--quiet` | `run.summary.flaky` em `report.json`; `browser.goto(url, { timeout })`; `timeout` na configuração |
-| O reporter `blob` e `merge-reports` | Um relatório para cada shard |
+| O reporter `blob` e `merge-reports` | [`e2e merge-reports`](/reference/cli#e2e-merge-reports) lê o diretório do relatório concluído de cada shard |
 | A imagem Docker do Playwright | A imagem da versão do `playwright-core` que o `@e2e-dev/web` fixa, ou `npx @e2e-dev/web install chromium --with-deps` |
 | `test.use({ ... })` em um arquivo ou describe | Opções do runner no grupo, opções da engine em um alvo, `browser.setViewport` em tempo de execução |
 | `projects[].dependencies`, `teardown` | Um `test.setup` de nível superior para o login; um script em volta da execução |
@@ -356,7 +359,7 @@ Playwright.
 | `locator.locator(selector)` | Uma consulta de `screen` dentro do escopo, como `card.getByRole('button', { name: 'Close' })`, ou um seletor de `browser.locator`, como `'.card >> .close'` |
 | `getByTitle()` | `browser.locator('[title="Close"]')`. Um título é um atributo do DOM, então não tem consulta em `screen` |
 | `page.waitForLoadState()` | Uma asserção sobre o que a próxima página mostra. Uma navegação espera por `load`, e cada ação e asserção espera pelo seu nó |
-| `npx playwright codegen`, o Inspector | [`npx e2e mcp`](/mcp-server) deixa um agente de código controlar o app enquanto escreve o teste; `screen.debug()` exibe a árvore |
+| `npx playwright codegen`, o Inspector | [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) deixa um agente de código controlar o app enquanto escreve o teste; `screen.debug()` exibe a árvore |
 | `{ force: true }`, `{ trial: true }` | `tap({ position })` pula as verificações de acionabilidade; `toBeVisible()` e `toBeEnabled()` para uma simulação |
 | `ariaSnapshot()`, `toMatchAriaSnapshot()`, `toMatchSnapshot()` | `expect(await screen.tree()).toContain(...)`; um arquivo de fixture e `toEqual` |
 | `keyboard.insertText()`, `inputValue()` em um `<label>` | `fill()`; o próprio controle, localizado com `getByLabel` |
@@ -412,6 +415,27 @@ Playwright.
 | Novas tentativas | 0 | 1 na CI, 0 localmente |
 | Workers | metade dos núcleos de CPU | 1 na CI, metade dos núcleos de CPU localmente |
 | Trace | `off` (`on-first-retry` na configuração gerada) | `retain-on-failure` |
+
+## Apps Electron
+
+Uma suíte que controla um app Electron com o `_electron` do Playwright passa
+para a [engine Electron](/electron), não para a engine web: um alvo com
+`engine: electron()` e `app: { appPath: '.' }`, e `test` de
+`@e2e-dev/electron`. O `e2e init` ainda não tem um preset para Electron, então
+escreva a configuração à mão.
+
+| Playwright | e2e |
+| --- | --- |
+| `_electron.launch({ args })` em uma fixture, `electronApp.firstWindow()` | `await app.open()` em `beforeEach`. Os argumentos que o app lê e as flags do Chromium vão em `app.launchArguments` do alvo, os mesmos para todos os testes |
+| `electronApp.evaluate(fn, arg)` | `electron.evaluate(fn, arg)` |
+| `page.evaluate(fn)` no processo de renderização | `electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.executeJavaScript('…'))`. Escolha a janela pelo título: `getAllWindows()` não segue a ordem em que `electron.windows()` lista as janelas |
+| `electronApp.waitForEvent('window')` | `await electron.waitForWindow(() => screen.getByRole('button', 'Open').tap())`, que torna ativa a nova janela. Para uma janela que o app abre por conta própria, `await electron.window({ title: 'Settings' })` |
+| `page.on('dialog')` | `await electron.onDialog('accept')`, `'dismiss'` ou um handler |
+| `page.waitForEvent('close')` | `await expect.poll(() => window.isClosed()).toBe(true)` |
+| `expect(page).toHaveTitle(title)` | `await expect.poll(() => window.title()).toBe(title)` |
+| `page.getByRole`, `getByLabel`, `getByTestId`, `locator(css)` | `screen.getByRole`, `getByLabel`, `getByTestId` e `electron.locator(css)`, que aceita só CSS |
+| `page.on('console')`, `electronApp.on('console')` | As mensagens ficam registradas no trace do teste, na seção App log, com as linhas do processo principal prefixadas por `[main]`. Um teste não consegue ler essas mensagens |
+| `electronApp.close()` | Nada: todo teste termina com o app encerrado |
 
 ## Próximos passos
 

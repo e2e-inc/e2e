@@ -344,7 +344,7 @@ await agent.assert('no overlay covers the checkout form', { vision: 'only' }); /
 
 视觉检查使用 `'only'`，例如检查遮罩层是否盖住表单，或图表显示是否正确。截图只显示当前视口，因此请先滚动到相关内容。
 
-浏览器引擎的语义树不包含[来自其他站点的 frame](/browser#reach-into-an-iframe) 的内容。要判定这类内容，使用 `true` 或 `'only'`。
+浏览器引擎的语义树不包含[来自其他站点的 frame](/reference/web) 的内容。要判定这类内容，使用 `true` 或 `'only'`。
 
 以下情况不会发送像素，只发送语义树：
 
