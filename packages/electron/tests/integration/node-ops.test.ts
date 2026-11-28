@@ -281,6 +281,14 @@ describe('waitReady', () => {
     expect(await ready('#free', 'checkEditable')).toBe('ready');
   });
 
+  it('takes an open modal dialog that is inert itself as inert, with its controls', async () => {
+    await window.setContent(`<dialog id="modal" inert>${SELECT('pick')}<input id="file" type="file"></dialog>`);
+    await showModals(['modal']);
+    expect(await run(await element('#pick'), 'checkSelect', { label: 'B' })).toEqual({ ok: false, reason: 'it is inert (a modal or the app blocks it)' });
+    expect(await run(await element('#file'), 'checkFileInput')).toEqual({ ok: false, reason: 'it is inert (a modal or the app blocks it)' });
+    expect(await selects('#pick')).toMatchObject({ message: expect.stringMatching(INERT) });
+  });
+
   it('takes the controls of a modal dialog another one covers as inert, centred over it or not, and the top one\'s as free', async () => {
     for (const placed of ['', 'margin:0;left:0;top:0']) {
       await window.setContent(`<dialog id="lower" style="width:300px;height:200px">${SELECT('under')}</dialog><dialog id="upper" style="${placed}">${SELECT('over')}</dialog>`);

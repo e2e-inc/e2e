@@ -111,12 +111,14 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
    * Whether an `inert` element holds the element in the tree as rendered:
    * through the slot it is assigned to and the shadow host of each root it
    * sits in. An open modal dialog is in the top layer, out of reach of an
-   * `inert` above it. What a modal dialog makes inert has no attribute to
-   * show it, and only Chromium orders the top layer: `waitReady` asks it.
+   * `inert` above it, though not of its own. What a modal dialog makes inert
+   * has no attribute to show it, and only Chromium orders the top layer:
+   * `waitReady` asks it.
    */
   const isInert = (target: Element): boolean => {
-    for (let at: Element | null = target; at !== null && !at.matches('dialog:modal'); ) {
+    for (let at: Element | null = target; at !== null; ) {
       if (at.hasAttribute('inert')) return true;
+      if (at.matches('dialog:modal')) return false;
       const root = at.getRootNode();
       at = at.assignedSlot ?? at.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
     }
