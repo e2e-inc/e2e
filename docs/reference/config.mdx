@@ -1222,7 +1222,7 @@ house: { executor: houseBrain, model: gateway('openai/gpt-6-luna-fast'), maxMode
 ```
 
 - `model`, `judge`, `context`, and the budgets still apply; judgments need a
-  model. [`system`](#system) and [`tools`](#tools) beside it are
+  model unless the executor has `answer`. [`system`](#system) and [`tools`](#tools) beside it are
   `INVALID_CONFIG`.
 - `maxModelCalls` bounds the model turns of one step.
 - A `model` or `judge` that differs from the one the executor brought is

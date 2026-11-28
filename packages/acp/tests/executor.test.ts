@@ -549,6 +549,22 @@ describe('acp', () => {
     expect(sessions[1]).toEqual([]);
   });
 
+  it('skips a mutating extension tool whose turn in the queue comes after the verdict', async () => {
+    let ran = false;
+    const seed = defineTool({ description: 'Seeds', inputSchema: z.object({}), execute: async () => ((ran = true), 'seeded') }, { mutates: true });
+    const { executor, log } = scripted([[{ batch: [{ call: 'seed', args: {} }, pass] }]]);
+    const step = context();
+    cleanups.push(step.end);
+    // The runner queues a mutating tool behind the action in flight: here, until the verdict is in.
+    step.ctx.budgets.runTool = async (_call, body) => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return body();
+    };
+    await expect(executor.extend!({ tools: { seed } }).runStep(step.ctx)).resolves.toMatchObject({ status: 'passed' });
+    await eventually(() => expect(JSON.stringify(log().find((entry) => entry['call'] === 'seed'))).toContain('The step has ended'));
+    expect(ran).toBe(false);
+  });
+
   it('refuses an extension tool under the name of one of the step tools', async () => {
     const tool = defineTool({ description: 'Mine', inputSchema: z.object({}), execute: async () => 'done' }, { mutates: false });
     for (const name of ['tap', 'complete_step']) {

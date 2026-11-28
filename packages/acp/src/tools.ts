@@ -50,12 +50,26 @@ export function activeStep(ctx: StepExecutorContext, extra: ExtraTools): ActiveS
     denied: undefined,
     calls: [],
     tools: {
-      ...(createProjectTools(ctx, extra) as SdkTools),
-      // The guard runs when a call's turn in the queue comes, so a call batched behind the verdict or a stop is skipped.
-      ...(createGrammarTools(ctx, { guard: (body) => (stopped(active) ? Promise.resolve(STEP_ENDED) : body()) }) as SdkTools),
+      ...(createProjectTools(ctx, guardedExtra(extra, guard)) as SdkTools),
+      ...(createGrammarTools(ctx, { guard }) as SdkTools),
     },
   };
+  // Runs when a call's turn in the queue comes, so a call batched behind the verdict or a stop is skipped.
+  function guard<T>(body: () => Promise<T>): Promise<T | string> {
+    return stopped(active) ? Promise.resolve(STEP_ENDED) : body();
+  }
   return active;
+}
+
+/** The extra tools with `guard` around each body: the runner queues a mutating one behind the action in flight, and the guard runs when its turn comes. */
+function guardedExtra(extra: ExtraTools, guard: (body: () => Promise<unknown>) => Promise<unknown>): ExtraTools {
+  return Object.fromEntries(
+    Object.entries(extra).map(([name, defined]) => {
+      const tool = defined.tool as SdkTool;
+      const execute: SdkTool['execute'] = (input, options) => guard(async () => tool.execute?.(input, options));
+      return [name, { ...defined, tool: { ...tool, execute } }];
+    }),
+  );
 }
 
 /** The verdict the agent concluded the step with, if it did. */
