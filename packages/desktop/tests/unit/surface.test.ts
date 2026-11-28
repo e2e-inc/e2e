@@ -950,6 +950,13 @@ describe('desktop fixture: windows', () => {
     await expect(closed.activate()).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/has closed/) });
   });
 
+  it('marks as active the window screen reads, not a focused one accessibility cannot read', async () => {
+    const { surface } = await launched({ listWindows: [windows(() => [{ ...mine, accessible: false }, panel])] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const [first, second] = await desktop.windows();
+    expect(await Promise.all([first!.isActive(), second!.isActive()])).toEqual([false, true]);
+  });
+
   it('reads no window as closed while the screen is locked, which lists none', async () => {
     const { surface, fake } = await launched({ listWindows: [(driver) => windows(() => (driver.locked === true ? [] : [mine, panel]))(driver)] });
     const desktop = createDesktopFixture(surface, fixtureContext());

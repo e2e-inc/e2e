@@ -478,7 +478,8 @@ export class DesktopSurface {
   async windows(operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<readonly OpenWindow[]> {
     const windows = await this.ownWindows(operation);
     if (this.pid !== undefined && windows.every((window) => window.accessible === false)) this.unlessLocked();
-    const active = this.activeWindow(windows)?.id;
+    // The window `screen` reads: the one a test made active, else the first by preference that accessibility can read.
+    const active = this.activeChoice(windows) ?? byPreference(windows).find((window) => window.accessible !== false)?.id;
     return windows.map((window) => ({ id: window.id, title: window.title ?? '', active: window.id === active, readable: window.system !== true && window.accessible !== false }));
   }
 
