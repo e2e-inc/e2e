@@ -86,9 +86,11 @@ export class WindowConditions {
     if (pattern.kind !== 'regexp' && !URL.canParse(pattern.value)) {
       throw new TestError('INVALID_ARGUMENT', `${call.name} takes an absolute URL or a RegExp, not ${JSON.stringify(pattern.value)}: an Electron app has no base URL to resolve it against`);
     }
-    return this.poll(call, `URL ${String(expected)}${ignoreCase === true ? ' (ignoring case)' : ''}`, () => {
+    // Parsed once, on its own: `https:page` would resolve against a base of the same scheme, and the window's moves.
+    const wanted = pattern.kind === 'regexp' ? expected : new URL(pattern.value).href;
+    return this.poll(call, `URL ${String(wanted)}${ignoreCase === true ? ' (ignoring case)' : ''}`, () => {
       const url = this.surface.shownWindow().page.url();
-      return Promise.resolve({ matches: urlMatches(url, expected, url, ignoreCase), observed: `URL ${url}` });
+      return Promise.resolve({ matches: urlMatches(url, wanted, String(wanted), ignoreCase), observed: `URL ${url}` });
     }, options?.timeout);
   }
 

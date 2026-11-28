@@ -151,6 +151,8 @@ test.describe('expect(electron) and the fixture\'s waits', () => {
     await expect(electron).toHaveURL(/app\/index\.html$/);
     await expect(electron).toHaveURL(here);
     await expect(electron).not.toHaveURL(controls);
+    // A string with a scheme and no host is the URL it parses to alone, never a path under the window's own.
+    await expect(electron).not.toHaveURL('file:index.html');
     await expect(electron).toHaveURL(/APP\/INDEX\.HTML$/, { ignoreCase: true });
     await expect(electron).not.toHaveURL(/APP\/INDEX\.HTML$/);
     // A RegExp of another realm is one too.
