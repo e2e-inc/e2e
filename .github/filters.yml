@@ -19,6 +19,7 @@ runner: &runner
   - 'Cargo.toml'
   - 'Cargo.lock'
   - 'rust-toolchain.toml'
+  - '.cargo/config.toml'
   - '!packages/*/tests/**'
   - '!**/*.md'
   - 'package.json'
