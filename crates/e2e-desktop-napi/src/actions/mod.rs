@@ -544,7 +544,21 @@ fn guarded<T>(input_id: Option<u32>, deadline: Instant, work: impl FnOnce() -> O
 
 /// Puts the keyboard on the element `reference` names, as `focus` does.
 pub fn focus_on(reference: &str, input_id: Option<u32>, deadline: Instant) -> Outcome<bool> {
-    guarded(input_id, deadline, || focus(&resolve(reference)?.element, deadline))
+    guarded(input_id, deadline, || {
+        let entry = resolve(reference)?;
+        // A control a scroll area holds out of view is scrolled to first, as a tap's is; one the user cannot reach (in a
+        // minimized window) is refused. A scroll moved the screen, so the step changed the app.
+        let scrolled = reveal(&entry.element, deadline, "focus")?;
+        after_scroll(scrolled, focus(&entry.element, deadline)).map(|moved| moved || scrolled)
+    })
+}
+
+/// Writes a value as `set_value` does, once the control is enabled and in the user's reach: scrolled into view as a
+/// tap's is, or refused in a minimized window. A failure after the scroll moved the screen.
+fn fill(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
+    enabled(element, deadline, "set value")?;
+    let scrolled = reveal(element, deadline, "set value")?;
+    after_scroll(scrolled, set_value(element, text, deadline))
 }
 
 /// Runs one action on the element `reference` names.
@@ -576,10 +590,10 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
             menu_shown(entry.pid, before, deadline);
             Ok(())
         }
-        Action::Clear => set_value(element, "", deadline),
+        Action::Clear => fill(element, "", deadline),
         Action::Check(wanted) => check(element, wanted, deadline),
         Action::ScrollTo => reveal(element, deadline, "scroll into view").map(|_| ()),
-        Action::SetValue(text) => set_value(element, &text, deadline),
+        Action::SetValue(text) => fill(element, &text, deadline),
         Action::SelectAll => select_all(element, deadline),
         Action::Select(label) => select(&entry, &label, deadline),
         Action::Scroll { direction, pages } => scroll(element, &direction, pages),
