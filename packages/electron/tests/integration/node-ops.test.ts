@@ -71,6 +71,22 @@ describe('nodeOp', () => {
     expect(await run(await element('#free'), 'checkEditable')).toEqual({ ok: true });
   });
 
+  it('takes the controls of a modal dialog another one covers as inert, centred over it or not, and the top one\'s as free', async () => {
+    const inert = { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
+    for (const placed of ['', 'margin:0;left:0;top:0']) {
+      await window.setContent(`<dialog id="lower" style="width:300px;height:200px"><select id="under"><option>A</option><option>B</option></select></dialog><dialog id="upper" style="${placed}"><select id="over"><option>A</option><option>B</option></select></dialog>`);
+      await window.inPage(() => {
+        (document.getElementById('lower') as HTMLDialogElement).showModal();
+        (document.getElementById('upper') as HTMLDialogElement).showModal();
+      });
+      expect(await run(await element('#under'), 'checkSelect', { label: 'B' })).toEqual(inert);
+      expect(await run(await element('#over'), 'checkSelect', { label: 'B' })).toEqual({ ok: true });
+      // Closed, the top one leaves the one under it free again.
+      await window.inPage(() => (document.getElementById('upper') as HTMLDialogElement).close());
+      expect(await run(await element('#under'), 'checkSelect', { label: 'B' })).toEqual({ ok: true });
+    }
+  });
+
   it('hit-tests through a slot and a shadow host, and names the element that covers the point', async () => {
     await window.setContent(`
       <div id="host"><button id="slotted" style="width:100px;height:40px">S</button></div>

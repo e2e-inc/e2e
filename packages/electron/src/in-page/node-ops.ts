@@ -107,28 +107,40 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
     if (control?.matches(':disabled') === true) return true;
     return above(target, '[aria-disabled]')?.getAttribute('aria-disabled')?.toLowerCase() === 'true';
   };
-  /** Whether a modal dialog is open in the root or in any open shadow root under it. */
-  const modalOpen = (root: Document | ShadowRoot): boolean => {
-    if (root.querySelector('dialog:modal') !== null) return true;
-    for (const element of root.querySelectorAll('*')) if (element.shadowRoot !== null && modalOpen(element.shadowRoot)) return true;
-    return false;
+  /** The modal dialogs open in the root and in every open shadow root under it. */
+  const openModals = (root: Document | ShadowRoot): Element[] => [
+    ...root.querySelectorAll('dialog:modal'),
+    ...[...root.querySelectorAll('*')].flatMap((element) => (element.shadowRoot === null ? [] : openModals(element.shadowRoot))),
+  ];
+  /**
+   * Whether another modal dialog, opened after this one, covers it: only the
+   * top one takes input. No DOM API orders the top layer, but Chromium
+   * hit-tests no inert element, so a point at the dialog's centre lands in
+   * the dialog on top, or its backdrop.
+   */
+  const coveredModal = (dialog: Element): boolean => {
+    if (openModals(dialog.ownerDocument).length < 2) return false;
+    const box = dialog.getBoundingClientRect();
+    const root = dialog.getRootNode() as Document | ShadowRoot;
+    const hit = root.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    return hit !== null && hit.closest('dialog:modal') !== dialog;
   };
   /**
    * Whether the element is inert, as Chromium has it: an `inert` element
    * holds it in the tree as rendered (through the slot it is assigned to and
    * the shadow host of each root it sits in), or a modal dialog is open and
-   * it is outside every one, which makes it inert with no attribute to show
-   * it. An open modal dialog is in the top layer, out of reach of an `inert`
-   * above it.
+   * it is outside every one, or in one another modal dialog covers, which
+   * makes it inert with no attribute to show it. An open modal dialog is in
+   * the top layer, out of reach of an `inert` above it.
    */
   const isInert = (target: Element): boolean => {
     for (let at: Element | null = target; at !== null; ) {
       if (at.hasAttribute('inert')) return true;
-      if (at.matches('dialog:modal')) return false;
+      if (at.matches('dialog:modal')) return coveredModal(at);
       const root = at.getRootNode();
       at = at.assignedSlot ?? at.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
     }
-    return modalOpen(target.ownerDocument);
+    return openModals(target.ownerDocument).length > 0;
   };
   /** Whether the element holds focus within its own document or shadow root. */
   const holdsFocus = (target: Element): boolean => {
