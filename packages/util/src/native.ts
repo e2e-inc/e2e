@@ -103,8 +103,16 @@ export class NativeUtilUnavailableError extends Error {
 function platformName(): string {
   const { platform, arch } = process;
   if (platform === 'linux') {
-    const report = process.report.getReport() as { header?: { glibcVersionRuntime?: string } };
-    return `linux-${arch}-${report.header?.glibcVersionRuntime === undefined ? 'musl' : 'gnu'}`;
+    // Without excludeNetwork the report looks up the address of every open socket on this thread: a minute with 50 open.
+    const options = process.report as NodeJS.ProcessReport & { excludeNetwork: boolean };
+    const excludeNetwork = options.excludeNetwork;
+    options.excludeNetwork = true;
+    try {
+      const report = process.report.getReport() as { header?: { glibcVersionRuntime?: string } };
+      return `linux-${arch}-${report.header?.glibcVersionRuntime === undefined ? 'musl' : 'gnu'}`;
+    } finally {
+      options.excludeNetwork = excludeNetwork;
+    }
   }
   if (platform === 'win32') return `win32-${arch}-msvc`;
   return `${platform}-${arch}`;
