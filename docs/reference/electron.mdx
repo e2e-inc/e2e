@@ -661,7 +661,7 @@ await expect(electron).not.toHaveTitle('Sign in');
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | An option other than `timeout`. |
+| `INVALID_ARGUMENT` | `expected` is neither a string nor a `RegExp`, or an option other than `timeout`. |
 | `LOCATOR_AMBIGUOUS` | `target` matches several nodes. |
 | `ASSERTION_FAILED` | The condition did not hold in time. The error has the last value read. |
 

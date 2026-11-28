@@ -448,10 +448,10 @@ an example test.
 | `page.evaluate(fn, arg)` in the renderer, `page.reload()`, `page.url()` | `electron.activeWindow().evaluate(fn, arg)`, `reload()`, `url()` |
 | `page.keyboard`, `page.mouse` | `electron.keyboard`, `electron.mouse` |
 | `page.waitForURL(re)` | `electron.waitForURL(re)`. A string is a URL, not a glob: rewrite a glob as a `RegExp` |
-| `page.waitForFunction(fn)` | `await expect.poll(() => window.evaluate(fn)).toBeTruthy()` |
+| `page.waitForFunction(fn, arg)` | `await expect.poll(() => electron.activeWindow().evaluate(fn, arg)).toBeTruthy()` |
 | `expect(page).toHaveURL(url)`, `toHaveTitle(title)` | `expect(electron).toHaveURL(url)`, `toHaveTitle(title)` |
 | `expect(locator).toHaveClass(cls)` | `expect(electron).toHaveClass(locator, cls)` |
-| `expect(locator).toHaveCSS(name, value)` | `expect.poll` over `window.evaluate()` with `getComputedStyle` |
+| `expect(locator).toHaveCSS(name, value)` | `expect.poll` over `electron.activeWindow().evaluate()` with `getComputedStyle` |
 | `electronApp.waitForEvent('window')` | `await electron.waitForWindow(() => screen.getByRole('button', 'Open').tap())`, which makes the new window active. For a window the app opens on its own, `await electron.window({ title: 'Settings' })` |
 | `page.on('dialog')` | `await electron.onDialog('accept')`, `'dismiss'`, or a handler |
 | `page.waitForEvent('close')` | `await expect.poll(() => window.isClosed()).toBe(true)` |
