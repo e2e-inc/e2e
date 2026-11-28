@@ -789,9 +789,13 @@ pub(crate) fn content_name(texts: &[String]) -> Option<String> {
     label(Some(texts.iter().map(|text| text.trim()).filter(|text| !text.is_empty()).collect::<Vec<_>>().join(" ")))
 }
 
-/// The title-bar buttons a window names as its own.
-fn window_chrome(window: &Element) -> Vec<Element> {
-    ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"].iter().filter_map(|name| window.element(name)).collect()
+/// The title-bar buttons a window names as its own. A read the app did not answer in time fails as a stall: a button it
+/// held back would read as one of the app's controls.
+fn window_chrome(window: &Element) -> Outcome<Vec<Element>> {
+    ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"]
+        .iter()
+        .filter_map(|name| crate::actions::element_attribute(window, name, "read the window's title bar").transpose())
+        .collect()
 }
 
 /// Reads one window of a process.
@@ -814,7 +818,7 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         deadline: request.deadline,
         focused,
         focus_unknown,
-        chrome: window_chrome(&window),
+        chrome: window_chrome(&window)?,
         nodes: 0,
         complete: !focus_unknown,
         timed_out: false,
