@@ -607,7 +607,11 @@ export class DesktopSurface {
         const whole = Date.now() + LATE_APP_MS;
         for (const pid of await this.lateCarriers(pending.token, Math.min(deadline - EXIT_WAIT_MS, whole), whole, signal, pending.target)) owned.add(pid);
       }
-      if (!(await killed([...owned], deadline, signal))) {
+      const ended = await this.killedAll([...owned], pending.token, deadline, signal);
+      if (ended === 'unknown') {
+        throw new EngineError('ENGINE_FAILURE', `could not tell whether a launch of ${pending.target} started another process as it quit: looking for its token among the processes failed; quitting tries again`, { retryable: false });
+      }
+      if (ended === 'running') {
         throw new EngineError('ENGINE_FAILURE', `the process a launch of ${pending.target} started did not exit; quitting tries again`, { retryable: false });
       }
       // A launch still running may yet start the app: it stays pending.
@@ -629,15 +633,25 @@ export class DesktopSurface {
     const helpers = token === undefined ? [] : await this.requireDriver().processesCarrying(token);
     if (helpers === null) throw new EngineError('ENGINE_FAILURE', `could not tell which processes the app (process ${pid}) started: looking for its token among the processes failed; quitting tries again`, { retryable: false });
     const owned = [...new Set([...(live ? [pid] : []), ...helpers])];
-    if (!(await killed(owned, deadline, signal))) throw new EngineError('ENGINE_FAILURE', `the app (process ${pid}) or a process it started did not exit`, { retryable: false });
-    // One of them may have started another as the processes were listed: once they are gone, none can start more, and a
-    // second look finds it.
-    const late = owned.length === 0 || token === undefined ? [] : await this.requireDriver().processesCarrying(token);
-    if (late === null) throw new EngineError('ENGINE_FAILURE', `could not tell whether the app (process ${pid}) started a process as it quit: looking for its token among the processes failed; quitting tries again`, { retryable: false });
-    if (!(await killed(late, deadline, signal))) throw new EngineError('ENGINE_FAILURE', `a process the app (process ${pid}) started did not exit`, { retryable: false });
+    const ended = await this.killedAll(owned, token, deadline, signal);
+    if (ended === 'unknown') throw new EngineError('ENGINE_FAILURE', `could not tell whether the app (process ${pid}) started a process as it quit: looking for its token among the processes failed; quitting tries again`, { retryable: false });
+    if (ended === 'running') throw new EngineError('ENGINE_FAILURE', `the app (process ${pid}) or a process it started did not exit`, { retryable: false });
     this.driver?.forgetProcess(pid);
     this.dropProcess();
     if (this.home !== undefined) await rm(path.join(this.home, APP_FILE), { force: true }).catch(() => undefined);
+  }
+
+  /**
+   * Kills `owned`, then looks once more for processes carrying `token`: one of them may have started another as the
+   * processes were listed, and once they are gone none can start more. `running` when one did not exit, `unknown` when
+   * the second look failed.
+   */
+  private async killedAll(owned: readonly number[], token: string | undefined, deadline: number, signal: AbortSignal): Promise<'gone' | 'running' | 'unknown'> {
+    if (!(await killed(owned, deadline, signal))) return 'running';
+    if (owned.length === 0 || token === undefined) return 'gone';
+    const late = await this.requireDriver().processesCarrying(token);
+    if (late === null) return 'unknown';
+    return (await killed(late, deadline, signal)) ? 'gone' : 'running';
   }
 
   /**

@@ -285,6 +285,25 @@ describe('DesktopSurface: launching', () => {
     expect(await gone(app)).toBe(true);
   });
 
+  it("quits a process a failed launch's app started as the quit listed the processes", async () => {
+    const { surface, fake } = await initialized({ launch: [failure('TIMEOUT', 'delivered_unverified', 'no new process carries the token', { kind: 'unclaimed' })] });
+    await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });
+    const { token } = last<{ token: string }>(fake, 'launch')!;
+    const app = standIn();
+    const late = standIn();
+    fake.carriers.set(app, token);
+    const list = fake.processesCarrying.bind(fake);
+    let looks = 0;
+    fake.processesCarrying = async (carried: string) => {
+      const found = await list(carried);
+      looks += 1;
+      if (looks === 1) fake.carriers.set(late, token);
+      return found;
+    };
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect([await gone(app), await gone(late)]).toEqual([true, true]);
+  });
+
   it('quits the process carrying the token of a launch that failed after it may have started the app', async () => {
     const theirs = standIn();
     const { surface, fake } = await initialized({ launch: [spawnApp({ answer: failure('TIMEOUT', 'delivered_unverified') })] });
