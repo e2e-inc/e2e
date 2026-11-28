@@ -341,7 +341,7 @@ export interface Engine {
    * no value reaches the config digest.
    */
   readonly secrets?: readonly Secret[];
-  /** Steering hooks: open, back, resize, restart, reset. */
+  /** Steering hooks: open, openLink, back, resize, switchTab, closeTab, restart, reset. */
   readonly session?: EngineSession;
   /**
    * Runs once per target in the runner, after collection and before workers,
@@ -1860,6 +1860,7 @@ engine reproduz essa semântica; importe as funções em vez de copiá-las.
 | --- | --- |
 | [`matchesText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `TextPattern`, `string` |
 | [`resolveExpression`, `expressionSelectors`](#resolveexpression) | `SemanticNode[]`, `readonly string[]` |
+| [`shownText`](#showntext) | `string \| undefined` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`, `sameSite`](#site-helpers) | `string`, `boolean` |
 | [`isRefusedLinkScheme`](#isrefusedlinkscheme) | `boolean` |
@@ -1917,15 +1918,19 @@ async locate(expression) {
 },
 ```
 
+- `text` corresponde ao `text` de um nó, ou ao `name` dele quando `text` é
+  omitido ou vazio ([`shownText`](#showntext)); `label` corresponde ao `name`.
+- Em um `filter`, o `hasText` lê `name`, `text` e `value`, então mantém um nó
+  que uma consulta `text` ignora.
 - `text` e `label` respondem com a correspondência mais interna quando um
   contêiner repete o texto de um descendente.
-- Uma consulta `text` corresponde ao nome ou ao texto de um nó. Com
-  `textQuery: 'text'`, ela corresponde só ao texto, como faz um navegador,
-  para uma árvore que carrega o texto de todo elemento. Uma consulta de texto
-  com escopo então também responde com o elemento do escopo quando o texto é
-  do próprio elemento.
-- Uma engine cuja árvore é toda a verdade (um dispositivo) chama essa
-  função; uma engine de navegador reproduz o comportamento da função.
+- Com `textQuery: 'text'`, uma consulta `text` corresponde só ao `text`, como
+  faz um navegador, para uma árvore que carrega o texto de todo elemento. Uma
+  consulta de texto com escopo então também responde com o elemento do escopo
+  quando o texto é do próprio elemento.
+- Uma engine cuja árvore é toda a verdade (um dispositivo, um app desktop)
+  chama essa função. Uma engine de navegador responde com o próprio motor de
+  consultas, em que `text` lê o conteúdo de texto e nunca um nome acessível.
 - Uma expressão `selector` precisa da opção `selector`, que responde de forma
   síncrona. Uma engine cuja linguagem de seletores é assíncrona (uma consulta
   do DevTools, um daemon de dispositivo) primeiro consulta cada seletor que
@@ -1933,6 +1938,23 @@ async locate(expression) {
   resultados.
 - Uma expressão `frame` resulta em `FRAME_NOT_FOUND`.
 - Uma expressão `union` corresponde a qualquer um dos ramos, na ordem do documento, sem nós duplicados.
+
+#### `shownText`
+
+A string pela qual uma consulta `text` lê um nó: o `text` dele, ou o `name`
+quando `text` é omitido ou vazio.
+
+```ts
+export function shownText(node: Pick<SemanticNode, 'name' | 'text'>): string | undefined;
+```
+
+```ts
+shownText({ name: 'Words', text: '5' }); // '5'
+shownText({ name: 'Close' }); // 'Close'
+```
+
+Uma engine que faz a correspondência de texto por conta própria chama essa
+função, para que o `getByText` dela concorde com `resolveExpression`.
 
 #### `urlMatches`
 

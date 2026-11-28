@@ -243,9 +243,10 @@ refresh token rotativo funciona ali só por tempo limitado.
 
 ## Use seu agente de código
 
-`@e2e-dev/acp` roda `agent.act` e `agent.assert` no Claude Code ou no Codex
-pelo [Agent Client Protocol](https://agentclientprotocol.com). O agente entra
-com o próprio login ou a própria chave de API, então o e2e não precisa de um
+`@e2e-dev/acp` roda todos os passos do agente e o [`e2e explore`](/explore)
+no Claude Code ou no Codex pelo
+[Agent Client Protocol](https://agentclientprotocol.com). O agente entra com o
+próprio login ou a própria chave de API, então o e2e não precisa de um
 provedor de modelo.
 
 O agente recebe `complete_step` e as ferramentas de ação do agente embutido
@@ -398,8 +399,10 @@ embutido.
     de prompt conta como uma chamada ao modelo em `maxModelCalls`, com os
     tokens e o custo dele quando o agente os informa. `maxSteps` e o tempo
     limite do passo limitam o turno.
-  - `waitFor` e `extract` usam os julgamentos embutidos, então precisam do
-    `model` da entrada do agente.
+  - `waitFor` e `extract` rodam no `judge` ou no `model` da entrada do agente
+    quando ela tem um. Caso contrário, o agente os responde em uma segunda
+    sessão, sem ferramentas, aberta por tentativa de teste. Nessa sessão,
+    `vision` precisa de um agente que aceite imagens em um prompt.
   - Uma entrada de agente com `executor` não aceita `tools`, então o agente
     não recebe ferramentas do projeto de `defineTool`.
   </Accordion>

@@ -211,6 +211,22 @@ getByText(text: TextMatch, options?: TextMatchOptions): Locator;
 screen.getByText('Welcome back', { exact: false });
 ```
 
+Em um dispositivo ou em um app desktop, `getByText` corresponde ao texto que um
+nó mostra, não ao nome acessível dele. Um texto ao qual o app dá outro nome
+acessível (`5` com o nome `Words`, ou um texto Android com uma content
+description) responde a `getByText('5')` e a `getByLabel('Words')`, nunca a
+`getByText('Words')`. Só um nó que não mostra texto, como um botão de ícone,
+corresponde pelo nome acessível. No navegador, `getByText` lê apenas o
+conteúdo de texto.
+
+O que um campo de texto mostra depende da plataforma:
+
+| Plataforma | `getByText` encontra um campo por |
+| --- | --- |
+| Android | O que ele contém, ou a dica dele enquanto está vazio. A content description dele responde a `getByLabel`. |
+| iOS | O rótulo dele, a única string que o iOS informa para ele. |
+| macOS | O nome acessível dele: um campo não tem texto próprio. |
+
 ##### Texto repetido
 
 `getByText` responde com o nó correspondente mais interno, então um contêiner
@@ -330,7 +346,9 @@ await row.getByRole('button', 'Void').tap();
 - `hasText` com uma string é uma correspondência de substring, sem diferenciar
   maiúsculas de minúsculas, sobre o nó encontrado e os descendentes dele, ao
   contrário do texto de uma consulta, que corresponde exatamente. Passe uma
-  `RegExp` para algo mais estrito.
+  `RegExp` para algo mais estrito. Em um dispositivo ou em um app desktop,
+  ele lê nomes acessíveis e valores além do texto, então mantém um nó que
+  `getByText` não encontra por essa string.
 - `hasNotText` exclui as correspondências com esse texto na subárvore, usando
   as mesmas regras de substring ou de `RegExp`.
 - `has` mantém uma correspondência cuja subárvore resolve o localizador interno.

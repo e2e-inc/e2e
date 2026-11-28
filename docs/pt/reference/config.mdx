@@ -1269,8 +1269,8 @@ house: { executor: houseBrain, model: gateway('openai/gpt-6-luna-fast'), maxMode
 ```
 
 - `model`, `judge`, `context` e os orçamentos continuam valendo; os
-  julgamentos precisam de um modelo. [`system`](#system) e [`tools`](#tools)
-  ao lado dele são `INVALID_CONFIG`.
+  julgamentos precisam de um modelo, a menos que o executor tenha `answer`.
+  [`system`](#system) e [`tools`](#tools) ao lado dele são `INVALID_CONFIG`.
 - `maxModelCalls` limita os turnos de modelo de um passo.
 - Um `model` ou `judge` diferente do que o executor trouxe é
   `INVALID_CONFIG`.
@@ -1737,7 +1737,8 @@ um segredo, e `CI` troca os padrões abaixo.
 O agente embutido verifica a falta de um modelo uma vez por execução, quando a
 fixture `agent` é adquirida pela primeira vez, e encerra a execução com código
 de saída 2. Um [executor](#executor) personalizado pode implementar `act` e
-`assert` sem um modelo. `waitFor` e `extract` ainda precisam de um.
+`assert` sem um modelo. `waitFor` e `extract` ainda precisam de um, a menos
+que o executor [responda aos julgamentos por conta própria](/executors#what-the-executor-handles).
 
 ### CI
 

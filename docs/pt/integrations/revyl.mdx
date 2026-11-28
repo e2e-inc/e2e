@@ -221,7 +221,7 @@ no Revyl. Com `REVYL_API_URL` definida, o reporter registra só
 | --- | --- | --- |
 | `app` | obrigatório | Id do app Web do Revyl em que as sessões rodam. |
 | `url` | obrigatório | URL `http(s)` em que cada sessão abre, sem credenciais nela. O Revyl precisa conseguir carregá-la. |
-| `viewport` | o padrão do Revyl | `{ width, height }` em pixels CSS, de 320 a 3840 por 240 a 2160. O navegador mantém esse tamanho durante a sessão inteira. |
+| `viewport` | `{ width: 1280, height: 800 }` | `{ width, height }` em pixels CSS, de 320 a 3840 por 240 a 2160. O navegador mantém esse tamanho durante a sessão inteira. |
 | `idleTimeoutSeconds` | `600` | Segundos sem atividade antes de o Revyl encerrar uma sessão que a execução deixou aberta, no mínimo 60. |
 
 Opções desconhecidas ou inválidas fazem o carregamento da configuração falhar
@@ -235,8 +235,9 @@ com `INVALID_CONFIG`.
   [limites de uma reserva por tentativa](/browser#pick-a-lease-scope) se
   aplicam.
 - O `viewport` da engine web precisa ser `null`. O Revyl se recusa a
-  redimensionar o navegador, então `browser.setViewport` e um `viewport`
-  definido falham.
+  redimensionar o navegador: `browser.setViewport` falha na hora, e um
+  `viewport` definido na engine deixa a tentativa esperando até o tempo
+  limite do teste.
 - A URL CDP funciona uma única vez. Uma conexão perdida não é reconectada, e
   a tentativa falha; uma nova tentativa inicia uma sessão nova.
 - Uma tentativa que grava vídeo, por exemplo com `--video`, recebe a
@@ -249,8 +250,10 @@ com `INVALID_CONFIG`.
 - O site roda na rede do Revyl, então aponte `url` e `app.url` para a URL de
   um deploy, não para `localhost`.
 - Quando uma tentativa termina, em todo caminho de saída, o provedor encerra
-  a sessão da tentativa. Se a própria execução cair, o Revyl encerra cada
-  sessão depois de `idleTimeoutSeconds` sem atividade.
+  a sessão da tentativa. Quando a execução termina, o provedor encerra a
+  sessão de qualquer worker que tenha caído antes de conseguir fazer isso.
+  Se a própria execução cair, o Revyl encerra cada sessão depois de
+  `idleTimeoutSeconds` sem atividade.
 
 ## Próximos passos
 

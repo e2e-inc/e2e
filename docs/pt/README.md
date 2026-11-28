@@ -371,3 +371,6 @@ translation moves or goes with it in the same change.
 | hide (a model, a key) | esconder (`ocultar` is for redact) |
 | async generator, yield | gerador assíncrono, fazer yield |
 | plain object | objeto simples |
+| query engine (browser) | motor de consultas |
+| display server | servidor gráfico |
+| owner (`aria-owns`) | elemento dono |

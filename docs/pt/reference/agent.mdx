@@ -24,7 +24,8 @@ O agente embutido precisa de um modelo configurado. Sem um, a primeira
 aquisição da fixture `agent` registra um único `MODEL_UNAVAILABLE` no nível
 da execução e encerra a execução (código de saída 2).
 [Executores personalizados](/executors) podem rodar `act` e `assert` sem um
-modelo; `waitFor` e `extract` continuam precisando de um.
+modelo; `waitFor` e `extract` continuam precisando de um, a menos que o
+executor [responda a eles por conta própria](/executors#what-the-executor-handles).
 
 ## Referência
 

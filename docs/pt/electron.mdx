@@ -26,6 +26,9 @@ bun add --dev e2e @e2e-dev/electron electron
 ```
 </CodeGroup>
 
+Em um projeto ainda sem configuração do e2e, `npx e2e init --yes --engine electron`
+escreve a configuração e um teste de exemplo para você.
+
 A engine inicia o pacote `electron` instalado no seu projeto. No Electron 45 ou
 mais recente, ela baixa o binário uma vez por execução, antes do primeiro
 teste. Apps empacotados funcionam a partir do Electron 22. Rode
@@ -90,13 +93,45 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
 
 | Método | O que faz |
 | --- | --- |
+| `launch({ args, env, cwd, timeout }?)` | Inicia o app com [argumentos e variáveis para este teste](#launch-with-per-test-arguments) |
+| `userDataDir` | O diretório de dados do usuário do teste, que já existe antes de o app ser iniciado |
 | `evaluate(fn, arg?)` | Roda `fn` no processo principal com o módulo `electron` e retorna o resultado da função, serializável em JSON |
 | `windows()` | As janelas abertas, na ordem em que abriram |
+| `activeWindow()` | A janela que `screen` lê |
 | `waitForWindow(trigger, { timeout }?)` | Roda `trigger`, espera a janela que ele abre e torna essa janela ativa |
 | `window({ title, url }, { timeout }?)` | Espera uma janela pelo título ou pela URL e a retorna, sem torná-la ativa |
 | `waitForDownload(trigger, { timeout }?)` | Roda `trigger` e espera o [download](#downloads) que ele inicia |
 | `onDialog(handler)` | Responde aos [diálogos `alert()` e `confirm()`](#handle-alert-and-confirm-dialogs) do app |
 | `locator(selector)` | Consulta a janela atual por seletor CSS |
+| `keyboard`, `mouse` | [Entrada de teclado e de ponteiro](#keyboard-and-mouse) para a janela ativa |
+
+## Inicie com argumentos por teste
+
+`electron.launch()` inicia o app como `app.open()` faz, e acrescenta
+argumentos e variáveis de ambiente deste teste aos do alvo. `cwd` define o
+diretório em que o processo começa. `app.open()`, `app.restart()` e
+`app.clearState()` mantêm esses valores até o fim do teste. Outra chamada a
+`launch()` substitui os valores.
+
+`electron.userDataDir` já existe antes de o app ser iniciado, então um teste
+pode colocar dados nele antes:
+
+```ts
+import { writeFileSync } from 'node:fs';
+import path from 'node:path';
+
+test('opens on saved settings', async ({ electron, screen }) => {
+  writeFileSync(path.join(electron.userDataDir, 'settings.json'), '{"theme":"dark"}');
+  await electron.launch({
+    args: ['--skip-onboarding'],
+    env: { APP_DATA_PATH: electron.userDataDir },
+  });
+  await expect(screen.getByRole('heading', 'Projects')).toBeVisible();
+});
+```
+
+Para iniciar o app assim em todos os testes, chame `electron.launch()` a partir
+de uma [fixture](/fixtures).
 
 ## Trabalhe com várias janelas
 
@@ -118,8 +153,8 @@ await main.activate();
 await settings.close();
 ```
 
-Uma janela tem `title()`, `url()`, `isActive()`, `isClosed()`, `activate()` e
-`close()`. Para uma janela que o app abre sozinho, como a janela principal
+Uma janela tem `title()`, `url()`, `isActive()`, `isClosed()`, `activate()`,
+`close()`, `reload()` e [`evaluate()`](#run-code-in-a-window). Para uma janela que o app abre sozinho, como a janela principal
 depois de uma tela de abertura, encontre essa janela com `electron.window()`:
 
 ```ts
@@ -156,6 +191,38 @@ valores como `arg` (somente JSON simples; segredos são recusados) e retorne
 dados simples. `require` não está no escopo dentro de `fn`; use o argumento
 `electron` ou `process.getBuiltinModule('node:fs')`.
 
+## Rode código em uma janela
+
+`window.evaluate()` roda uma função na página da janela, onde ficam as
+variáveis globais do próprio app. O método segue as mesmas regras de
+`electron.evaluate()`: `fn` é enviada como texto, e `arg` e o resultado são
+JSON simples.
+
+```ts
+const window = electron.activeWindow();
+const theme = await window.evaluate((key) => localStorage.getItem(key), 'theme');
+await window.reload();
+```
+
+## Teclado e mouse
+
+`electron.keyboard` e `electron.mouse` enviam entrada para a janela ativa,
+onde quer que estejam o foco e o ponteiro dessa janela. Prefira
+`locator.press()` e `locator.fill()` quando houver um elemento a nomear.
+
+```ts
+await electron.keyboard.press('Escape');
+await electron.keyboard.press('ControlOrMeta+P');
+await electron.keyboard.type('hello', { delay: 20 });
+await electron.mouse.move(0, 0);
+```
+
+- `keyboard` tem `press`, `down`, `up`, `type` e `insertText`. `mouse` tem
+  `move`, `down`, `up` e `wheel`.
+- Um atalho que a página trata funciona. Um acelerador de menu não funciona:
+  veja [Limites](#limits).
+- `type` nunca aceita um segredo. Preencha um segredo com `locator.fill()`.
+
 ## Trate diálogos de alert e confirm
 
 `electron.onDialog()` responde aos diálogos que o app abre a partir daí, do
@@ -176,7 +243,8 @@ await electron.onDialog(async (dialog) => {
 
 Um handler em forma de função precisa chamar `accept()` ou `dismiss()`. Um
 diálogo que nenhum handler trata é dispensado (`confirm()` retorna `false`) e
-faz o próximo passo do teste falhar.
+faz o próximo passo do teste falhar, ou o próprio teste, quando o diálogo foi
+aberto pelo último passo.
 
 ## Faça upload de arquivos
 
@@ -207,7 +275,11 @@ expect(file.suggestedFilename).toBe('report.csv');
 ```
 
 Os downloads nunca vão parar na sua própria pasta Downloads: o app os salva
-dentro do diretório de dados do usuário do teste.
+dentro do diretório de dados do usuário do teste. Um nome que um arquivo já
+tinha nesse diretório na inicialização, ou que outro download já usou, recebe
+um número, como `note (1).txt`; um arquivo que o próprio app escreve ali não
+entra na contagem. Um download que começa antes de a primeira janela do app
+carregar vai para onde o app o salvaria.
 
 ## Grave vídeo
 
@@ -235,9 +307,28 @@ para o diretório `.app` no macOS) e omita `app.appPath`:
 }
 ```
 
+No Windows, aponte para o `.exe` do app, não para a pasta do app nem para um
+atalho:
+
+```ts title="e2e.config.ts"
+{
+  name: 'electron-packaged',
+  engine: electron({
+    executablePath: 'dist/win-unpacked/MyApp.exe',
+  }),
+}
+```
+
+Um app instalado por um instalador Squirrel (`electron-winstaller`, o padrão
+do Electron Forge) mantém um inicializador de mesmo nome ao lado das pastas
+`app-<version>`. Aponte para o `.exe` dentro da pasta da versão.
+
 - Se o build desativar o fuse `EnableNodeCliInspectArguments`, `screen`,
   `expect` e o agente continuam funcionando, mas `electron.evaluate()` falha e
-  `electron.window({ title })` só corresponde a títulos de documento.
+  `electron.window({ title })` só corresponde a títulos de documento. No
+  Windows e no Linux, a captura de tela de uma janela que o app escondeu com
+  `hide()` também estoura o tempo limite, e a gravação dessa janela não tem
+  quadros.
 - No macOS, um build sem assinatura que lê o keychain (`safeStorage`) pode
   travar em um prompt do sistema. Adicione `--use-mock-keychain` a
   `app.launchArguments`.
@@ -267,12 +358,14 @@ A engine adiciona `--no-sandbox` automaticamente no Linux.
 
 | Área | No Electron |
 | --- | --- |
+| Encontrar elementos | Um elemento dentro de uma subárvore `inert`, como a página atrás de um modal, não está na árvore: `getByRole`, `getByText` e `getByLabel` não encontram esse elemento, mas `electron.locator()` encontra |
 | Argumentos de inicialização | A engine adiciona `--inspect=0`, `--remote-debugging-pipe`, `--force-color-profile=srgb`, `--user-data-dir=...`, flags que mantêm uma janela coberta ou oculta sendo desenhada, e `--no-sandbox` no Linux. Parsers de argumentos estritos precisam aceitar esses argumentos |
 | Workers paralelos | Cada teste recebe o próprio diretório de dados do usuário, então os testes rodam em paralelo. Se o seu app redefine esse diretório com `app.setPath('userData', ...)`, defina `workers: 1` |
 | Área de transferência | O app usa a área de transferência do seu sistema operacional, então o que um teste copia substitui o que você copiou. Defina `workers: 1` para testes de área de transferência |
 | Tema e idioma | `prefers-color-scheme` segue `nativeTheme` e o sistema operacional. Os textos da UI do Chromium seguem o idioma do sistema operacional; adicione `--lang=en-US` a `app.launchArguments` para fixar o inglês |
 | Toque longo | Segura por 800 ms por padrão, em vez dos 500 ms da web |
 | Seletores CSS | `electron.locator()` busca no documento da janela e nos shadow roots abertos, uma raiz por vez, e nunca entra em frames |
+| `aria-owns` | Um elemento que `aria-owns` nomeia aparece sob o elemento dono, como a árvore do Chromium o coloca, então resultados de consulta, `.or()` e `first()` ordenam esse elemento ali, não na ordem do documento |
 | Renderers que caíram | Uma janela cujo renderer caiu faz as leituras falharem até você recarregar essa janela com `electron.evaluate()` ou reiniciar o app |
 
 ## Segurança
@@ -287,7 +380,8 @@ A engine adiciona `--no-sandbox` automaticamente no Linux.
   dessa janela são retidas.
 - **Fronteira de arquivos locais:** se uma janela navega para um caminho `file:`
   fora do diretório do seu app, o agente não recebe nenhuma observação e as
-  capturas de tela são recusadas.
+  capturas de tela são recusadas. Quando `app.appPath` aponta para um script
+  principal, o diretório do app é o pacote do script dentro do projeto.
 - **Porta do inspector:** a automação das janelas roda por um pipe privado,
   enquanto o processo principal escuta em uma porta de loopback sem
   autenticação para `electron.evaluate()` durante cada teste.
@@ -309,7 +403,6 @@ A engine adiciona `--no-sandbox` automaticamente no Linux.
 - Conteúdo dentro de um `iframe` ou `webview` (a página convidada de um `webview` é listada como uma janela, então `electron.window()` alcança essa página)
 - Rotas e cookies (use `session.defaultSession` em `electron.evaluate()` em vez disso)
 - Salvar e restaurar sessões
-- Uma fixture `keyboard` para manter uma tecla pressionada
 - Ler o console do app a partir de um teste
 
 ## Opções
@@ -317,6 +410,7 @@ A engine adiciona `--no-sandbox` automaticamente no Linux.
 | Opção | Tipo | Padrão | O que define |
 | --- | --- | --- | --- |
 | `executablePath` | `string` | o `electron` do projeto | Binário a iniciar, como um [app empacotado](#test-a-packaged-app) |
+| `cwd` | `string` | raiz do projeto | Diretório em que o processo do app começa: absoluto, ou relativo à raiz do projeto |
 | `env` | `Record<string, string>` | `{}` | Variáveis de ambiente extras para o app (não `ELECTRON_RUN_AS_NODE` nem `NODE_OPTIONS`); veja [Segurança](#security) |
 | `testIdAttribute` | `string` | `'data-testid'` | Atributo que `getByTestId` lê |
 | `settle` | `number \| false` | `100` | Tempo de espera em milissegundos depois de uma ação do agente, antes da próxima leitura (`false` pula a espera) |
