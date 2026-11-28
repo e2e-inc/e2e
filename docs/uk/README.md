@@ -54,6 +54,9 @@ the end of the line above it, but it cannot detect a silently dropped sentence.
 
 ## Style
 
+- Do not translate word for word. Prioritize natural, fluent Ukrainian phrasing
+  over literal word-for-word accuracy, while keeping every fact, caveat, and
+  detail from the original page in the same section.
 - Plain, concise technical Ukrainian following the 2019 Ukrainian orthography
   (*проєкт*, *вебзастосунок*, *вебсторінка*, *тайм-аут*, single consonants in
   common loanwords such as *ранер*, *коміт*, *акаунт*).
@@ -89,11 +92,23 @@ the end of the line above it, but it cannot detect a silently dropped sentence.
   CLI option labels such as **None** and **Skip for now** unchanged so readers
   can match them in the terminal.
 - Never inflect inline code or Latin-script names. When a sentence needs a
-  case, place a Ukrainian noun in front («у сервісі GitHub Actions», «на
-  сервері MCP», «у файлі `e2e.config.ts`»). Keep Latin acronyms (CI, MCP, API,
+  case, place a Ukrainian noun in front («у сервісі GitHub Actions», «на MCP
+  сервері», «у файлі `e2e.config.ts`»). Keep Latin acronyms (CI, MCP, API,
   SDK, CLI, URL, PR, UI, E2E) uninflected and keep multi-word terms that
   Ukrainian developers leave in English as is (`pull request`, `bug bash`,
   `deep link`, `test ID`, `keychain`, `workflow`).
+- Prefer «наприклад», «таких як», «скажімо», «на кшталт», or «зокрема» over
+  «як-от», and vary them instead of repeating «наприклад» in consecutive
+  sentences.
+- Use «параметр» (not «прапорець») for CLI flags, «MCP сервер» (not «сервер
+  MCP») and `` `e2e mcp` сервер ``, «e2e скіл» (not «скіл e2e»), and «трейс»
+  (not «сторінка трейсу»).
+- Use «елемент» (not «вузол») for UI controls matched by locators. Reserve
+  «вузол» for accessibility or DOM tree nodes (such as «вузол пристрою» or
+  «дочірні вузли у дереві»).
+- Make implicit English nouns explicit when a literal word would be vague in
+  Ukrainian (for example, «підключена підписка» instead of a bare «вхід» for
+  subscription sign-in).
 - Distinguish *goal* («ціль») from *target* («таргет») consistently, since both
   appear on the same pages.
 - Translate *route* as «перехоплення запитів» or «мокування запитів», not
@@ -150,7 +165,7 @@ the end of the line above it, but it cannot detect a silently dropped sentence.
 | flaky test | нестабільний тест (flaky); *flaky* як статус звіту |
 | attempt | спроба |
 | run (noun) | запуск |
-| trace | трейс |
+| trace, trace page | трейс (у трейсі, не «сторінка трейсу») |
 | artifact | артефакт |
 | report, reporter | звіт, репортер |
 | credentials | облікові дані |
@@ -161,7 +176,7 @@ the end of the line above it, but it cannot detect a silently dropped sentence.
 | verdict | вердикт |
 | decision model | модель прийняття рішень |
 | coding agent | кодинг-агент |
-| skill | скіл |
+| skill, e2e skill | скіл, e2e скіл (не «скіл e2e») |
 | plugin | плагін |
 | prompt | промпт |
 | wizard | майстер налаштування |
@@ -174,6 +189,8 @@ the end of the line above it, but it cannot detect a silently dropped sentence.
 | commit (verb) | комітити, закомітити |
 | mock | мок, мокати |
 | config, configuration | конфіг, конфігурація |
+| flag (CLI) | параметр |
+| MCP server | MCP сервер |
 | debugging | налагодження |
 | screenshot | знімок екрана |
 | snapshot | снепшот |
