@@ -16,6 +16,7 @@ test.describe('profile settings', () => {
     await expect(screen.getByTestId('public-zone')).toHaveText('Asia/Tokyo');
 
     await app.open('/e/profile-settings');
+    await expect(screen.getByLabel('Display name')).toBeEnabled();
     await expect(screen.getByLabel('Time zone')).toHaveValue('Asia/Tokyo');
   });
 
@@ -36,6 +37,7 @@ test.describe('profile settings', () => {
     await expect(screen.getByTestId('public-name')).toHaveText('Jordan Lee');
 
     await app.open('/e/profile-settings');
+    await expect(screen.getByLabel('Display name')).toBeEnabled();
     await expect(screen.getByTestId('header-name')).toHaveText('Signed in as Jordan Lee');
     await expect(screen.getByLabel('Display name')).toHaveValue('Jordan Lee');
   });

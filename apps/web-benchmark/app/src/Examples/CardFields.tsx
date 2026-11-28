@@ -22,7 +22,8 @@ const ORDER: Field[] = ["number", "expiry", "cvc"];
 
 /**
  * The script every field frame runs. `FIELD` selects the mask and the check;
- * the frame reports `{ field, valid, last4 }` to the page after every input,
+ * the frame reports `{ field, valid, last4, value }` to the page after every
+ * input (the expiry and code as typed, the number only as its last four),
  * asks the page to move focus when its value turns valid, and focuses its own
  * input when the page says so.
  */
@@ -75,7 +76,8 @@ const FRAME_SCRIPT = `
     hint.textContent = result.message;
     input.setAttribute("aria-invalid", result.message ? "true" : "false");
     var last4 = FIELD === "number" && result.valid ? digits(input.value).slice(-4) : null;
-    parent.postMessage({ type: "card-field", field: FIELD, valid: result.valid, last4: last4 }, "*");
+    var value = FIELD === "number" ? null : input.value;
+    parent.postMessage({ type: "card-field", field: FIELD, valid: result.valid, last4: last4, value: value }, "*");
     if (result.valid && !wasValid) parent.postMessage({ type: "card-field-complete", field: FIELD }, "*");
     wasValid = result.valid;
   });
@@ -120,6 +122,7 @@ export default function CardFields() {
   const frames = useRef<Record<Field, HTMLIFrameElement | null>>({ number: null, expiry: null, cvc: null });
   const [valid, setValid] = useState<Record<Field, boolean>>({ number: false, expiry: false, cvc: false });
   const [last4, setLast4] = useState<string | null>(null);
+  const [values, setValues] = useState<{ expiry: string; cvc: string }>({ expiry: "", cvc: "" });
   const [paid, setPaid] = useState(false);
 
   useEffect(() => {
@@ -131,12 +134,13 @@ export default function CardFields() {
     const onMessage = (event: MessageEvent) => {
       const data: unknown = event.data;
       if (typeof data !== "object" || data === null) return;
-      const message = data as { type?: unknown; field?: unknown; valid?: unknown; last4?: unknown };
+      const message = data as { type?: unknown; field?: unknown; valid?: unknown; last4?: unknown; value?: unknown };
       const field = ORDER.find((entry) => entry === message.field);
       if (field === undefined || event.source !== frames.current[field]?.contentWindow) return;
       if (message.type === "card-field") {
         setValid((current) => ({ ...current, [field]: message.valid === true }));
         if (field === "number") setLast4(typeof message.last4 === "string" ? message.last4 : null);
+        else setValues((current) => ({ ...current, [field]: typeof message.value === "string" ? message.value : "" }));
         return;
       }
       if (message.type === "card-field-complete") {
@@ -154,8 +158,11 @@ export default function CardFields() {
   const ready = ORDER.every((field) => valid[field]);
 
   if (paid) {
+    // What was charged, kept off screen for the tests: a wrong expiry or code
+    // still authorizes here, as it would against a test card, so the task's
+    // values are checked from this attribute.
     return (
-      <div style={styles.container}>
+      <div data-testid="card-checkout" data-charged={`${last4} ${values.expiry} ${values.cvc}`} style={styles.container}>
         <p data-testid="success-message" style={styles.success}>
           Payment authorized for card ending {last4}
         </p>

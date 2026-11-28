@@ -46,36 +46,76 @@ test('wishlist: a judgment catches the lost saved items', async ({ app, agent })
   expect(caught).toBe(true);
 });
 
-// The two bugs below show only across views: a judgment of one screen passes
-// over them. Each test credits a caught bug only once the deterministic checks
-// prove the flow reached the screen that shows it, so an agent that gave up
-// early earns nothing.
+/** Whether a judgment failed, which is the only verdict that counts as catching the bug below. */
+async function judgmentFails(judgment: () => Promise<void>): Promise<boolean> {
+  try {
+    await judgment();
+    return false;
+  } catch (cause) {
+    if ((cause as { code?: string }).code === 'ASSERTION_FAILED') return true;
+    throw cause;
+  }
+}
+
+// The two bugs below show only on a second view of the data. Each test splits
+// the flow in three: an act that only gets to that view (it passes, so a keyed
+// run records it), deterministic checks that the view is the decisive one, and
+// a judgment there, whose failure alone is credit. A flow that broke on the way
+// fails the test instead of earning it. Each has a healthy twin on the same
+// page, where the judgment must pass, so calling everything broken scores
+// nothing.
 
 test(
-  'profile settings: the flow catches the name that was never stored',
+  'profile settings: a judgment catches the name that was never stored',
   { skip: UNRECORDED },
   async ({ app, agent, screen }) => {
     await app.open('/e/profile-settings');
-    const caught = await caughtTheBug(async () => {
-      await agent.act(
-        'change the display name to Jordan Rivera, save the profile, and confirm on the public profile that the new name took effect',
-      );
-    });
+    await agent.act('change the display name to Jordan Rivera, save the profile, then open the Public profile tab');
     await expect(screen.getByTestId('header-name')).toHaveText('Signed in as Jordan Rivera');
     await expect(screen.getByRole('tab', 'Public profile')).toHaveAttribute('aria-selected', 'true');
+    const caught = await judgmentFails(() =>
+      agent.assert('the public profile shows the display name that was just saved, Jordan Rivera'),
+    );
     expect(caught).toBe(true);
   },
 );
 
 test(
-  'audit log: the flow catches the event missing between pages',
+  'profile settings: a judgment confirms the time zone that was stored',
+  { skip: UNRECORDED },
+  async ({ app, agent, screen }) => {
+    await app.open('/e/profile-settings');
+    await agent.act('change the time zone to Asia/Tokyo, save the profile, then open the Public profile tab');
+    await expect(screen.getByTestId('public-zone')).toHaveText('Asia/Tokyo');
+    await agent.assert('the public profile shows the time zone that was just saved, Asia/Tokyo');
+  },
+);
+
+test(
+  'audit log: a judgment catches the event missing from page 2',
   { skip: UNRECORDED },
   async ({ app, agent, screen }) => {
     await app.open('/e/audit-log');
-    const caught = await caughtTheBug(async () => {
-      await agent.act('go to page 2 of the audit log and check that it continues exactly where page 1 ended, with no event number missing');
-    });
-    await expect(screen.getByTestId('page-range')).not.toContainText('page 1 of 5');
+    await agent.act('open page 2 of the audit log');
+    await expect(screen.getByTestId('page-range')).toContainText('page 2 of 5');
+    const caught = await judgmentFails(() =>
+      agent.assert(
+        'the events are numbered #47 (newest) down to #1, and this page lists exactly the events its footer range names, none missing',
+      ),
+    );
     expect(caught).toBe(true);
+  },
+);
+
+test(
+  'audit log: a judgment confirms a page that matches its footer',
+  { skip: UNRECORDED },
+  async ({ app, agent, screen }) => {
+    await app.open('/e/audit-log');
+    await agent.act('open page 4 of the audit log');
+    await expect(screen.getByTestId('page-range')).toContainText('page 4 of 5');
+    await agent.assert(
+      'the events are numbered #47 (newest) down to #1, and this page lists exactly the events its footer range names, none missing',
+    );
   },
 );

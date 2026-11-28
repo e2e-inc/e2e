@@ -379,7 +379,7 @@ export const examples: Example[] = [
     name: "Audit Log",
     description: "Page through an account's audit log of numbered events.",
     plantedBug:
-      "Pages after the first start one event late, so event #37 (the 11th newest) appears on no page while the footer still claims 'Showing 11-20 of 47'.",
+      "Page 2 starts one event late: it lists nine events (#36 to #28) under a footer that still says 'Showing 11-20 of 47', so event #37 is on no page. Every other page is right.",
   },
   {
     component: PromoStorefront,

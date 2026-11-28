@@ -25,6 +25,7 @@ test.describe('card fields', () => {
     await expect(pay).toBeEnabled();
     await pay.tap();
     await expect(screen.getByTestId('success-message')).toHaveText('Payment authorized for card ending 4242');
+    await expect(screen.getByTestId('card-checkout')).toHaveAttribute('data-charged', '4242 12 / 34 123');
   });
 
   test('a number that fails the checksum keeps Pay disabled', async ({ screen, browser }) => {

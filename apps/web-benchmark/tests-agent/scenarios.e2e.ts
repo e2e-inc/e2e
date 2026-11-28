@@ -31,6 +31,8 @@ interface Scenario {
    * gate never calls the model live on every pull request for it.
    */
   readonly unrecorded?: string;
+  /** Checks beyond the success message, for a scenario whose success text cannot tell a right run from a wrong one. */
+  readonly verify?: (screen: Screen) => Promise<void>;
 }
 
 const SCENARIOS: readonly Scenario[] = [
@@ -147,12 +149,14 @@ const SCENARIOS: readonly Scenario[] = [
     goal: 'pay for the annual plan with card number 4242 4242 4242 4242, expiry 12/34, and security code 123',
     success: 'Payment authorized for card ending 4242',
     unrecorded: UNRECORDED,
+    verify: (screen) => expect(screen.getByTestId('card-checkout')).toHaveAttribute('data-charged', '4242 12 / 34 123'),
   },
   {
     slug: 'team-directory',
     goal: 'suspend Alex Kim from the Sales team in the Toronto office, and change no other member',
     success: 'Suspended akim@acme.test only',
     unrecorded: UNRECORDED,
+    verify: (screen) => expect(screen.getByTestId('team-directory')).toHaveAttribute('data-changed-others', ''),
   },
 ];
 
@@ -166,6 +170,7 @@ async function complete(
     scenario.maxSteps === undefined ? undefined : { maxSteps: scenario.maxSteps },
   );
   await expect(screen.getByTestId('success-message')).toHaveText(scenario.success);
+  await scenario.verify?.(screen);
 }
 
 for (const scenario of SCENARIOS) {

@@ -4,9 +4,9 @@ import { type CSSProperties, useState } from "react";
 
 /**
  * A paginated audit log of 47 numbered events, newest first, ten per page.
- * Every page looks complete on its own; the event numbers are consecutive,
- * so what is missing shows only by comparing the end of one page with the
- * start of the next.
+ * The event numbers are consecutive and the footer names each page's range,
+ * so a page's rows can be checked against its own footer, and the end of one
+ * page against the start of the next.
  *
  * Ours, not copied from the e2e-inc monorepo (like Control Inventory).
  */
@@ -44,13 +44,15 @@ const PAGES = Math.ceil(EVENTS.length / PAGE_SIZE);
 
 /**
  * The slice of events one page shows.
- * PLANTED BUG (do not fix): pages after the first start one event too late,
- * so event 37, the 11th newest, is on no page. The footer's range and the
- * total still read as if every event were listed.
+ * PLANTED BUG (do not fix): page 2 starts one event too late and still ends
+ * where it should, so it lists nine events and event 37, the 11th newest, is
+ * on no page. Its footer still reads "Showing 11-20 of 47". Every other page
+ * is right.
  */
 function pageSlice(page: number): Event[] {
-  const start = page === 1 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  return EVENTS.slice(start, start + PAGE_SIZE);
+  const end = page * PAGE_SIZE;
+  const start = page === 2 ? PAGE_SIZE + 1 : end - PAGE_SIZE;
+  return EVENTS.slice(start, end);
 }
 
 export default function AuditLog() {
