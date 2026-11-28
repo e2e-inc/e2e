@@ -4,12 +4,13 @@
  * the target names, and the build `appPath` points at.
  */
 
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { obj, type EngineDoctorCheck, type EngineDoctorInfo } from '@e2e-dev/core/engine';
 import { runCommand } from './errors.ts';
-import type { ClientFactory, MobileOptions } from './options.ts';
+import type { AgentDeviceClient, ClientFactory, MobileOptions } from './options.ts';
 import { deviceSelection } from './bindings.ts';
+import { parsePlistDict } from './plist.ts';
 import { isDeviceList } from './pool.ts';
 import type { DeviceProvider } from './provider.ts';
 
@@ -35,9 +36,9 @@ export async function mobileDoctor(options: MobileOptions, createClient: ClientF
   const { device } = options;
   const devices = device === undefined ? [undefined] : typeof device === 'string' ? [device] : isDeviceList(device) ? device : undefined;
   if (devices === undefined) return [{ id: 'device', status: 'skip', message: `devices and the build come from the "${(device as DeviceProvider).name}" provider` }];
-  const build = await buildCheck(info);
   const targetApp = info.app.appPath === undefined ? info.app.bundleId : undefined;
   const client = createClient(session);
+  const build = await buildCheck(options, devices, client, info);
   const checks: EngineDoctorCheck[] = [...build];
   const reported = new Set<string>();
   for (const name of devices) {
@@ -67,15 +68,97 @@ function statusOf(status: string): EngineDoctorCheck['status'] | undefined {
   return status === 'pass' || status === 'warn' || status === 'fail' ? status : undefined;
 }
 
-/** Whether the build `appPath` names is on disk; nothing to check without one. */
-async function buildCheck(info: EngineDoctorInfo): Promise<readonly EngineDoctorCheck[]> {
+/** Physical iOS device UDIDs (8-16 ECID or 40-char legacy SHA1). */
+const PHYSICAL_IOS_UDID = /^(?:[0-9A-F]{8}-[0-9A-F]{16}|[0-9A-F]{40})$/i;
+
+/**
+ * Whether the target selects only physical iOS devices, so `Info.plist`
+ * expects `iPhoneOS` rather than `iPhoneSimulator`.
+ */
+async function isPhysicalIosTarget(
+  devices: readonly (string | undefined)[],
+  client: AgentDeviceClient,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const configured = devices.filter((name): name is string => name !== undefined);
+  if (configured.length > 0 && configured.every((name) => PHYSICAL_IOS_UDID.test(name))) {
+    return true;
+  }
+  try {
+    const inventory: unknown = await runCommand('devices', () => client.devices.list({ platform: 'ios' }), signal);
+    if (!Array.isArray(inventory)) return false;
+    const entries = inventory.filter(
+      (entry): entry is { id?: unknown; name?: unknown; kind?: unknown; platform?: unknown; booted?: unknown } =>
+        typeof entry === 'object' && entry !== null,
+    );
+    if (configured.length > 0) {
+      const matched = configured
+        .map((target) => entries.find((entry) => entry.id === target || entry.name === target))
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+      return matched.length === configured.length && matched.every((entry) => entry.kind === 'device');
+    }
+    const booted = entries.filter((entry) => entry.platform === 'ios' && entry.booted === true);
+    return booted.length > 0 && booted.every((entry) => entry.kind === 'device');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the build `appPath` names is on disk, and for an iOS `.app` bundle
+ * whether its `Info.plist` is a simulator build matching `app.bundleId`.
+ */
+async function buildCheck(
+  options: MobileOptions,
+  devices: readonly (string | undefined)[],
+  client: AgentDeviceClient,
+  info: EngineDoctorInfo,
+): Promise<readonly EngineDoctorCheck[]> {
   const { appPath } = info.app;
   if (appPath === undefined) return [];
   const resolved = path.resolve(info.projectRoot, appPath);
   try {
     await stat(resolved);
-    return [{ id: 'app-path', status: 'pass', message: resolved }];
   } catch {
     return [{ id: 'app-path', status: 'fail', message: `app.appPath ${resolved} does not exist; build the app or fix the path` }];
   }
+  if (options.platform !== 'ios' || !resolved.endsWith('.app')) {
+    return [{ id: 'app-path', status: 'pass', message: resolved }];
+  }
+
+  let plistBytes: Buffer;
+  try {
+    plistBytes = await readFile(path.join(resolved, 'Info.plist'));
+  } catch {
+    return [{ id: 'app-path', status: 'pass', message: resolved }];
+  }
+  const plist = parsePlistDict(plistBytes);
+  if (plist === undefined) return [{ id: 'app-path', status: 'pass', message: resolved }];
+
+  const rawPlatforms = plist.CFBundleSupportedPlatforms;
+  const platforms = Array.isArray(rawPlatforms) ? rawPlatforms.filter((entry): entry is string => typeof entry === 'string') : undefined;
+  if (platforms !== undefined && !platforms.includes('iPhoneSimulator')) {
+    const physical = await isPhysicalIosTarget(devices, client, info.signal);
+    if (!physical) {
+      const detail = platforms.length > 0
+        ? `is a device build (${platforms.join(', ')})`
+        : 'is not a simulator build (CFBundleSupportedPlatforms does not include iPhoneSimulator)';
+      return [{
+        id: 'app-path',
+        status: 'fail',
+        message: `app.appPath ${resolved} ${detail}; build for the simulator (-sdk iphonesimulator) or point app.appPath at a Debug-iphonesimulator build`,
+      }];
+    }
+  }
+
+  const bundleId = plist.CFBundleIdentifier;
+  if (info.app.bundleId !== undefined && typeof bundleId === 'string' && bundleId.length > 0 && bundleId !== info.app.bundleId) {
+    return [{
+      id: 'app-path',
+      status: 'fail',
+      message: `app.appPath ${resolved} has CFBundleIdentifier ${bundleId}, but app.bundleId is ${info.app.bundleId}`,
+    }];
+  }
+
+  return [{ id: 'app-path', status: 'pass', message: resolved }];
 }

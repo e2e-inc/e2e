@@ -3,7 +3,7 @@
  * doctor per configured device, mapped to e2e checks, and the build check.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -100,4 +100,194 @@ describe('doctor', () => {
     expect(await h.engine.doctor!(info(h))).toEqual([{ id: 'device', status: 'skip', message: 'devices and the build come from the "cloud" provider' }]);
     expect(h.fake.methods()).toEqual([]);
   });
+
+  it('passes an iOS simulator .app with matching XML Info.plist', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const appDir = writeAppBundle(dir, 'Simulator.app', xmlPlist('com.example.app', ['iPhoneSimulator']));
+    const h = doctorHarness({ appPath: 'Simulator.app', bundleId: 'com.example.app' });
+    const checks = await h.engine.doctor!(info(h, dir));
+    expect(checks[0]).toEqual({ id: 'app-path', status: 'pass', message: appDir });
+  });
+
+  it('passes an iOS simulator .app with matching binary bplist00 Info.plist', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const appDir = writeAppBundle(dir, 'BinarySim.app', binaryPlistDict({
+      CFBundleIdentifier: 'com.example.app',
+      CFBundleSupportedPlatforms: ['iPhoneSimulator'],
+    }));
+    const h = doctorHarness({ appPath: 'BinarySim.app', bundleId: 'com.example.app' });
+    const checks = await h.engine.doctor!(info(h, dir));
+    expect(checks[0]).toEqual({ id: 'app-path', status: 'pass', message: appDir });
+  });
+
+  it('fails when an iOS .app is a device build (iPhoneOS) for a simulator target', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const appDir = writeAppBundle(dir, 'Device.app', xmlPlist('com.example.app', ['iPhoneOS']));
+    const h = doctorHarness({ appPath: 'Device.app', bundleId: 'com.example.app' });
+    const checks = await h.engine.doctor!(info(h, dir));
+    expect(checks[0]).toEqual({
+      id: 'app-path',
+      status: 'fail',
+      message: `app.appPath ${appDir} is a device build (iPhoneOS); build for the simulator (-sdk iphonesimulator) or point app.appPath at a Debug-iphonesimulator build`,
+    });
+  });
+
+  it('fails when a binary bplist00 .app is a device build (iPhoneOS)', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const appDir = writeAppBundle(dir, 'BinaryDevice.app', binaryPlistDict({
+      CFBundleIdentifier: 'com.example.app',
+      CFBundleSupportedPlatforms: ['iPhoneOS'],
+    }));
+    const h = doctorHarness({ appPath: 'BinaryDevice.app', bundleId: 'com.example.app' });
+    const checks = await h.engine.doctor!(info(h, dir));
+    expect(checks[0]).toMatchObject({ id: 'app-path', status: 'fail', message: expect.stringContaining('is a device build (iPhoneOS)') });
+    expect(checks[0]?.message).toContain(appDir);
+  });
+
+  it('fails when CFBundleIdentifier differs from app.bundleId, and passes when app.bundleId is unset', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const appDir = writeAppBundle(dir, 'Mismatch.app', xmlPlist('com.example.other', ['iPhoneSimulator']));
+    const mismatch = doctorHarness({ appPath: 'Mismatch.app', bundleId: 'com.example.app' });
+    expect((await mismatch.engine.doctor!(info(mismatch, dir)))[0]).toEqual({
+      id: 'app-path',
+      status: 'fail',
+      message: `app.appPath ${appDir} has CFBundleIdentifier com.example.other, but app.bundleId is com.example.app`,
+    });
+
+    const unpinned = doctorHarness({ appPath: 'Mismatch.app' });
+    const unpinnedInfo: EngineDoctorInfo = { ...info(unpinned, dir), app: { appPath: 'Mismatch.app' } };
+    expect((await unpinned.engine.doctor!(unpinnedInfo))[0]).toEqual({
+      id: 'app-path',
+      status: 'pass',
+      message: appDir,
+    });
+  });
+
+  it('skips the iPhoneSimulator platform check for physical iOS device targets', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const appDir = writeAppBundle(dir, 'Phone.app', xmlPlist('com.example.app', ['iPhoneOS']));
+
+    const byUdid = doctorHarness({ device: '00008110-001A2B3C4D5E6F70', appPath: 'Phone.app', bundleId: 'com.example.app' });
+    expect((await byUdid.engine.doctor!(info(byUdid, dir)))[0]).toEqual({
+      id: 'app-path',
+      status: 'pass',
+      message: appDir,
+    });
+
+    const byInventory = doctorHarness({ device: 'iPhone 15', appPath: 'Phone.app', bundleId: 'com.example.app' });
+    byInventory.fake.respond('devices.list', () => [
+      { platform: 'ios', id: '00008110-001A2B3C4D5E6F70', name: 'iPhone 15', kind: 'device', booted: true },
+    ]);
+    expect((await byInventory.engine.doctor!(info(byInventory, dir)))[0]).toEqual({
+      id: 'app-path',
+      status: 'pass',
+      message: appDir,
+    });
+  });
+
+  it('handles missing or malformed Info.plist gracefully without crashing doctor', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const missingDir = path.join(dir, 'NoPlist.app');
+    mkdirSync(missingDir);
+    const missing = doctorHarness({ appPath: 'NoPlist.app', bundleId: 'com.example.app' });
+    expect((await missing.engine.doctor!(info(missing, dir)))[0]).toEqual({
+      id: 'app-path',
+      status: 'pass',
+      message: missingDir,
+    });
+
+    const badXmlDir = writeAppBundle(dir, 'BadXml.app', '<plist><dict><key>CFBundleIdentifier</plist>');
+    const badXml = doctorHarness({ appPath: 'BadXml.app', bundleId: 'com.example.app' });
+    expect((await badXml.engine.doctor!(info(badXml, dir)))[0]).toEqual({
+      id: 'app-path',
+      status: 'pass',
+      message: badXmlDir,
+    });
+
+    const badBinDir = writeAppBundle(dir, 'BadBin.app', Buffer.from('bplist00corrupt'));
+    const badBin = doctorHarness({ appPath: 'BadBin.app', bundleId: 'com.example.app' });
+    expect((await badBin.engine.doctor!(info(badBin, dir)))[0]).toEqual({
+      id: 'app-path',
+      status: 'pass',
+      message: badBinDir,
+    });
+  });
 });
+
+function writeAppBundle(root: string, name: string, plistContent: string | Buffer): string {
+  const appDir = path.join(root, name);
+  mkdirSync(appDir, { recursive: true });
+  writeFileSync(path.join(appDir, 'Info.plist'), plistContent);
+  return appDir;
+}
+
+function xmlPlist(bundleId: string, platforms: readonly string[]): string {
+  const items = platforms.map((platform) => `<string>${platform}</string>`).join('');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>${bundleId}</string>
+  <key>CFBundleSupportedPlatforms</key>
+  <array>${items}</array>
+</dict>
+</plist>`;
+}
+
+/** Encodes a small string/string-array dictionary as a valid `bplist00` binary plist. */
+function binaryPlistDict(entries: Readonly<Record<string, string | readonly string[]>>): Buffer {
+  const objects: Buffer[] = [];
+  const offsets: number[] = [];
+
+  const addObject = (buf: Buffer): number => {
+    const index = objects.length;
+    objects.push(buf);
+    return index;
+  };
+
+  const addString = (value: string): number => {
+    const raw = Buffer.from(value, 'ascii');
+    if (raw.length < 0x0f) {
+      return addObject(Buffer.concat([Buffer.from([0x50 | raw.length]), raw]));
+    }
+    const lenBuf = raw.length <= 0xff
+      ? Buffer.from([0x10, raw.length])
+      : Buffer.from([0x11, (raw.length >> 8) & 0xff, raw.length & 0xff]);
+    return addObject(Buffer.concat([Buffer.from([0x5f]), lenBuf, raw]));
+  };
+
+  const keys = Object.keys(entries);
+  const keyRefs = keys.map(addString);
+  const valRefs = keys.map((key) => {
+    const value = entries[key]!;
+    if (typeof value === 'string') return addString(value);
+    const itemRefs = value.map(addString);
+    return addObject(Buffer.from([0xa0 | itemRefs.length, ...itemRefs]));
+  });
+
+  const topObject = addObject(Buffer.from([0xd0 | keys.length, ...keyRefs, ...valRefs]));
+
+  let cursor = 8;
+  for (const obj of objects) {
+    offsets.push(cursor);
+    cursor += obj.length;
+  }
+
+  const offsetTableOffset = cursor;
+  const offsetIntSize = offsetTableOffset <= 0xff ? 1 : 2;
+  const offsetTable = Buffer.alloc(offsets.length * offsetIntSize);
+  offsets.forEach((off, i) => {
+    if (offsetIntSize === 1) offsetTable.writeUInt8(off, i);
+    else offsetTable.writeUInt16BE(off, i * 2);
+  });
+
+  const trailer = Buffer.alloc(32);
+  trailer[6] = offsetIntSize;
+  trailer[7] = 1;
+  trailer.writeBigUInt64BE(BigInt(objects.length), 8);
+  trailer.writeBigUInt64BE(BigInt(topObject), 16);
+  trailer.writeBigUInt64BE(BigInt(offsetTableOffset), 24);
+
+  return Buffer.concat([Buffer.from('bplist00', 'ascii'), ...objects, offsetTable, trailer]);
+}
