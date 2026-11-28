@@ -546,6 +546,8 @@ fn guarded<T>(input_id: Option<u32>, deadline: Instant, work: impl FnOnce() -> O
 pub fn focus_on(reference: &str, input_id: Option<u32>, deadline: Instant) -> Outcome<bool> {
     guarded(input_id, deadline, || {
         let entry = resolve(reference)?;
+        // A disabled control takes the focus write and ignores it: wait for it to be enabled, as a fill does.
+        enabled(&entry.element, deadline, "focus")?;
         // A control a scroll area holds out of view is scrolled to first, as a tap's is; one the user cannot reach (in a
         // minimized window) is refused. A scroll moved the screen, so the step changed the app.
         let scrolled = reveal(&entry.element, deadline, "focus")?;
