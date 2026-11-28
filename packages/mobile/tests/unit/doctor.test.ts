@@ -250,6 +250,24 @@ describe('doctor', () => {
     });
   });
 
+  it('fails a device build when the booted pool holds a simulator beside a physical device', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const appDir = writeAppBundle(dir, 'Mixed.app', xmlPlist('com.example.app', ['iPhoneOS']));
+    const h = doctorHarness({ appPath: 'Mixed.app', bundleId: 'com.example.app' });
+    h.fake.respond('devices.list', () => [
+      { platform: 'ios', id: SIMULATOR_UDID, name: 'iPhone 17', kind: 'simulator', booted: true },
+      { platform: 'ios', id: '00008110-001A2B3C4D5E6F70', name: 'iPhone 15', kind: 'device', booted: true },
+    ]);
+    expect((await h.engine.doctor!(info(h, dir)))[0]).toMatchObject({ id: 'app-path', status: 'fail', message: expect.stringContaining(`${appDir} is a device build (iPhoneOS)`) });
+  });
+
+  it('passes a plist nested past the parser stack as malformed instead of failing doctor', async () => {
+    dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
+    const appDir = writeAppBundle(dir, 'Deep.app', `<?xml version="1.0"?><plist><dict><key>a</key>${'<array>'.repeat(200_000)}</dict></plist>`);
+    const h = doctorHarness({ appPath: 'Deep.app', bundleId: 'com.example.app' });
+    expect((await h.engine.doctor!(info(h, dir)))[0]).toEqual({ id: 'app-path', status: 'pass', message: appDir });
+  });
+
   it('trusts the build when the configured device is not in the inventory', async () => {
     dir = mkdtempSync(path.join(tmpdir(), 'e2e-mobile-doctor-'));
     const appDir = writeAppBundle(dir, 'Unlisted.app', xmlPlist('com.example.app', ['iPhoneOS']));

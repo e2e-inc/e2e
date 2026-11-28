@@ -15,14 +15,19 @@ const BPLIST_TRAILER_SIZE = 32;
  * Returns `undefined` if the buffer is empty, an unsupported format, or malformed.
  */
 export function parsePlist(data: Buffer): PlistValue | undefined {
-  if (data.length >= BPLIST_MAGIC.length && data.subarray(0, BPLIST_MAGIC.length).equals(BPLIST_MAGIC)) {
-    return parseBinaryPlist(data);
+  try {
+    if (data.length >= BPLIST_MAGIC.length && data.subarray(0, BPLIST_MAGIC.length).equals(BPLIST_MAGIC)) {
+      return parseBinaryPlist(data);
+    }
+    const text = data.toString('utf8').trimStart();
+    if (text.startsWith('<')) {
+      return parseXmlPlist(text);
+    }
+    return undefined;
+  } catch {
+    // A file nested past the call stack's depth throws a RangeError from the recursion: it is malformed, not a doctor failure.
+    return undefined;
   }
-  const text = data.toString('utf8').trimStart();
-  if (text.startsWith('<')) {
-    return parseXmlPlist(text);
-  }
-  return undefined;
 }
 
 /** Reads `Info.plist` fields relevant to iOS bundle validation as a plain record. */

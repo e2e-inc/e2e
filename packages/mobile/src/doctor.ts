@@ -95,9 +95,10 @@ async function classifyIosTarget(
     (entry): entry is { id?: unknown; name?: unknown; kind?: unknown; platform?: unknown; booted?: unknown } =>
       typeof entry === 'object' && entry !== null,
   );
+  // One simulator in the pool is enough: the build has to install there too.
   const kindOf = (selected: readonly { kind?: unknown }[]): IosTargetKind => {
+    if (selected.some((entry) => entry.kind === 'simulator')) return 'simulator';
     if (selected.length > 0 && selected.every((entry) => entry.kind === 'device')) return 'device';
-    if (selected.length > 0 && selected.every((entry) => entry.kind === 'simulator')) return 'simulator';
     return 'unknown';
   };
   if (configured.length > 0) {
