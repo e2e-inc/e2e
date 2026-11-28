@@ -104,8 +104,9 @@ export interface ReportMerge {
 
 /**
  * The change a run's test filters judged, by counts only, or why no filter
- * ran: `base` and `files` once git measured the change, `skipped` alone
- * when no filter ran before git was asked.
+ * ran: `base` and `files` once git measured the change since a ref, `since`
+ * and `files` once it measured the change since the last run, `skipped`
+ * alone when no filter ran before either.
  */
 export type ReportChanges =
   | {
@@ -115,12 +116,23 @@ export type ReportChanges =
       files: number;
       /** Why no filter ran, such as `no files changed since abc1234`; omitted when they ran. */
       skipped?: string | undefined;
+      since?: undefined;
     }
   | {
-      /** Why no filter ran before git was asked: `--last-failed` or `no tests to judge`. */
+      /** `--since-last-run` measured the change, from the working tree the judged tests last passed against. */
+      since: 'last-run';
+      /** How many files changed since then; 0 when no test was judged. */
+      files: number;
+      /** Why no configured filter ran: `the config has no filters`; omitted when they ran or no test was judged. */
+      skipped?: string | undefined;
+      base?: undefined;
+    }
+  | {
+      /** Why no filter ran before git measured a change: `--last-failed`, `no tests to judge`, or with `--since-last-run` why there is no record or no test to judge. */
       skipped: string;
       base?: undefined;
       files?: undefined;
+      since?: undefined;
     };
 
 /** Why a filter left nothing out without answering: it threw or answered with something other than `{ exclude, relevance?, note? }`, or ran past 5 minutes. */

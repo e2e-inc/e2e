@@ -146,7 +146,7 @@ describe('filterSelection', () => {
       config: cfg,
       collection: col,
       selectionFilters: {},
-      changedSince: 'no-such-ref',
+      since: { kind: 'ref', ref: 'no-such-ref' },
       signal: new AbortController().signal,
       notice: (message) => notices.push(message),
       ...overrides,

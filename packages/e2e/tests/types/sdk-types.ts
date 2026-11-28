@@ -506,6 +506,8 @@ filterCandidate.fn;
 filterCandidate.tags.push('smoke');
 filterCandidate.setupFile satisfies string | undefined;
 declare const filterContext: TestFilterContext;
+// `head` is set only by `--since-last-run`.
+void (filterContext.changes.head satisfies string | undefined);
 // @ts-expect-error the change is read-only
 filterContext.changes.files.push('src/a.ts');
 filterContext.configFile satisfies string | undefined;
@@ -1712,11 +1714,14 @@ report.run.filters?.[0]?.outcome satisfies 'failed' | 'timed-out' | undefined;
 ({ cause: 'todo', reason: 'todo' }) satisfies NonNullable<Report['run']['results'][number]['skip']>;
 // @ts-expect-error only a filtered skip names the test filter that left the test out
 ({ cause: 'explicit', reason: 'not on CI', filter: 'jev' }) satisfies NonNullable<Report['run']['results'][number]['skip']>;
-// The change the filters judged is counts only, never a file list: base and files together once git measured it, else why no filter ran.
+// The change the filters judged is counts only, never a file list: base and files together once git measured it since a ref, since and files once it measured it since the last run, else why no filter ran.
 report.run.changes satisfies
-  | { base: string; files: number; skipped?: string | undefined }
-  | { skipped: string; base?: undefined; files?: undefined }
+  | { base: string; files: number; skipped?: string | undefined; since?: undefined }
+  | { since: 'last-run'; files: number; skipped?: string | undefined; base?: undefined }
+  | { skipped: string; base?: undefined; files?: undefined; since?: undefined }
   | undefined;
+// @ts-expect-error a change measured since the last run names no base
+({ since: 'last-run', files: 1, base: 'a'.repeat(40) }) satisfies NonNullable<Report['run']['changes']>;
 // @ts-expect-error a change git never measured has no file count
 ({ files: 0, skipped: '--last-failed' }) satisfies NonNullable<Report['run']['changes']>;
 // A filter deciding what runs is a setup step named by the filter's name.
@@ -1857,6 +1862,9 @@ void run({ config: 'e2e.config.ts' });
 void run({ changedSince: 'origin/main' } satisfies RunOptions);
 // @ts-expect-error changedSince is a git ref
 void run({ changedSince: true });
+void run({ sinceLastRun: true } satisfies RunOptions);
+// @ts-expect-error sinceLastRun is a boolean
+void run({ sinceLastRun: 'origin/main' });
 void (runResult.exitCode satisfies RunExitCode);
 void (runResult.status satisfies RunStatus);
 void (runResult.report satisfies Report);
@@ -1917,6 +1925,7 @@ void list({
   grep: [/^plain$/], grepInvert: [/other/], lastFailed: false, shard: { index: 1, total: 2 }, passWithNoTests: true,
   output: 'out', env: {}, targets: ['web'], changedSince: 'origin/main',
 } satisfies ListOptions);
+void list({ sinceLastRun: true } satisfies ListOptions);
 void list({ config: { targets } });
 void isE2EError(new ConfigurationError('NO_TESTS', 'none'));
 // @ts-expect-error grep is an array of RegExp, not strings

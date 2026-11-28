@@ -42,8 +42,8 @@ function fakeWatch(listeners: Map<string, (event: string, filename: string | nul
 }
 
 describe('planRun', () => {
-  const base: RunOptions = { files: ['tests/signup.e2e.ts:12'], lastFailed: true, changedSince: 'origin/main', grep: [/checkout/], tags: ['smoke'] };
-  const rerun = { ...base, freshGraph: true, lastFailed: false, changedSince: undefined, passWithNoTests: true };
+  const base: RunOptions = { files: ['tests/signup.e2e.ts:12'], lastFailed: true, changedSince: 'origin/main', sinceLastRun: true, grep: [/checkout/], tags: ['smoke'] };
+  const rerun = { ...base, freshGraph: true, lastFailed: false, changedSince: undefined, sinceLastRun: undefined, passWithNoTests: true };
 
   it('keeps the command line for the first run, --last-failed and --changed-since included, with the project files read afresh', () => {
     expect(planRun(base, NO_FILTERS, { kind: 'start' })).toEqual({ ...base, freshGraph: true });

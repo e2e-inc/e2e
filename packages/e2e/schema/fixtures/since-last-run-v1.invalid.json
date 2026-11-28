@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "since-last-run-1",
+  "configDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "settled": {
+    "796f9448ca33432eb89feae732745c219a76c105fc352ee33d9912e10bf09695": {
+      "testId": "tests/checkout.e2e.ts::pays",
+      "tree": "main"
+    }
+  }
+}

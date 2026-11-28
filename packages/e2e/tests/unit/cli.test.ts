@@ -276,6 +276,11 @@ describe('e2e run argument parsing', () => {
     expect(options.lastFailed).toBe(true);
   });
 
+  it('maps --since-last-run to sinceLastRun', async () => {
+    await invoke('run', '--since-last-run');
+    expect(lastRunOptions()).toMatchObject({ sinceLastRun: true });
+  });
+
   it('maps --changed-since to changedSince, which needs a ref', async () => {
     await invoke('run', 'tests/a.e2e.ts', '--changed-since', 'origin/main');
     expect(lastRunOptions()).toMatchObject({ files: ['tests/a.e2e.ts'], changedSince: 'origin/main' });
@@ -914,6 +919,7 @@ describe('e2e --version and --help', () => {
       '--grep',
       '--grep-invert',
       '--changed-since',
+      '--since-last-run',
       '--last-failed',
       '--shard',
       '--pass-with-no-tests',

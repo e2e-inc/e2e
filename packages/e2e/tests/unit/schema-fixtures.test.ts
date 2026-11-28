@@ -247,6 +247,15 @@ describe.each(schemas)('%s schema', (name) => {
       }
       report.run.changes = {};
       expect(validate(report)).toBe(false);
+      // A change measured since the last run counts its files and names no base.
+      for (const sinceLastRun of [{ since: 'last-run', files: 2 }, { since: 'last-run', files: 2, skipped: 'the config has no filters' }]) {
+        report.run.changes = sinceLastRun;
+        expect(validate(report), JSON.stringify(sinceLastRun)).toBe(true);
+      }
+      for (const refused of [{ since: 'last-run' }, { since: 'last-run', files: 2, base: 'a'.repeat(40) }, { since: 'last-commit', files: 2 }, { since: 'last-run', skipped: '--last-failed' }]) {
+        report.run.changes = refused;
+        expect(validate(report), JSON.stringify(refused)).toBe(false);
+      }
       delete report.run.filters;
       delete report.run.changes;
       expect(validate(report)).toBe(true);

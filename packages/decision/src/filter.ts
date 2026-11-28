@@ -415,19 +415,24 @@ function testsIn(tests: readonly TestFilterCandidate[]): string {
  * The change as one unified diff of `changes.files`, with renames found and
  * a deleted file's lines left out: what the commits since `changes.base`
  * change, never the working tree, then each file no commit changes by name
- * alone, since CI may have written it. Stops adding
+ * alone, since CI may have written it. With `changes.head`, from a
+ * `--since-last-run` run, the diff runs between the two trees of tracked
+ * files, since the edits a developer has not committed are the change; an
+ * untracked file still goes by name alone, and one tracked since the last
+ * run shows as added, without what it held while untracked. Stops adding
  * files once the diff is past `MAX_DIFF_BYTES`.
  */
-async function changeDiff({ base, root, files }: TestFilterChanges, signal: AbortSignal): Promise<string> {
-  const committed = new Set((await git(root, ['diff', '--name-only', '--no-renames', '--no-ext-diff', '-z', base, 'HEAD', '--'], signal)).split('\0'));
+async function changeDiff({ base, head, root, files }: TestFilterChanges, signal: AbortSignal): Promise<string> {
+  const [to, unread] = head === undefined ? ['HEAD', 'not committed'] : [head, 'untracked'];
+  const read = new Set((await git(root, ['diff', '--name-only', '--no-renames', '--no-ext-diff', '-z', base, to, '--'], signal)).split('\0'));
   let diff = '';
-  for (const paths of pathspecs(files.filter((file) => committed.has(file)))) {
-    diff += await git(root, ['--literal-pathspecs', 'diff', ...DIFF_FLAGS, '-M', '--irreversible-delete', base, 'HEAD', '--', ...paths], signal);
+  for (const paths of pathspecs(files.filter((file) => read.has(file)))) {
+    diff += await git(root, ['--literal-pathspecs', 'diff', ...DIFF_FLAGS, '-M', '--irreversible-delete', base, to, '--', ...paths], signal);
     if (Buffer.byteLength(diff) > MAX_DIFF_BYTES) return diff;
   }
   for (const file of files) {
-    if (committed.has(file)) continue;
-    diff += `diff --git ${diffPath(`a/${file}`)} ${diffPath(`b/${file}`)}\nnot committed, contents not read\n`;
+    if (read.has(file)) continue;
+    diff += `diff --git ${diffPath(`a/${file}`)} ${diffPath(`b/${file}`)}\n${unread}, contents not read\n`;
     if (Buffer.byteLength(diff) > MAX_DIFF_BYTES) break;
   }
   return diff;

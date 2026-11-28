@@ -134,6 +134,11 @@ and `describe.only` fail with `ONLY_IN_CI`, and the replay cache is
 - `--changed-since <ref>` runs the configured `filters` (such as
   `decisionFilter` from `@e2e-dev/decision`) on a pull request; never pass
   it on `pull_request_target`.
+- `--since-last-run` is the local loop after each edit. With nothing
+  changed since the last run with the flag, only the tests that have not
+  passed yet run. After a change, the `filters` judge the tests that passed
+  before it, and without filters they all run. Run `npx e2e run` once,
+  without it, before you finish.
 - With `--shard i/n`, give each shard its own `--output` and upload the
   whole directory; `npx e2e merge-reports <shard dirs> --output <dir>`
   builds one report for the matrix. To rerun one shard's failures first,

@@ -10,7 +10,9 @@ import { Video } from './snippets/video.jsx';
 With `--changed-since <ref>`, a test filter leaves out the tests the change
 since that ref can't affect, and starts the files of the likeliest to fail first. The
 decision filter asks a [decision model](/decision-models), such as Jev, about
-each test. Without the flag, as on `main` and locally, every test runs.
+each test. Without the flag, as on `main`, every test runs. Locally,
+[`--since-last-run`](#run-only-what-changed-since-the-last-run) measures
+the change from your last run.
 
 <Video>
   <video src="/images/filters.mp4" aria-label="Two runs side by side. With --changed-since, the decision filter leaves out 25 of 27 tests and the run passes in 12 seconds. The full run is still going after 30 seconds." muted loop playsInline controls />
@@ -99,10 +101,48 @@ bunx e2e list --changed-since origin/main
 doesn't start your app, and makes the same model calls as a run. Commit your
 changes first so the filter can read the diff.
 
+## Run only what changed since the last run
+
+While you iterate locally, pass `--since-last-run` instead of a ref. The
+first run with the flag runs every test and records your working tree. Each
+later run measures the change since that record, uncommitted edits
+included:
+
+<CodeGroup>
+```bash npm
+npx e2e run --since-last-run
+```
+
+```bash pnpm
+pnpm exec e2e run --since-last-run
+```
+
+```bash bun
+bunx e2e run --since-last-run
+```
+</CodeGroup>
+
+- When no file changed, only the tests that haven't passed yet run. If they
+  all passed, nothing runs and the run passes.
+- When files changed, the filters judge the tests that passed before the
+  change. A test that failed, was interrupted, or is new runs without
+  asking, until it passes.
+- With no filters configured, a change runs every test that passed before
+  it.
+
+The decision filter reads the diff of tracked files, uncommitted edits
+included, and an untracked file by name only. The flag needs a git
+repository, and only files count: a change to a file that git ignores, to
+the environment, or to the [output](/reference/config#output) and cache
+directories runs nothing. A coding
+agent can run it after every edit, and `e2e run` once before it finishes.
+See the [CLI reference](/reference/cli#since-last-run) for what the record
+holds.
+
 ## What always runs
 
-- The full suite whenever `--changed-since` isn't passed (or nothing changed
-  since the merge base).
+- The full suite whenever neither `--changed-since` nor `--since-last-run`
+  is passed (or nothing changed since the merge base).
 - `--last-failed` reruns and subsequent `--watch` reruns.
 
 The decision filter also always runs:
@@ -188,7 +228,9 @@ on:
 ## Write your own
 
 A filter is `{ name, filter }`: `filter` gets the tests and the change, and
-returns the tests to leave out with a reason for each. It can also score the
+returns the tests to leave out with a reason for each. A filter that runs
+`git diff` must diff `changes.base` to `changes.head` when the run sets it,
+as [`--since-last-run`](/reference/cli#since-last-run) does. It can also score the
 rest from 0 to 1 with `relevance`. This one maps changed paths to test tags,
 and starts the tests whose area the change reaches first:
 

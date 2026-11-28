@@ -250,7 +250,7 @@ export function memberRan(member: { readonly status: string; readonly skip?: { r
 }
 
 /** Whether a skip cause is a `SelfSkipCause`, one a test gives itself rather than one the runner gives it. */
-function skippedItself(cause: string | undefined): cause is SelfSkipCause {
+export function skippedItself(cause: string | undefined): cause is SelfSkipCause {
   return (SELF_SKIP_CAUSES as readonly (string | undefined)[]).includes(cause);
 }
 

@@ -7,11 +7,9 @@
 
 import { describeValue } from '@e2e-dev/core/lib/config/validate';
 import { ConfigurationError, E2EError } from '@e2e-dev/core/lib/internal/errors';
-import { COMMIT_HASH, GitFailure, runGit, type GitResult } from '../internal/git.ts';
+import { COMMIT_HASH, filesChanged, GIT_MAX_BUFFER, GitFailure, gitFailureText, gitOutput, repositoryRoot, runGit, withGitBudget } from '../internal/git.ts';
 import { compareCodePoints } from '@e2e-dev/core/lib/internal/globs';
 import { onDiskPath } from '@e2e-dev/core/lib/internal/paths';
-import { budgetText } from '@e2e-dev/core/lib/internal/time';
-import { ellipsize } from '../report/format.ts';
 import type { TestFilterChanges } from '../run-types.ts';
 
 /**
@@ -43,9 +41,6 @@ interface ChangeOptions {
 
 const GIT_BUDGET_MS = 30_000;
 
-/** How much one git call may print: a diff's file list on a large monorepo runs to megabytes. */
-const GIT_MAX_BUFFER = 256 * 1024 * 1024;
-
 /**
  * Finds the change the test filters judge: every file that differs from
  * the merge base of `changedSince` and HEAD, in the working tree, untracked
@@ -53,24 +48,13 @@ const GIT_MAX_BUFFER = 256 * 1024 * 1024;
  * call together has a 30 second budget; a ref git cannot measure from, in
  * time or at all, is `INVALID_CHANGED_SINCE`.
  */
-export async function findChanges(options: ChangeOptions): Promise<TestFilterChanges> {
+export function findChanges(options: ChangeOptions): Promise<TestFilterChanges> {
   const ref = options.changedSince;
-  const budgetMs = options.budgetMs ?? GIT_BUDGET_MS;
-  const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(), budgetMs);
-  const signal = AbortSignal.any([options.signal, deadline.signal]);
-  try {
-    return await lookUp(ref, options.cwd, signal);
-  } catch (cause) {
-    if (options.signal.aborted) {
-      throw new E2EError('interrupted', 'INTERRUPTED', `interrupted while finding ${options.purpose ?? 'the change the test filters judge'}`);
-    }
-    if (cause instanceof ConfigurationError) throw cause;
-    const why = deadline.signal.aborted ? `git did not answer within ${budgetText(budgetMs)}` : cause instanceof GitFailure ? cause.message : String(cause);
-    throw invalidChangedSince(`--changed-since ${JSON.stringify(ref)}: ${why}`, cause);
-  } finally {
-    clearTimeout(timer);
-  }
+  return withGitBudget(options.signal, options.budgetMs ?? GIT_BUDGET_MS, (signal) => lookUp(ref, options.cwd, signal), (failed) =>
+    failed.kind === 'interrupted'
+      ? new E2EError('interrupted', 'INTERRUPTED', `interrupted while finding ${options.purpose ?? 'the change the test filters judge'}`)
+      : invalidChangedSince(`--changed-since ${JSON.stringify(ref)}: ${failed.why}`, failed.cause),
+  );
 }
 
 /** The change since `ref`, asking git within `signal`. */
@@ -97,20 +81,13 @@ async function lookUp(ref: string, cwd: string, signal: AbortSignal): Promise<Te
  * change.
  */
 async function changesSince(root: string, base: string, signal: AbortSignal): Promise<TestFilterChanges> {
-  const [diff, untracked] = await Promise.all([
-    gitOutput(root, ['diff', '--name-only', '--no-renames', '--no-ext-diff', '-z', base, '--'], signal),
+  const [tracked, untracked] = await Promise.all([
+    filesChanged(root, base, signal),
     gitOutput(root, ['ls-files', '--others', '--exclude-standard', '--full-name', '-z'], signal),
   ]);
-  const files = [...new Set([...diff.split('\0'), ...untracked.split('\0').filter((file) => !file.endsWith('/'))])].filter((file) => file !== '').toSorted(compareCodePoints);
+  const files = [...new Set([...tracked, ...untracked.split('\0').filter((file) => file !== '' && !file.endsWith('/'))])].toSorted(compareCodePoints);
   // As on disk, like the filter context's `projectRoot`: git prints `C:/repo` on Windows.
   return Object.freeze({ base, root: onDiskPath(root), files: Object.freeze(files) });
-}
-
-/** The repository `cwd` is in, by its absolute root. */
-async function repositoryRoot(cwd: string, signal: AbortSignal): Promise<string> {
-  const root = (await gitOutput(cwd, ['rev-parse', '--show-toplevel'], signal)).replace(/\r?\n$/u, '');
-  if (root === '') throw new GitFailure('git rev-parse --show-toplevel printed no repository root');
-  return root;
 }
 
 /**
@@ -131,7 +108,7 @@ async function commitOf(root: string, rev: string, signal: AbortSignal): Promise
 async function mergeBase(root: string, commit: string, signal: AbortSignal): Promise<string | undefined> {
   const result = await runGit(root, ['merge-base', commit, 'HEAD'], { signal, maxBuffer: GIT_MAX_BUFFER });
   if (result.exitCode === 1) return undefined;
-  if (result.exitCode !== 0) throw new GitFailure(failureText(['merge-base'], result));
+  if (result.exitCode !== 0) throw new GitFailure(gitFailureText(['merge-base'], result));
   const base = result.stdout.trim();
   return COMMIT_HASH.test(base) ? base : undefined;
 }
@@ -139,19 +116,6 @@ async function mergeBase(root: string, commit: string, signal: AbortSignal): Pro
 /** Whether the checkout is shallow, so a missing merge base may be history it has not fetched. */
 async function isShallow(root: string, signal: AbortSignal): Promise<boolean> {
   return (await gitOutput(root, ['rev-parse', '--is-shallow-repository'], signal)).trim() === 'true';
-}
-
-/** A git call's stdout; a non-zero exit is a `GitFailure` quoting what git said. */
-async function gitOutput(cwd: string, args: readonly string[], signal: AbortSignal): Promise<string> {
-  const result = await runGit(cwd, args, { signal, maxBuffer: GIT_MAX_BUFFER });
-  if (result.exitCode !== 0) throw new GitFailure(failureText(args, result));
-  return result.stdout;
-}
-
-/** `git rev-parse: not a git repository`: the command and the first line git wrote, without its `fatal:` prefix. */
-function failureText(args: readonly string[], result: GitResult): string {
-  const said = result.stderr.split('\n').find((line) => line.trim() !== '')?.trim().replace(/^(fatal|error): /u, '');
-  return `git ${args[0] ?? ''}: ${ellipsize(said ?? `exited with code ${result.exitCode}`, 200)}`;
 }
 
 /** `--changed-since` named something git cannot measure a change from. */

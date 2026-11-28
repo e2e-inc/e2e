@@ -37,7 +37,7 @@
           "exitCode": 0,
           "configDigest": "0000000000000000000000000000000000000000000000000000000000000000",
           "changes": {
-            "base": "0123456789abcdef0123456789abcdef01234567",
+            "since": "last-run",
             "files": 1
           },
           "filters": [
