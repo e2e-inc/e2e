@@ -228,6 +228,21 @@ To test a packaged build, point `executablePath` at the binary (not the
 }
 ```
 
+On Windows, name the app's `.exe`, not its folder or a shortcut:
+
+```ts title="e2e.config.ts"
+{
+  name: 'electron-packaged',
+  engine: electron({
+    executablePath: 'dist/win-unpacked/MyApp.exe',
+  }),
+}
+```
+
+An app installed by a Squirrel installer (`electron-winstaller`, Electron
+Forge's default) keeps a launcher of the same name beside its `app-<version>`
+folders. Name the `.exe` inside the version folder.
+
 - If the build disables the `EnableNodeCliInspectArguments` fuse, `screen`,
   `expect`, and the agent still work, but `electron.evaluate()` fails and
   `electron.window({ title })` matches document titles only.

@@ -1,10 +1,11 @@
 /**
  * `revylBrowsers()` against a scripted Revyl API: the options it refuses,
- * the session it starts and the CDP URL it leases, and the session it stops
- * on every path. The CDP attach itself is `@e2e-dev/web`'s, tested there.
+ * the session it starts and the CDP URL it leases, the session it stops on
+ * every path, and the sweep of sessions a dead worker left. The CDP attach itself is `@e2e-dev/web`'s, tested there.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { BrowserReleaseContext, BrowserRequest } from '@e2e-dev/web';
@@ -29,7 +30,15 @@ let routes: Record<string, (call: Call) => Response>;
 
 const json = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
+/** A fresh run per test: the provider keeps its run's open sessions on disk, under the run id. */
+let runId = '';
+
+/** Where the provider keeps the run's markers for target `web`, as `src/web/ledger.ts` builds it. */
+const markerDir = (): string => path.join(tmpdir(), 'e2e-revyl', runId, createHash('sha256').update('web').digest('hex').slice(0, 16));
+const markers = (): string[] => (existsSync(markerDir()) ? readdirSync(markerDir()) : []);
+
 beforeEach(() => {
+  runId = `run-${randomUUID()}`;
   calls = [];
   routes = {
     'POST /api/v1/apps/app-1/builds/external': () => json({ id: 'build-1' }),
@@ -50,14 +59,15 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  rmSync(path.join(tmpdir(), 'e2e-revyl', runId), { recursive: true, force: true });
 });
 
 function request(overrides: Partial<BrowserRequest> = {}): BrowserRequest {
-  return { runId: 'run', targetName: 'web', slot: 0, slots: 1, attemptId: 'attempt-1', env, signal: new AbortController().signal, log: () => undefined, ...overrides };
+  return { runId, targetName: 'web', slot: 0, slots: 1, attemptId: 'attempt-1', env, signal: new AbortController().signal, log: () => undefined, ...overrides };
 }
 
-const recordContext: ProviderRecordContext = { runId: 'run', targetName: 'web', attemptId: 'attempt-1', env, signal: new AbortController().signal };
-const context: BrowserReleaseContext = { runId: 'run', targetName: 'web', env, signal: new AbortController().signal, log: () => undefined };
+const recordContext = (): ProviderRecordContext => ({ runId, targetName: 'web', attemptId: 'attempt-1', env, signal: new AbortController().signal });
+const context = (): BrowserReleaseContext => ({ runId, targetName: 'web', env, signal: new AbortController().signal, log: () => undefined });
 const failure = (pending: Promise<unknown>): Promise<Error> => pending.then(() => new Error('resolved'), (error: unknown) => error as Error);
 const paths = () => calls.map((call) => `${call.method} ${new URL(call.url).pathname}`);
 const stops = () => calls.filter((call) => call.url.endsWith('/stop'));
@@ -138,6 +148,7 @@ describe('revylBrowsers()', () => {
     expect((failed.cause as Error).message).toContain('the site returned 404');
     expect(stops()).toHaveLength(1);
     expect(stops()[0]!.url).toContain((calls[1]!.body as { session_id: string }).session_id);
+    expect(markers()).toEqual([]);
   });
 
   it('stops the session when Revyl refuses to mint a CDP URL', async () => {
@@ -161,11 +172,49 @@ describe('revylBrowsers()', () => {
     expect(stops()).toHaveLength(1);
   });
 
-  it('says so when stopping a failed start fails too', async () => {
+  it('says so when stopping a failed start fails too, and leaves the session to the sweep', async () => {
+    const provider = revylBrowsers(options);
     routes['POST /api/v1/execution/device-proxy/run-1/cdp'] = () => json({ detail: 'nope' }, 400);
     routes['POST /api/v1/execution/device/sessions/'] = () => json({ detail: 'down' }, 500);
 
-    await expect(revylBrowsers(options).acquire(request())).rejects.toThrow(/stopping it failed, so Revyl ends it after 600 s idle/);
+    await expect(provider.acquire(request())).rejects.toThrow(/stopping it failed, so the run's sweep or Revyl's 600 s idle timeout ends it/);
+    const sessionId = (calls[1]!.body as { session_id: string }).session_id;
+    expect(markers()).toEqual([sessionId]);
+
+    routes['POST /api/v1/execution/device/sessions/'] = () => json({ ok: true });
+    await expect(provider.sweep!(context())).resolves.toEqual([sessionId]);
+  });
+
+  it('starts no session it cannot record for the sweep', async () => {
+    // A file where the run's marker directory goes, so no marker can be written.
+    mkdirSync(path.join(tmpdir(), 'e2e-revyl'), { recursive: true });
+    writeFileSync(path.join(tmpdir(), 'e2e-revyl', runId), '');
+
+    await expect(revylBrowsers(options).acquire(request())).rejects.toThrow(/ENOTDIR|EEXIST/);
+    expect(paths()).not.toContain('POST /api/v1/execution/start_device');
+  });
+
+  it('keeps a marker for each session until it is stopped', async () => {
+    const provider = revylBrowsers(options);
+
+    const lease = await provider.acquire(request());
+    expect(markers()).toEqual([lease.id]);
+    await provider.release(lease, context());
+
+    expect(markers()).toEqual([]);
+  });
+
+  it('keeps the marker of a session whose release failed to stop it, so the sweep stops it', async () => {
+    const provider = revylBrowsers(options);
+    const lease = await provider.acquire(request());
+    routes['POST /api/v1/execution/device/sessions/'] = () => json({ detail: 'internal' }, 500);
+
+    await expect(provider.release(lease, context())).rejects.toThrow(/answered 500: internal/);
+    expect(markers()).toEqual([lease.id]);
+
+    routes['POST /api/v1/execution/device/sessions/'] = () => json({ ok: true });
+    await expect(provider.sweep!(context())).resolves.toEqual([lease.id]);
+    expect(markers()).toEqual([]);
   });
 
   it('mints the CDP URL again after a gateway error, before the session is given up', async () => {
@@ -183,9 +232,9 @@ describe('revylBrowsers()', () => {
   it('stops the session on release, and counts one Revyl already ended as stopped', async () => {
     const provider = revylBrowsers(options);
 
-    await provider.release({ id: 'session-1', cdpEndpoint: CDP_URL }, context);
+    await provider.release({ id: 'session-1', cdpEndpoint: CDP_URL }, context());
     routes['POST /api/v1/execution/device/sessions/'] = () => json({ detail: 'Session already ended' }, 409);
-    await provider.release({ id: 'session-2', cdpEndpoint: CDP_URL }, context);
+    await provider.release({ id: 'session-2', cdpEndpoint: CDP_URL }, context());
 
     expect(paths()).toEqual(['POST /api/v1/execution/device/sessions/session-1/stop', 'POST /api/v1/execution/device/sessions/session-2/stop']);
   });
@@ -198,12 +247,13 @@ describe('revylBrowsers()', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'revyl-recording-'));
     onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
 
-    const recording = await revylBrowsers(options).record!({ id: 'session-1', cdpEndpoint: CDP_URL }, recordContext);
+    const recording = await revylBrowsers(options).record!({ id: 'session-1', cdpEndpoint: CDP_URL }, recordContext());
     expect(recording.startedAt).toBe('2026-11-21T23:44:44.536193+00:00');
     expect(stops()).toEqual([]);
     const result = await recording.stop({ dir, signal: new AbortController().signal });
 
     expect(result).toEqual({ file: 'recording.mp4' });
+    expect(stops().map((call) => new URL(call.url).pathname)).toEqual(['/api/v1/execution/device/sessions/session-1/stop']);
     expect([...readFileSync(path.join(dir, 'recording.mp4'))]).toEqual([0, 0, 0, 24, 102, 116, 121, 112]);
     const order = paths();
     expect(order.indexOf('POST /api/v1/execution/device/sessions/session-1/stop')).toBeLessThan(order.indexOf('GET /api/v1/reports-v3/reports/by-session/session-1/video-timeline'));
@@ -213,7 +263,7 @@ describe('revylBrowsers()', () => {
 
   it('fails a recording Revyl did not keep', async () => {
     routes['GET /api/v1/reports-v3/reports/by-session/session-1/video-timeline'] = () => json({ recording_status: 'unavailable', video_url: null });
-    const recording = await revylBrowsers(options).record!({ id: 'session-1', cdpEndpoint: CDP_URL }, recordContext);
+    const recording = await revylBrowsers(options).record!({ id: 'session-1', cdpEndpoint: CDP_URL }, recordContext());
 
     await expect(recording.stop({ dir: tmpdir(), signal: new AbortController().signal })).rejects.toThrow('Revyl kept no recording of session session-1 (unavailable)');
   });
@@ -222,8 +272,45 @@ describe('revylBrowsers()', () => {
     let answers = 0;
     routes['POST /api/v1/execution/device/sessions/'] = () => (++answers === 1 ? new Response('<html>bad gateway</html>', { status: 502 }) : json({ ok: true }));
 
-    await revylBrowsers(options).release({ id: 'session-1', cdpEndpoint: CDP_URL }, context);
+    await revylBrowsers(options).release({ id: 'session-1', cdpEndpoint: CDP_URL }, context());
 
     expect(stops()).toHaveLength(2);
+  });
+  describe('sweep', () => {
+    it('stops the sessions of the run a dead worker never released, and only those', async () => {
+      const provider = revylBrowsers(options);
+      const released = await provider.acquire(request());
+      const left = await provider.acquire(request({ slot: 1 }));
+      await provider.release(released, context());
+      calls = [];
+
+      await expect(provider.sweep!(context())).resolves.toEqual([left.id]);
+      expect(paths()).toEqual([`POST /api/v1/execution/device/sessions/${left.id}/stop`]);
+      await expect(provider.sweep!(context())).resolves.toEqual([]);
+      expect(existsSync(path.join(tmpdir(), 'e2e-revyl', runId))).toBe(false);
+    });
+
+    it("never touches another run's sessions", async () => {
+      const provider = revylBrowsers(options);
+      await provider.acquire(request());
+      calls = [];
+
+      await expect(provider.sweep!({ ...context(), runId: `run-${randomUUID()}` })).resolves.toEqual([]);
+      expect(stops()).toEqual([]);
+    });
+
+    it('stops every session it found even when one stop fails, names both, and names only the ones Revyl still had open', async () => {
+      const provider = revylBrowsers(options);
+      const [first, second, third] = [await provider.acquire(request()), await provider.acquire(request({ slot: 1 })), await provider.acquire(request({ slot: 2 }))];
+      routes['POST /api/v1/execution/device/sessions/'] = (call) =>
+        call.url.includes(second!.id) ? json({ detail: 'internal' }, 500) : call.url.includes(third!.id) ? json({ detail: 'Session already ended' }, 409) : json({ ok: true });
+
+      const failed = await failure(provider.sweep!(context()));
+
+      expect(failed.message).toBe(`stopped ${first!.id}; could not stop ${second!.id} (Revyl /api/v1/execution/device/sessions/:id/stop answered 500: internal), so Revyl ends each after 600 s idle`);
+      expect(markers()).toEqual([second!.id]);
+      routes['POST /api/v1/execution/device/sessions/'] = () => json({ ok: true });
+      await expect(provider.sweep!(context())).resolves.toEqual([second!.id]);
+    });
   });
 });
