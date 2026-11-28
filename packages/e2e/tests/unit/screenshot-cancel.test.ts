@@ -7,13 +7,16 @@
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveExpression, type SemanticNode } from '@e2e-dev/core/lib/engine/index';
+import { encodePng } from '@e2e-dev/core/lib/internal/image';
 import { WrittenScreenshots } from '@e2e-dev/core/lib/run/screenshots';
 import { expect as expectFixture } from '../../src/expect/index.ts';
 import { encodeRgbaPng } from '../helpers/rgba-png.ts';
 import { screenOver } from '../helpers/screen-over.ts';
 import { snapshot } from '../helpers/snapshot.ts';
+
+vi.mock('@e2e-dev/core/lib/internal/image', { spy: true });
 
 const VIEWPORT = { width: 2560, height: 1440 };
 const ROOT: SemanticNode = { ref: { id: 'root', revision: '' }, role: 'document' };
@@ -40,15 +43,18 @@ describe('toHaveScreenshot cancelled while it encodes', () => {
   ])('%s', async (_title, ci) => {
     const png = encodeRgbaPng({ ...VIEWPORT, data: new Uint8Array(VIEWPORT.width * VIEWPORT.height * 4).fill(200) });
     const controller = new AbortController();
-    let observes = 0;
+    const encode = vi.mocked(encodePng);
+    encode.mockClear();
+    encode.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      controller.abort();
+      return png;
+    });
     const project = path.join(dir, 'project');
     const artifacts = path.join(dir, 'artifacts');
     const { screen } = screenOver({
       locate: (expression) => resolveExpression(expression, [ROOT]),
       observe: () => {
-        observes += 1;
-        // The second capture matches the first, so the next native call is the encode: cancel during it.
-        if (observes === 2) setTimeout(() => controller.abort(), 0);
         return snapshot([ROOT], { viewport: VIEWPORT, pixels: { data: png, mediaType: 'image/png', width: VIEWPORT.width, height: VIEWPORT.height, scale: 1 } });
       },
       timeoutMs: 5_000,
@@ -65,8 +71,7 @@ describe('toHaveScreenshot cancelled while it encodes', () => {
       },
     });
     await expect(expectFixture(screen).toHaveScreenshot('home')).rejects.toMatchObject({ code: 'CANCELLED' });
-    // The encode itself is not stopped: wait for it, then look for what it would have written.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(encode).toHaveBeenCalledOnce();
     expect([dir].flatMap(filesUnder)).toEqual([]);
   });
 });

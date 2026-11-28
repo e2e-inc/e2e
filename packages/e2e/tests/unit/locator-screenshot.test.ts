@@ -7,12 +7,15 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EngineError, resolveExpression, type SemanticNode } from '@e2e-dev/core/lib/engine/index';
+import { processPng } from '@e2e-dev/core/lib/internal/image';
 import { decodeRgbaPng as decodePng, encodeRgbaPng as encodePng, type RgbaImage } from '../helpers/rgba-png.ts';
 import type { Locator } from '@e2e-dev/core/lib/types';
 import { screenOver } from '../helpers/screen-over.ts';
 import { snapshot } from '../helpers/snapshot.ts';
+
+vi.mock('@e2e-dev/core/lib/internal/image', { spy: true });
 
 const VIEWPORT = { width: 100, height: 50 };
 const RED = [255, 0, 0, 255] as const;
@@ -282,18 +285,24 @@ describe('locator.screenshot', () => {
       observe: () => snapshot([card(box)], { viewport: VIEWPORT }),
       perform: () => undefined,
       screenshot: () => {
-        writeFileSync(path.join(artifactsDir, 'screenshots', 'shot.png'), encodePng(screenImage(30, box)));
-        // Cancels after the reads that follow the capture, while the native crop of 3000x1500 pixels runs.
-        setTimeout(() => controller.abort(), 0);
+        writeFileSync(path.join(artifactsDir, 'screenshots', 'shot.png'), encodePng(screenImage(1, box)));
         return 'screenshots/shot.png';
       },
       artifactsDir,
       timeoutMs: 2_000,
       signal: controller.signal,
     });
+    const crop = vi.mocked(processPng);
+    crop.mockClear();
+    // The crop runs on the addon's pool; the attempt is cancelled before it answers.
+    // `processPng` is overloaded on its output; this call asks for a PNG.
+    crop.mockImplementationOnce((async () => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      controller.abort();
+      return new Uint8Array(encodePng(screenImage(1, box)));
+    }) as unknown as typeof processPng);
     await expect(screen.getByTestId('card').screenshot()).rejects.toMatchObject({ code: 'CANCELLED' });
-    // The crop itself is not stopped: wait for it, then look for what it would have written.
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(crop).toHaveBeenCalledOnce();
     expect(readdirSync(path.join(artifactsDir, 'screenshots'))).toEqual([]);
   });
 
