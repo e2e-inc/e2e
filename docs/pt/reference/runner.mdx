@@ -1,0 +1,650 @@
+---
+title: "e2e/runner"
+description: "Rode uma suíte de testes ou uma exploração, liste uma seleção ou hospede sessões do e2e em outro runner de testes."
+"og:image": "https://e2e.com/docs/images/og/reference/runner.png?v=a4609b13d7"
+"twitter:image": "https://e2e.com/docs/images/og/reference/runner.png?v=a4609b13d7"
+---
+
+`e2e/runner` roda uma suíte a partir do código, sem chamar a CLI. `run` roda
+os testes e retorna o relatório deles, `explore` roda uma exploração e
+retorna os achados dela, `list` retorna uma seleção, e `openHost` hospeda
+sessões do e2e em outro runner de testes. Importar `e2e` em um arquivo de
+teste não carrega o runner.
+
+<Note>
+`run`, `list`, `explore` e `openHost` precisam do Node.js. No Bun, eles lançam
+`NODE_UNSUPPORTED`; lá, rode os testes com a [CLI](/reference/cli#bun).
+</Note>
+
+```ts title="scripts/run-e2e.ts"
+import type { E2EConfig } from 'e2e';
+import { run } from 'e2e/runner';
+import { web } from '@e2e-dev/web';
+
+const config: E2EConfig = {
+  targets: [{ name: 'web', engine: web(), app: { url: 'http://localhost:3000' } }],
+};
+const controller = new AbortController();
+const result = await run({
+  config,
+  files: ['tests/signup.e2e.ts'],
+  interruptSignal: controller.signal,
+  onEvent(event) {
+    if (event.type === 'test-started') console.log(event.title);
+  },
+});
+
+console.log(result.status, result.report.run.summary);
+```
+
+## Referência
+
+### Funções
+
+| Função | Retorna |
+| --- | --- |
+| [`run`](#run) | `Promise<RunResult>` |
+| [`explore`](#explore) | `Promise<ExploreResult>` |
+| [`list`](#list) | `Promise<ListResult>` |
+| [`openHost`](#openhost) | `Promise<E2EHost<Fixtures>>` |
+| [`isE2EError`](#ise2eerror) | `boolean` |
+
+#### `run`
+
+`run(options?: RunOptions)` roda uma suíte completa. A função termina a
+limpeza antes de resolver e nunca encerra o processo que a chamou.
+
+```ts
+const result = await run({ files: ['tests/signup.e2e.ts'] });
+process.exitCode = result.exitCode;
+```
+
+##### Opções
+
+| Opção | Exemplo | Tipo | Padrão |
+| --- | --- | --- | --- |
+| `cwd` | `'apps/web'` | `string` | o diretório de trabalho atual |
+| `config` | `'e2e.ci.config.ts'` | `string \| E2EConfig` | o `e2e.config.ts` descoberto |
+| `files` | `['tests/signup.e2e.ts:12']` | `readonly string[]` | a suíte configurada |
+| `changedSince` | `'origin/main'` | `string` | - |
+| `interruptSignal` | `controller.signal` | `AbortSignal` | - |
+| `onEvent` | `(event) => {}` | `RunEventSink` | - |
+
+- `files` aceita caminhos, globs, nomes simples ou `file:line`.
+- `changedSince` funciona como [`--changed-since`](/filters).
+- Abortar `interruptSignal` interrompe os testes e roda a desmontagem.
+- `onEvent` recebe eventos de progresso tipados. O progresso no terminal fica
+  desligado. O callback não pode bloquear. Um callback que lança ou rejeita é
+  desativado sem fazer a execução falhar.
+- Defina na configuração os ajustes de execução, como novas tentativas e
+  workers.
+- Uma configuração em tempo de execução (um valor `E2EConfig`) roda com um
+  worker no processo que chamou a função. Uma configuração em arquivo aceita
+  os processos de worker configurados.
+
+##### Resultado
+
+| Campo | Significado |
+| --- | --- |
+| `exitCode` | O código de saída equivalente ao da CLI: `0`, `1`, `2`, `3`, `4` ou `130`. |
+| `status` | `passed`, `failed`, `blocked`, `error` ou `interrupted`. |
+| `report` | O relatório completo. Leia `report.run.results`, `report.run.errors` e `report.run.summary` para conhecer os desfechos. |
+| `reportPath` | Caminho absoluto para `report.json`, ou `undefined` se o arquivo não pôde ser escrito ou se a execução terminou antes de chegar aos testes. |
+| `aiTracePath` | Caminho do trace de IA, ou `undefined` quando nenhum trace de IA foi escrito. |
+
+Falhas de teste, falhas de configuração e interrupção resolvem a promise, com
+o status e os erros no relatório.
+
+| Lança | Quando |
+| --- | --- |
+| `RUNNER_BUSY` | Outra suíte está rodando, ou há um host aberto. Feche todos os hosts antes de rodar uma suíte, e aguarde a suíte antes de abrir um host. |
+
+- Os módulos auxiliares que seus arquivos de teste importam ficam em cache
+  entre chamadas de `run` no mesmo processo. Uma edição neles exige um novo
+  processo.
+- Cada execução que retorna um relatório envia um evento anônimo
+  [`e2e_run_completed`](/telemetry), com as mesmas formas de desativação da
+  CLI. A primeira chamada pode imprimir o aviso de telemetria no stderr.
+- A saída da suíte passa por ocultação de texto em UTF-8 e não preserva dados
+  binários. Os logs do seu app e a saída do callback de progresso ficam sob o
+  seu controle.
+
+#### `explore`
+
+`explore(options?: ExploreOptions)` roda uma [exploração](/explore), a
+execução que `e2e explore` inicia. A função termina a limpeza antes de
+resolver e nunca encerra o processo que a chamou.
+
+```ts title="scripts/explore-e2e.ts"
+import type { E2EConfig } from 'e2e';
+import { explore } from 'e2e/runner';
+import { web } from '@e2e-dev/web';
+import { gateway } from 'ai';
+
+const config: E2EConfig = {
+  agents: { default: { model: gateway('openai/gpt-6-luna-fast') } },
+  targets: [{ name: 'web', engine: web(), app: { url: 'http://localhost:3000' } }],
+};
+const controller = new AbortController();
+const result = await explore({
+  config,
+  goal: 'Explore the checkout flow like a first-time buyer and report anything off',
+  maxSteps: 4,
+  interruptSignal: controller.signal,
+  onEvent(event) {
+    if (event.type === 'explore' && event.progress.phase === 'finding') console.log(event.progress.finding.title);
+  },
+});
+
+console.log(result.status, result.explore.ended, result.explore.findings.length);
+```
+
+##### Opções
+
+| Opção | Exemplo | Tipo | Padrão |
+| --- | --- | --- | --- |
+| `cwd` | `'apps/web'` | `string` | o diretório de trabalho atual |
+| `config` | `'e2e.ci.config.ts'` | `string \| E2EConfig` | o `e2e.config.ts` descoberto |
+| `goal` | `'Explore the login flow'` | `string` | `'Explore the app and find bugs'`; com `changedSince`, `'Explore what this change affects and find bugs in it'` |
+| `target` | `'web'` | `string` | o primeiro alvo configurado |
+| `agent` | `'smart'` | `string` | `agents.default` |
+| `session` | `'loggedIn'` | `string` | - |
+| `changedSince` | `'origin/main'` | `string` | - |
+| `maxSteps` | `4` | `number` | `8` |
+| `timeoutMs` | `300_000` | `number` | `600_000` |
+| `interruptSignal` | `controller.signal` | `AbortSignal` | - |
+| `onEvent` | `(event) => {}` | `RunEventSink` | - |
+
+- `goal` tem no máximo 2.000 caracteres.
+- `session` nomeia uma sessão que um [teste de preparação](/authentication)
+  salva. Esse teste de preparação roda primeiro, e a exploração começa a
+  partir dele, como faz `--session`.
+- `changedSince` explora a mudança desde essa ref, como faz
+  [`--changed-since`](/reference/cli#e2e-explore).
+- `maxSteps` vai de 1 a 100. `timeoutMs` vai de `180000` a `7200000`.
+- `onEvent` recebe os mesmos eventos de `run`, mais um evento `explore` para
+  cada decisão de planejamento, passo e achado. O que `e2e explore` imprime
+  antes de a execução começar, como o alvo escolhido, chega como um evento
+  `notice` com alvo `run`, antes do evento `collected`.
+- Os ajustes de gravação e de saída, como `video`, `trace` e `output`, vêm da
+  configuração.
+
+##### Resultado
+
+`ExploreResult` tem todos os campos de [`RunResult`](#run), mais `explore`, o
+mesmo registro que `report.run.explore` guarda.
+
+| Campo | Significado |
+| --- | --- |
+| `explore.goal`, `explore.budgets` | O objetivo, com os valores de segredos ocultados, e os orçamentos de passos e de tempo com que a exploração rodou. |
+| `explore.ended` | Por que a exploração terminou: `finished`, `skipped` (com `changedSince`, o planejador julgou que a mudança não tem nada que um usuário consiga ver; a execução passa), `step-limit`, `time`, `stuck` ou `aborted`. |
+| `explore.summary` | A avaliação final do agente, quando ele deu uma. |
+| `explore.change` | Com `changedSince`, a mudança a partir da qual a exploração planejou: `base`, a base de merge, e `files`, quantos arquivos mudaram. |
+| `explore.steps` | Cada passo que o agente planejou e rodou, com o status do passo: `passed`, `failed`, `blocked` ou `exhausted`. |
+| `explore.findings` | Cada achado: `kind`, `severity` de 1 a 5, `title`, `expected`, `actual` e `reproduction`. Um `issue` faz a execução falhar; um `warning`, não. |
+
+Depois que a exploração começa, achados, falhas e interrupção resolvem a
+promise, com o status no relatório. Opções ou uma configuração que não
+conseguem iniciar uma exploração rejeitam antes, como fazem as flags
+correspondentes de `e2e explore`. Reconheça esses erros com
+[`isE2EError`](#ise2eerror). Como uma falha de [`openHost`](#openhost), eles
+passam pela ocultação e não trazem um `cause` bruto.
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_CONFIG` | `goal`, `maxSteps` ou `timeoutMs` está fora do intervalo, ou `agent` não nomeia nenhum agente configurado. |
+| `UNKNOWN_TARGET` | `target` não nomeia nenhum alvo configurado. |
+| `MODEL_UNAVAILABLE` | O agente não tem modelo. |
+| `INVALID_CHANGED_SINCE` | `changedSince` está vazio, começa com `-` ou nomeia uma ref a partir da qual o git não consegue medir uma mudança. |
+| `RUNNER_BUSY` | Uma suíte ou uma exploração está rodando, ou há um host aberto. |
+| Os códigos que `run` registra | A configuração não existe, ou o loader a recusou. |
+
+Cada exploração que retorna um relatório envia um evento anônimo
+[`e2e_run_completed`](/telemetry), como faz `run`.
+
+#### `list`
+
+`list(options?: ListOptions)` coleta e seleciona como
+[`e2e list`](/reference/cli#e2e-list) faz, e termina aí. Nenhum processo de
+app, engine ou worker inicia, e nada é escrito.
+
+```ts
+import { isE2EError, list } from 'e2e/runner';
+
+const { pairs, unmatched, targets } = await list({
+  files: ['tests/signup.e2e.ts'],
+  grep: [/checkout/],
+});
+
+for (const pair of pairs) {
+  console.log(`${pair.id} ${pair.disposition} ${pair.titlePath.join(' › ')}`);
+}
+```
+
+Cada chamada importa os arquivos de teste de novo, então um `list()`
+posterior no mesmo processo enxerga uma edição.
+
+##### Opções
+
+| Opção | Exemplo | Tipo | Padrão |
+| --- | --- | --- | --- |
+| `config` | `'e2e.ci.config.ts'` | `string \| E2EConfig` | descoberta a partir de `cwd`, com a mesma busca que `e2e list` faz |
+| `targets` | `['web']` | `readonly string[]` | - |
+| `cwd` | `'apps/web'` | `string` | o diretório de trabalho atual |
+| `files` | `['tests/', 'signup.e2e.ts:12']` | `readonly string[]` | a suíte configurada |
+| `tags`, `tagMode`, `excludeTags` | `{ tags: ['smoke'], tagMode: 'all' }` | `readonly string[]`, `'any' \| 'all'` | - |
+| `grep`, `grepInvert` | `[/checkout/]` | `readonly RegExp[]` | - |
+| `lastFailed` | `true` | `boolean` | - |
+| `shard` | `{ index: 1, total: 4 }` | `{ index, total }` | - |
+| `changedSince` | `'origin/main'` | `string` | - |
+| `passWithNoTests` | `true` | `boolean` | - |
+| `output` | `'.e2e'` | `string` | o `output` da configuração |
+| `env` | `{ ...process.env, CI: '1' }` | `NodeJS.ProcessEnv` | `process.env` |
+
+- `targets` nomeia alvos, como faz `--target`.
+- `files` é a seleção posicional de arquivos: caminhos, globs, nomes simples e
+  `file:line`.
+- `tags`, `tagMode` e `excludeTags` são os filtros `--tag`, `--tag-mode` e
+  `--exclude-tag`.
+- `grep` e `grepInvert`: os títulos de describe e o título de um teste, unidos
+  por espaços, precisam corresponder a um padrão de `grep` e a nenhum padrão
+  de `grepInvert`.
+- `lastFailed` mantém só os testes que não passaram na execução anterior,
+  lidos do `report.json` em `output`.
+- `shard` é a fatia de `--shard index/total`.
+- `changedSince` funciona como `--changed-since`. Os
+  [filtros de testes](/filters) rodam no processo que chama; `list` não
+  imprime nenhuma das linhas deles, e `e2e list` imprime.
+- `passWithNoTests` faz a promise resolver quando não há teste a rodar, em
+  vez de lançar `NO_TESTS`.
+- `output` é o diretório de resultados.
+- `env` é o ambiente em que a configuração é resolvida.
+
+##### Resultado
+
+`ListResult` é `{ pairs, unmatched, targets }`.
+
+- `pairs` traz um `ListedPair` por teste, alvo e agente, na ordem de seleção,
+  incluindo os pares que um filtro removeu. As repetições não são expandidas.
+- `unmatched` são os argumentos posicionais, como foram escritos, que não
+  selecionaram nenhum arquivo descoberto.
+- `targets` são os nomes dos alvos selecionados, na ordem da configuração.
+
+| Campo | Significado |
+| --- | --- |
+| `id` | O id de resultado que o `report.json` guarda para a repetição 0. |
+| `file`, `title`, `titlePath`, `kind`, `tags` | O teste coletado. `kind` é `test` ou `setup`. `tags` é `[]` quando o teste não declara nenhuma. |
+| `source` | A declaração, relativa ao projeto: `{ file, line, column }`. `undefined` quando o teste não registrou nenhuma. |
+| `session` | A sessão que o teste consome, vinda do teste ou da cadeia de describe dele. `undefined` quando o teste não consome nenhuma. |
+| `sessions` | Os nomes das sessões que um teste de preparação produz. `[]` em um teste comum. |
+| `serialId` | Definido quando o teste pertence a um grupo serial; caso contrário, `undefined`. |
+| `target`, `agent` | O nome do alvo e o agente configurado com que esse par roda. |
+| `disposition` | `run`, `skip` ou `filtered`. |
+| `reason` | Por que o par foi pulado ou filtrado, como `title does not match --grep`. Omitido quando o par roda. |
+| `filter` | O nome do filtro de testes que deixou o par de fora. Um par que uma flag de seleção filtrou não tem nenhum. |
+
+`e2e list` imprime os pares `run` e `skip`, e os pares que um filtro de testes
+deixou de fora. `list` retorna todos os pares `filtered`.
+
+##### Erros
+
+Uma falha é o mesmo erro classificado com que `e2e list` sai. Reconheça o
+erro com [`isE2EError`](#ise2eerror) e escolha o tratamento pelo
+`error.code`. Como uma falha de [`openHost`](#openhost), o erro passa pela
+ocultação e não traz um `cause` bruto: uma configuração que carrega uma chave
+e depois falha pode citar essa chave.
+
+```ts
+import { isE2EError, list } from 'e2e/runner';
+
+try {
+  await list({ targets: ['missing'] });
+} catch (error) {
+  if (isE2EError(error) && error.code === 'UNKNOWN_TARGET') {
+    console.error(error.message);
+  }
+}
+```
+
+| Lança | Quando |
+| --- | --- |
+| `NO_TESTS` | A seleção está vazia e `passWithNoTests` não está definido. Um `ConfigurationError`. Quando os filtros de testes não deixam nada para rodar, `list` resolve em vez de lançar, com todos os pares `filtered` ou `skip`. |
+| `UNKNOWN_TARGET` | Um nome em `targets` não é um alvo configurado. |
+| `INVALID_CHANGED_SINCE` | `changedSince` está vazio ou começa com `-`, ou os filtros de testes rodam e ele nomeia uma ref a partir da qual o git não consegue medir uma mudança. |
+| Os códigos que `run` registra | A configuração não existe, o loader a recusou ou a coleta falhou. |
+
+#### `openHost`
+
+`openHost<Fixtures>(options?: OpenHostOptions)` prepara o e2e para o
+Playwright Test, o Vitest, o Jest ou o seu próprio harness, e retorna um
+[host](#host).
+
+```ts
+import { openHost } from 'e2e/runner';
+
+await using host = await openHost({ target: 'web' });
+await using session = await host.openSession({ name: 'checkout' });
+await session.fixtures.app.open('/checkout');
+```
+
+- A coleta, as novas tentativas e os relatórios ficam a cargo do seu runner.
+- O host inicia os [serviços](/services) da configuração, prepara a engine do
+  alvo, inicia os processos do app e inicializa a engine uma vez por tempo de
+  vida do worker. Use um host com escopo por worker e uma sessão com escopo
+  por teste; veja o [exemplo com o Playwright Test](#playwright-test-fixtures).
+- Cada [`host.openSession`](#host-opensession) cria uma tentativa que vive o
+  tempo de um teste, com fixtures novas, um prazo, passos e artefatos.
+- Se a abertura falhar, antes de lançar o erro, o e2e desmonta
+  o que já tinha iniciado.
+
+##### Opções
+
+| Opção | Exemplo | Tipo | Padrão |
+| --- | --- | --- | --- |
+| `config` | `'e2e.config.ts'` | `string \| E2EConfig` | o `e2e.config.ts`, `.mts`, `.js` ou `.mjs` mais próximo |
+| `cwd` | `'apps/web'` | `string` | `process.cwd()` |
+| `target` | `'android'` | `string` | o único alvo |
+| `env` | `process.env` | `NodeJS.ProcessEnv` | `process.env` |
+| `signal` | `controller.signal` | `AbortSignal` | - |
+| `headed` | `true` | `boolean` | `false` |
+| `onNotice` | `(target, message) => {}` | `(target: string, message: string) => void` | - |
+
+- `config` é o caminho de um arquivo de configuração relativo a `cwd`, ou um
+  valor `E2EConfig`. Sem essa opção, a configuração é descoberta a partir de
+  `cwd`, com a mesma busca que `list` faz.
+- `cwd` é o diretório onde a configuração é descoberta, e a raiz do projeto
+  de uma configuração passada como valor.
+- `target` é obrigatório quando a configuração declara vários alvos.
+- `env` é o ambiente que a configuração, as engines e os provedores leem.
+- `signal` cancela o provisionamento do host, a abertura pendente de uma
+  sessão ou chamadas de fixtures em andamento.
+- `headed` roda uma engine de navegador em modo headed.
+- `onNotice` recebe o progresso fora de um passo, como o provisionamento, um
+  serviço ou um processo do app. O callback não pode lançar.
+
+Um host que recebe o caminho de uma configuração carrega do zero o arquivo e
+os arquivos do projeto que esse arquivo importa. Os imports de pacotes
+continuam compartilhados, então o estado singleton deles não é recriado a cada
+host. Uma configuração passada como valor usa as próprias instâncias de
+engine. Cada instância pertence a um host até esse host fechar, então um
+segundo host precisa usar outra instância.
+
+| Lança | Quando |
+| --- | --- |
+| `UNKNOWN_TARGET` | `target` não nomeia nenhum alvo configurado. |
+| `TARGET_REQUIRED` | A configuração declara vários alvos e `target` não nomeia nenhum. |
+| `RUNNER_BUSY` | Uma suíte está rodando. Aguarde a suíte antes de abrir um host. |
+
+As falhas de abertura são erros classificados que passaram pela ocultação; as
+causas brutas da engine não são expostas. Identifique esses erros com
+[`isE2EError`](#ise2eerror) e `error.code`.
+
+#### `isE2EError`
+
+Um type guard que reconhece um erro classificado do e2e. Escolha o tratamento
+pelo `error.code` do erro.
+
+```ts
+if (isE2EError(error) && error.code === 'NO_TESTS') process.exitCode = 0;
+```
+
+`instanceof` pode não reconhecer um erro do e2e entre cópias diferentes do
+pacote, então use `isE2EError`. Tanto `ConfigurationError` quanto `isE2EError`
+são exportados de `e2e/runner`.
+
+### Host
+
+`E2EHost<Fixtures>` é o que [`openHost`](#openhost) retorna.
+
+| Membro | Retorna |
+| --- | --- |
+| `runId`, `target` | `string` |
+| [`host.openSession`](#host-opensession) | `Promise<E2ESession<Fixtures>>` |
+| [`host.close`](#host-close) | `Promise<readonly SerializedError[]>` |
+
+`runId` e `target` são a identidade que as sessões do host compartilham.
+
+Só uma tentativa hospedada por processo pode estar em abertura, ao vivo ou em
+fechamento, mesmo entre hosts diferentes, seja a configuração um arquivo ou um
+valor.
+
+- Uma abertura sobreposta é rejeitada antes de o estado de tentativa da
+  engine começar. Aguarde `session.close()` antes de abrir a próxima sessão no
+  mesmo host.
+- Uma inicialização que falha ou é cancelada encerra o que abriu e deixa o
+  host utilizável, assim como uma execução mantém o worker dela para a nova
+  tentativa.
+- Quando a limpeza da engine falha em uma sessão ou em uma inicialização que
+  falhou, o host fecha de vez, já que o isolamento dele fica incerto; abra um
+  novo host. A falha de limpeza de uma sessão volta de `session.close()`, e a
+  de uma inicialização que falhou, de `host.close()`.
+
+| Lança | Quando |
+| --- | --- |
+| `WORKER_PROTOCOL` | Uma tentativa hospedada sobreposta, ou uma chamada em um host fechado. |
+
+#### `host.openSession`
+
+`host.openSession(options: OpenSessionOptions)` abre uma [sessão](#session)
+nova no alvo deste host. Uma sessão é uma tentativa de teste sem ciclo de
+novas tentativas. Uma nova tentativa abre outra sessão no mesmo host do worker.
+
+```ts
+const session = await host.openSession({
+  name: 'checkout',
+  timeout: 60_000, // default: the config's timeout
+  onStep: (step) => {
+    if (step.phase === 'end') console.log(`${step.api} ${step.label}: ${step.status}`);
+  },
+});
+```
+
+##### Opções
+
+| Opção | Exemplo | Tipo | Padrão |
+| --- | --- | --- | --- |
+| `name` | `'checkout'` | `string` | obrigatório |
+| `timeout` | `60_000` | `number` | o `timeout` da configuração |
+| `signal` | `controller.signal` | `AbortSignal` | - |
+| `agent` | `'smart'` | `string` | o primeiro agente configurado |
+| `onStep` | `(step) => {}` | `(progress: StepProgress) => void` | - |
+
+- `name` é o nome do teste nos relatórios de passos e no trace.
+- `timeout` é o prazo das operações da sessão, em milissegundos, positivo e
+  finito, contado a partir da abertura da sessão. Ele não limita o
+  provisionamento nem a abertura, e não fecha a sessão.
+- `signal` cancela a abertura ou chamadas de fixtures em andamento. O `signal`
+  do host também vale. O provisionamento acontece em `openHost`, então só o
+  `signal` do host cancela essa etapa; qualquer um dos dois sinais cancela uma
+  inicialização.
+- `agent` é o agente que a fixture `agent` usa quando uma chamada não nomeia
+  nenhum.
+- `onStep` recebe o `StepProgress` ao vivo, o mesmo fluxo que os reporters
+  recebem. O callback não pode bloquear nem lançar. O campo `phase` de cada
+  evento é `start`, `event`, `activity`, `replay` ou `end`. Um evento `end`
+  traz `status`, `durationMs`, `modelCalls`, o `cache` do cache de replay em um
+  passo de `agent.act` e um `error` já com a ocultação aplicada quando o passo
+  falhou.
+- `timeout`, `agent` e `onStep` pertencem à sessão, não a `openHost`.
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_CONFIG` | `name` não é uma string, ou `timeout` não é positivo e finito. |
+| `CANCELLED` | O `signal` da sessão ou o do host abortou antes ou durante a abertura. |
+| `WORKER_PROTOCOL` | Outra tentativa hospedada está em abertura, ao vivo ou em fechamento, ou o host está fechado. |
+
+#### `host.close`
+
+`host.close()` cancela qualquer sessão ativa ou pendente, espera que ela feche
+e depois descarta a engine, encerra os processos do app, libera o
+provisionamento e encerra os serviços da configuração.
+
+```ts
+const failures = await host.close();
+if (failures.length > 0) throw new AggregateError(failures, 'e2e host close failed');
+```
+
+- Idempotente: descarta e libera os recursos uma única vez.
+- Um host é `AsyncDisposable`: `await using host = await openHost()` fecha o
+  host na saída do escopo e lança um `AggregateError` quando o fechamento
+  relata falhas.
+
+### Sessão
+
+`E2ESession<Fixtures>` é o que [`host.openSession`](#host-opensession) retorna.
+
+| Membro | Retorna |
+| --- | --- |
+| `fixtures` | `TestFixtures & Fixtures` |
+| `runId`, `attemptId`, `target` | `string` |
+| `steps()` | `readonly StepRecord[]` |
+| `report()` | `Report \| undefined` |
+| `artifactsDir` | `string` |
+| `tracePath` | `string` |
+| [`session.close`](#session-close) | `Promise<readonly SerializedError[]>` |
+
+- `fixtures` contém `agent`, `app`, `screen`, `platform`, `request` e as
+  fixtures da engine.
+- `runId` e `target` são a execução e o alvo do host; `attemptId` é exclusivo
+  desta tentativa.
+- `steps()` retorna `StepRecord`s somente leitura dos passos rodados até agora,
+  como o [relatório](/reference/reporters) os registra.
+- `report()` retorna o `Report` da sessão a partir do qual o trace é
+  renderizado, depois do fechamento e de uma escrita bem-sucedida do trace;
+  caso contrário, `undefined`. O status desse relatório descreve a sessão do
+  SDK, não o veredito do corpo do teste no seu runner.
+- `artifactsDir` é o diretório absoluto das capturas de tela, das gravações e
+  do trace desta tentativa.
+- `tracePath` é o caminho absoluto para `trace.md`; anexe ou leia esse arquivo
+  depois que `close()` terminar.
+
+#### `session.close`
+
+`session.close()` cancela as operações restantes, encerra a tentativa e escreve
+o trace dela. O método retorna as falhas de expectativas suaves, de operações
+abandonadas (um polling ou um passo não concluído) e de limpeza, em vez de
+lançá-las.
+
+```ts
+const failures = await session.close();
+if (failures.length > 0) throw new AggregateError(failures, 'e2e session close failed');
+```
+
+- Idempotente: chamadas posteriores retornam as mesmas falhas.
+- O host continua aberto para o próximo teste.
+- Uma sessão é `AsyncDisposable`:
+  `await using session = await host.openSession({ name: 'checkout' })`
+  fecha a sessão na saída do escopo e lança um `AggregateError` com as falhas
+  retornadas.
+
+#### Prazo e falhas suaves
+
+`expect.soft` acumula falhas durante todo o tempo de vida da sessão. Verifique
+o resultado de `close()` para fazer o teste do seu runner falhar.
+
+- `expect.poll` usa o orçamento restante da sessão, mesmo quando o tempo
+  limite do próprio polling é maior.
+- As operações de uma fixture embutida que uma engine fornece também respeitam
+  esse orçamento, incluindo operações que desativam o próprio tempo limite.
+- Quando o prazo passa, um polling ou uma operação que acompanhava esse prazo
+  relata o próprio corte. Todo o resto que ainda está rodando, incluindo uma
+  operação à qual uma engine ou um modelo nunca respondeu, falha com
+  `TEST_TIMEOUT`.
+- Nos dois casos, a sessão termina com o tempo limite excedido, e `close()` retorna o
+  erro de tempo limite. As operações seguintes falham com `TEST_TIMEOUT`;
+  feche a sessão.
+
+#### Artefatos
+
+Os artefatos ficam em `<output>/results/host/<resultSegment>/`. No
+fechamento, o e2e escreve `trace.md` ali, pela mesma formatação com
+ocultação que os relatórios usam.
+
+- O e2e gera um `resultSegment` seguro a partir do nome e da identidade única
+  da tentativa. O nome nunca vira um componente bruto de caminho.
+- Nomes repetidos e novas tentativas ganham diretórios separados.
+- Com segredos fornecidos por um provedor, o diretório usa um segmento feito
+  só da identidade, já que valores não resolvidos não podem ser ocultados de
+  um slug do título. Mesmo assim, o trace mostra o nome, com a ocultação
+  aplicada.
+- Os caminhos de artefatos são relativos a `<output>/results`, não a
+  `session.artifactsDir`.
+- O vídeo segue o modo do alvo em uma primeira tentativa. O vídeo só em falhas é
+  mantido em falhas suaves e em passos que falharam, ficaram bloqueados,
+  excederam o tempo limite ou foram cancelados.
+
+<Note>
+Uma sessão hospedada escreve o trace dela, não o `report.json`. Para os
+relatórios do seu runner, use `onStep`, `steps()`, `report()` e as falhas de
+`close()`. As falhas do corpo do teste no seu runner não são repassadas ao e2e.
+
+A tentativa avulsa que o `e2e mcp` usa continua interna. Não existe uma
+exportação `openSession` de nível superior.
+</Note>
+
+## Tipos
+
+`e2e/runner` exporta estes tipos junto com as funções.
+
+| Tipo | Descreve |
+| --- | --- |
+| `RunOptions`, `RunResult` | As opções e o resultado de [`run`](#run) |
+| `ExploreOptions`, `ExploreResult` | As opções e o resultado de [`explore`](#explore) |
+| `RunEventSink` | O callback `onEvent` |
+| `ListOptions`, `ListResult`, `ListedPair` | As opções, o resultado e um par de [`list`](#list) |
+| `OpenHostOptions`, `E2EHost` | As opções de [`openHost`](#openhost) e o [host](#host) |
+| `OpenSessionOptions`, `E2ESession` | As opções de [`openSession`](#host-opensession) e a [sessão](#session) |
+| `StepProgress`, `StepRecord` | Um evento de progresso de `onStep`, e um passo que `steps()` retorna |
+| `SerializedError` | Uma falha que `close()` retorna |
+
+## Exemplos
+
+### Fixtures do Playwright Test
+
+Um host com escopo por worker e uma sessão com escopo por teste:
+
+```ts title="tests/fixtures.ts"
+import { test as base } from '@playwright/test';
+import { openHost, type E2EHost, type E2ESession } from 'e2e/runner';
+import type { Device } from '@e2e-dev/mobile';
+
+type Fixtures = { device: Device };
+
+const test = base.extend<
+  { e2e: E2ESession<Fixtures> },
+  { e2eHost: E2EHost<Fixtures> }
+>({
+  e2eHost: [async ({}, use) => {
+    const host = await openHost<Fixtures>({ target: 'android' });
+    try {
+      await use(host);
+    } finally {
+      const failures = await host.close();
+      if (failures.length > 0) throw new AggregateError(failures, 'e2e host close failed');
+    }
+  }, { scope: 'worker' }],
+  e2e: async ({ e2eHost }, use, testInfo) => {
+    const session = await e2eHost.openSession({
+      name: testInfo.titlePath.join(' › '),
+      // Playwright's 0 disables its timeout; e2e then falls back to the config's.
+      timeout: testInfo.timeout || undefined,
+      onStep: (step) => {
+        if (step.phase === 'end') console.log(`${step.api} ${step.label}: ${step.status}`);
+      },
+    });
+    try {
+      await use(session);
+    } finally {
+      const failures = await session.close();
+      await testInfo.attach('e2e trace', { path: session.tracePath, contentType: 'text/markdown' });
+      if (failures.length > 0) throw new AggregateError(failures, 'e2e session close failed');
+    }
+  },
+});
+
+test('turns on dark mode', async ({ e2e }) => {
+  const { agent, app } = e2e.fixtures;
+  await agent.act('open settings and turn on dark mode');
+  await app.screenshot();
+});
+```

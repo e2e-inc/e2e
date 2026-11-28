@@ -388,6 +388,140 @@ describe('projectSnapshot', () => {
     expect(byTestId(root, 'username')?.text).toBeUndefined();
   });
 
+  it("finds a value by its text and by its label, and the label's text only once", () => {
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'W',
+          children: [
+            { role: 'statictext', value: 'Words' },
+            { role: 'statictext', name: 'Words', value: '5' },
+          ],
+        },
+      },
+      minter(),
+    );
+    const find = (kind: 'text' | 'label', value: string) => resolveExpression({ kind: 'query', query: { kind, value: { kind: 'string', value, exact: true } } }, [root]).map((node) => node.text);
+    expect(root.children?.[1]).toMatchObject({ role: 'text', name: 'Words', text: '5' });
+    expect(find('text', 'Words')).toEqual(['Words']);
+    expect(find('text', '5')).toEqual(['5']);
+    expect(find('label', 'Words')).toEqual(['Words', '5']);
+  });
+
+  it('reads a row and a cell by the text inside them, where the driver names them by the names inside', () => {
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'W',
+          children: [
+            { role: 'statictext', value: 'Words' },
+            {
+              role: 'table',
+              children: [
+                {
+                  role: 'row',
+                  name: 'Words Total',
+                  children: [
+                    { role: 'cell', name: 'Words', children: [{ role: 'statictext', name: 'Words', value: '5' }] },
+                    { role: 'cell', name: 'Total', children: [{ role: 'group', children: [{ role: 'statictext', value: ' Total ' }] }] },
+                    { role: 'cell', name: 'Delete', children: [{ role: 'button', name: 'Delete' }] },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+      minter(),
+    );
+    const find = (kind: 'text' | 'label', value: string) => resolveExpression({ kind: 'query', query: { kind, value: { kind: 'string', value, exact: true } } }, [root]).map((node) => `${node.role} ${node.text}`);
+    expect(find('text', 'Words')).toEqual(['text Words']);
+    expect(find('text', '5')).toEqual(['text 5']);
+    expect(find('text', '5 Total')).toEqual(['row 5 Total']);
+    expect(find('label', 'Words')).toEqual(['text Words', 'text 5']);
+    // A cell with no text inside shows nothing of its own, so its name stands in.
+    expect(find('text', 'Delete')).toEqual(['button Delete']);
+  });
+
+  it('leaves text that is off screen out of the text of a row that is on screen', () => {
+    const offscreen = { states: ['offscreen'] };
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'W',
+          children: [
+            {
+              role: 'table',
+              children: [
+                {
+                  role: 'row',
+                  name: 'Inventory Archived Old Gone',
+                  children: [
+                    { role: 'cell', name: 'Inventory', children: [{ role: 'statictext', value: 'Inventory' }] },
+                    { role: 'cell', name: 'Archived', ...offscreen, children: [{ role: 'statictext', value: 'Archived', ...offscreen }] },
+                    { role: 'group', ...offscreen, children: [{ role: 'statictext', value: 'Old' }] },
+                    { role: 'statictext', value: 'Gone', bounds: { x: 0, y: 0, width: 0, height: 12 } },
+                  ],
+                },
+                { role: 'row', name: 'Stock', children: [{ role: 'statictext', value: 'Sold out', ...offscreen }] },
+                { role: 'row', name: 'Orders Shipped', ...offscreen, children: [{ role: 'statictext', name: 'Orders', value: '7', ...offscreen }, { role: 'statictext', value: 'Shipped', ...offscreen }] },
+              ],
+            },
+          ],
+        },
+      },
+      minter(),
+    );
+    const find = (value: string, visible?: true) =>
+      resolveExpression({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value, exact: false }, ...(visible === true ? { visible } : {}) } }, [root]).map((node) => `${node.role} ${node.text}`);
+    expect(find('Inventory', true)).toEqual(['text Inventory']);
+    for (const hidden of ['Archived', 'Old', 'Gone', 'Sold out']) expect(find(hidden, true)).toEqual([]);
+    expect(find('Archived')).toEqual(['text Archived']);
+    // A row with none of its text on screen shows nothing, so its name stands in.
+    expect(find('Stock', true)).toEqual(['row Stock']);
+    // A row that is off screen itself keeps its text, which is how a query finds it to scroll to.
+    expect(find('7 Shipped')).toEqual(['row 7 Shipped']);
+    expect(find('7 Shipped', true)).toEqual([]);
+  });
+
+  it('reads the text under a heading that has none of its own into its row and cell', () => {
+    const { root } = projectSnapshot(
+      {
+        snapshot_id: 's',
+        tree: {
+          role: 'window',
+          name: 'W',
+          children: [
+            {
+              role: 'table',
+              children: [
+                {
+                  role: 'row',
+                  children: [
+                    { role: 'cell', children: [{ role: 'heading', level: 2, children: [{ role: 'statictext', value: 'Settings' }] }, { role: 'statictext', value: 'Badge' }] },
+                    { role: 'cell', children: [{ role: 'heading', name: 'Billing', level: 2, children: [{ role: 'statictext', value: 'Billing' }] }, { role: 'statictext', value: 'New' }] },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
+      minter(),
+    );
+    const find = (value: string) => resolveExpression({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value, exact: true } } }, [root]).map((node) => `${node.role} ${node.text}`);
+    expect(find('Settings Badge')).toEqual(['cell Settings Badge']);
+    // A heading with text of its own is read once, not again through the text inside it.
+    expect(find('Billing New')).toEqual(['cell Billing New']);
+    expect(find('Settings Badge Billing New')).toEqual(['row Settings Badge Billing New']);
+  });
+
   it('withholds masking when a secure field has no bounds, and measures rects from the window', () => {
     expect(project('macos/appkit-form').secureRects).toBeUndefined();
     const raw = load('macos/appkit-form');

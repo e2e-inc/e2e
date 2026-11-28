@@ -1,0 +1,972 @@
+---
+title: Reporters
+description: Receba os eventos da execução e publique os resultados com um reporter personalizado.
+"og:image": "https://e2e.com/docs/images/og/reference/reporters.png?v=6f74d2a2a5"
+"twitter:image": "https://e2e.com/docs/images/og/reference/reporters.png?v=6f74d2a2a5"
+---
+
+Um reporter recebe os eventos da execução à medida que acontecem e a execução
+concluída assim que o relatório dela é escrito. `reporters` em `e2e.config.ts`
+lista reporters embutidos por id junto com objetos reporter.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { github } from '@e2e-dev/github';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+  reporters: ['list', 'junit', github()],
+} satisfies E2EConfig;
+```
+
+Para passar opções a um reporter embutido, chame a factory dele de
+`e2e/reporters` no lugar do id: `junit({ outputFile: 'reports/junit.xml' })`.
+Um id equivale à factory dele chamada sem opções.
+
+Os reporters embutidos usam só o contrato [`Reporter`](#custom-reporters),
+então um reporter seu pode fazer tudo o que eles fazem.
+
+## Referência
+
+### Reporters embutidos
+
+| Reporter | Descrição |
+| --- | --- |
+| [`list`](#list) | Progresso no terminal e resumo da execução |
+| [`dot`](#dot) | Progresso compacto e resumo da execução |
+| [`line`](#line) | Uma linha de progresso e resumo da execução |
+| [`json`](#json) | Documento do relatório no stdout |
+| [`junit`](#junit) | Escreve `<output>/junit.xml` |
+| [`markdown`](#markdown) | Escreve `<output>/summary.md` |
+| [`ctrf`](#ctrf) | Escreve `<output>/ctrf.json` |
+| [`github()`](#github) | Comentário no pull request e resumo do job |
+| [`htmlReporter()`](#htmlreporter) | Escreve `<output>/report.html` |
+
+| Lança | Quando |
+| --- | --- |
+| `INVALID_CONFIG` | `reporters` não é um array. |
+| `INVALID_CONFIG` | Um id diferente de `list`, `dot`, `line`, `json`, `junit`, `markdown` ou `ctrf`. |
+| `INVALID_CONFIG` | Uma factory não chamada, como `junit` no lugar de `junit()`. |
+| `INVALID_CONFIG` | Uma entrada que não é um id nem um objeto com um `name` e pelo menos um hook. |
+| `INVALID_CONFIG` | Mais de um reporter [interativo](#interactive), como `list` e `dot`. |
+| `INVALID_CONFIG` | `list`, `dot` ou `line` com `stream: 'stdout'` junto com `json`. |
+
+#### `list`
+
+Mostra o progresso no terminal, as falhas e o resumo da execução.
+
+```ts
+reporters: ['list'], // default
+```
+
+- `list({ stream })` define o stream do terminal em que ele imprime: `'stdout'`
+  ou `'stderr'`. Sem essa opção, `list` imprime no stdout, ou no stderr junto
+  com `json`.
+- Ele é [interativo](#interactive). Mostra os mesmos eventos que
+  [`onEvent`](#onevent) recebe, com o que o seu código imprime
+  ([saída](#output)) e um teste que espera em uma [pausa](#pauses).
+- Em um TTY, uma visualização ao vivo mostra os testes em andamento. Quando o
+  stdout não é um terminal (com pipe, redirecionado, na maioria das CIs), cada
+  teste é impresso ao terminar.
+- O [`onSummary`](#onsummary) dele imprime as linhas de resumo de todos os
+  reporters abaixo do próprio resumo.
+- A saída termina com uma linha `Failed` por teste que falhou: o arquivo e a
+  linha do teste, a primeira linha do erro e a página de trace, quando uma foi
+  escrita, então `e2e run | tail` mesmo assim nomeia o que quebrou.
+
+#### `dot`
+
+Imprime um caractere quando cada teste selecionado termina.
+
+```ts
+reporters: ['dot'],
+```
+
+| Passou | Instável | Falhou | Excedeu o tempo limite | Interrompido | Pulado |
+| --- | --- | --- | --- | --- | --- |
+| `.` | `~` | `F` | `T` | `I` | `-` |
+
+As linhas quebram depois de 80 marcas. As cores seguem as configurações do
+terminal; `NO_COLOR` as desativa. O cabeçalho da execução, os detalhes e os
+locais das falhas, o resumo e os prompts dos passos usam o mesmo formato do
+`list`.
+
+Por padrão, ele imprime no stdout; `dot({ stream: 'stderr' })` muda o destino.
+Junto com `json`, como em `--reporter dot,json`, `dot` imprime tudo no
+stderr, então o stdout fica com o relatório JSON.
+
+Ao contrário do Playwright, o e2e usa marcas ASCII e imprime só o resultado
+final depois das novas tentativas, sem marca para cada tentativa repetida.
+
+#### `line`
+
+Mostra o progresso em uma linha e imprime cada falha quando ela acontece.
+
+```ts
+reporters: ['line'],
+```
+
+```text
+[3/12] |web| tests/cart.e2e.ts > adds an item (running)
+```
+
+- Em um TTY, a linha nomeia o último teste que começou ou terminou. Quando o
+  stdout não é um terminal (com pipe, redirecionado, na maioria das CIs), cada
+  teste imprime a própria linha ao terminar.
+- `[3/12]` conta os testes selecionados com um resultado final, depois das
+  novas tentativas. O total é `?` quando a execução é encerrada antes de
+  conhecer os próprios testes.
+- Um teste que falhou ou excedeu o tempo limite imprime os detalhes da falha
+  na hora, não em `Failed Tests` no final. Esses detalhes não nomeiam nenhuma
+  página de trace, que é escrita quando a execução termina: as linhas
+  `Failed` do fim a nomeiam.
+- O cabeçalho da execução, o resumo e os prompts dos passos usam o mesmo
+  formato do `list`, assim como o que o seu código imprime.
+
+Por padrão, ele imprime no stdout; `line({ stream: 'stderr' })` muda o destino.
+Junto com `json`, como em `--reporter line,json`, `line` imprime tudo no
+stderr, então o stdout fica com o relatório JSON.
+
+Ao contrário do Playwright, o e2e conta um teste quando chega o resultado
+final dele, não cada tentativa quando ela começa, e a linha não nomeia nenhum
+passo.
+
+#### `json`
+
+Imprime o documento do relatório no stdout.
+
+```ts
+reporters: ['json'],
+```
+
+Ele não é [interativo](#interactive). Sem `list`, `dot` ou `line` junto com ele,
+o que o seu código imprime vai para o stderr.
+
+#### `junit`
+
+Escreve `junit.xml` ao lado do relatório.
+
+```ts
+reporters: ['list', 'junit'],
+```
+
+- `junit({ outputFile: 'reports/junit.xml' })`, de `e2e/reporters`, escreve o
+  arquivo em outro lugar, como um caminho a partir da raiz do projeto. Padrão:
+  `junit.xml` no [diretório de saída](/reference/config#output).
+- O [`reportFiles`](#reportfiles) dele renderiza `run.report` como um arquivo
+  com uma linha `JUnit`. É o menor exemplo completo de um reporter, e não
+  escreve nada quando o relatório não foi escrito.
+- Quando um teste que falhou, excedeu o tempo limite, passou só em uma nova
+  tentativa ou falhou como [`test.fail`](/reference/test#fail) esperava
+  registrou uma captura de tela da falha, o `<testcase>` dele a vincula como
+  `<system-out>[[ATTACHMENT|<path>]]</system-out>`, que o GitLab CI mostra no
+  relatório de testes do pipeline. O caminho é relativo a `$CI_PROJECT_DIR`,
+  ou à raiz do projeto quando essa variável não está definida; capturas de
+  tela fora desse diretório não recebem link.
+
+#### `markdown`
+
+Escreve `summary.md` ao lado do relatório.
+
+```ts
+reporters: ['list', 'markdown'],
+```
+
+Ele faz o que o `junit` faz, mas com `summary.md`, por meio de
+[`renderMarkdownReport`](#rendermarkdownreport), e aceita o mesmo
+`outputFile`: `markdown({ outputFile: 'reports/summary.md' })`.
+
+<a id="rendermarkdownreport" />
+
+##### `renderMarkdownReport`
+
+Renderiza um relatório como a página Markdown que o reporter `markdown`
+escreve, para que o seu próprio reporter possa publicar a mesma página em
+outro lugar.
+
+```ts
+import { renderMarkdownReport, type Reporter } from 'e2e';
+
+const reporter: Reporter = {
+  name: 'wiki',
+  async onRunFinished(run) {
+    const page = renderMarkdownReport(run.report, { traces: run.traces });
+    await fetch('https://wiki.example.test/runs', { method: 'POST', body: page });
+  },
+};
+```
+
+- `traces` vincula cada bloco à página de trace dele pelo id do resultado.
+- [`@e2e-dev/github`](/github) é esse reporter para o GitHub Actions.
+
+#### `ctrf`
+
+Escreve `ctrf.json` ao lado do relatório, no
+[Common Test Report Format](https://ctrf.io) 0.3.0. Qualquer ferramenta CTRF
+consegue lê-lo: actions de relatório de testes, notificadores de chat,
+dashboards.
+
+```ts
+reporters: ['list', 'ctrf'],
+```
+
+- Ele aceita o mesmo `outputFile` que o `junit`:
+  `ctrf({ outputFile: 'reports/ctrf.json' })`. Não escreve nada quando o
+  relatório não foi escrito, então uma execução encerrada antes dos testes
+  deixa o `ctrf.json` anterior no lugar, como deixa o `junit.xml`.
+- Um teste CTRF por `<testcase>` do `junit.xml`, deixando de fora a suíte
+  `run` dele. O `name` de cada teste começa pelo arquivo de teste, e `testId`
+  é o id do resultado, o mesmo em toda execução. `name` une o arquivo e os
+  títulos com ` > `, então um título que contém ` > ` pode ficar igual ao de
+  outro teste; `testId` sempre os diferencia.
+- `filePath` e `line` apontam para onde o teste é declarado, que é um módulo
+  importado pelo arquivo de teste quando esse módulo o declara. `suite`
+  começa pelo arquivo de teste, e `summary.suites` conta arquivos de teste.
+- Um teste representa uma tentativa: a última que chegou ao veredito. As
+  tentativas anteriores são `retryAttempts`, e uma nova tentativa que a
+  execução cortou depois dela só é contada, em `extra`. Um teste que falhou e
+  depois passou tem `flaky: true`.
+- Em um [grupo serial](/reference/test#serial), um teste roda de novo quando
+  o grupo tenta novamente, então ele tem `retries` mesmo quando passou todas
+  as vezes; uma ferramenta que lê `retries` como instabilidade o conta como
+  instável, enquanto `flaky` fica sem valor. Um teste que uma nova tentativa
+  pulou representa essa tentativa pulada: sem tempos nem anexos, e as
+  tentativas que ele rodou são os `retryAttempts` dele. Uma ferramenta que
+  conta `retries + 1` rodadas conta também a tentativa pulada.
+- `status` é o `passed`, `failed`, `skipped` ou `other` do CTRF. `rawStatus`
+  mantém o status do próprio e2e: `timed-out` vira `failed`, `interrupted`
+  vira `other`.
+- Os erros da execução, como um `afterAll` com falha, vão para
+  `results.errors` e nunca contam como teste. Uma ferramenta que conta só os
+  testes que falharam lê essa execução como verde, então
+  [condicione o job](/ci#gate-pull-requests) ao código de saída.
+- Os anexos vinculam capturas de tela, vídeos e logs, como a tela em uma
+  falha, pela URL hospedada, depois pela referência `http(s)` do armazenamento
+  de artefatos, depois pelo caminho a partir da raiz do projeto
+  (`$CI_PROJECT_DIR` quando definida). Um arquivo fora dessa raiz, e todo
+  download, fica de fora. Um teste em um grupo serial lista só os próprios
+  arquivos, mais os arquivos do grupo, como o vídeo do grupo, que não
+  pertencem a nenhum teste. Um vídeo de uma segunda sessão que um teste abriu
+  com `launch()` conta como do grupo. Os arquivos de uma nova tentativa
+  cortada, ou de uma tentativa do grupo em que nenhum teste rodou, ficam só
+  no `report.json`.
+- Todo texto copiado do relatório passa de novo pela ocultação de segredos
+  da execução. Um link que a ocultação mudaria fica de fora.
+- Os dados para os quais o CTRF não tem campo, como o status e2e de cada
+  passo e os tokens e o custo de modelo da execução, ficam sob a chave
+  `e2e-inc.e2e` de cada `extra`.
+
+#### `github()`
+
+`@e2e-dev/github` publica a execução como um comentário no pull request a
+partir do GitHub Actions, mantém esse comentário atualizado nas reexecuções e
+escreve o mesmo texto no resumo do job.
+
+```ts
+import { github } from '@e2e-dev/github';
+
+const reporter = github({ key: 'chromium' });
+```
+
+- `key` diferencia o comentário de um job do comentário de outro quando o
+  workflow, o job e o projeto são os mesmos, como em uma matriz. Sem ela, as
+  réplicas de um job na matriz compartilham um comentário, e a última a
+  terminar prevalece. Nunca use o id da execução: uma reexecução precisa
+  encontrar o comentário antigo. A chave também nomeia o comentário no
+  título: `e2e chromium: 77 passed`.
+- Ele lê o token, o evento e o repositório quando a execução termina, nunca
+  quando a configuração carrega.
+- Com `--last-failed`, ele incorpora a reexecução a [`lastRun`](#onrunfinished)
+  para mostrar todas as execuções como um só comentário.
+- A configuração e as permissões estão em
+  [Comentários em pull requests](/github).
+
+#### `htmlReporter()`
+
+`@e2e-dev/html-reporter` escreve a execução como uma página que você abre em
+um navegador: os testes por arquivo, com abas de status e uma caixa de busca,
+e, para cada teste, as tentativas, o erro, os passos, as capturas de tela e o
+vídeo.
+
+```ts
+import { htmlReporter } from '@e2e-dev/html-reporter';
+
+const reporter = htmlReporter({ media: 'embed' });
+```
+
+- O [`reportFiles`](#reportfiles) dele escreve `report.html` ao lado do
+  relatório, com o documento do relatório embutido. A página abre a partir do
+  disco sem servidor, ou com [`npx e2e report`](/reference/cli#e2e-report).
+- Uma execução que não escreve relatório também não escreve página, então a
+  página da execução anterior permanece, como acontece com `junit.xml`. Veja
+  [Saída](/reference/cli#output).
+- `media` decide o que acontece com capturas de tela, vídeos e downloads:
+
+  | `media` | A página | Para compartilhá-la |
+  |---|---|---|
+  | `'link'` (padrão) | vincula os arquivos a partir de `<output>/results/` por caminho relativo | mantenha o diretório de saída junto, como um só artefato de CI |
+  | `'embed'` | contém os arquivos, então esse único arquivo é o relatório inteiro | envie o arquivo; vídeos de dispositivos o deixam com dezenas de megabytes por minuto |
+  | `'none'` | deixa os arquivos de fora e mostra só texto | envie o arquivo |
+
+  Um link de download salva o arquivo em vez de abri-lo. Um download que o
+  runner não conseguiu verificar em busca de segredos, como um PDF ou um zip,
+  fica fora de uma página com os arquivos embutidos, e um vídeo que um serviço
+  de navegadores ou dispositivos hospedados mantém continua sendo um link
+  para o vídeo nesse serviço.
+- `outputFile` coloca a página em outro lugar, como um caminho a partir da
+  raiz do projeto (passe esse caminho para `e2e report <path>` ao rodar a
+  partir da raiz do projeto).
+- A página mostra só a execução que a escreveu: depois de `--last-failed`, os
+  testes da reexecução sem as falhas que ela carregou das execuções
+  anteriores, e no `e2e explore`, a exploração sem os achados.
+- Os testes aparecem como uma árvore: cada arquivo, os blocos describe dele e
+  depois os testes desses blocos, com as falhas primeiro. Selecionar o
+  caminho de um arquivo recolhe os testes dele.
+- Uma execução que selecionou mais de um alvo ganha abas de alvo acima das
+  abas de status. Escolher uma delas mostra só os testes desse alvo e as
+  contagens deles; a URL carrega a escolha, então uma visualização filtrada
+  continua funcionando como link.
+- Cada passo mostra onde começa no vídeo da tentativa; selecionar o tempo
+  reproduz o vídeo a partir dali, e o passo em que o vídeo está fica
+  destacado. A linha do tempo do vídeo marca o início de cada passo, e o
+  botão de velocidade vai de 0.25× a 4×; uma gravação com menos de cinco
+  segundos começa em câmera lenta. A gravação de um celular fica ao lado dos
+  passos em vez de acima deles.
+- Uma asserção que falhou e informa os valores esperado e recebido (uma
+  asserção de localizador, por exemplo) mostra esses valores com os
+  caracteres diferentes marcados. Quando o arquivo de teste está no projeto,
+  a falha mostra o código em volta da chamada que falhou, e cada passo abre no
+  código que o rodou. Para isso, a página guarda algumas linhas dos arquivos
+  de teste em volta de cada passo, então um relatório compartilhado também
+  as mostra.
+- **copy prompt** no erro de uma tentativa que falhou copia a falha para um
+  agente de código: o erro, os passos, o que o passo que falhou fez e os
+  caminhos, a partir da raiz do projeto, do que existir entre a página de
+  trace, a árvore da tela, a captura de tela e o vídeo dessa tentativa.
+- Os passos do agente mostram a explicação, as ações que tomaram, o modelo,
+  os tokens e o custo, se o passo foi reproduzido do cache e os últimos
+  turnos.
+- A página segue o tema claro ou escuro do sistema. O sol e a lua no topo
+  fixam um deles, e o navegador guarda a escolha para todo relatório que abrir.
+
+### Reporters personalizados
+
+Um objeto reporter tem um `name` e pelo menos um hook. Cada hook é chamado em
+todo reporter que o tem. Use `onEvent` para progresso ao vivo, `reportFiles`
+para arquivos ao lado do relatório e `onRunFinished` para enviar o relatório
+final para algum lugar.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig, Reporter } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+const upload: Reporter = {
+  name: 'upload',
+  async onRunFinished(run) {
+    const response = await fetch('https://example.test/runs', {
+      method: 'POST',
+      body: JSON.stringify(run.report),
+    });
+    const { url } = (await response.json()) as { url: string };
+    return [{ label: 'Results', text: url }];
+  },
+};
+
+export default {
+  targets: [{ engine: web(), app: { url: 'localhost:3000' } }],
+  reporters: ['list', upload],
+} satisfies E2EConfig;
+```
+
+| Membro | Tipo |
+| --- | --- |
+| [`name`](#name) | `string` |
+| [`interactive`](#interactive) | `boolean` |
+| [`onEvent`](#onevent) | `(event: RunEvent) => void` |
+| [`reportFiles`](#reportfiles) | `(run, signal) => ReportFile[]` |
+| [`onRunFinished`](#onrunfinished) | `(run, signal) => Promise<…>` |
+| [`onSummary`](#onsummary) | `(rows, run) => void` |
+
+```ts
+interface Reporter {
+  readonly name: string;
+  readonly interactive?: boolean;
+  onEvent?(event: RunEvent): void;
+  reportFiles?(run: FinishedRun, signal: AbortSignal): readonly ReportFile[] | Promise<readonly ReportFile[]>;
+  onRunFinished?(run: FinishedRun, signal: AbortSignal): Promise<ReporterSummary | void>;
+  onSummary?(rows: ReporterSummary, run: FinishedRun): void;
+}
+```
+
+Passos em cache expõem `cache.recordedBy: { provider, model }` no `report.json`
+e na página de trace quando a gravação tem esse dado. Gravações mais antigas o
+omitem. O console imprime `replayed · recorded with provider/model` só quando
+essa identidade difere do modelo configurado. Essa linha não aparece em
+execuções com vários agentes nem para agentes fixados cujo modelo não está no
+cabeçalho da execução.
+
+#### `name`
+
+O rótulo do reporter nos diagnósticos. Obrigatório e não vazio. Pode coincidir
+com o nome de um reporter embutido: um reporter chamado `json` continua sendo
+seu, e `--reporter` nunca o substitui.
+
+```ts
+name: 'upload',
+```
+
+#### `interactive`
+
+Defina essa propriedade quando o reporter mostrar a execução a uma pessoa no
+terminal, como [`list`](#list), [`dot`](#dot) e [`line`](#line) fazem. O
+runner então não imprime por conta própria nenhuma [saída](#output), erro da
+execução ou [pausa](#pauses).
+
+```ts
+interactive: true, // default: false
+```
+
+- Trate os [eventos](#events) `output`, `run-error`, `paused` e `resumed`.
+  Uma execução que termina cedo, como em `NO_TESTS`, imprime só o que o
+  reporter imprime.
+- Os hooks dele escrevem direto em `process.stdout` ou `process.stderr`. O
+  runner não aplica a ocultação a essa saída, então imprima só o que os
+  eventos e o relatório contêm: esses já passaram pela ocultação.
+- Junto com `json`, o que ele escreve no stdout é impresso no stderr.
+- Sem um reporter interativo, o runner imprime a saída, os erros da execução
+  e as pausas no stderr. Ele nunca escreve no stdout, então o stdout contém só
+  o que um reporter imprime ali, como o relatório `json`.
+- O que qualquer outro reporter imprime fora de [`onSummary`](#onsummary) é
+  tratado como saída do seu código: passa pela ocultação e aparece como o
+  resto dela.
+- Depois que o `onEvent` de um reporter interativo lança um erro ou rejeita,
+  o runner imprime no lugar dele pelo resto da execução.
+- Um segundo Ctrl-C nunca interrompe o `onRunFinished` dele: a saída desse
+  reporter é local.
+- No máximo um reporter pode ser interativo.
+- Uma execução iniciada de dentro de outro programa por meio de
+  [`e2e/runner`](/reference/runner) pula todo reporter interativo, e o que o seu
+  código imprime fica no próprio stream.
+
+#### `onEvent`
+
+Recebe cada evento da execução quando ele acontece, como JSON simples.
+
+```ts
+onEvent(event) {
+  switch (event.type) {
+    case 'test-finished':
+      console.log(event.result.test.title, event.result.status);
+      break;
+    default:
+  }
+},
+```
+
+[Eventos](#events) os lista.
+
+<Note>
+`onEvent` é o único hook ao vivo. Ele não pode bloquear nem lançar erros.
+Faça o trabalho lento em `onRunFinished`. Um erro lançado coloca o reporter
+em quarentena pelo resto da execução e imprime uma linha no stderr nomeando o
+reporter, o tipo do evento e o erro. O resultado da execução não muda.
+</Note>
+
+#### `reportFiles`
+
+Retorna os arquivos a escrever para a execução concluída. O runner escreve
+cada um de forma atômica, criando o diretório dele.
+
+```ts
+reportFiles: (run) => [{ path: 'reports/status.txt', content: run.report.run.status, label: 'Status' }],
+```
+
+```ts
+interface ReportFile {
+  readonly path: string;    // absolute, or from the project root
+  readonly content: string;
+  readonly label?: string;  // the summary row's label; its text is the path
+  readonly note?: string;   // printed after the path, such as `(one file, 2.1 MB)`
+}
+```
+
+- Tem o mesmo prazo de um minuto e o mesmo `signal` que `onRunFinished`.
+  Depois de um segundo Ctrl-C, restam 5 segundos, então raramente um arquivo
+  da execução anterior fica ao lado do novo relatório.
+- Um arquivo no caminho do `report.json`, um arquivo que não pode ser escrito
+  ou um valor de retorno que não é uma lista de arquivos vira uma linha no
+  stderr.
+
+#### `onRunFinished`
+
+Roda depois que o relatório e todos os arquivos de relatório são escritos e
+o resumo do terminal é impresso, com a execução concluída e um `AbortSignal`.
+
+```ts
+async onRunFinished(run, signal) {
+  await fetch('https://example.test/runs', { method: 'POST', body: JSON.stringify(run.report), signal });
+  return [{ label: 'Results', text: 'https://example.test/runs/0192c' }];
+},
+```
+
+```ts
+interface FinishedRun {
+  readonly report: Report;                 // the report-1 document, as written
+  readonly status: RunStatus;              // report.run.status
+  readonly exitCode: RunExitCode;
+  readonly projectRoot: string;            // what the terminal shows paths relative to
+  readonly reportPath: string | undefined; // absent when the run stopped before its tests or the write failed
+  readonly outputDir: string;              // the output directory, .e2e by default
+  readonly artifactsRoot: string;          // what the report's artifact paths are relative to
+  readonly aiTracePath: string | undefined;
+  readonly traces: ReadonlyMap<string, string>;      // result id -> its trace page, from the project root
+  readonly lastRun?: Report;               // with --last-failed, the runs before this one, folded into one
+  redact(text: string): string;            // masks the config's fixed secret values (not provider-resolved ones) in text from outside the report
+}
+
+type ReporterSummary = readonly { label: string; text: string }[];
+```
+
+- Todos os reporters rodam simultaneamente, cada um com um prazo de um minuto.
+- Um tempo limite excedido, uma exceção ou um valor de retorno inválido é
+  informado no stderr. O status, o código de saída e o relatório da execução
+  não mudam.
+- Um Ctrl-C não impede os reporters de terminar. Um segundo Ctrl-C deixa de
+  esperar por eles, exceto pelos [interativos](#interactive).
+- `signal` é abortado quando o orçamento se esgota ou quando a execução é
+  interrompida à força.
+- O runner escreve as páginas de trace, `results/<test>/trace.md`, antes de
+  chamar `onRunFinished`.
+
+<Note>
+Passe `signal` para toda requisição e todo timer. A CLI sai sem esperar por
+um reporter que ela abandonou, cortando o que ele ainda faz; sob
+[`e2e/runner`](/reference/runner), esse trabalho mantém o seu processo vivo.
+</Note>
+
+##### Linhas de resumo
+
+As linhas que um reporter retorna, e as linhas dos arquivos de relatório com
+rótulo dele, chegam a todo [`onSummary`](#onsummary). `list`, `dot` e `line` as
+imprimem abaixo do próprio resumo, no mesmo layout das próprias linhas. O
+reporter `json` não as inclui.
+
+```
+   Test Files  2 passed (2)
+        Tests  6 passed (6)
+     Start at  14:02:11
+     Duration  8.41s
+
+        JUnit  .e2e/junit.xml
+      Results  https://example.test/runs/0192c…
+```
+
+##### Artefatos
+
+- Os caminhos de artefatos no relatório são caminhos POSIX relativos a
+  `artifactsRoot`.
+- `path`, `size` e `sha256` são opcionais: um artefato cujo arquivo nunca
+  apareceu, ou que uma ocultação reteve, é registrado sem eles e traz
+  `redaction: 'incomplete'`. Verifique se há `path` antes de ler.
+- Um vídeo que um serviço hospedado mantém tem uma URL `http(s)` em `url`, no
+  lugar de `path`.
+
+##### Reexecuções com `--last-failed`
+
+- O próprio relatório da reexecução lista os testes que ela deixou de fora
+  como não selecionados. Um reporter que mantém um único lugar atualizado, do
+  jeito que `@e2e-dev/github` mantém um comentário de pull request, incorpora
+  a reexecução a `lastRun` com `foldLastRun(run.report, run.lastRun)` para
+  mostrar todas as execuções como uma só.
+- `lastRun` contém as execuções anteriores a esta, já incorporadas umas às
+  outras, então uma segunda reexecução continua vendo os testes que passaram
+  na primeira execução. O runner escreve a mesma incorporação, incluindo esta
+  execução, em `report-with-reruns.json` ao lado do relatório.
+- Um teste que a reexecução devia rodar, mas que outro filtro deixou de fora,
+  fica em `run.carried` da reexecução. Esse registro traz o último resultado
+  do teste, o grupo serial em que vivem as tentativas dele e a falha de
+  `beforeAll` ou `afterAll` em cujo escopo ele está, vindos da execução
+  anterior que os informou, seja ela qual for.
+- Uma incorporação mostra o resultado carregado no lugar do não selecionado e
+  conta uma falha ou um erro de hook carregados contra o resultado final.
+- Os artefatos que os dois relatórios nomeiam estão no disco sob
+  `artifactsRoot`.
+
+<a id="merged-shard-reports" />
+##### Relatórios de shards mesclados
+
+- Um relatório de [`e2e merge-reports`](/reference/cli#e2e-merge-reports) não
+  tem `run.shard`. O `run.merge` dele contém `shardDurationMs`, a soma das
+  durações dos shards de origem, e `shards`, em ordem crescente de índice.
+  Cada entrada traz `index`, `id`, `status`, `exitCode` e `configDigest` de
+  um shard de origem, mais `changes` e `filters` quando esse shard os tinha.
+- As tentativas trazem o índice `shard` de origem. Os resultados de teste
+  trazem `shard` quando um único shard é dono deles. Para testes de preparação
+  compartilhados, leia o índice em cada tentativa. Uma reexecução com
+  `--last-failed` incorporada a um relatório mesclado mantém `run.merge`.
+
+<a id="test-filters" />
+##### Filtros de testes
+
+- Um teste que um [filtro de testes](/filters) deixou de fora é um resultado
+  não selecionado com `skip.cause` `filtered` e `skip.filter` nomeando o filtro.
+- `run.filters` contém um registro por filtro chamado, em ordem: `name`,
+  `candidates`, `excluded` (os testes deixados de fora depois que os grupos
+  seriais recuperaram os membros deles), `note` (cortado em 1024 caracteres;
+  para um filtro que falhou ou excedeu o tempo limite, o aviso que diz por
+  quê) e `outcome`, definido quando o filtro não deixou nada de fora: `failed`
+  quando ele lançou um erro ou retornou um resultado inválido, `timed-out`
+  quando passou de 5 minutos. Um filtro que fica sem testes não é chamado e
+  não tem registro.
+- Depois que os filtros decidem, `run.changes` contém a mudança que eles
+  avaliaram, em contagens: `base` (a base de merge), `files` e `skipped` (por
+  que nenhum filtro rodou, como `no files changed since abc1234`). Está
+  presente quando há filtros configurados e a execução recebeu
+  `--changed-since`, exceto no `e2e explore`, em reexecuções de `--watch` e
+  quando a execução termina antes de os filtros decidirem. Com
+  `--last-failed`, ou sem testes para avaliar, contém só `skipped`.
+- Uma falha enquanto os filtros decidem, como `INVALID_CHANGED_SINCE` para
+  uma ref que não nomeia nenhum commit, fica em `run.errors` com `phase`
+  `filter`. Um `changedSince` malformado tem `phase` `config`.
+
+#### `onSummary`
+
+Recebe as linhas de resumo de todos os reporters, primeiro as dos embutidos,
+depois as dos outros na ordem de `reporters`: as de cada arquivo de relatório
+com rótulo, depois o que o `onRunFinished` do reporter retornou. O segundo
+argumento é a [execução concluída](#onrunfinished).
+
+```ts
+onSummary(rows) {
+  for (const row of rows) console.log(`${row.label}: ${row.text}`);
+},
+```
+
+Roda por último, depois que todo `onRunFinished` termina ou é abandonado, e
+também depois de um segundo Ctrl-C.
+
+Imprima aqui. A menos que o reporter seja [interativo](#interactive), o que
+`onSummary` escreve passa pela ocultação. Vai para o stream em que foi
+escrito, incluindo o stdout, então um reporter pode imprimir ali um documento
+próprio. Junto com `json`, o stdout contém só o relatório JSON, e o que
+qualquer outro reporter escreve no stdout é impresso no stderr.
+
+## Eventos
+
+`onEvent` recebe um destes fatos. Cada evento também tem um número de
+sequência, `seq`, e um timestamp ISO, `at`.
+
+```ts
+type RunEventFact =
+  | { type: 'run-started'; runId; projectId; projectRoot; artifactsRoot; ci; targets; agents?; model?; judge?; stepping? }
+  | { type: 'plan'; total; files: { file; target; tests }[] } // deprecated
+  | { type: 'collected'; total; files: { file; target; tests }[]; repeatEach; tests: CollectedTestInfo[] }
+  | { type: 'notice'; target; message }
+  | { type: 'output'; target?; pair?; stream: 'stdout' | 'stderr'; text }
+  | { type: 'setup'; step: SetupStep; state: 'started' }
+  | { type: 'setup'; step: SetupStep; state: 'finished'; durationMs; outcome?: 'reused' | 'failed' | 'timed-out' }
+  | { type: 'run-hold'; heldMs: number; heldSince: number | null }
+  | { type: 'test-started'; testId; agent; repeat; title; file; serialId; target }
+  | { type: 'step'; testId; agent; repeat; target; progress: StepProgress }
+  | { type: 'paused'; testId; agent; repeat; target; titlePath; reason: 'step' | 'pause'; attachId; steps: PausedStep[]; keys: { key; does }[] }
+  | { type: 'resumed'; testId; agent; repeat; target }
+  | { type: 'test-finished'; result: RunEventResult }
+  | { type: 'serial-group'; group: SerialGroupRecord }
+  | { type: 'explore'; progress: ExploreProgress }
+  | { type: 'run-error'; error: SerializedError }
+  | { type: 'run-interrupted'; mode: 'graceful' | 'forced' }
+  | { type: 'run-stopped'; failures; limit }
+  | { type: 'run-finished'; status; exitCode; durationMs?; reportPath?; aiTracePath?; traces? };
+```
+
+- `run-started` vem primeiro. Depois de `run-finished`, só dois eventos podem
+  vir: `output`, o que um reporter imprime enquanto trata esse evento, e
+  `run-interrupted`, quando um Ctrl-C chega enquanto os reporters terminam.
+- `targets` em `run-started` nomeia os alvos que a execução selecionou com
+  `--target`, na ordem da configuração, ou todos os alvos configurados sem
+  essa flag ou quando `--target` nomeia um alvo desconhecido, o que faz a
+  execução falhar com `UNKNOWN_TARGET`. O `run.targets` do relatório mesmo
+  assim lista todos os alvos configurados.
+- `judge` em `run-started` é o modelo juiz do agente da execução, presente só
+  quando os julgamentos usam um modelo diferente de `model`. `stepping` é
+  `true` quando a execução retém cada passo para `--step`.
+- `setup` delimita o trabalho antes de os testes começarem. O `step.kind`
+  dele é `collect`, `filter` (um [filtro de testes](/filters), pelo `name`
+  dele), `prepare`, `service` ou `app`. Em um passo `app`, `url` é a URL que
+  a verificação de prontidão do passo consulta, com uma porta livre
+  preenchida e sem userinfo nem query. `outcome` é `reused` quando um comando
+  de serviço ou de app se conectou a um processo que já servia a URL desse
+  comando, `failed` quando um filtro lançou um erro ou retornou um resultado
+  inválido, e `timed-out` quando um filtro passou de 5 minutos.
+- Um `notice` nomeia em `target` o assunto da linha dele: um alvo, `app`,
+  `collect`, `filter` para o progresso e o resumo de um filtro de testes, ou
+  `run`.
+- `collected` vem depois que os testes são coletados e selecionados, antes
+  que qualquer um rode. [Testes coletados](#collected-tests) o descreve.
+- `plan` está obsoleto: leia `collected`, que vem depois dele com os mesmos
+  `total` e `files`. Ele não será removido antes de 1º de abril de 2027.
+- [Saída](#output) descreve `output`, e [Pausas](#pauses), `paused` e
+  `resumed`.
+- `run-hold` é emitido no início e no fim de cada intervalo com todos os
+  workers em andamento retidos.
+  `heldMs` é o tempo total, em milissegundos, dos intervalos concluídos em que
+  todos os workers em andamento ficaram retidos.
+  `heldSince` é o início do intervalo atual em milissegundos Unix, ou `null`
+  quando nenhum intervalo desses está aberto.
+- `durationMs` em `run-finished` corresponde ao `run.durationMs` do relatório.
+- `test-finished` traz o registro completo do resultado, incluindo os
+  artefatos de todas as tentativas.
+- `explore` aparece só em uma execução de `e2e explore`: `started`, `planning`,
+  `step-started`, `step-finished`, `finding` e `finished`. O registro de
+  tudo isso é `run.explore` no relatório.
+- Todo reporter recebe o mesmo objeto de evento. Os campos do próprio objeto
+  são congelados, e os registros que ele traz são compartilhados: copie o que
+  quiser mudar.
+- Novos tipos de evento são adicionados com o tempo. Trate os tipos que você
+  conhece e ignore o resto; deixe vazio o ramo `default` de um `switch`.
+
+### Testes coletados
+
+`collected` lista todos os testes da execução antes de o primeiro começar,
+para que um reporter possa desenhar a execução inteira de antemão.
+
+```ts
+interface CollectedTestInfo {
+  readonly testId: string;  // the `testId` of the test's events and results
+  readonly target: string;
+  readonly agent: string;
+  readonly file: string;    // from the project root, POSIX separators
+  readonly kind: 'test' | 'setup'; // `setup` saves a session for other tests
+  readonly title: string;
+  readonly titlePath: readonly string[]; // the describe titles, then the title
+  readonly tags: readonly string[];
+  readonly source?: { file: string; line: number; column: number }; // where it is declared
+  readonly serialId?: string; // its serial group
+  readonly disposition: 'run' | 'skip' | 'filtered';
+  readonly reason?: string; // why it is skipped or filtered
+}
+```
+
+- `tests` tem uma entrada por teste, alvo e agente, na ordem de seleção.
+  Os testes que um filtro, `--grep` ou um shard deixou de fora são `filtered`.
+- Um `test` que roda o faz `repeatEach` vezes: 1 sem `--repeat-each`.
+  Um teste `setup` roda uma vez.
+- `total` conta todos os testes que a execução coletou, e `files`, os `run` e
+  `skip` por arquivo e alvo, para que um reporter saiba quando os resultados
+  de um arquivo estão completos. Um teste `setup` pulado não recebe
+  resultado, então `files` o deixa de fora. Os dois contam um teste repetido
+  uma vez por repetição, enquanto `tests` o lista uma vez.
+- O `at` do evento é o início da execução, o `startedAt` do relatório.
+
+### Testes e tentativas
+
+- Um teste fixado em vários agentes começa e termina uma vez por agente,
+  então use o id do teste, o alvo e o agente juntos como chave do estado em
+  andamento.
+- Testes comuns emitem `test-started` uma vez para essa combinação. Membros
+  seriais o emitem em cada tentativa do grupo em que rodam.
+- Use a [identidade](#step-progress) do progresso dos passos para distinguir
+  novas tentativas.
+- Uma tentativa que falha antes de qualquer passo não emite progresso de
+  passo e aparece no resultado final.
+
+<Note>
+Os segredos são ocultados antes de os eventos serem montados. Mensagens de
+erro e motivos de pulo só perdem os escapes ANSI e os caracteres de controle
+que não sejam tab, nova linha e o `\r` de uma quebra de linha `\r\n`, então
+trate-os como não confiáveis.
+</Note>
+
+### Progresso dos passos
+
+O campo `phase` descreve o progresso do passo:
+
+- `start` e `end` marcam os limites do passo.
+- `event` informa um turno do modelo, uma chamada de ferramenta ou uma
+  observação concluídos.
+- `activity` informa um trabalho que começa: `observe`, `action` ou `model`.
+- `replay` informa quando o replay a partir do cache começa ou devolve o
+  controle ao agente.
+
+```ts
+type StepProgress = (
+  | { phase: 'start'; kind: StepKind; api: string; label: string; source?: { file: string; line: number; column: number } }
+  | {
+      phase: 'end';
+      kind: StepKind;
+      api: string;
+      label: string;
+      status: 'passed' | 'failed' | 'blocked' | 'timed-out' | 'cancelled';
+      durationMs: number;
+      modelCalls: number;
+      cache?: Pick<StepCacheInfo, 'mode' | 'reason'>;
+      error?: SerializedError;
+      explanation?: string;
+    }
+  | { phase: 'event'; api: string; event: StepEvent }
+  | { phase: 'activity'; api: string; activity: 'observe' | 'model' | 'action' }
+  | { phase: 'replay'; api: string; active: boolean }
+) & { identity?: StepProgressIdentity };
+```
+
+Em uma fase `start`, `source` é a linha do arquivo de teste que chamou o
+passo: um caminho a partir da raiz do projeto com separadores POSIX, e uma
+linha e uma coluna contadas a partir de 1. Fica ausente quando o local da
+chamada está fora do projeto.
+
+Em uma fase `end`, `error` e `explanation` passam pela ocultação. Mantenha o
+`status` dela, incluindo `blocked` e `cancelled`. Não trate todo passo que
+não passou como uma falha do produto.
+
+Em uma fase `end`, o `cache` é o `mode` e o `reason` do
+[`StepCacheInfo`](/reference/agent#types) do passo: o
+[papel do cache de replay](/cache#why-a-step-was-not-replayed) em um passo de
+`agent.act`. Ele fica ausente quando o cache não foi consultado.
+
+Toda fase de passo que o runner emite inclui `progress.identity`:
+
+```ts
+{ attemptId: string; attemptIndex: number; stepId: string; stepIndex: number; actor?: string; parentStepId?: string }
+```
+
+- Os IDs correspondem ao relatório final. Os dois índices começam em zero.
+- Uma nova tentativa tem um novo ID de tentativa e um índice de tentativa
+  maior; os índices de passo dela recomeçam em zero.
+- Os membros de um grupo serial compartilham o ID e o índice de tentativa do
+  grupo. Os IDs de passo de cada membro continuam distintos.
+- Use `stepId` para associar as fases de início, atividade, evento, replay e
+  fim, incluindo passos aninhados.
+- `actor` nomeia a sessão em que um passo rodou quando ela não é a do próprio
+  teste: uma que o teste abriu com [`launch()`](/core#open-a-host-inside-a-test).
+- `parentStepId` é o `stepId` do [`test.step`](/reference/test#test-step)
+  dentro do qual o passo roda. Um `test.step` é ele mesmo um passo do tipo
+  `step`, com a api `test.step` e o título dele como rótulo.
+- `identity` é opcional no tipo para que um reporter também possa aceitar
+  streams mais antigos.
+
+### Saída
+
+`output` é uma escrita no stdout ou no stderr, já com a ocultação aplicada:
+`console.log` e companhia. Uma escrita pode terminar no meio de uma linha.
+
+```ts
+onEvent(event) {
+  if (event.type !== 'output') return;
+  socket.send(JSON.stringify({ source: event.target === undefined ? 'runner' : event.pair?.testId, stream: event.stream, text: event.text }));
+},
+```
+
+- A saída de um teste tem um `target`. `pair` nomeia o teste em andamento no
+  momento e fica indefinido entre testes.
+- Uma saída sem `target` vem do processo do runner enquanto a execução está
+  em andamento: um arquivo de teste enquanto carrega, um filtro de testes,
+  outro reporter.
+- A menos que um reporter [interativo](#interactive) rode, o runner também
+  imprime a saída no stderr. Um reporter que só registra a saída nunca
+  silencia o terminal.
+- O que um reporter imprime enquanto trata um evento `output`, ou a partir de
+  um trabalho que inicia ali, nunca volta como evento. O runner aplica a
+  ocultação e imprime esse texto por conta própria.
+
+### Pausas
+
+`paused` diz que um teste está esperando por uma pessoa: antes dos passos que
+[`--step`](/debugging#step-through-a-test) retém (`reason: 'step'`), ou em
+[`screen.pause()`](/debugging#pause-a-test) (`reason: 'pause'`). `resumed`
+diz que esse teste volta a rodar.
+
+```ts
+onEvent(event) {
+  if (event.type === 'paused') overlay.show(`Paused at ${event.steps[0].source?.file}:${event.steps[0].source?.line}`);
+  if (event.type === 'resumed') overlay.hide();
+},
+```
+
+```ts
+interface PausedStep {
+  readonly number: number; // its position in the trace; 0 for a pause
+  readonly api: string;
+  readonly label: string;
+  readonly source?: { file: string; line: number; column: number };
+}
+```
+
+- Um reporter só mostra uma pausa. O runner lê as teclas e os comandos
+  `e2e run --step` que respondem a ela.
+- `steps` tem uma chamada, ou todos os passos retidos juntos, como em um
+  `Promise.all`.
+- `keys` lista o que o teclado faz agora, na ordem em que um prompt as mostra,
+  como `{ key: 'enter', does: 'run this step' }`. Fica vazio quando nenhum
+  teclado é lido, como em uma execução [avançada por comandos](/debugging#step-through-a-test-without-a-terminal).
+- Testes que esperam aparecem um de cada vez. Um segundo `paused` para o
+  mesmo teste substitui o primeiro: um passo se juntou a ele, ou as teclas
+  mudaram.
+- Todo `paused` recebe um `resumed`, também quando o teste ou a execução
+  termina antes.
+- `titlePath` são os títulos de describe e depois o título do teste, como em
+  [`collected`](#collected-tests).
+- Use `attachId` para [se conectar pelo MCP](/reference/mcp#attaching-to-a-held-test).
+  Ele continua o mesmo entre as pausas da tentativa.
+- A menos que um reporter [interativo](#interactive) rode, uma pausa que o
+  teclado responde também é impressa no stderr como uma linha.
+
+## O que `--reporter` faz com objetos reporter
+
+`--reporter` substitui só os reporters embutidos; os seus próprios reporters e
+os de pacotes continuam rodando. Um reporter embutido que a flag nomeia mantém
+as opções que a configuração deu a ele.
+
+<CodeGroup>
+```bash npm
+npx e2e run --reporter list,junit
+```
+
+```bash pnpm
+pnpm exec e2e run --reporter list,junit
+```
+
+```bash bun
+bunx e2e run --reporter list,junit
+```
+</CodeGroup>
+
+- Com `reporters: ['list', junit({ outputFile: 'reports/junit.xml' })]`,
+  `--reporter junit` roda só esse `junit`, que continua escrevendo
+  `reports/junit.xml`.
+- Uma configuração sem reporter [interativo](#interactive) não tem
+  visualização da execução. Os erros da execução mesmo assim são impressos
+  no stderr, cada um como `CODE: message`.
+- Uma configuração com um reporter interativo próprio recusa `--reporter list`,
+  `--reporter dot` e `--reporter line`: no máximo um reporter é interativo.
+
+## Onde um reporter roda
+
+Os hooks rodam no processo do runner. Os workers também carregam a
+configuração, então a construção de um reporter não pode ter efeitos
+colaterais. `--watch` entrega todas as execuções a um mesmo reporter, cada
+uma começando pelo primeiro evento dela.
+
+- Leia tokens e inicie requisições dentro dos handlers.
+- Adicionar um reporter mantém válidos os
+  [gravações em cache](/cache#what-must-match).
+
+## Tipos
+
+`Reporter`, `FinishedRun`, `ReportFile`, `ReporterSummary`, `Report`,
+`RunEvent`, `RunEventOf`, `CollectedTestInfo`, `PausedStep` e `PausedKey` são
+exportados pelo ponto de entrada principal, assim como
+`renderMarkdownReport(report, options)`. `e2e/reporters` exporta `list`,
+`dot`, `line`, `json`, `junit`, `markdown` e `ctrf`, com
+`ListReporterOptions`, `DotReporterOptions`, `LineReporterOptions`,
+`JunitReporterOptions`, `MarkdownReporterOptions` e `CtrfReporterOptions`.
+
+`foldLastRun(report, lastRun)`, também do ponto de entrada principal,
+incorpora uma reexecução com `--last-failed` às execuções anteriores a ela,
+como o `@e2e-dev/github` faz.
+
+## Relacionados
+
+[Comentários em pull requests](/github) configura o `@e2e-dev/github`. A
+[referência da CLI](/reference/cli#output) lista o que os reporters embutidos
+escrevem.

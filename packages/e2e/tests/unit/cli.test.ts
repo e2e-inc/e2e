@@ -757,7 +757,7 @@ describe('e2e init argument parsing', () => {
   });
 
   it.each([
-    [['--engine', 'playwright'], 'error: --engine: unknown engine "playwright"; expected web, mobile, none'],
+    [['--engine', 'playwright'], 'error: --engine: unknown engine "playwright"; expected web, mobile, electron, none'],
     [['--engine', 'web,none'], 'error: --engine: none cannot be combined with other values'],
     [['--gateway', 'anthropic'], 'Allowed choices are vercel, openrouter, openai-compatible, chatgpt, copilot, opencode-console, grok, none.'],
     [['--example'], 'error: --example without a name asks which example, and --yes skips the prompts; name one of with-vite'],

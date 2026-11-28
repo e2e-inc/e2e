@@ -41,6 +41,7 @@ import { SESSION_BOUNDS } from '../session-tools/bounds.ts';
 import { PROVIDER_NAMES } from '../oauth/provider-ids.ts';
 import type { LoginFlags } from '../oauth/cli.ts';
 import { SignalLadder } from './signals.ts';
+import { compileTitlePattern } from './title-pattern.ts';
 import { isStepAction } from './step.ts';
 import { stepAddress } from '../run/step-socket.ts';
 import { UpdateCheck } from './update-check.ts';
@@ -77,13 +78,10 @@ function parseNonNegativeInt(value: string): number {
  * A pattern that does not compile is a usage error.
  */
 function parsePattern(value: string, previous: RegExp[] = []): RegExp[] {
-  const slashed = /^\/(.*)\/([a-z]*)$/su.exec(value);
-  const [source, flags] = slashed === null ? [value, ''] : [slashed[1]!, slashed[2]!];
-  if (source === '') throw new InvalidArgumentError('must be a regular expression');
   try {
-    return [...previous, new RegExp(source, flags)];
+    return [...previous, compileTitlePattern(value)];
   } catch (cause) {
-    throw new InvalidArgumentError(`must be a regular expression: ${cause instanceof Error ? cause.message : String(cause)}`);
+    throw new InvalidArgumentError(cause instanceof Error ? cause.message : String(cause));
   }
 }
 

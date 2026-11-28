@@ -13,7 +13,6 @@ import { fixtureNames } from '../collect/fixture-names.ts';
 import type { ModuleRegistration, RegisteredTest, TestBody } from '../collect/registry.ts';
 import { selectTargets } from '../collect/select.ts';
 import { discoverConfig, loadConfigModule, missingConfigError } from '../config/load.ts';
-import { missingModelError, resolveAgentConfig } from '@e2e-dev/core/lib/config/agent';
 import { type ResolvedConfig, type ResolvedCredential, type ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import { resolveConfig } from '../config/resolve-run.ts';
 import { launchesPinnedApp } from '@e2e-dev/core/lib/config/targets';
@@ -24,13 +23,13 @@ import type { RunEventSink } from '../run/events.ts';
 import type { RunnerOutput } from '../run/process-output.ts';
 import { run, type RunOutcome } from '../run/runner.ts';
 import { registerStaticSecrets, staticOutputLedger, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
-import type { AgentConfig, RecordingMode } from '@e2e-dev/core/lib/types';
+import type { RecordingMode } from '@e2e-dev/core/lib/types';
 import type { BuiltinReporter, E2EConfig } from '../run-types.ts';
 import { createExploreBody } from './body.ts';
 import { STEP_BOUNDS, TIMEOUT_BOUNDS } from './bounds.ts';
 import { changeContext, readExploreChange, type ChangeBrief, type ExploreChange } from './change.ts';
 import { readPullRequest } from './pull-request.ts';
-import { explorerAgent, withFindingTool } from './executor.ts';
+import { resolveExplorer } from './executor.ts';
 import { signedInContext, type PlanAccount } from './plan.ts';
 import { ExploreState } from './state.ts';
 
@@ -38,8 +37,6 @@ const DEFAULT_GOAL = 'Explore the app and find bugs';
 /** The goal with `--changed-since` and none given: the change is the scope. */
 const DEFAULT_CHANGE_GOAL = 'Explore what this change affects and find bugs in it';
 const MAX_GOAL_CHARS = 2_000;
-/** Each step's action and model-call budget when the config sets none: a charter is longer than a scripted step. */
-const DEFAULT_STEP_BUDGET = 40;
 /** One charter's own deadline; the run's remaining time caps it. */
 const STEP_TIMEOUT_MS = 240_000;
 /** Added to the test timeout so the body's own clock ends the exploration before the attempt's does. */
@@ -157,18 +154,11 @@ export async function explore(options: ExploreOptions = {}): Promise<ExploreOutc
   if (agentName !== 'default') notice(`exploring with agent "${agentName}"`);
 
   const state = new ExploreState(redactGoal(goal, resolved.allSecrets), budgets, { change: change?.report });
-  const explorer = explorerAgent({ state, agentName, entry: raw.agents?.[agentName], resolved: resolved.agent, notice });
-  const resolvedExplorer = resolveAgentConfig(exploreAgentConfig(explorer), `agents.${agentName}`);
-  // Every exploration step calls the model, a custom executor's included,
-  // since the built-in agent replaces it: no model is a failure before
-  // anything starts, not a run-level one once the first step asks.
-  if (resolvedExplorer.model === undefined) {
-    throw missingModelError(agentName, 'explore runs the built-in agent, which requires a model');
-  }
+  const explorer = resolveExplorer({ state, agentName, entry: raw.agents?.[agentName], resolved: resolved.agent, notice });
   // The explorer replaces the agent for the exploration alone: a setup test
   // `--session` pulls in runs as the project's own agents, with its cache and
   // retries. The exploration pins no retries and runs with the cache off.
-  const explorerAgents = new Map(resolved.agents).set(agentName, withFindingTool(resolvedExplorer, state));
+  const explorerAgents = new Map(resolved.agents).set(agentName, explorer);
   // The exploration is bounded by its own `--timeout`, not `maxDuration`.
   const { maxDuration: _maxDuration, ...runConfig } = raw;
   const outcome = await run({
@@ -293,18 +283,6 @@ function pickTarget(targets: readonly ResolvedTarget[], requested: string | unde
     notice(`exploring target "${chosen.name}"; pass --target to explore another`);
   }
   return chosen;
-}
-
-/**
- * The explorer's agents entry with per-step budgets that default higher than
- * a scripted step's, a charter being longer.
- */
-function exploreAgentConfig(explorer: AgentConfig): AgentConfig {
-  return {
-    ...explorer,
-    maxSteps: explorer.maxSteps ?? DEFAULT_STEP_BUDGET,
-    maxModelCalls: explorer.maxModelCalls ?? DEFAULT_STEP_BUDGET,
-  };
 }
 
 /**

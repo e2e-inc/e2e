@@ -1,0 +1,307 @@
+---
+title: Autentikasi
+description: Masuk sekali, gunakan kembali sesi pada berbagai tes, dan teruskan secret tanpa memperlihatkannya kepada model.
+"og:image": "https://e2e.com/docs/images/og/authentication.png?v=6e061842b8"
+"twitter:image": "https://e2e.com/docs/images/og/authentication.png?v=6e061842b8"
+---
+
+import { Video } from '../snippets/video.jsx';
+
+Tes penyiapan masuk sekali lalu menyimpan sesi dengan nama tertentu. Tes lain
+memulihkan sesi tersebut agar dimulai dalam keadaan sudah masuk. Kata sandi
+dan secret lain diberikan sebagai handle buram: e2e mengetikkan nilai
+sebenarnya untuk Anda dan menampilkan `<secret:name>` di tempat lain (dengan
+[beberapa batasan](/reference/security#where-redaction-stops)).
+
+<Video>
+  <video src="/images/authentication.mp4" aria-label="Konfigurasi mendeklarasikan kredensial admin, tes penyiapan masuk dan menyimpan sesi admin, lalu eksekusi headed membuka halaman pelanggan dalam keadaan sudah masuk. 15 tes berhasil dalam 12 detik." muted loop playsInline controls />
+
+  Satu tes penyiapan melakukan sign-in. Setiap tes yang menyebutkan `session: 'admin'` dimulai dalam keadaan sudah masuk.
+</Video>
+
+<a id="sign-in-once-in-a-setup-test" />
+
+## Gunakan kembali sesi yang sudah masuk
+
+Simpan sesi di dalam body `test.setup`. Pulihkan menggunakan opsi `session`.
+Runner menjalankan penyiapan yang dibutuhkan tes, bahkan saat Anda hanya
+memilih tes tersebut:
+
+<Tabs>
+  <Tab title="tests/auth.setup.e2e.ts">
+
+```ts
+import { test } from '@e2e-dev/web';
+import { expect, credentials } from 'e2e';
+
+test.setup('authenticate as admin', { sessions: ['admin'] }, async ({ app, screen, session, browser }) => {
+  const admin = credentials.user('admin');
+
+  await app.open('/login');
+  await screen.getByLabel('Username').fill(admin.username);
+  await screen.getByLabel('Password').fill(admin.password);
+  await screen.getByRole('button', 'Sign in').tap();
+
+  await expect(browser).toHaveURL('/dashboard');
+  await expect(screen.getByRole('status', 'Greeting')).toContainText('admin');
+
+  await session.save('admin');
+});
+```
+
+  </Tab>
+  <Tab title="tests/dashboard.e2e.ts">
+
+```ts
+import { test } from '@e2e-dev/web';
+import { expect } from 'e2e';
+
+test('the dashboard opens directly', { session: 'admin' }, async ({ app, screen, browser }) => {
+  await app.open('/dashboard');
+
+  await expect(browser).toHaveURL('/dashboard');
+  await expect(screen.getByRole('status', 'Greeting')).toHaveText(
+    'Welcome back, admin!',
+  );
+});
+```
+
+  </Tab>
+</Tabs>
+
+<Note>
+`session.save()` tidak memeriksa apakah sign-in berhasil. Periksa URL atau
+elemen yang hanya muncul setelah sign-in sebelum menyimpan sesi.
+</Note>
+
+## Aturan sesi
+
+| Aturan | Dampak jika dilanggar |
+| --- | --- |
+| Definisikan tes penyiapan di tingkat teratas, jangan di dalam `describe` | Error saat pengumpulan tes |
+| Hanya satu tes penyiapan yang boleh mendeklarasikan nama sesi tertentu | Error saat pengumpulan tes |
+| Body penyiapan harus menyimpan semua nama yang dideklarasikannya | Kontrak sesi gagal |
+| Jangan menyimpan nama sesi yang tidak dideklarasikan | Kontrak sesi gagal |
+| Engine target harus mendukung penyimpanan dan pemulihan state | Error saat pengumpulan tes sebelum tes berjalan (browser cloud per-attempt tidak dapat menyimpan sesi) |
+
+Jika penyiapan gagal, tes yang bergantung pada sesinya dilewati, sementara
+tes lain tetap berjalan.
+
+Di browser, sesi menyimpan cookie, localStorage, dan IndexedDB (bukan state
+server atau database). Pemulihan sesi tidak membuka halaman, jadi tetap
+panggil `app.open()` di awal setiap tes. Sesi hanya berlaku untuk satu
+eksekusi, dienkripsi di disk menggunakan kunci yang hanya disimpan di memori,
+dan dihapus saat pembersihan. Lihat [Sesi](/reference/security#sessions).
+
+## Kredensial
+
+Deklarasikan akun tes di konfigurasi dan baca kata sandi dari lingkungan:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://127.0.0.1:3000' } }],
+  credentials: {
+    admin: {
+      username: 'admin@example.test',
+      password: process.env.ADMIN_PASSWORD ?? '',
+    },
+  },
+} satisfies E2EConfig;
+```
+
+e2e memvalidasi kata sandi saat memuat konfigurasi: jika `ADMIN_PASSWORD`
+tidak tersedia atau panjangnya kurang dari 6 karakter, semua perintah gagal
+dengan error konfigurasi kecuali Anda memberikan
+[pengganti env](#override-a-value-per-run).
+
+<Accordion title="Jangan simpan nilai di lingkungan proses">
+
+Proses apa pun yang dimulai runner dapat membaca string dari `process.env`.
+`password` juga menerima fungsi, sedangkan `username` tidak. Runner hanya
+memanggil fungsi tersebut untuk pengisian yang diizinkan, di dalam proses
+runner, sehingga nilainya dapat berasal dari vault atau kode sekali pakai yang
+baru dibuat:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { vault } from './support/vault.ts';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://127.0.0.1:3000' } }],
+  credentials: {
+    admin: {
+      username: 'admin@example.test',
+      password: () => vault.read('e2e/admin-password'),
+    },
+  },
+} satisfies E2EConfig;
+```
+
+Nilai disamarkan mulai dari pengisian pertamanya. Jika aplikasi dapat
+menampilkan nilai sebelum tes mengetikkannya, gunakan string. Hal yang sama
+berlaku untuk entri `secrets`.
+
+</Accordion>
+
+## Kata sandi diberikan sebagai handle
+
+`credentials.user(name)` mengembalikan username sebagai string biasa dan kata
+sandi sebagai `Secret` bernama `<name>.password`. `Secret` tidak memiliki
+`.value`. Berikan handle ini ke `fill` atau ke `params` pada langkah agent:
+
+```ts
+await agent.act('Sign in', {
+  params: { username: admin.username, password: admin.password },
+});
+```
+
+Model hanya melihat nama dan tujuan secret. Saat model mengisi kata sandi,
+runner mensyaratkan field kata sandi lalu mengetikkan nilainya. Lihat
+[aturan pengisian secret](/reference/security#secret-fills). Agent tidak dapat
+membaca field aman, jadi gunakan assertion untuk memastikan sign-in berhasil.
+
+Screenshot menyamarkan field kata sandi. Nilai yang ditampilkan aplikasi di
+tempat lain akan dikirim ke model. Lihat
+[screenshot setelah pengisian secret](/reference/security#screenshots-after-a-secret-fill).
+
+<Warning>
+Penyamaran mencocokkan string. Nilai yang telah diubah, seperti empat
+karakter terakhir sebuah kunci, masih dapat muncul. Simpan pengisian secret
+di tes penyiapan dan lakukan assertion pada hasil pengiriman formulir. Lihat
+[batas penyamaran](/reference/security#where-redaction-stops).
+</Warning>
+
+## Secret selain kata sandi
+
+Gunakan `secrets` untuk API key, token webhook, dan nilai lain yang diketik
+oleh tes:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [{ engine: web(), app: { url: 'http://127.0.0.1:3000' } }],
+  secrets: {
+    'stripe-key': process.env.STRIPE_TEST_KEY ?? '',
+    'webhook-token': process.env.WEBHOOK_TOKEN ?? '',
+  },
+} satisfies E2EConfig;
+```
+
+`secrets.get()` mengembalikan handle. Gunakan seperti kata sandi:
+
+```ts
+import { secrets } from 'e2e';
+
+await screen.getByLabel('Secret key').fill(secrets.get('stripe-key'));
+await agent.act('Connect Stripe with the given key', {
+  params: { apiKey: secrets.get('stripe-key') },
+});
+```
+
+Entri `secrets` dapat mengisi input apa pun yang dapat diedit. Meminta secret
+yang belum dikonfigurasi akan menggagalkan langkah. Karena input biasa tidak
+disamarkan seperti field kata sandi, screenshot (termasuk screenshot untuk
+model) akan menampilkan nilai selama masih terlihat di input.
+`credentials.admin` dan `secrets.admin` berada di namespace terpisah.
+
+Anda juga dapat memberikan `secrets.get()` ke opsi engine yang mendukungnya,
+seperti [`basicAuth`](/web#protected-previews). Lihat
+[Secret di opsi engine](/reference/security#secrets-in-engine-options).
+
+## Ganti nilai untuk satu eksekusi
+
+Ganti kredensial atau secret yang dikonfigurasi untuk satu eksekusi dengan
+variabel lingkungan:
+
+| Entri | Variabel |
+| --- | --- |
+| `credentials.admin.username` | `E2E_USER_ADMIN_USERNAME` |
+| `credentials.admin.password` | `E2E_USER_ADMIN_PASSWORD` |
+| `secrets['stripe-key']` | `E2E_SECRET_STRIPE_KEY` |
+
+Nama entri diubah menjadi huruf besar dan karakter non-alfanumerik diganti
+dengan `_` (dua nama yang menghasilkan variabel env sama akan menggagalkan
+validasi konfigurasi).
+
+<CodeGroup>
+```bash npm
+E2E_USER_ADMIN_PASSWORD=... E2E_SECRET_STRIPE_KEY=sk_test_... npx e2e run
+```
+
+```bash pnpm
+E2E_USER_ADMIN_PASSWORD=... E2E_SECRET_STRIPE_KEY=sk_test_... pnpm exec e2e run
+```
+
+```bash bun
+E2E_USER_ADMIN_PASSWORD=... E2E_SECRET_STRIPE_KEY=sk_test_... bunx e2e run
+```
+</CodeGroup>
+
+## Beberapa pengguna yang sudah masuk
+
+Simpan satu sesi untuk setiap pengguna. Lalu jalankan tes yang sama dengan
+setiap sesi dan [agent](/agents):
+
+<Tabs>
+  <Tab title="tests/personas.setup.e2e.ts">
+
+```ts
+import { test } from '@e2e-dev/web';
+import { expect, credentials } from 'e2e';
+
+const PERSONAS = ['buyer', 'admin'] as const;
+
+test.setup('sign in each persona', { sessions: [...PERSONAS] }, async ({ app, screen, session, browser }) => {
+  for (const name of PERSONAS) {
+    const user = credentials.user(name);
+    await app.open('/login');
+    await screen.getByLabel('Username').fill(user.username);
+    await screen.getByLabel('Password').fill(user.password);
+    await screen.getByRole('button', 'Sign in').tap();
+    await expect(browser).toHaveURL('/dashboard');
+    await session.save(name);
+    await app.open('/logout');
+  }
+});
+```
+
+  </Tab>
+  <Tab title="tests/checkout.e2e.ts">
+
+```ts
+import { describe, test } from '@e2e-dev/web';
+
+for (const persona of ['buyer', 'admin'] as const) {
+  describe(`checkout as ${persona}`, { agent: persona, session: persona, tags: [persona] }, () => {
+    test('pays for one item', async ({ app, agent }) => {
+      await app.open('/cart');
+      await agent.act('pay for the item in the cart');
+      await agent.assert('the order confirmation is shown');
+    });
+  });
+}
+```
+
+  </Tab>
+</Tabs>
+
+Setiap nama merujuk ke entri `agents`, entri `credentials`, dan sesi yang
+disimpan. Jika persona tidak memerlukan sesi terpisah,
+[jalankan satu alur dengan beberapa agent](/agents#one-flow-several-personas).
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Referensi tes" icon="flask" href="/reference/test">
+    `test.setup`, `sessions`, dan opsi `session`.
+  </Card>
+  <Card title="Referensi konfigurasi" icon="sliders" href="/reference/config#credentials">
+    Blok `credentials` dan `secrets`.
+  </Card>
+</CardGroup>

@@ -106,8 +106,13 @@ export class LiveWindow {
     private readonly getWindow: (room: number) => readonly string[],
   ) {}
 
-  /** Records one permanent line written above the block, so the block knows the room left under the log. */
+  /**
+   * Records one permanent line written above the block, so the block knows
+   * the room left under the log. A window with no terminal to paint never
+   * reads the count, so it skips measuring the line.
+   */
   logged(line: string): void {
+    if (this.raw === undefined) return;
     this.above += rowsOf(line, terminalColumns());
   }
 

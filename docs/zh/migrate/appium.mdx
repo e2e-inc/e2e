@@ -339,7 +339,7 @@ bunx e2e run --target ios --reporter list,junit
 | 保存的会话、`test.setup` 和 `{ session }` | 每个测试单独登录，或为应用预置数据。设备没有可保存的会话，参阅[与网页端的差异](/mobile#what-differs-from-the-web) |
 | 设备网格或中枢、其他设备云 | 托管提供方，或你编写的 `DeviceProvider` |
 | `sauce:options` | 编写 [`DeviceProvider`](/mobile#hosted-devices) |
-| Appium Inspector | `screen.debug()`，或用于编码智能体实时会话的 [`npx e2e mcp`](/mcp-server) |
+| Appium Inspector | `screen.debug()`，或用于编码智能体实时会话的 [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) |
 | `driver.updateSettings()`, `appium:settings[...]` | [`mobile()`](/reference/mobile#engine) 上的 `snapshot`、`settle` 和 `transition` |
 | `.getAttribute('clickable')`, `.isClickable()` | 对元素执行操作。操作会等待元素达到可操作状态 |
 | 远程 Appium 服务器（`hostname`、`port`） | 在拥有设备的机器上运行 e2e |

@@ -4,7 +4,7 @@ sidebarTitle: E2B
 description: 使用 @e2e-dev/e2b 中的 e2b() 和 e2bBrowsers() 提供方，在 E2B 沙箱中运行 Android 测试目标和网页端测试目标。
 ---
 
-`@e2e-dev/e2b` 在 [E2B](https://e2b.dev) 沙箱中运行你的测试目标：通过[设备提供方](/mobile#hosted-devices) `e2b()` 运行 Android 16，通过 `@e2e-dev/e2b/web` 中的[浏览器提供方](/browser#hosted-browsers) `e2bBrowsers()` 运行 Chromium。你的测试无需修改。
+`@e2e-dev/e2b` 在 [E2B](https://e2b.dev) 沙箱中运行你的测试目标：通过[设备提供方](/mobile#hosted-devices) `e2b()` 运行 Android 16，通过 `@e2e-dev/e2b/web` 中的[浏览器提供方](/reference/web) `e2bBrowsers()` 运行 Chromium。你的测试无需修改。
 
 ## 身份验证
 
@@ -57,7 +57,7 @@ export default {
 
 ## 在浏览器中运行网页端测试目标
 
-每个工作进程都有独立的 Chromium 沙箱，每次尝试都会在其中获得新的浏览器上下文，与本地运行相同。使用 `scope: 'attempt'` 时，每次尝试会获得新的沙箱（[该作用域的限制](/browser#pick-a-lease-scope)）。
+每个工作进程都有独立的 Chromium 沙箱，每次尝试都会在其中获得新的浏览器上下文，与本地运行相同。使用 `scope: 'attempt'` 时，每次尝试会获得新的沙箱（[该作用域的限制](/reference/web)）。
 
 在安装了网页端引擎的项目中安装此集成：
 
@@ -143,7 +143,7 @@ export default {
   <Card title="托管设备" icon="mobile" href="/mobile#hosted-devices">
     设备提供方如何租用设备。
   </Card>
-  <Card title="托管浏览器" icon="globe" href="/browser#hosted-browsers">
+  <Card title="托管浏览器" icon="globe" href="/reference/web">
     浏览器提供方如何租用浏览器。
   </Card>
 </CardGroup>

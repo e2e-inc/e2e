@@ -14,7 +14,7 @@ import { AgentError } from '@e2e-dev/core/lib/agent/error';
 import { isFailedResult, waitingToolNames } from '@e2e-dev/core/lib/agent/loop-guards';
 import { GRAMMAR_TOOL_NAMES } from '@e2e-dev/core/lib/agent/action-names';
 import { createGrammarTools, createVerdictTool, grammarTools } from '@e2e-dev/core/lib/agent/primitives';
-import { createBuiltInAgent, projectTools } from '@e2e-dev/core/lib/agent/default-agent';
+import { createBuiltInAgent, createProjectTools } from '@e2e-dev/core/lib/agent/default-agent';
 import { createToolLoopExecutor } from '@e2e-dev/core/lib/agent/tool-loop';
 import { defineTool } from '@e2e-dev/core/lib/agent/tool';
 import { fakeExecutorContext } from '../helpers/fake-executor-context.ts';
@@ -254,8 +254,8 @@ it('offers read-only project tools alongside assertion exploration', () => {
     read_status: defineTool(tool, { mutates: false }),
     write_status: defineTool(tool, { mutates: true }),
   };
-  expect(Object.keys(projectTools({ ...context, step: { ...context.step, kind: 'assert' } }, tools))).toEqual(['read_status']);
-  expect(Object.keys(projectTools(context, tools))).toEqual(['read_status', 'write_status']);
+  expect(Object.keys(createProjectTools({ ...context, step: { ...context.step, kind: 'assert' } }, tools))).toEqual(['read_status']);
+  expect(Object.keys(createProjectTools(context, tools))).toEqual(['read_status', 'write_status']);
 });
 
 it('drops an inconclusive code from an act verdict and keeps it on an assertion', async () => {

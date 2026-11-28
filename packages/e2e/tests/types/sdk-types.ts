@@ -1626,6 +1626,22 @@ declare const brain: StepExecutor;
 ({ targets, agents: { default: { executor: brain, model, judge: model, context: 'Plans are called tiers.', maxModelCalls: 10 } } }) satisfies E2EConfig;
 // An executor that declares vision receives the assert option as step.vision.
 ({ name: 'seeing', vision: true, runStep: async (ctx) => ({ status: 'passed', summary: ctx.step.vision === 'only' ? 'pixels' : 'tree' }) }) satisfies StepExecutor;
+// An executor may answer judgment questions on its own model, and take an extension.
+({
+  name: 'answering',
+  runStep: async () => ({ status: 'passed', summary: '' }),
+  answer: async ({ system, prompt, images, attempt, signal }) => {
+    void [system satisfies string, prompt satisfies string, images[0]?.data satisfies Uint8Array | undefined, attempt.attemptId, signal.aborted];
+    return { text: '{}', modelId: 'own', inputTokens: 1, outputTokens: 1 };
+  },
+  extend: ({ system, tools }) => {
+    void [system satisfies string | undefined, tools?.['seed']?.annotations.mutates];
+    return brain;
+  },
+}) satisfies StepExecutor;
+// @ts-expect-error an answer carries its text
+({ name: 'answering', runStep: async () => ({ status: 'passed', summary: '' }), answer: async () => ({ modelId: 'own' }) }) satisfies StepExecutor;
+brain.extend?.({ system: 'More rules.', tools: { seedCart } }) satisfies StepExecutor | undefined;
 // @ts-expect-error vision is a declaration, not a mode
 ({ name: 'seeing', vision: 'only', runStep: async () => ({ status: 'passed', summary: '' }) }) satisfies StepExecutor;
 // @ts-expect-error system belongs to the built-in agent; a custom executor brings its own prompt

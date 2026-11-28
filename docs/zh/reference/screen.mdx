@@ -497,7 +497,7 @@ await screen.pause();
 - 每次尝试都会暂停测试，包括重试和准备测试。
 - 在 `--step` 运行中，按 `n`、`a` 或运行 `e2e run --step rest` 之后，测试仍会在 `screen.pause()` 处暂停。
 - 暂停时间不计入任何超时。
-- 在 [MCP](/mcp-server) `open_session {test}` 打开的会话中、基于 `@e2e-dev/core` 或 `openHost` 的程序中，以及 `e2e/runner` 的 `run()` 中，测试不会暂停。设置了 `CI` 时，测试在 `run()` 中仍会以 `PAUSE_UNAVAILABLE` 失败，与 `e2e run` 相同。
+- 在 [MCP](/coding-agents#let-the-agent-use-the-app) `open_session {test}` 打开的会话中、基于 `@e2e-dev/core` 或 `openHost` 的程序中，以及 `e2e/runner` 的 `run()` 中，测试不会暂停。设置了 `CI` 时，测试在 `run()` 中仍会以 `PAUSE_UNAVAILABLE` 失败，与 `e2e run` 相同。
 - 在 `e2e run --watch` 中，暂停时按 `q` 或运行 `e2e run --step stop`，只会取消当前运行。
 - 定位器不提供该方法。
 

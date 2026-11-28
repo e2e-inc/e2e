@@ -255,10 +255,11 @@ mobile({ platform: 'ios', transition: 800 }); // default: 500
 अगर इंतज़ार के दौरान कंट्रोल बदल जाए, तो एक्शन करने से पहले अपने टाइमआउट के अंदर उसे
 फिर से ढूँढता है।
 
-[`device`](#device) के `back`, `home`, `shake`, `alert`, `dismissKeyboard`,
-`setOrientation`, और `fold` स्क्रीन बदल देते हैं, इसलिए वे इस बजट के लिए टैप की तरह ही
-एक्शन गिने जाते हैं। उनकी दिखाई गई स्क्रीन के साथ जो कंट्रोल आता है, उस पर अगला एक्शन
-लगने से पहले वह यह बजट पूरा होने का इंतज़ार करता है।
+[`device`](#device) के `back`, `home`, `pressRemote`, `pressButton`, `shake`, `lock`,
+`unlock`, `alert`, `dismissKeyboard`, `setOrientation`, और `fold` स्क्रीन बदल देते
+हैं, इसलिए वे इस बजट के लिए टैप की तरह ही एक्शन गिने जाते हैं। उनकी दिखाई गई
+स्क्रीन के साथ जो कंट्रोल आता है, उस पर अगला एक्शन लगने से पहले वह यह बजट पूरा
+होने का इंतज़ार करता है।
 
 `fill` और `clear` टाइप करने से पहले फ़ील्ड को दोबारा पढ़ते हैं। गायब फ़ील्ड, बदली हुई
 सिक्योरिटी स्टेट, या अधूरा कैप्चर बदलाव करने से पहले `NODE_STALE` लौटाते हैं, और फिर नए
@@ -385,6 +386,14 @@ export default {
 - हर परमिशन `grant`, `deny`, या `reset` होती है। iOS पर `deny` एक रिकॉर्ड किया हुआ मना
   होता है जहाँ ऐप को बिना प्रॉम्प्ट के मना कर दिया जाता है, और Android पर यह रिवोकेशन
   होता है जहाँ ऐप के दोबारा माँगने पर OS फिर पूछता है।
+- `permissions: 'all'` वे सारी परमिशन दे देता है जो प्लेटफ़ॉर्म सेट कर सकता है। यह मैप
+  की जगह लेता है; किसी परमिशन को `'deny'` या `'reset'` करना हो तो परमिशन के नाम दें।
+  - Android पर: ऐप के मैनिफ़ेस्ट में डिक्लेयर की गई हर रनटाइम परमिशन। जो परमिशन
+    रनटाइम पर नहीं दी जा सकतीं, जैसे `INTERNET`, वे छोड़ दी जाती हैं, इसलिए जो ऐप कोई
+    रनटाइम परमिशन डिक्लेयर नहीं करता, वह बिना किसी बदलाव के लॉन्च होता है।
+  - iOS सिम्युलेटर पर: हर प्राइवेसी सर्विस जो रनटाइम सेट कर सकता है, लोकेशन `always`
+    के साथ। सिम्युलेटर नोटिफ़िकेशन सेट करने से मना करता है, इसलिए वह प्रॉम्प्ट
+    `device.alert('accept')` से स्वीकार करें।
 - ऐप शुरू होने से पहले नाम से उस पर परमिशन सेट की जाती हैं, पहले खोले बिना, क्योंकि iOS
   चलते ऐप की परमिशन बदलने पर और Android परमिशन हटाने पर उसे बंद कर देता है।
 - वॉर्म-अप कोई लॉन्च आर्ग्युमेंट नहीं भेजता और किसी परमिशन को नहीं छूता।
@@ -446,9 +455,9 @@ export default {
 
 | कॉन्ट्रैक्ट मेंबर | डिवाइस पर |
 | --- | --- |
-| `observe` | रेक्ट्स के साथ ऐक्सेसिबिलिटी ट्री। एलिमेंट टाइप [रोल्स](#roles) में दी गई सूची के हिसाब से रोल पर मैप होते हैं; `Switch` या `CheckBox`, और Android का `RadioButton`, डिवाइस की बताई `checked` स्टेट रखते हैं, और `SecureTextField` या जिस Android फ़ील्ड को UIAutomator `password` मार्क करे वह सिक्योर `textbox` होता है। iOS फ़ील्ड अपने लेबल के बराबर वैल्यू रखता है (बिना लेबल वाले फ़ील्ड का नाम उसके टेक्स्ट से होता है); Android में टेक्स्ट व्यू के लेबल का उसकी वैल्यू के रूप में दोहराया जाना हटा दिया जाता है। ऐक्सेसिबिलिटी आइडेंटिफ़ायर (iOS) या रिसोर्स id (Android) नोड का `testId` बनता है। Android नोड का नाम ऐप के सेट किए कंटेंट डिस्क्रिप्शन (React Native का `accessibilityLabel`) से होता है, वरना उसके टेक्स्ट से, और उसका `text` वही होता है जो वह दिखाता है, इसलिए लेबल वाला टेक्स्ट व्यू या भरा हुआ फ़ील्ड लेबल से `getByLabel` और टेक्स्ट से `getByText` का जवाब देता है। फ़ील्ड का हिंट उसका `placeholder` ऐट्रिब्यूट होता है, चाहे दिख रहा हो या नहीं। Compose Multiplatform iOS पर कोई प्लेसहोल्डर रिपोर्ट नहीं करता: खाली फ़ील्ड जो टेक्स्ट ड्रॉ करता है उसे अपने लेबल में जोड़ देता है (`Name, Ada Lovelace`) और एक `StaticText` चाइल्ड रखता है, इसलिए वही टेक्स्ट फ़ील्ड का `placeholder` बनता है और उस चाइल्ड को छोड़ दिया जाता है। खाली फ़ील्ड की कोई वैल्यू नहीं होती: Android दिख रहे हिंट को मार्क करता है, और XCTest खाली iOS फ़ील्ड के प्लेसहोल्डर को उसकी वैल्यू के रूप में रिपोर्ट करता है, इसलिए जिस iOS फ़ील्ड की वैल्यू उसके प्लेसहोल्डर (ट्रिम की हुई) के बराबर हो वह खाली पढ़ा जाता है, भले ही ठीक प्लेसहोल्डर जैसा टेक्स्ट टाइप किया गया हो। एक Android बात agent-device की है, प्लेटफ़ॉर्म की नहीं: `rect` और हर पॉइंट स्क्रीन के फ़िज़िकल पिक्सल में होते हैं; वह जो डिस्प्ले डेंसिटी रिपोर्ट करता है वह अभी लागू नहीं होती। Android का स्टेटस बार और नेविगेशन बार, यानी स्क्रीन के किनारों पर पूरी चौड़ाई वाली `com.android.systemui` विंडो और उस किनारे की पट्टी में agent-device से अकेले रिपोर्ट किए गए संकरे स्टेटस आइकन (घड़ी, सिग्नल, बैटरी), इन्हें छोड़ दिया जाता है; नोटिफ़िकेशन शेड, सिस्टम डायलॉग, और किनारों से अंदर की तरफ़ आने वाले हेड्स-अप नोटिफ़िकेशन या दूसरे पॉपअप बने रहते हैं। माँगने पर पिक्सल मिलते हैं, जिनमें हर सिक्योर नोड की बाउंड्स काले रंग से ढकी होती हैं। |
+| `observe` | रेक्ट्स के साथ ऐक्सेसिबिलिटी ट्री। एलिमेंट टाइप [रोल्स](#roles) में दी गई सूची के हिसाब से रोल पर मैप होते हैं; `Switch` या `CheckBox`, और Android का `RadioButton`, डिवाइस की बताई `checked` स्टेट रखते हैं, और `SecureTextField` या जिस Android फ़ील्ड को UIAutomator `password` मार्क करे वह सिक्योर `textbox` होता है। iOS फ़ील्ड अपने लेबल के बराबर वैल्यू रखता है (बिना लेबल वाले फ़ील्ड का नाम उसके टेक्स्ट से होता है); Android में टेक्स्ट व्यू के लेबल का उसकी वैल्यू के रूप में दोहराया जाना हटा दिया जाता है। ऐक्सेसिबिलिटी आइडेंटिफ़ायर (iOS) या रिसोर्स id (Android) नोड का `testId` बनता है। Android नोड का नाम ऐप के सेट किए कंटेंट डिस्क्रिप्शन (React Native का `accessibilityLabel`) से होता है, वरना उसके टेक्स्ट से, और उसका `text` वही होता है जो वह दिखाता है, इसलिए लेबल वाला टेक्स्ट व्यू या भरा हुआ फ़ील्ड लेबल से `getByLabel` और टेक्स्ट से `getByText` का जवाब देता है। नोड में `label`, `resource-id`, `class`, और Android पर `content-desc` ऐट्रिब्यूट भी होते हैं ([`getAttribute`](/reference/screen#getattribute) देखें)। फ़ील्ड का हिंट उसका `placeholder` ऐट्रिब्यूट होता है, चाहे दिख रहा हो या नहीं। Compose Multiplatform iOS पर कोई प्लेसहोल्डर रिपोर्ट नहीं करता: खाली फ़ील्ड जो टेक्स्ट ड्रॉ करता है उसे अपने लेबल में जोड़ देता है (`Name, Ada Lovelace`) और एक `StaticText` चाइल्ड रखता है, इसलिए वही टेक्स्ट फ़ील्ड का `placeholder` बनता है और उस चाइल्ड को छोड़ दिया जाता है। खाली फ़ील्ड की कोई वैल्यू नहीं होती: Android दिख रहे हिंट को मार्क करता है, और XCTest खाली iOS फ़ील्ड के प्लेसहोल्डर को उसकी वैल्यू के रूप में रिपोर्ट करता है, इसलिए जिस iOS फ़ील्ड की वैल्यू उसके प्लेसहोल्डर (ट्रिम की हुई) के बराबर हो वह खाली पढ़ा जाता है, भले ही ठीक प्लेसहोल्डर जैसा टेक्स्ट टाइप किया गया हो। एक Android बात agent-device की है, प्लेटफ़ॉर्म की नहीं: `rect` और हर पॉइंट स्क्रीन के फ़िज़िकल पिक्सल में होते हैं; वह जो डिस्प्ले डेंसिटी रिपोर्ट करता है वह अभी लागू नहीं होती। Android का स्टेटस बार और नेविगेशन बार, यानी स्क्रीन के किनारों पर पूरी चौड़ाई वाली `com.android.systemui` विंडो और उस किनारे की पट्टी में agent-device से अकेले रिपोर्ट किए गए संकरे स्टेटस आइकन (घड़ी, सिग्नल, बैटरी), इन्हें छोड़ दिया जाता है; नोटिफ़िकेशन शेड, सिस्टम डायलॉग, और किनारों से अंदर की तरफ़ आने वाले हेड्स-अप नोटिफ़िकेशन या दूसरे पॉपअप बने रहते हैं। माँगने पर पिक्सल मिलते हैं, जिनमें हर सिक्योर नोड की बाउंड्स काले रंग से ढकी होती हैं। |
 | `perform` | एडिटेबल फ़ील्ड पर `tap`, `doubleTap`, `multiTap`, `longPress`, `fill`, `clear`, `hover`, `check`, `uncheck`, `press` (`Enter`, `Space`, या एक कैरेक्टर), `swipe`, `dragTo`, और `focus`। `switch` या `checkbox` पर टैप उसके सबसे अंदरूनी कंट्रोल पर लगता है, क्योंकि UIKit सेटिंग्स रो को एक लेबल वाले स्विच के रूप में दिखाता है जिसमें असली टॉगल चाइल्ड होता है। `check` और `uncheck` को `checked` स्टेट चाहिए होती है। दोनों प्लेटफ़ॉर्म पर स्विच यह स्टेट रिपोर्ट करते हैं, और नेटिव Android `CheckBox` भी; React Native चेकबॉक्स या रेडियो यह तभी रिपोर्ट करता है जब ऐप `accessibilityState.checked` सेट करे। बिना स्टेट वाला कंट्रोल `UNSUPPORTED_CAPABILITY` देता है, इसलिए उस पर टैप करें। `doubleTap` दो प्रेस होते हैं, iOS पर 284 से 285 ms के अंतर पर (agent-device के XCTest टैप की यही गति है): agent-device का अपना डबल-टैप जेस्चर React Native के `Pressable` तक एक ही प्रेस के रूप में पहुँचता है। 300 ms या कम की विंडो वाला डिटेक्टर इस जोड़ी को दो सिंगल टैप पढ़ सकता है। `multiTap` `doubleTap` की ही गति से `count` प्रेस करता है, इसलिए वही छोटी-विंडो वाली बात यहाँ भी लागू होती है; agent-device की सीमा 200 से ऊपर का `count` किसी भी प्रेस से पहले `UNSUPPORTED_CAPABILITY` देता है। iOS पर लगभग 285 ms प्रति प्रेस के हिसाब से 200 प्रेस में लगभग एक मिनट लगता है, जो डिफ़ॉल्ट 30 s के एक्शन टाइमआउट से ज़्यादा है, इसलिए बड़े `count` के लिए ज़्यादा `timeout` पास करें। जब तक टेस्ट `duration` न दे, `longPress` एक सेकंड तक होल्ड करता है, जो React Native `Pressable` के 500 ms के `delayLongPress` और ऐप्स की लंबी सीमाओं से ज़्यादा है; agent-device का अपना डिफ़ॉल्ट होल्ड छोटा होता है और उन पर टैप गिना जाता है। `blur`, `selectOption`, `setInputFiles`, `scrollIntoView`, और `secondaryTap` डिक्लेयर नहीं हैं, न ही `tapModifiers`, इसलिए `modifiers` के साथ `tap`, `doubleTap`, या `multiTap` देने पर `UNSUPPORTED_CAPABILITY` आता है। किसी ऐसे नोड पर एक्शन जिसे नए स्नैपशॉट ने बदल दिया हो, किसी और एलिमेंट पर चलने के बजाय उस नोड को दोबारा ढूँढता है। |
-| `performAt` | स्क्रीन के सीधे पॉइंट पर `tap`, `doubleTap`, `longPress`, और `swipeTo`, ताकि `screen.tapAt`, `screen.doubleTapAt`, `tap({ position })`, `screen.swipe({ from, to })`, और एजेंट का `tap_at` ऐसे कंट्रोल तक पहुँच सकें जो ट्री में नहीं है। पॉइंट पर कोई `hover`, `secondaryTap`, या `dragTo` नहीं होता: टच में बिना नोड के ये नहीं होते, इसलिए `hover_at` को ट्री में शामिल कंट्रोल चाहिए। |
+| `performAt` | स्क्रीन के सीधे पॉइंट पर `tap`, `doubleTap`, `longPress`, और `swipeTo`, ताकि `screen.tapAt`, `screen.doubleTapAt`, `tap({ position })`, `screen.swipe({ from, to })`, और एजेंट का `tap_at` ऐसे कंट्रोल तक पहुँच सकें जो ट्री में नहीं है। iOS पर, जब सॉफ़्ट कीबोर्ड खुला हो, बिना `duration` वाला `screen.swipe({ from, to })` कीबोर्ड से ऊपर वाले हिस्से में ही रहना चाहिए; ऐसा न हो तो कुछ भी भेजे जाने से पहले वह `ACTION_FAILED` से फ़ेल होता है। `duration` के साथ पाथ वैसे ही भेजा जाता है जैसा दिया गया है, कीबोर्ड के आर-पार, जैसा इंटरैक्टिव कीबोर्ड डिसमिसल के टेस्ट को चाहिए। पॉइंट पर कोई `hover`, `secondaryTap`, या `dragTo` नहीं होता: टच में बिना नोड के ये नहीं होते, इसलिए `hover_at` को ट्री में शामिल कंट्रोल चाहिए। |
 | `keyboard` | फ़ोकस्ड फ़ील्ड में `type` और `press`, एजेंट का बिना टारगेट वाला `type` और `press` और `type_at` और `press_at` का फ़ॉलबैक, और `dismiss`, जो एजेंट का `dismiss_keyboard` है। |
 | `locate` | हर `screen` क्वेरी। टेक्स्ट और लेबल क्वेरी सबसे अंदरूनी मैच लौटाती हैं, क्योंकि डिवाइस दोनों को ट्री में ऊपर दोहराता है (React Native इनपुट एक होस्ट व्यू और उसके अंदर का फ़ील्ड होता है, दोनों पर लेबल होता है)। Android पर टेस्ट id क्वेरी (स्ट्रिंग या RegExp), जब स्क्रीन पर पूरी id से कुछ मैच न हो, तो `<package>:id/` प्रीफ़िक्स के बिना भी रिसोर्स id से मैच करती है (फ़्रेमवर्क के `android` को छोड़कर किसी भी पैकेज के लिए)। `screen.locator('id=…')` agent-device का सेलेक्टर है और पूरी id लेता है। |
 | `validateApp` | `app.bundleId` या `app.appPath` ज़रूरी है और अभी `app.url` को मना करता है, साथ में यह नोट देता है कि प्लेटफ़ॉर्म के डिवाइस से इस मशीन तक कैसे पहुँचा जाए। |
@@ -497,7 +506,10 @@ test('offline banner', { platforms: ['android'] }, async ({ app, device, screen 
 | [`home`](#home) | `Promise<void>` |
 | [`back`](#back) | `Promise<void>` |
 | [`pressRemote`](#pressremote) | `Promise<void>` |
+| [`pressButton`](#pressbutton) | `Promise<void>` |
 | [`shake`](#shake) | `Promise<void>` |
+| [`lock`](#lock) | `Promise<void>` |
+| [`unlock`](#unlock) | `Promise<void>` |
 | [`alert`](#alert) | `Promise<void>` |
 | [`dismissKeyboard`](#dismisskeyboard) | `Promise<void>` |
 | [`isKeyboardShown`](#iskeyboardshown) | `Promise<boolean>` |
@@ -505,8 +517,8 @@ test('offline banner', { platforms: ['android'] }, async ({ app, device, screen 
 | [`setClipboard`](#setclipboard) | `Promise<void>` |
 
 हर async मेथड `device.<method>` नाम का रिकॉर्ड किया हुआ स्टेप है, जो
-`config.actionTimeout` से बँधा होता है। `back`, `home`, `pressRemote`, `shake`,
-`alert`, `dismissKeyboard`, `setOrientation`, और `fold` [`transition`](#transition)
+`config.actionTimeout` से बँधा होता है। `back`, `home`, `pressRemote`, `pressButton`,
+`shake`, `lock`, `unlock`, `alert`, `dismissKeyboard`, `setOrientation`, और `fold` [`transition`](#transition)
 बजट के लिए एक्शन गिने जाते हैं। नीचे हर एंट्री में उस मेंबर का डिक्लेरेशन है; ये जो
 टाइप इस्तेमाल करते हैं वे [टाइप](#device-fixture) में हैं।
 
@@ -642,13 +654,22 @@ await app.open();
 #### `setLocation`
 
 ```ts
-/** Sets the simulated location, switching location services on first on Android. */
+/**
+ * Sets the simulated location, switching location services on first on
+ * Android. A latitude outside -90 to 90, a longitude outside -180 to 180,
+ * or either one not a finite number is `INVALID_ARGUMENT`, before any
+ * device command.
+ */
 setLocation(coordinates: { latitude: number; longitude: number }): Promise<void>;
 ```
 
 ```ts
 await device.setLocation({ latitude: 52.23, longitude: 21.01 });
 ```
+
+| थ्रो करता है | कब |
+| --- | --- |
+| `INVALID_ARGUMENT` | -90 से 90 के बाहर का लैटिट्यूड, -180 से 180 के बाहर का लॉन्गिट्यूड, या इनमें से कोई फ़ाइनाइट नंबर न हो। यह किसी भी डिवाइस कमांड से पहले फ़ेल होता है। |
 
 #### `clearLocation`
 
@@ -776,12 +797,13 @@ await device.openApp(app);
 ```
 
 - इसे रन के बिल्ड के लिए, या अपग्रेड पाथ पर किसी दूसरे बिल्ड के लिए इस्तेमाल करें।
-- रिज़ॉल्व हुई id वह बंडल id या पैकेज होती है जिसे agent-device ने बिल्ड से पढ़ा, वरना
+- रिज़ॉल्व हुई id वह बंडल id या पैकेज होती है जिसे agent-device ने बिल्ड से पढ़ा, या
   जो `app` पास किया गया था।
 
 | थ्रो करता है | कब |
 | --- | --- |
-| `APP_NOT_OPEN` | कोई पाथ नहीं दिया गया और टारगेट में `app.appPath` नहीं है; या `reinstall: true` के साथ कोई `app` नहीं दिया गया और कोई ऐप पिन नहीं है (न `app.bundleId`, न बिल्ड अभी इंस्टॉल हुआ है)। |
+| `INVALID_STATE` | कोई पाथ नहीं दिया गया और टारगेट में `app.appPath` नहीं है; या `reinstall: true` के साथ कोई `app` नहीं दिया गया और कोई ऐप पिन नहीं है (न `app.bundleId`, न बिल्ड अभी इंस्टॉल हुआ है)। |
+| `INVALID_ARGUMENT` | पाथ दिया गया, लेकिन e2e चलाने वाली मशीन पर, प्रोजेक्ट रूट के हिसाब से रिज़ॉल्व करने पर, उस पाथ पर कुछ नहीं है। यह किसी भी डिवाइस कमांड से पहले फ़ेल होता है। |
 | `ENGINE_FAILURE` | agent-device ने कोई id नहीं बताई और कोई `app` पास नहीं किया गया, ताकि फ़ाइल पाथ id की तरह काम न करे। [ट्रबलशूटिंग](/mobile#troubleshooting) देखें। |
 
 #### `uninstallApp`
@@ -1025,6 +1047,39 @@ await device.pressRemote('play-pause');
 ज़्यादातर Android TV रिमोट में एक Play बटन होता है जो टॉगल करता है: वह `play-pause` है।
 `play` समर्पित Play बटन के लिए है।
 
+#### `pressButton`
+
+```ts
+/**
+ * Presses one hardware button: `'volume-up'`, `'volume-down'`, or
+ * `'power'`. An Android emulator or phone takes all three, and a physical
+ * iPhone or iPad the volume buttons; an iOS simulator, an Android TV, and
+ * any other device or button is `UNSUPPORTED_CAPABILITY`. A name outside
+ * the list is `INVALID_ARGUMENT`.
+ * It resolves once the press is sent, with no volume level or screen state,
+ * so assert on what the screen shows next.
+ */
+pressButton(button: HardwareButton): Promise<void>;
+```
+
+```ts
+await device.pressButton('volume-up');
+await expect(screen.getByRole('slider', { name: 'Media' })).toBeVisible();
+```
+
+Android पर वॉल्यूम प्रेस ऐप के ऊपर सिस्टम का वॉल्यूम पैनल खोल देता है, इसलिए अगली
+रीड में उसके स्लाइडर दिखते हैं, जब तक कुछ सेकंड बाद पैनल खुद न छिप जाए। `power`
+स्क्रीन बंद कर देता है, और स्क्रीन दोबारा चालू होने तक उसे पढ़ा नहीं जा सकता: रीड
+या एक्शन का टाइमआउट हो जाता है। जल्दी-जल्दी दो `power` प्रेस ऐप को जगाने के बजाय
+फ़ोन का डबल-प्रेस शॉर्टकट चला सकते हैं, जो स्टॉक एम्युलेटर पर कैमरा खोलता है।
+स्क्रीन लॉक करनी हो और तब तक इंतज़ार करना हो जब तक डिवाइस उसे लॉक्ड न बताए, तो
+[`lock`](#lock) इस्तेमाल करें, फिर [`unlock`](#unlock)।
+
+| थ्रो करता है | कब |
+| --- | --- |
+| `INVALID_ARGUMENT` | `button` तीनों नामों में से कोई नहीं है। डिवाइस को कुछ नहीं भेजा जाता। |
+| `UNSUPPORTED_CAPABILITY` | डिवाइस वह बटन नहीं दबा सकता: iOS सिम्युलेटर, Android TV, iPhone या iPad पर `power`, या ऐसा होस्टेड डिवाइस जिसका WebDriver बैकएंड वह बटन नहीं देता। |
+
 #### `shake`
 
 ```ts
@@ -1050,6 +1105,96 @@ await expect(screen.getByText('Report a problem')).toBeVisible();
 | --- | --- |
 | `UNSUPPORTED_CAPABILITY` | यह ऐसा डिवाइस नहीं है जिसे agent-device शेक कर सके: असली डिवाइस, TV या वॉच टारगेट, या ऐसा डिवाइस जिसे प्रोवाइडर अपने बैकएंड से चलाता है (जैसे WebDriver सेशन या प्रोवाइडर का अपना iOS सिम्युलेटर)। |
 | `ENGINE_FAILURE` | Android एम्युलेटर के कंसोल ने शेक मना कर दिया, जैसा बिना एक्सेलेरोमीटर वाली इमेज में होता है। |
+
+#### `lock`
+
+```ts
+/**
+ * Locks the screen and resolves once the device reports it locked: the
+ * sleep key on an Android phone or tablet, the lock button on an iPhone or
+ * iPad simulator. A screen that is already locked stays locked. A lock
+ * that asks for a PIN, pattern, password, or passcode is locked too, but
+ * `unlock()` refuses it, so the device stays locked until someone unlocks
+ * it by hand: use Swipe on Android and no passcode on iOS.
+ * `UNSUPPORTED_CAPABILITY` on a device agent-device cannot lock (a physical
+ * iPhone or iPad, a TV, a device a provider drives through a backend that
+ * has no lock command), and on an Android device whose screen lock is set
+ * to None, which has no lock screen to show. Android 11 to 15 do not
+ * report that setting, so there the sleep key is sent, the display turns
+ * off, and the lock fails with `ENGINE_FAILURE` after about 5 seconds.
+ * Android 10 and older do not report the lock type either, so a lock or
+ * an unlock that would change the state fails with `ENGINE_FAILURE`
+ * before any key is sent.
+ */
+lock(): Promise<void>;
+```
+
+```ts
+try {
+  await device.lock();
+} finally {
+  await device.unlock();
+}
+await expect(screen.getByText('Welcome back')).toBeVisible();
+```
+
+स्क्रीन को कुछ समय के लिए लॉक करना हो, जैसा Appium का `lock(seconds)` करता है, तो
+`lock()` और `unlock()` के बीच इंतज़ार करें।
+
+हमेशा चालू रहने वाले डिस्प्ले (always-on display) वाले iPhone सिम्युलेटर पर, जैसे
+iPhone 17 Pro, `unlock()` डिस्प्ले को बंद छोड़ सकता है, जबकि डिवाइस उसे अनलॉक्ड
+बताता है: लॉक डिस्प्ले को बंद करने के बजाय धुंधला कर देता है, और अनलॉक वाला स्वाइप
+डिस्प्ले को जगाए बिना लॉक स्क्रीन हटा देता है। टैप और स्क्रीन रीड तब भी काम करते
+हैं, लेकिन स्क्रीनशॉट में डिस्प्ले बंद होने से पहले का आखिरी फ़्रेम दिखता है, और iOS
+26.5 पर उस सिम्युलेटर पर बाद का हर `fill` रन के बाकी समय अपनी रीड-बैक जाँच में फ़ेल
+होता है। जिस iPhone में always-on display नहीं है, जैसे iPhone 16e, उस पर इसका असर
+नहीं होता। वजह agent-device के iOS अनलॉक में है।
+
+इंजन आपके लिए डिवाइस कभी अनलॉक नहीं करता। स्क्रीन लॉक रहते जो टेस्ट फ़ेल होता है, वह
+उस डिवाइस के अगले टेस्ट के लिए उसे लॉक ही छोड़ देता है, इसलिए `finally` ब्लॉक में या
+`afterEach` में अनलॉक करें। दोनों मेथड ऐप सेशन पर चलते हैं: [`closeApp`](#closeapp)
+के बाद ये `APP_NOT_OPEN` से फ़ेल होते हैं, जब तक `openApp` कोई ऐप न खोल दे, इसलिए ऐप
+बंद करने से पहले अनलॉक करें।
+
+| थ्रो करता है | कब |
+| --- | --- |
+| `UNSUPPORTED_CAPABILITY` | यह ऐसा डिवाइस नहीं है जिसे agent-device लॉक कर सके: असली iPhone या iPad, Android TV या Apple TV, या ऐसा डिवाइस जिसे प्रोवाइडर अपने ऐसे बैकएंड से चलाता है जिसमें लॉक कमांड नहीं है। |
+| `UNSUPPORTED_CAPABILITY` | Android 16 या नए पर, Android डिवाइस का स्क्रीन लॉक None पर सेट है। मैसेज यही बताता है; Settings > Security में कोई और स्क्रीन लॉक सेट करें, जैसे Swipe। |
+| `ACTION_FAILED` | डिवाइस के स्क्रीन लॉक्ड बताने से पहले `actionTimeout` खत्म हो गया। PIN, पैटर्न, या पासवर्ड वाले और "Power button instantly locks" बंद वाले Android डिवाइस पर कीगार्ड "Lock after screen timeout" का इंतज़ार करता है, जो एक मिनट तक हो सकता है; `actionTimeout` बढ़ाएँ या वह सेटिंग चालू करें। |
+| `ENGINE_FAILURE` | डिवाइस ने स्क्रीन लॉक्ड नहीं बताई: Android पर 5 सेकंड के अंदर, और साथ में "Lock after screen timeout" की देरी, जो एक मिनट तक हो सकती है। Android 11 से 15 पर, जब स्क्रीन लॉक None पर सेट हो, तो फ़ेलियर यही होता है, `still reports the keyguard hidden` मैसेज के साथ, और डिस्प्ले बंद ही रहता है। |
+| `ENGINE_FAILURE` | Android 10 या पुराना, अनलॉक्ड स्क्रीन पर: agent-device लॉक का टाइप नहीं पढ़ सकता (`Unable to read the screen lock type`), और कोई बटन नहीं भेजा जाता। |
+
+#### `unlock`
+
+```ts
+/**
+ * Unlocks the screen and resolves once the device reports it unlocked.
+ * Nothing brings an app to the front: check the screen you expect next.
+ * Android wakes the screen and dismisses
+ * the keyguard, an iOS simulator swipes up from the bottom edge. A display
+ * that is off turns on even when the screen is not locked (Android always
+ * sends its wake key); an unlocked screen that is on stays as it is. The
+ * exception is an iPhone simulator with an always-on display, such as the
+ * iPhone 17 Pro: the unlock can leave its display off, and on iOS 26.5 the
+ * text a later fill types does not reach the app. It never
+ * enters a PIN, pattern, password, or passcode: a lock that asks for one is
+ * `UNSUPPORTED_CAPABILITY`, and so is a device agent-device cannot lock (a
+ * physical iPhone or iPad, a TV, a device a provider drives through a
+ * backend that has no lock command).
+ */
+unlock(): Promise<void>;
+```
+
+```ts
+await device.unlock();
+```
+
+| थ्रो करता है | कब |
+| --- | --- |
+| `UNSUPPORTED_CAPABILITY` | लॉक PIN, पैटर्न, पासवर्ड, या पासकोड माँगता है। मैसेज उसका नाम बताता है; डिवाइस हाथ से अनलॉक करें, या वह क्रेडेंशियल हटा दें। |
+| `UNSUPPORTED_CAPABILITY` | यह ऐसा डिवाइस नहीं है जिसे agent-device लॉक कर सके: असली iPhone या iPad, Android TV या Apple TV, या ऐसा डिवाइस जिसे प्रोवाइडर अपने ऐसे बैकएंड से चलाता है जिसमें लॉक कमांड नहीं है। जिस Android डिवाइस का स्क्रीन लॉक None पर सेट है, उसे मना नहीं किया जाता: `unlock()` उसे जगा देता है। |
+| `ENGINE_FAILURE` | अनलॉक के बाद भी डिवाइस स्क्रीन को लॉक्ड बता रहा था। |
+| `ENGINE_FAILURE` | Android 10 या पुराना, लॉक्ड स्क्रीन पर: agent-device लॉक का टाइप नहीं पढ़ सकता (`Unable to read the screen lock type`), और कोई बटन नहीं भेजा जाता। |
 
 #### `alert`
 
@@ -1412,8 +1557,14 @@ await agent.act('Open About and read the iOS version');
 /** A permission's state: held, refused, or not asked for yet, so the OS asks again. */
 export type PermissionState = 'grant' | 'deny' | 'reset';
 
-/** Permissions an app holds when it launches, by name. */
-export type LaunchPermissions = Readonly<Partial<Record<DevicePermission, PermissionState>>>;
+/**
+ * Permissions an app holds when it launches, by name, or `'all'` to grant
+ * every one the platform can. On Android that is each runtime permission the
+ * app declares; the rest are skipped. On an iOS simulator it is each privacy
+ * service the runtime can set, location `always` included. The simulator
+ * refuses to set notifications.
+ */
+export type LaunchPermissions = Readonly<Partial<Record<DevicePermission, PermissionState>>> | 'all';
 ```
 
 ### डिवाइस फ़िक्स्चर
@@ -1435,8 +1586,8 @@ export interface OpenAppOptions {
   readonly launchArguments?: LaunchArguments;
   /**
    * Permissions the app holds before this launch, each granted, denied, or
-   * reset. Replaces the target's `app.permissions` for a relaunch of the
-   * pinned app.
+   * reset, or `'all'` to grant every one the platform can. Replaces the
+   * target's `app.permissions` for a relaunch of the pinned app.
    */
   readonly permissions?: LaunchPermissions;
 }
@@ -1473,6 +1624,9 @@ export type RemoteKey =
   | 'fast-forward'
   | 'next'
   | 'previous';
+
+/** A hardware button `device.pressButton` takes. */
+export type HardwareButton = 'volume-up' | 'volume-down' | 'power';
 
 /** Orientations `setOrientation` accepts. */
 export type DeviceOrientation = 'portrait' | 'portrait-upside-down' | 'landscape-left' | 'landscape-right';

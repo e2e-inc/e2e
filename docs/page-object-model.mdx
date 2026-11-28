@@ -1,6 +1,6 @@
 ---
 title: Page objects
-description: Wrap one screen's locators and actions in a class, and hand it to tests as a fixture.
+description: "Use the page object model in e2e by wrapping one screen's locators and actions in a class and handing it to tests as a fixture, with agent goals where they fit."
 "og:image": "https://e2e.com/docs/images/og/page-objects.png?v=c53bbc6604"
 "twitter:image": "https://e2e.com/docs/images/og/page-objects.png?v=c53bbc6604"
 ---
@@ -100,7 +100,12 @@ a configured model, the deterministic ones too.
 
 Many page object methods exist only to click through a flow. One
 [`agent.act` goal](/core-concepts#goals) can replace them. Keep methods for
-the steps every test repeats and needs exact.
+the steps every test repeats and needs exact. Keep the outcome checks
+visible in the test, not inside a method.
+
+Keep a short instruction that one test uses inline, or name a long one with
+a local `const`. Export an instruction that several tests repeat from a
+TypeScript module, and pass the test data through `params`.
 
 To start tests signed in, don't call `signIn` in each one. Save a session
 once instead. See [Authentication](/authentication).

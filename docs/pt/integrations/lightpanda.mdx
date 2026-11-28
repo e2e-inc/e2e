@@ -10,7 +10,7 @@ O [Lightpanda](https://lightpanda.io) é um navegador headless de código
 aberto escrito do zero, sem o Chromium. Ele inicia em milissegundos, ocupa
 uma fração da memória do Chrome e fala o Chrome DevTools Protocol.
 `lightpanda()` de `@e2e-dev/lightpanda` é um
-[provedor de navegadores](/browser#hosted-browsers) para ele: cada slot de
+[provedor de navegadores](/reference/web) para ele: cada slot de
 worker recebe o próprio `lightpanda serve`, iniciado em uma porta livre no
 início da execução e encerrado no fim. Os testes e a CI continuam iguais; a
 configuração muda só no `browser` do alvo.
@@ -103,7 +103,7 @@ para mais que `workers` quando rodar mais workers.
 
 | Opção           | Padrão                          | Significado |
 | --------------- | ------------------------------- | ----------- |
-| `binary`        | `LIGHTPANDA_PATH`, senão o binário encontrado | O binário a iniciar: um caminho ou um nome no `PATH`. |
+| `binary`        | `LIGHTPANDA_PATH` ou detectado automaticamente | O binário a iniciar: um caminho ou um nome no `PATH`. |
 | `loadResources` | `['stylesheet']`                | Sub-recursos que o servidor busca: `iframe`, `image`, `stylesheet`. Veja [Busque mais recursos da página](#fetch-more-of-the-page). |
 | `args`          | `[]`                            | Flags extras de `lightpanda serve`, depois das que o provedor define. |
 
@@ -143,7 +143,7 @@ sem mudanças:
   `check`, `select`, `press` e entrada de teclado.
 - Asserções com polling sobre texto, valor, contagem e estado.
 - Mocks de `browser.route` e esperas por requisições.
-- [Downloads](/browser#download-a-file) com `browser.waitForDownload`.
+- [Downloads](/reference/web) com `browser.waitForDownload`.
 - `browser.setCookies` a partir de um teste.
 - [Sessões](/authentication): `test.setup` com `session.save`, e `session:`
   em um teste.
@@ -169,12 +169,12 @@ do projeto acompanha a maioria deles.
 
 | Recurso | O que acontece | Por quê |
 | ------- | -------------- | ------- |
-| [Diálogos](/browser#handle-a-dialog) | `browser.onDialog` roda e depois faz o teste falhar com `ENGINE_FAILURE`: `Page.handleJavaScriptDialog` informa que não há diálogo. | O próprio Lightpanda responde a `alert`, `confirm` (`false`) e `prompt` (`null`) antes que um cliente consiga. |
+| [Diálogos](/reference/web) | `browser.onDialog` roda e depois faz o teste falhar com `ENGINE_FAILURE`: `Page.handleJavaScriptDialog` informa que não há diálogo. | O próprio Lightpanda responde a `alert`, `confirm` (`false`) e `prompt` (`null`) antes que um cliente consiga. |
 | [Uploads de arquivo](/reference/screen#setinputfiles) por um botão que abre um input de arquivo oculto | `setInputFiles` no botão falha depois do tempo limite da ação: o clique não abre nenhuma janela de escolha de arquivo. `setInputFiles` no próprio input funciona. | O Lightpanda aceita `Page.setInterceptFileChooserDialog`, mas nunca envia `Page.fileChooserOpened`. |
-| [Iframes](/browser#reach-into-an-iframe) | `frameLocator` não encontra nada. | Iframes não são carregados por padrão. `loadResources: ['stylesheet', 'iframe']` os carrega; consultas e preenchimentos então funcionam, mas um listener na página que contém o frame, em um elemento que o frame criou, não dispara. |
+| [Iframes](/reference/web) | `frameLocator` não encontra nada. | Iframes não são carregados por padrão. `loadResources: ['stylesheet', 'iframe']` os carrega; consultas e preenchimentos então funcionam, mas um listener na página que contém o frame, em um elemento que o frame criou, não dispara. |
 | Arrastar e soltar: `locator.swipeTo`, ou um caminho de `screen.swipe` até uma área de soltura | O ponteiro se move, mas nada é solto: o nó arrastado fica onde estava. | No Lightpanda, a entrada do mouse ainda não inicia um arraste HTML. |
 | `browser.setViewport` | A página mede o novo tamanho, mas um listener de `resize` nunca roda. | Nenhum evento `resize` é disparado. |
-| [Emulação de mídia](/reference/web#media-emulation): `colorScheme`, `reducedMotion`, `browser.emulateMedia` | A página continua informando `light` e movimento completo. | `Emulation.setEmulatedMedia` não muda o que `matchMedia` responde. |
+| [Emulação de mídia](/reference/web): `colorScheme`, `reducedMotion`, `browser.emulateMedia` | A página continua informando `light` e movimento completo. | `Emulation.setEmulatedMedia` não muda o que `matchMedia` responde. |
 | Rolagem: `scrollIntoView`, `scrollUntilVisible` e uma ação em um nó “outside of the viewport” | A rolagem não faz nada, e uma espera de acionabilidade pode estourar o tempo limite. | Sem layout, não há posição de rolagem para mover. A renderização simples empilha todos os blocos em uma coluna, então uma parte maior da página fica abaixo da dobra do que no Chrome, e nada ali pode ser alcançado. |
 | Conteúdo de `<canvas>`: um marcador de mapa, um teclado numérico ou um gráfico, desenhados com o contexto 2D | Uma captura de tela não mostra nenhum desenho, e o canvas não ocupa espaço. A camada de pixels do agente (`tap_at`, `type_at`, um julgamento por visão) não tem nada para ver. | `getContext('2d')` retorna um contexto que não registra nada do que o renderizador desenha. |
 

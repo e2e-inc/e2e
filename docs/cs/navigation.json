@@ -17,7 +17,9 @@
     "Migrate": "Migrace",
     "Test API": "Testovací API",
     "Project": "Projekt",
-    "Web": "Web",
-    "Mobile": "Mobilní"
+    "Browsers": "Prohlížeče",
+    "Devices": "Zařízení",
+    "Browsers and devices": "Prohlížeče a zařízení",
+    "Ecosystem": "Ekosystém"
   }
 }

@@ -1,6 +1,6 @@
 ---
 title: From Appium
-description: Move Appium and WebdriverIO mobile tests to TypeScript with locators, device calls, and agent goals.
+description: "Migrate Appium and WebdriverIO mobile tests to e2e by porting capabilities and selectors to TypeScript tests with locators, device calls, and agent goals."
 ---
 
 import { SetupPrompt } from '../snippets/setup-prompt-card.jsx';
@@ -36,7 +36,7 @@ The examples use WebdriverIO. A Java or Python client maps the same way.
 
 </SetupPrompt>
 
-For a migration that spans several sessions, the [`migrate-to-e2e` skill](/coding-agents#migrate-an-existing-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
+For a migration that spans several sessions, the [`migrate-to-e2e` skill](/migrate#let-an-agent-migrate-the-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
 
 ## Port the capabilities
 
@@ -369,7 +369,7 @@ is not a step, so it skips the report and secret redaction.
 | Saved sessions, `test.setup` and `{ session }` | Sign in per test or seed the app. A device has no session to save, see [What differs from the web](/mobile#what-differs-from-the-web) |
 | A device grid or hub, other device clouds | A hosted provider, or a `DeviceProvider` you write |
 | `sauce:options` | Write a [`DeviceProvider`](/mobile#hosted-devices) |
-| Appium Inspector | `screen.debug()`, or [`npx e2e mcp`](/mcp-server) for a coding agent's live session |
+| Appium Inspector | `screen.debug()`, or [`npx e2e mcp`](/coding-agents#let-the-agent-use-the-app) for a coding agent's live session |
 | `driver.updateSettings()`, `appium:settings[...]` | `snapshot`, `settle`, and `transition` on [`mobile()`](/reference/mobile#engine) |
 | `.getAttribute('clickable')`, `.isClickable()` | Act on the element. The action waits until it is actionable |
 | A remote Appium server (`hostname`, `port`) | Run e2e on the machine that has the devices |

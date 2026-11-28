@@ -162,7 +162,7 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
 
   func show() {
     if let window { window.makeKeyAndOrderFront(nil); return }
-    let window = NSWindow(contentRect: NSRect(x: 660, y: 200, width: 360, height: 930),
+    let window = NSWindow(contentRect: NSRect(x: 660, y: 200, width: 360, height: 960),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
     window.title = "Controls"
     window.isReleasedWhenClosed = false
@@ -290,7 +290,13 @@ final class ControlsWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate
 
     let draft = NSHostingView(rootView: DraftAlert { [weak self] text in self?.status.stringValue = text })
 
-    let stack = NSStackView(views: [scroll, accountScroll, note, opener, tags, handoff, tabs, options, volume, disabled, enableLater, size, agree, closeTab, draft, double, hover, hoverStatus, status])
+    // A value named by the label beside it, as a status bar's "Words: 5": a text query for the label must find the label alone.
+    let wordsLabel = NSTextField(labelWithString: "Words")
+    let wordCount = NSTextField(labelWithString: "5")
+    wordCount.setAccessibilityLabel("Words")
+    let words = NSStackView(views: [wordsLabel, wordCount])
+
+    let stack = NSStackView(views: [scroll, accountScroll, note, opener, tags, handoff, tabs, options, volume, disabled, enableLater, size, agree, closeTab, draft, double, hover, words, hoverStatus, status])
     stack.orientation = .vertical
     stack.alignment = .leading
     stack.edgeInsets = NSEdgeInsets(top: 20, left: 20, bottom: 20, right: 20)

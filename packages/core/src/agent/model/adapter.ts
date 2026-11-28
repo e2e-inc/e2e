@@ -3,6 +3,7 @@
 import type { JSONSchema7 } from 'ai';
 import type { ProviderOptions } from '../../types.ts';
 import { AgentError } from '../error.ts';
+import type { ExecutorImage } from '../executor.ts';
 import type { ProtocolValidation } from '../protocol.ts';
 
 /** Token accounting for one model call. */
@@ -28,14 +29,8 @@ export interface ModelProvenance {
   readonly adapterVersion: string;
 }
 
-/** Untrusted pixel evidence sent alongside the prompt. */
-export interface ModelImage {
-  readonly data: Uint8Array;
-  readonly mediaType: string;
-  /** CSS pixel geometry, used for the pre-flight token bound. */
-  readonly width: number;
-  readonly height: number;
-}
+/** Untrusted pixel evidence sent alongside the prompt; its CSS pixel geometry feeds the pre-flight token bound. */
+export type ModelImage = ExecutorImage;
 
 /** One bounded, stateless model request. There is no shared transcript. */
 export interface ModelCall<Value> {
@@ -91,6 +86,44 @@ export class ModelOutputInvalidError extends AgentError {
     super('MODEL_OUTPUT_INVALID', issue, options.cause === undefined ? {} : { cause: options.cause });
     this.rawText = options.rawText;
   }
+}
+
+/**
+ * Parses exactly one JSON object from response text, tolerating a code fence.
+ * Model text is never evaluated as code.
+ */
+function parseJsonObject(text: string): unknown {
+  const trimmed = text.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)```$/.exec(trimmed);
+  const body = (fenced?.[1] ?? trimmed).trim();
+  try {
+    return JSON.parse(body);
+  } catch (cause) {
+    throw new ModelOutputInvalidError('response text is not a single JSON value', {
+      rawText: text,
+      cause,
+    });
+  }
+}
+
+/** A text reply as the call's value: one JSON value that passes the call's own validation. */
+export function parseValidated<Value>(call: Pick<ModelCall<Value>, 'validate'>, text: string): Value {
+  const validation = call.validate(parseJsonObject(text));
+  if (!validation.ok) throw new ModelOutputInvalidError(validation.issue, { rawText: text });
+  return validation.value;
+}
+
+/**
+ * The pre-flight ceiling of one request: its input upper bound, or
+ * STEP_BUDGET_EXHAUSTED before anything is sent when that is over the agent's
+ * `maxInputTokens`.
+ */
+export function inputUpperBound(call: Pick<ModelCall<unknown>, 'system' | 'maxInputTokens'>, prompt: string, images: readonly ModelImage[]): number {
+  const bound = tokenUpperBound(call.system) + tokenUpperBound(prompt) + images.reduce((total, image) => total + imageTokenUpperBound(image), 0);
+  if (bound > call.maxInputTokens) {
+    throw new AgentError('STEP_BUDGET_EXHAUSTED', `model input upper bound ${bound} exceeds the agent's maxInputTokens ${call.maxInputTokens}`);
+  }
+  return bound;
 }
 
 /**

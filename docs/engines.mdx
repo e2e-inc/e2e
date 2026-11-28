@@ -1,13 +1,14 @@
 ---
 title: Engines
-description: Choose how to build an engine for a UI platform, in TypeScript or any other language.
+description: "Add a UI platform to e2e, such as a desktop app or a TV, by choosing how to build an engine, in TypeScript or in any other language over the engine protocol."
 ---
 
 An engine drives a user interface, such as a browser, a simulator, or a TV,
-for `screen`, `app`, and the agent. The runner drives every engine over the
+for `screen`, `app`, and the agent. `@e2e-dev/web`, `@e2e-dev/mobile`,
+`@e2e-dev/desktop`, and `@e2e-dev/electron` are engines, and you can write
+one for another platform. The runner drives every engine over the
 [engine protocol](/reference/engine-protocol): JSON-RPC messages, one per
-engine member. `@e2e-dev/web`, `@e2e-dev/mobile`, `@e2e-dev/desktop`, and
-`@e2e-dev/electron` are engines too.
+engine member.
 
 ```mermaid
 flowchart LR
@@ -19,15 +20,24 @@ flowchart LR
 
 ## Choose how to write one
 
-| You want | Write | Guide |
+| You want | Write | Start at |
 | --- | --- | --- |
 | An engine in TypeScript | `defineEngine`, set on a target | [Writing an engine](/writing-an-engine) |
-| A TypeScript engine in its own process | `defineEngine`, served with `serveEngine` | [Engine servers](/engine-servers#serve-a-typescript-engine) |
-| An engine in another language, or on a device | A server that answers the protocol's messages | [Engine servers](/engine-servers#write-a-server-in-another-language) |
+| A TypeScript engine in its own process | `defineEngine`, served with `serveEngine` | [Serve a TypeScript engine](/reference/engine-protocol#serve-a-typescript-engine) |
+| An engine in another language, or on a device | A server that answers the protocol's messages | [Write a server in another language](/reference/engine-protocol#write-a-server-in-another-language) |
 
 An engine from `defineEngine` runs in the runner's process. Every call still
 crosses the protocol, so an engine that passes its suite needs nothing a
 server elsewhere couldn't receive.
+
+## Find a type or a message
+
+Every path implements one contract, and two pages hold all of it:
+
+| You need | Page |
+| --- | --- |
+| A member, hook, capability, type, or error code of the contract | [`e2e/engine`](/reference/engine) |
+| A message's params and result, a transport, or `connectEngine` and `serveEngine` | [Engine protocol](/reference/engine-protocol) |
 
 ## Learn from the Electron engine
 
@@ -51,13 +61,7 @@ where the contract assumed a browser or a device:
   <Card title="Writing an engine" icon="code" href="/writing-an-engine">
     Build an engine with `defineEngine`, step by step.
   </Card>
-  <Card title="Engine servers" icon="network-wired" href="/engine-servers">
+  <Card title="Engine servers" icon="network-wired" href="/reference/engine-protocol#engine-servers">
     Run an engine in another process, machine, or language.
-  </Card>
-  <Card title="e2e/engine" icon="book" href="/reference/engine">
-    Every type and hook of the engine contract.
-  </Card>
-  <Card title="Engine protocol" icon="book" href="/reference/engine-protocol">
-    Every message, as a server receives it.
   </Card>
 </CardGroup>

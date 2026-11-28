@@ -17,12 +17,15 @@ after(() => {
  * Runs a copy of the check against a docs tree of one English page and its
  * Hindi translation, `hindi`, so the script reads the fixture, not the repo.
  */
-function check(hindi: string): { status: number | null; stderr: string } {
+function check(
+  hindi: string,
+  navigation: object = { tabs: [] },
+): { status: number | null; stdout: string; stderr: string } {
   const root = mkdtempSync(join(tmpdir(), 'e2e-docs-translations-'));
   roots.push(root);
   cpSync(SCRIPTS, join(root, 'scripts'), { recursive: true });
   mkdirSync(join(root, 'docs'));
-  writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({ navigation: { tabs: [] } }));
+  writeFileSync(join(root, 'docs', 'docs.json'), JSON.stringify({ navigation }));
   writeFileSync(join(root, 'docs', 'mobile.mdx'), '---\ntitle: Mobile\n---\n\nIt is iOS only.\n');
   for (const language of DOCS_LANGUAGES) {
     mkdirSync(join(root, 'docs', language));
@@ -31,10 +34,18 @@ function check(hindi: string): { status: number | null; stderr: string } {
   writeFileSync(join(root, 'docs', 'hi', 'mobile.mdx'), hindi);
   const script = join(root, 'scripts', 'check-docs-translations.ts');
   const run = spawnSync(process.execPath, [script], { encoding: 'utf8' });
-  return { status: run.status, stderr: run.stderr };
+  return { status: run.status, stdout: run.stdout, stderr: run.stderr };
 }
 
 describe('check-docs-translations', () => {
+  it('asks for a label for a group nested inside a group', () => {
+    const { stdout } = check('---\ntitle: मोबाइल\n---\n\nयह केवल iOS है।\n', {
+      tabs: [{ tab: 'Docs', groups: [{ group: 'Hosted', pages: [{ group: 'Browsers', pages: ['mobile'] }] }] }],
+    });
+    assert.match(stdout, /no label in "groups" for "Hosted"/);
+    assert.match(stdout, /no label in "groups" for "Browsers"/);
+  });
+
   it('fails on a translated line that repeats the end of the line above it, naming its line', () => {
     const { status, stderr } = check(
       '---\ntitle: मोबाइल\n---\n\n' +

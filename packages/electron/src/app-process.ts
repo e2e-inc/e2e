@@ -5,6 +5,7 @@
  * Launches and quits run one at a time.
  */
 
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import type { Protocol } from 'devtools-protocol';
 import { Deadline, EngineError, pollCondition, raceAbort, TestError, type EngineAppInfo, type EngineAttemptContext, type OperationContext } from '@e2e-dev/core/engine';
@@ -15,7 +16,8 @@ import type { ElectronMainModule } from './fixtures.ts';
 import { closedWindow, invalidState, unsupported } from './errors.ts';
 import { appDirectory } from './file-bound.ts';
 import { ElectronProcess, type ProcessExit } from './launcher.ts';
-import { MainEvaluateError, MainProcess } from './main-process.ts';
+import { EvaluateError } from './evaluate.ts';
+import { MainProcess } from './main-process.ts';
 import { REFUSED_ENV, type ResolvedElectronOptions } from './options.ts';
 import { PageTarget } from './page.ts';
 import type { Windows } from './windows.ts';
@@ -34,6 +36,16 @@ export interface LaunchSetup {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly userDataDir: string;
   readonly attempt: EngineAttemptContext;
+  /** What `electron.launch()` added for this attempt, over the target's arguments and the engine's `env`. */
+  readonly extra?: LaunchExtra;
+}
+
+/** The arguments and variables one attempt's launches add to the target's own. */
+export interface LaunchExtra {
+  readonly args: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+  /** The directory the process starts in, over the engine's `cwd`. */
+  readonly cwd?: string;
 }
 
 /** How long the main process gets to answer a question whose answer is optional. */
@@ -136,11 +148,17 @@ export class AppProcess {
     await stop(app, Math.min(budget.timeoutMs, graceMs));
   }
 
-  /** Launches the app on the attempt's user-data directory and waits for its first window to load, all within one budget. */
-  async launch(setup: LaunchSetup, operation: OperationContext): Promise<void> {
+  /**
+   * Launches the app on the attempt's user-data directory and waits for its
+   * first window to load, all within one budget: `budget` when the operation
+   * did other work before the launch, such as quitting the app.
+   */
+  async launch(setup: LaunchSetup, operation: OperationContext, budget = new Budget(operation, 'app.open')): Promise<void> {
     // One budget for the whole launch, ending a little before the operation does so the launch reports why it failed
     // rather than the operation timing out; each phase gets what the ones before it left.
-    const timeout = Math.max(1, new Budget(operation, 'app.open').waits.remaining());
+    // An operation cancelled, or out of time after the quit before it, starts no app.
+    budget.check();
+    const timeout = Math.max(1, budget.waits.remaining());
     const deadline = new Deadline(timeout);
     const left = (): number => Math.max(1, deadline.remaining());
     let app: RunningApp;
@@ -164,9 +182,12 @@ export class AppProcess {
       let first = await window();
       opened = true;
       // Still inside the launch: an app that quits here, or a caller that stopped waiting, fails it.
-      await raceAbort(() => Promise.race([this.setUp(app, setup, left), quitEarly]), operation.signal, 'setting up the app');
+      const reported = await raceAbort(() => Promise.race([this.setUp(app, setup, left), quitEarly]), operation.signal, 'setting up the app');
       // A splash screen can close while the app is set up: the launch ends on a window that is there.
       while (first.isClosed()) first = await window();
+      const { appPath } = setup.app;
+      // The window the launch ends on, which need not be the first registered: that one may be a splash or a blank page.
+      this.directory = appDirectory({ reported, declared: appPath === undefined ? undefined : path.resolve(setup.projectRoot, appPath), firstDocument: first.url(), projectRoot: setup.projectRoot });
       // The window that loaded is the one read, not one still on its way.
       this.windows.show(open().indexOf(first));
     } catch (cause) {
@@ -182,8 +203,12 @@ export class AppProcess {
     }
   }
 
-  /** What a launch does once the app has a window: its main process connected, its downloads placed, its versions reported. */
-  private async setUp(app: RunningApp, setup: LaunchSetup, left: () => number): Promise<void> {
+  /**
+   * What a launch does once the app has a window that loaded: its main
+   * process connected, its downloads placed, its versions reported. Resolves
+   * to the app path the main process reports, or undefined when it cannot be asked.
+   */
+  private async setUp(app: RunningApp, setup: LaunchSetup, left: () => number): Promise<string | undefined> {
     // Only now is an app with no inspector known to have none: the address is printed before the app's own code runs.
     // One that printed it is being connected to, and that has a bound of its own.
     setTimeout(() => {
@@ -197,20 +222,18 @@ export class AppProcess {
       await answerWithin(app.process.browser.root.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads }), Math.min(left(), DOWNLOADS_SETUP_MS));
     } else {
       await placeDownloads(main, downloads, Math.min(left(), DOWNLOADS_SETUP_MS));
+      await keepWindowsDrawing(main, Math.min(left(), ANSWER_MS));
     }
     const versions = await answerWithin(readVersions(app, main), left());
     if (versions !== undefined) setup.attempt.environment(versions);
-    const reported = main === undefined ? undefined : await answerWithin(main.evaluate(({ app: electronApp }) => electronApp.getAppPath(), undefined), Math.min(left(), ANSWER_MS));
-    const { appPath } = setup.app;
-    const firstDocument = this.windows.current()?.page.url() ?? '';
-    this.directory = appDirectory({ reported, declared: appPath === undefined ? undefined : path.resolve(setup.projectRoot, appPath), firstDocument });
+    return main === undefined ? undefined : await answerWithin(main.evaluate(({ app: electronApp }) => electronApp.getAppPath(), undefined), Math.min(left(), ANSWER_MS));
   }
 
   /** Starts the binary. Nothing is awaited: a binary that cannot start shows as a process that ended. */
   private start(setup: LaunchSetup): RunningApp {
     const { appPath, launchArguments } = setup.app;
-    const args = [`--user-data-dir=${setup.userDataDir}`, ...(appPath === undefined ? [] : [path.resolve(setup.projectRoot, appPath)]), ...(launchArguments ?? [])];
-    const process = new ElectronProcess({ executable: setup.executable, args, cwd: setup.projectRoot, env: launchEnv(setup.env, this.options.env) });
+    const args = [`--user-data-dir=${setup.userDataDir}`, ...(appPath === undefined ? [] : [path.resolve(setup.projectRoot, appPath)]), ...(launchArguments ?? []), ...(setup.extra?.args ?? [])];
+    const process = new ElectronProcess({ executable: setup.executable, args, cwd: path.resolve(setup.projectRoot, setup.extra?.cwd ?? this.options.cwd ?? '.'), env: launchEnv(setup.env, [this.options.env, setup.extra?.env ?? {}]) });
     let withoutMain: () => void = () => undefined;
     const none = new Promise<undefined>((resolve) => {
       withoutMain = () => resolve(undefined);
@@ -328,7 +351,7 @@ export class AppProcess {
     });
     session.on('Page.loadEventFired', () => {
       this.windows.markLoaded(page);
-      page.emit('load');
+      page.markLoaded();
     });
     session.on('Page.frameNavigated', ({ frame }) => {
       if (frame.parentId !== undefined) return;
@@ -374,7 +397,7 @@ export class AppProcess {
       const exiting = this.app === app && (closedWindow(cause) || /Execution context was destroyed/.test(String(cause)));
       if (exiting) await answerWithin(app.process.exited, ANSWER_MS);
       if (this.app !== app) throw new EngineError('INVALID_STATE', 'the app quit while electron.evaluate ran', { retryable: false, cause });
-      if (!(cause instanceof MainEvaluateError)) throw cause;
+      if (!(cause instanceof EvaluateError)) throw cause;
       // Its message is the test's, never read for a pattern.
       throw new TestError('EVALUATE_FAILED', `electron.evaluate: ${cause.message}`, { cause });
     }
@@ -539,11 +562,25 @@ async function readVersions(app: RunningApp, main: MainProcess | undefined): Pro
  * Sends downloads to the attempt's own directory, never the user's: Electron
  * saves one without asking in a hidden window. A download the app placed
  * itself, in its own `will-download` handler, stays where the app put it.
+ * A name already taken in the directory, by this launch or one before it in
+ * the attempt, gets a number (`note (1).txt`), as a browser numbers one, so
+ * no download replaces another.
  */
 async function placeDownloads(main: MainProcess, directory: string, withinMs: number): Promise<void> {
+  const saved = existsSync(directory) ? readdirSync(directory) : [];
   await answerWithin(
-    main.evaluate(({ app: electronApp, session, webContents }, downloads) => {
+    main.evaluate(({ app: electronApp, session, webContents }, { downloads, saved: earlier }) => {
       electronApp.setPath('downloads', downloads);
+      // Compared without case: two names that differ only in case are one file on macOS and Windows.
+      const taken = new Set(earlier.map((name) => name.toLowerCase()));
+      const unique = (name: string): string => {
+        const dot = name.lastIndexOf('.');
+        const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+        let candidate = name;
+        for (let count = 1; taken.has(candidate.toLowerCase()); count += 1) candidate = `${stem} (${count})${extension}`;
+        taken.add(candidate.toLowerCase());
+        return candidate;
+      };
       // A session's path is read when it starts, which may be before this runs: each download is placed explicitly, in
       // the sessions there are (a partition the app's ready handler made, too) and in every one made later.
       const placed = new Set<Electron.Session>();
@@ -551,7 +588,7 @@ async function placeDownloads(main: MainProcess, directory: string, withinMs: nu
         if (placed.has(target)) return;
         placed.add(target);
         target.on('will-download', (_event, item) => {
-          if (item.getSavePath() === '') item.setSavePath(`${downloads}/${item.getFilename()}`);
+          if (item.getSavePath() === '') item.setSavePath(`${downloads}/${unique(item.getFilename())}`);
           // What `electron.waitForDownload` reads: each download the app started, and how it ended.
           const entry = { filename: item.getFilename(), path: item.getSavePath(), state: 'progressing' };
           const log = ((globalThis as { e2eDownloads?: (typeof entry)[] }).e2eDownloads ??= []);
@@ -565,27 +602,52 @@ async function placeDownloads(main: MainProcess, directory: string, withinMs: nu
       place(session.defaultSession);
       for (const contents of webContents.getAllWebContents()) place(contents.session);
       electronApp.on('session-created', place);
-    }, directory),
+      // A session the app made before this ran, with no window on it yet, is placed when a window first uses it.
+      electronApp.on('web-contents-created', (_event, contents) => place(contents.session));
+    }, { downloads: directory, saved }),
+    withinMs,
+  );
+}
+
+/**
+ * Keeps the app's windows drawing while the app hides them, as the engine's
+ * launch switches keep covered ones. `hide()` stops a window's compositor on
+ * Windows and Linux: a screenshot of it then never returns and a recording
+ * gets no frame, whatever the DevTools protocol asks for. Electron keeps the
+ * compositor of a window whose contents have background throttling off, so
+ * it is turned off for every window, the ones opened later too. Only the
+ * main process can: an app with no inspector keeps the limit.
+ */
+async function keepWindowsDrawing(main: MainProcess, withinMs: number): Promise<void> {
+  await answerWithin(
+    main.evaluate(({ app: electronApp, webContents }) => {
+      for (const contents of webContents.getAllWebContents()) contents.setBackgroundThrottling(false);
+      electronApp.on('browser-window-created', (_event, window) => window.webContents.setBackgroundThrottling(false));
+    }, undefined),
     withinMs,
   );
 }
 
 /**
  * The app's environment: the few variables of the run's that a process needs
- * to start and draw (`INHERITED_ENV`, and the locale's `LC_*`), with the
- * engine's `env` option over them. The rest of the run's environment stays
+ * to start and draw (`INHERITED_ENV`, and the locale's `LC_*`), with each of
+ * `layers` over them in turn: the engine's `env` option, then a test's own. The rest of the run's environment stays
  * with the runner: it holds provider keys and tokens, and an app can log or
  * upload what it is given. Never `ELECTRON_RUN_AS_NODE`, which would start
  * the binary as plain Node.js, nor `NODE_OPTIONS`.
  */
-export function launchEnv(runEnv: Readonly<Record<string, string | undefined>>, extra: Readonly<Record<string, string>>): Record<string, string> {
+export function launchEnv(runEnv: Readonly<Record<string, string | undefined>>, layers: readonly Readonly<Record<string, string>>[], platform: NodeJS.Platform = process.platform): Record<string, string> {
   const env: Record<string, string> = {};
-  // Windows reads a variable's name in any case.
+  // Windows reads a variable's name in any case: a later layer's `path` replaces an earlier `PATH`, never sits beside it.
+  const set = (key: string, value: string): void => {
+    if (platform === 'win32') for (const known of Object.keys(env)) if (known !== key && known.toUpperCase() === key.toUpperCase()) delete env[known];
+    env[key] = value;
+  };
   for (const [key, value] of Object.entries(runEnv)) {
     const name = key.toUpperCase();
-    if (value !== undefined && (INHERITED_ENV.has(name) || name.startsWith('LC_'))) env[key] = value;
+    if (value !== undefined && (INHERITED_ENV.has(name) || name.startsWith('LC_'))) set(key, value);
   }
-  for (const [key, value] of Object.entries(extra)) if (!REFUSED_ENV.has(key.toUpperCase())) env[key] = value;
+  for (const layer of layers) for (const [key, value] of Object.entries(layer)) if (!REFUSED_ENV.has(key.toUpperCase())) set(key, value);
   return env;
 }
 

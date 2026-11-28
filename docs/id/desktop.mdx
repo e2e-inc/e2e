@@ -1,0 +1,243 @@
+---
+title: Desktop
+description: Uji aplikasi desktop native di macOS melalui pohon aksesibilitasnya.
+---
+
+`@e2e-dev/desktop` menjalankan tes pada aplikasi desktop native. Engine ini
+membaca dan mengendalikan aplikasi melalui pohon aksesibilitas OS dengan
+driver native yang berjalan di dalam proses tes. Tes memakai API `agent`,
+`screen`, dan `expect` yang sama seperti tes browser.
+
+<Note>
+  Engine desktop masih berupa prototipe dan hanya berjalan di macOS 13 atau
+  yang lebih baru. Konfigurasi dengan target desktop tetap dapat dimuat di
+  Windows dan Linux, dan target lainnya dapat dijalankan di sana jika dipilih
+  dengan `--target`. Eksekusi yang menyertakan target desktop berhenti dengan
+  `UNSUPPORTED_CAPABILITY` sebelum tes apa pun dimulai.
+</Note>
+
+## Penyiapan
+
+Pasang runner dan engine:
+
+<CodeGroup>
+```bash npm
+npm install --save-dev e2e @e2e-dev/desktop
+```
+
+```bash pnpm
+pnpm add --save-dev e2e @e2e-dev/desktop
+```
+
+```bash bun
+bun add --dev e2e @e2e-dev/desktop
+```
+</CodeGroup>
+
+Di macOS, aplikasi yang menjalankan e2e memerlukan dua izin di **System
+Settings > Privacy & Security**. Aplikasi itu bisa berupa terminal, IDE, atau
+agent CI Anda.
+
+- **Accessibility**, untuk membaca dan mengendalikan aplikasi.
+- **Screen Recording**, untuk mengambil screenshot.
+
+npm memasang driver yang sesuai untuk Mac Anda bersama engine, yaitu
+`@e2e-dev/desktop-darwin-arm64` atau `@e2e-dev/desktop-darwin-x64`. Anda tidak
+memerlukan Rust atau Xcode.
+
+Periksa penyiapan Anda:
+
+<CodeGroup>
+```bash npm
+npx e2e doctor
+```
+
+```bash pnpm
+pnpm exec e2e doctor
+```
+
+```bash bun
+bunx e2e doctor
+```
+</CodeGroup>
+
+Perintah ini memeriksa driver, kedua izin, dan build `appPath`.
+
+## Arahkan ke aplikasi
+
+Atur `app.appPath` target ke bundle `.app` yang sudah di-build. Atau atur
+`app.bundleId` ke bundle id atau nama aplikasi yang terpasang, seperti
+`com.apple.calculator`. Jika keduanya diatur, build pada `appPath` yang akan
+dijalankan dan bundle id-nya harus cocok dengan `bundleId`.
+`app.launchArguments` diteruskan ke setiap peluncuran. Entri berbentuk objek
+menjadi `-name value`, seperti di iOS, sehingga `{ AppleLanguages: ['fr'] }`
+membuka aplikasi dalam bahasa Prancis.
+
+Aplikasi yang dijalankan hanya menerima lingkungan minimal (`HOME`, `USER`,
+`LOGNAME`, `SHELL`, `PATH`, `TMPDIR`, `LANG`, `LC_*`,
+`__CF_USER_TEXT_ENCODING`, serta `E2E_DESKTOP_LAUNCH` untuk pelacakan proses),
+sehingga secret, kunci model, dan token CI Anda tidak bocor ke aplikasi.
+macOS menyembunyikan variabel tersebut di aplikasi bawaannya, aplikasi Apple
+App Store (Numbers, Pages, Xcode), dan build yang ditandatangani dengan flag
+`restrict`. Karena itu, aplikasi tersebut juga menerima
+`-E2EDesktopLaunch=<token>` sebagai argumen peluncuran terakhir. Engine
+mengenali aplikasi App Store dari tanda tangannya, sehingga semua aplikasi
+Mac App Store menerima argumen itu.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { desktop } from '@e2e-dev/desktop';
+
+export default {
+  targets: [
+    {
+      name: 'mac',
+      engine: desktop(),
+      app: { appPath: 'build/MyApp.app' },
+    },
+  ],
+  credentials: {
+    ada: { username: 'ada', password: process.env.ADA_PASSWORD ?? '' },
+  },
+} satisfies E2EConfig;
+```
+
+## Tulis tes
+
+Impor `test` dari `@e2e-dev/desktop`. Secara default, `app.open()` membiarkan
+aplikasi berjalan di latar belakang. Jalankan dengan `--headed` untuk aplikasi
+yang perlu dibawa ke depan sebelum menampilkan jendela.
+`desktop({ physicalInput: true })` juga membawa aplikasi ke depan dan
+mengaktifkan input fisik yang dijelaskan di bawah. Jika engine pernah
+menjalankan aplikasi itu, salinan tersebut akan ditutup terlebih dahulu.
+Salinan yang Anda buka sendiri dibiarkan berjalan, dan engine tidak membaca
+atau mengendalikannya. Aplikasi yang hanya mengizinkan satu salinan akan
+meneruskan peluncuran ke salinan yang sudah berjalan, sehingga `app.open()`
+gagal dan menyebutkan salinan tersebut; tutup salinan itu terlebih dahulu.
+Setiap tes berakhir dengan aplikasi ditutup, dan jendela yang disimpan aplikasi
+saat terakhir ditutup tidak dibuka kembali.
+
+```ts title="tests/sign-in.e2e.ts"
+import { test } from '@e2e-dev/desktop';
+import { credentials, expect } from 'e2e';
+
+test('signs in', async ({ app, screen }) => {
+  const ada = credentials.user('ada');
+  await app.open();
+  await screen.getByRole('textbox', 'Username').fill(ada.username);
+  await screen.getByRole('textbox', 'Password').fill(ada.password);
+  await screen.getByRole('combobox', 'Plan').selectOption('Team');
+  await screen.getByRole('button', 'Sign in').tap();
+  await expect(screen.getByTestId('status')).toContainText('Signed in as ada');
+});
+```
+
+Role memakai nama seperti di web: `textbox`, `checkbox`, `combobox`, dan
+`button`. Pohon aksesibilitas mencantumkan teks statis sebagai `text`, yang
+bukan role `getByRole`; cari teks itu dengan `getByText`. Nama kontrol mengikuti
+nama yang diberikan aksesibilitas macOS: judul atau label aksesibilitasnya.
+Judul tombol menjadi nama sekaligus teksnya, sehingga `getByText('Sign in')`
+menemukan tombol serta teks statis yang sama, sedangkan
+`getByRole('button', 'Sign in')` hanya menemukan tombol.
+`getByPlaceholder` tidak didukung: engine memberi field tanpa label nama dari
+placeholder-nya. Karena itu, cari field tersebut dengan
+`getByRole('textbox', 'Username')`. `getByTestId` mencari `AXIdentifier`
+kontrol (`accessibilityIdentifier` di AppKit, `.accessibilityIdentifier` di
+SwiftUI).
+
+## Fixture desktop
+
+| Metode | Fungsinya |
+| --- | --- |
+| `windows()` | Jendela aplikasi yang terbuka |
+| `waitForWindow(trigger, { timeout }?)` | Menjalankan `trigger`, menunggu jendela yang dibukanya, lalu menjadikan jendela itu aktif |
+| `window({ title }, { timeout }?)` | Menunggu jendela berdasarkan judulnya dan mengembalikannya tanpa menjadikannya aktif |
+| `keyboard.press(key)` | Menekan tombol atau kombinasi seperti `ControlOrMeta+2` pada jendela aktif, untuk aplikasi tanpa kontrol yang menerima fokus keyboard |
+| `keyboard.type(text)` | Mengetik teks ke field yang sedang fokus |
+| `closeApp()` | Menutup aplikasi. `app.open()` akan meluncurkannya kembali |
+| `platform` | OS tempat aplikasi berjalan, `'macos'` |
+
+## Bekerja dengan beberapa jendela
+
+`screen` membaca jendela aktif. Sebelum tes memilih jendela, yang aktif adalah
+jendela aplikasi yang sedang fokus, sehingga dialog yang mengambil fokus akan
+dibaca tanpa langkah tersendiri. `desktop.waitForWindow()` menjalankan langkah
+yang membuka jendela lalu menjadikannya aktif. Jendela itu tetap aktif,
+terlepas dari jendela mana yang mendapat fokus, sampai ditutup. Setelah itu,
+`screen` kembali membaca jendela yang fokus.
+
+```ts
+const settings = await desktop.waitForWindow(() =>
+  screen.getByRole('button', 'Settings…').tap(),
+);
+await expect(screen.getByRole('checkbox', 'Launch at login')).toBeVisible();
+
+const main = await desktop.window({ title: 'My App' });
+await main.activate();
+await settings.close();
+```
+
+Jendela memiliki `title()`, `isActive()`, `isClosed()`, `activate()`, dan
+`close()`. Setiap metode meminta informasi ke macOS, jadi semuanya perlu
+di-`await`. `close()` menekan tombol tutup jendela, sehingga gagal jika
+jendela tetap terbuka untuk menanyakan perubahan yang belum disimpan. `title`
+menerima string yang harus cocok persis atau `RegExp`. Gunakan
+`desktop.window()` untuk mencari jendela yang dibuka aplikasi sendiri.
+
+## Perbedaan dari web
+
+| Area | Pada target desktop |
+| --- | --- |
+| Input | Aplikasi berjalan di latar belakang. Tindakan memakai macOS Accessibility API dan tombol dikirim ke antrean event aplikasi sendiri, sehingga mouse dan keyboard tetap bisa Anda gunakan. Aplikasi yang tidak membuka jendela di latar belakang (seperti aplikasi berbasis dokumen) memerlukan `--headed` atau `physicalInput: true`. Tap, `doubleTap`, `secondaryTap`, `check`, `uncheck`, `fill`, `clear`, atau `selectOption` pada kontrol nonaktif akan menunggu dalam batas waktu tindakan sampai aplikasi mengaktifkannya, lalu gagal dengan `ACTION_FAILED` (ditolak, jadi tidak ada input yang dikirim). Kotak yang sudah menunjukkan status `check` atau `uncheck` yang diminta dibiarkan apa adanya. |
+| Input fisik | `doubleTap`, `hover`, dan tap berdasarkan koordinat memerlukan `desktop({ physicalInput: true })`, yang membawa aplikasi ke depan dan memakai pointer sungguhan. Tombol dan pengetikan kemudian memakai keyboard sungguhan. Klik ditolak jika jendela lain, baik milik aplikasi maupun bukan, atau kontrol di dalam elemen (seperti tombol atau field teks dalam baris) berada di bawah pointer sebelum pointer bergerak atau setelahnya. Tap pada titik tertentu atau hover juga ditolak jika jendela lain menutupi titik tersebut. Double-click adalah satu gestur, seperti saat dilakukan orang: setelah klik pertama terjadi, klik kedua langsung menyusul, apa pun yang dibuka klik pertama. Perhatikan jendela mengambang yang dapat menutupi area target. |
+| Tombol | `press` dan pengetikan hanya mengirim tombol ke kontrol yang fokus di jendela key milik aplikasi. Tanpa `physicalInput`, jendela yang diaktifkan dengan `activate()` tetapi bukan jendela key tidak menerima tombol. Fitur ini mendukung tombol bernama, huruf, angka, dan ``, . / ; ' [ ] \ - = ` `` (karakter lain seperti `!` atau `é` ditolak), serta memblokir pintasan sistem seperti `ControlOrMeta+q` (gunakan `desktop.closeApp()` sebagai gantinya). Huruf pintasan mengikuti tata letak keyboard Mac, jadi `ControlOrMeta+a` tetap memilih semua pada AZERTY. Pintasan dengan angka atau tanda baca memerlukan tata letak yang dapat mengetiknya tanpa Shift; pada AZERTY, `ControlOrMeta+2` gagal karena tidak didukung. Tanpa `physicalInput`, pintasan `ControlOrMeta` hanya sampai ke menu bar aplikasi: pintasan pada item menu berfungsi, tetapi pintasan yang ditangani kontrol fokus atau jendela key (Copy, Paste, Select All, atau `.keyboardShortcut` pada tombol SwiftUI) tidak berfungsi meski `press` berhasil. Gunakan `physicalInput: true` untuk pintasan tersebut. `press` pada locator memerlukan kontrol yang menerima fokus keyboard; untuk aplikasi tanpa kontrol seperti itu (misalnya Calculator), gunakan `desktop.keyboard.press()`. |
+| Pilihan | `selectOption` mencocokkan label opsi, bukan indeks. Nama aksesibel baris tabel adalah semua teks yang ditampilkan sel-selnya; jika dua baris memiliki label sama, pilihan ditolak. Pada tombol pop-up, metode ini memeriksa bahwa tombol menampilkan opsi yang dipilih. Opsi nonaktif akan ditunggu sampai diaktifkan dalam batas waktu tindakan, lalu gagal dengan `ACTION_FAILED` yang menyebutkan nama opsi dan menutup menu. Jika ada dua opsi dengan judul sama, opsi aktif yang dipilih dari menu; tombol pop-up yang sudah menampilkan judul tersebut dibiarkan apa adanya karena menu tertutup tidak menunjukkan opsi mana yang dipilih. Untuk kotak kombo yang dapat diedit, gunakan `fill()`; jika kotak kombo tidak menerima teks, pilihan ditolak, jadi tap kotak itu lalu tap opsinya. |
+| Jendela | `screen` membaca [jendela aktif](#work-with-several-windows): jendela yang dipilih tes, atau jendela yang fokus, jendela utama aplikasi, lalu jendela terlihat pertama. Dialog Siri yang dapat muncul di atas aplikasi pada macOS 27 hanya dibaca jika tes menjadikannya aktif. Jendela dengan sheet terbuka dihitung sebagai fokus. Sheet dan menu konteks atau pop-up yang terbuka ikut disertakan, sehingga `getByRole('menuitem', 'Copy')` menemukan item menu; bingkai jendela (Close/Minimize/Zoom) dikecualikan. Jendela yang diminimalkan dan baris yang tergulir keluar dari daftar terbaca tersembunyi, sehingga dilewati oleh `getByRole`. `getByText` dan `getByTestId` tetap cocok dengan node tersembunyi. Keduanya menemukan node yang memuat teks atau ID, jadi `getByText('Item 40')` menemukan label baris, bukan barisnya. Tap, secondary tap, `check`, atau `uncheck` pada node tersembunyi akan menggulirkannya ke tampilan terlebih dahulu atau ditolak. Jika tindakan gagal setelah pengguliran, tindakan gagal dengan `ACTION_FAILED` karena mungkin sudah berdampak dan tidak dicoba ulang, sebab posisi daftar telah berubah. Jendela pada Space macOS lain tetap dapat dibaca. |
+| Pembacaan | Aplikasi hanya terbaca kosong jika tidak memiliki jendela terbuka. Jika layar terkunci, pohon jendela lebih dalam daripada `maxDepth`, atau jendela memiliki lebih dari 8.000 elemen yang dapat dibaca, locator terus mencoba sampai batas waktu alih-alih menghasilkan hasil negatif yang keliru. Screenshot jendela tersebut ditolak. `app.open()` gagal jika layar terkunci. |
+| Menu bar | Menu bar aplikasi belum dapat dibaca; jalankan item menu dengan pintasan tombol (`press`). |
+| Konten web | Jendela browser, aplikasi Electron, dan web view belum didukung. Gunakan `@e2e-dev/web` untuk aplikasi web dan [`@e2e-dev/electron`](/electron) untuk aplikasi Electron. |
+| Worker | Terbatas pada satu worker per target desktop. Jika menjalankan dua target desktop dengan `physicalInput: true`, atur `workers: 1` agar keduanya tidak berebut cursor dan keyboard. |
+| Pengguliran | `scrollTo(edge)` belum didukung dan gagal dengan `UNSUPPORTED_CAPABILITY`. Sebagai gantinya, gunakan `scrollUntilVisible`. |
+| State | `app.clearState()` dan `app.back()` belum didukung. Sesi `test.setup` dan `video: 'on'` ditolak saat tes dikumpulkan karena engine tidak menyimpan state maupun merekam video. |
+| Belum didukung | `getByPlaceholder`, `toBeInViewport`, `toBeEmpty`, `blur`, `longPress`, `dragTo`, `setInputFiles`, `modifiers` pada tap, dan `selectOption({ index })` gagal dengan pesan yang menjelaskan hal itu. |
+| Secret | Field kata sandi tidak pernah menampilkan nilainya dan digambar hitam pada screenshot. Jika screenshot tidak dapat menutupi field kata sandi, atau jendela lebih dalam dari `maxDepth` maupun memiliki elemen lebih banyak daripada yang dapat dibaca, penyimpanan screenshot akan gagal. |
+
+State sementara dibersihkan saat eksekusi berakhir. Jika aplikasi atau worker
+dihentikan paksa di tengah eksekusi, eksekusi desktop berikutnya akan
+membersihkan proses aplikasi yang tertinggal secara otomatis.
+
+<Accordion title="Kasus khusus tambahan pada desktop">
+- **Jendela yang tidak dapat dibaca:** jendela yang tidak dapat dibaca tidak
+  dianggap kosong, sehingga `not.toBeVisible()` tidak bisa berhasil untuknya.
+- **Menu pop-up:** memilih opsi yang tidak ada pada tombol pop-up akan menutup
+  kembali menunya; jika menu tetap terbuka, error akan menyebutkannya.
+</Accordion>
+
+## Opsi
+
+| Opsi | Tipe | Bawaan |
+| --- | --- | --- |
+| `snapshot` | `'full' \| 'interactive'` | `'full'` |
+| `physicalInput` | `boolean` | `false` |
+| `settle` | `number \| false` | `150` |
+| `maxDepth` | `number` | `24` |
+
+`snapshot: 'interactive'` membuat observasi agent hanya membaca kontrol,
+tanpa teks statis; locator dan `expect` tetap membaca seluruh jendela.
+`physicalInput` mengizinkan pointer dan keyboard sungguhan, yang menggerakkan
+cursor Anda dan membawa aplikasi ke depan. `settle` adalah lama waktu engine
+menunggu setelah tindakan agent sebelum agent membaca layar, dalam milidetik.
+`maxDepth` adalah jumlah tingkat jendela yang dibaca, dari 1 sampai 50;
+naikkan nilainya jika locator pada aplikasi bertingkat dalam mengalami batas
+waktu saat hanya sebagian jendela yang terbaca.
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Mobile" icon="mobile" href="/mobile">
+    Jalankan tes yang sama pada simulator iOS dan emulator Android.
+  </Card>
+  <Card title="Langkah agent" icon="robot" href="/agent-steps">
+    Minta agent mengisi formulir atau memeriksa layar.
+  </Card>
+</CardGroup>

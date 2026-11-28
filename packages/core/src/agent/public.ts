@@ -7,7 +7,9 @@
  * under `{ executor }`. `createGrammarTools` and `BASE_RULES` are the
  * built-in agent's action tools and their rules, and `createVerdictTool` and
  * `VERDICT_RULES` its `complete_step`, for a loop or an executor that keeps
- * the built-in actions and verdicts. The socket vocabulary itself, `StepExecutor` and its
+ * the built-in actions and verdicts, and `createProjectTools` runs
+ * `defineTool` tools under a step's accounting for an executor that offers
+ * them. The socket vocabulary itself, `StepExecutor` and its
  * verdicts, lives on the main `e2e` entrypoint, so a hand-rolled executor
  * needs no import from here (and no AI SDK) at all.
  */
@@ -28,7 +30,7 @@ export {
   type GrammarToolOptions,
   type VerdictTool,
 } from './primitives.ts';
-export { BASE_RULES } from './default-agent.ts';
+export { BASE_RULES, createProjectTools } from './default-agent.ts';
 export { isRuntimeHardStop } from './executor.ts';
-export { redactSecrets, redactStepText, registerProviderKey, registerProviderKeys } from './provider-keys.ts';
+export { redactProviderKeys, redactSecrets, redactStepText, registerProviderKey, registerProviderKeys } from './provider-keys.ts';
 export type { ScreenOutput } from './screen-update.ts';

@@ -1,13 +1,13 @@
 ---
 title: Kernel browsers
 sidebarTitle: Kernel
-description: Run web targets in Kernel's hosted Chromium with the kernel() browser provider from @e2e-dev/kernel.
+description: "Run e2e web tests in Kernel's hosted Chromium browsers with the kernel() browser provider from @e2e-dev/kernel, one browser per worker or per test attempt."
 "og:image": "https://e2e.com/docs/images/og/integrations/kernel.png?v=c116b9983d"
 "twitter:image": "https://e2e.com/docs/images/og/integrations/kernel.png?v=c116b9983d"
 ---
 
 `kernel()` from `@e2e-dev/kernel` is a
-[browser provider](/browser#hosted-browsers) for [Kernel](https://kernel.sh).
+[browser provider](/reference/web#hosted-browsers) for [Kernel](https://kernel.sh).
 Each worker slot, or each attempt, gets its own hosted Chromium. Tests stay
 the same. Only the target's `browser` changes.
 
@@ -92,7 +92,7 @@ only to the browser's default context.
 `scope: 'attempt'` leases a new browser for each attempt, retries included.
 The attempt runs in its default context, on its first tab, so a `profile`
 applies and the live view shows one tab. Each test pays for a browser start,
-and the [limits of a per-attempt lease](/browser#hosted-browsers) apply,
+and the [limits of a per-attempt lease](/reference/web#hosted-browsers) apply,
 sessions included.
 
 ## Recordings
@@ -128,7 +128,7 @@ itself dies first, Kernel deletes each browser after `timeout_seconds` idle,
 ## Next
 
 <CardGroup cols={2}>
-  <Card title="Hosted browsers" icon="globe" href="/browser#hosted-browsers">
+  <Card title="Hosted browsers" icon="globe" href="/reference/web#hosted-browsers">
     How a browser provider leases browsers, and the limits of `'attempt'` scope.
   </Card>
   <Card title="Continuous integration" icon="rotate" href="/ci">

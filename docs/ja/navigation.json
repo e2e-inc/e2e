@@ -18,7 +18,9 @@
     "Migrate": "移行",
     "Test API": "テスト API",
     "Project": "プロジェクト",
-    "Web": "Web",
-    "Mobile": "モバイル"
+    "Browsers": "ブラウザ",
+    "Devices": "デバイス",
+    "Browsers and devices": "ブラウザとデバイス",
+    "Ecosystem": "エコシステム"
   }
 }

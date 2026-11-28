@@ -18,7 +18,9 @@
     "Migrate": "माइग्रेट करें",
     "Test API": "टेस्ट API",
     "Project": "प्रोजेक्ट",
-    "Web": "वेब",
-    "Mobile": "मोबाइल"
+    "Browsers": "ब्राउज़र",
+    "Devices": "डिवाइस",
+    "Browsers and devices": "ब्राउज़र और डिवाइस",
+    "Ecosystem": "इकोसिस्टम"
   }
 }

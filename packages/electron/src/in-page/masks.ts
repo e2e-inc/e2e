@@ -33,7 +33,8 @@ export function placeMasks(selector: string): MaskState {
 
   const resume: Animation[] = [];
   for (const animation of document.getAnimations()) {
-    if (animation.effect === null || animation.playbackRate === 0) continue;
+    // A paused animation holds still already; one the capture cancelled is played again after it, which would start it.
+    if (animation.effect === null || animation.playbackRate === 0 || animation.playState === 'paused') continue;
     const end = animation.effect.getComputedTiming().endTime;
     try {
       if (Number.isFinite(Number(end))) {

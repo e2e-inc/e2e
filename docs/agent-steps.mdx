@@ -1,6 +1,6 @@
 ---
 title: How agent steps work
-description: What the model sees, what it may do, how a step ends, and what it costs.
+description: "Learn how an agent step runs in e2e, from what the AI model sees and which actions it may take to how a step ends and what it costs in model calls."
 "og:image": "https://e2e.com/docs/images/og/agent-steps.png?v=321767dc3b"
 "twitter:image": "https://e2e.com/docs/images/og/agent-steps.png?v=321767dc3b"
 ---
@@ -125,6 +125,45 @@ Each call has a model-call budget and a default timeout. See
 Use `expect` for exact checks, and give each `act` the
 steps toward one [goal](/core-concepts#goals). When the provider caches prompts,
 `--debug` shows the cached share of input tokens per step.
+
+## Split a long flow into goals
+
+Start with one `agent.act` call for the behavior under test. Split it at a
+meaningful transition when the next step needs a known state (such as the
+payment page of a long checkout), when a long flow risks the `maxSteps` or
+`maxModelCalls` budgets, or when a failure in the middle needs its own step
+boundary. Say why the split is needed, and wait for the intermediate screen
+state before you continue. Each call has its own
+[budgets](/reference/agent#budgets) and can replay from its own recording.
+
+```ts title="Complete one checkout across two screens"
+import { expect, test } from 'e2e';
+
+test('places an order with a saved card', async ({ app, agent, screen }) => {
+  await app.open('/checkout');
+
+  // The saved card can load after the Payment heading appears.
+  await agent.act('Fill the Shipping address with {address}, then choose Continue to payment.', {
+    params: { address: '12 Market Street' },
+  });
+  await screen.getByRole('radio', 'Test card').waitFor();
+  await agent.act('Select the saved Test card and choose Place order.');
+
+  await expect(screen.getByText('Order confirmed')).toBeVisible();
+});
+```
+
+- **Wait after setup, assert at the end.** When setup uses `agent.act`, end
+  setup with a wait for the starting state, and check the final outcome in
+  the assert block. A later passing verification check, such as a locator
+  assertion or `locator.waitFor()`, confirms earlier goals for the
+  [replay cache](/cache#when-a-recording-is-written). An `expect` on a plain
+  value and `expect.poll` do not.
+- **Match the UI's wording.** Use the field and button names shown on
+  screen, and say the order when it matters, such as filling shipping info,
+  picking a delivery option, then placing the order.
+- **When a goal fails, tighten the instruction.** Terms that every goal
+  shares go into the agent's [`context`](/agents) instead.
 
 ## Next
 
