@@ -31,6 +31,8 @@ export async function cases(): Promise<readonly Case[]> {
   const changed = reference.decodePng(shots.get('desktop-1280x720-word')!);
   const nativeStored = NativeImage.fromRgba(stored.data, stored.width, stored.height);
   const nativeSame = NativeImage.fromRgba(stored.data, stored.width, stored.height);
+  // A poll compares the stored image with a capture decoded on its own, so each side gets two buffers.
+  const same = { ...stored, data: stored.data.slice() };
   const nativeChanged = NativeImage.fromRgba(changed.data, changed.width, changed.height);
   const masks = [
     { x: 296, y: 136, width: 866, height: 38 },
@@ -73,7 +75,7 @@ export async function cases(): Promise<readonly Case[]> {
     {
       name: 'compare 1280x720, identical',
       when: 'every toHaveScreenshot poll that matches',
-      old: () => reference.compareImages(stored, stored, exact),
+      old: () => reference.compareImages(stored, same, exact),
       native: () => nativeStored.compare(nativeSame, exact),
     },
     {
