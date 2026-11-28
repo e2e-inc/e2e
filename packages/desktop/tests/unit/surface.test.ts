@@ -1137,6 +1137,13 @@ describe('desktop fixture: windows', () => {
     expect([runs, await controls.title()]).toEqual([1, 'Controls']);
   });
 
+  it('gives a quick trigger no extra look when the reads took the wait', async () => {
+    const alone = windows(() => [mine]);
+    const { surface } = await launched({ listWindows: [alone, alone, windows(() => [mine], 80), windows(() => [mine, panel], 180)] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    await expect(desktop.waitForWindow(() => Promise.resolve(), { timeout: 225 })).rejects.toMatchObject({ code: 'ACTION_FAILED' });
+  });
+
   it('still looks once when the trigger left too little of the wait for a read', async () => {
     const alone = windows(() => [mine]);
     const { surface } = await launched({ listWindows: [alone, alone, alone, windows(() => [mine, panel], 50)] });

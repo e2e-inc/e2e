@@ -102,20 +102,18 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
   /**
    * Reads the open windows until `pick` finds what it looks for, or `waitMs`
    * ends. Each read gets the time left in the wait, and a match it brings back
-   * after the wait ended is not taken. A wait with too little time left for a
-   * read (a trigger that took nearly all of it) still looks once, with the
+   * after the wait ended is not taken. With `looksOnce` (a trigger that took
+   * all of the wait, or all but too little for a read) it looks once, with the
    * operation's own budget.
    * `timedOut` gets the last list read, and the failure of the last read when
    * it read none.
    */
-  const waitFor = async <T>(pick: (windows: readonly OpenWindow[]) => T | undefined, operation: OperationContext, waitMs: number, timedOut: (windows: readonly OpenWindow[], unread?: Error) => string): Promise<T> => {
+  const waitFor = async <T>(pick: (windows: readonly OpenWindow[]) => T | undefined, operation: OperationContext, waitMs: number, timedOut: (windows: readonly OpenWindow[], unread?: Error) => string, looksOnce = false): Promise<T> => {
     let windows: readonly OpenWindow[] = [];
     let unread: Error | undefined;
     let found: T | undefined;
     // A little before the step's own end, so the wait reports what it waited for rather than a bare timeout.
-    const deadline = new Deadline(Math.max(1, waitMs - Math.min(WAIT_MARGIN_MS, waitMs / 10)));
-    // Too little left for a read to answer in is no time left: a trigger that took nearly all of it gets the one look too.
-    const looksOnce = waitMs < WAIT_MARGIN_MS;
+    const deadline = new Deadline(looksOnce ? 0 : Math.max(1, waitMs - Math.min(WAIT_MARGIN_MS, waitMs / 10)));
     await pollCondition({
       deadline,
       signal: operation.signal,
@@ -162,17 +160,20 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
       // The trigger is test code: its error is reported as it is.
       await trigger();
       const triggerMs = Date.now() - started;
+      // The one look with the operation's own budget is for a trigger that took the wait, not for time a slow read spent.
+      const triggerTookIt = triggerMs >= waitMs - Math.min(WAIT_MARGIN_MS, waitMs / 10);
       const opened = await waitFor(
         // Not a dialog macOS put over the app, which `screen` never reads on its own either.
         (windows) => windows.find((window) => window.readable && !before.has(window.id)),
         operation,
         waitMs - (Date.now() - begun),
         () => `no window opened within ${waitMs}ms; the trigger resolved after ${triggerMs}ms`,
+        triggerTookIt,
       );
-      // Activating it reads the windows again, within what is left of the call: a trigger that used all of it took the
-      // one look with the operation's own budget, and so does its activation.
+      // Activating it reads the windows again, within what is left of the call, or with the operation's own budget after
+      // the one look.
       const left = waitMs - (Date.now() - begun);
-      await surface.activateWindow(opened.id, left >= WAIT_MARGIN_MS ? { ...operation, timeoutMs: left } : operation);
+      await surface.activateWindow(opened.id, triggerTookIt ? operation : { ...operation, timeoutMs: Math.max(1, left) });
       return handle(opened);
     },
     async window(which, options) {
