@@ -78,6 +78,12 @@ export interface ScreenUpdateOptions {
    * for a plain look, which acted on nothing.
    */
   readonly keyboardNote?: boolean | undefined;
+  /**
+   * System lines from looks the action took on its way (the screens between
+   * a repeated scroll), listed before the observation's own, so no line a
+   * look read goes unshown.
+   */
+  readonly systemLog?: readonly string[] | undefined;
 }
 
 /** The screenshot the model holds newest, and the viewport it was taken of. */
@@ -187,10 +193,15 @@ export class ScreenPresenter {
     this.seen = { tabs: observation.tabs, path: observation.path ?? this.seen?.path };
   }
 
-  /** The step's first screen, whole. */
-  initial(observation: ExecutorObservation): string {
+  /** The screen whole, held as the one later updates are compared with. */
+  private whole(observation: ExecutorObservation): string {
     this.hold(observation);
     return renderFull(observation);
+  }
+
+  /** The step's first screen, whole, with the system lines that came with it. */
+  initial(observation: ExecutorObservation): string {
+    return `${this.whole(observation)}${systemLogNote(observation.systemLog)}`;
   }
 
   /**
@@ -200,7 +211,7 @@ export class ScreenPresenter {
    */
   unlisted(observation: ExecutorObservation): string {
     this.hold(observation);
-    return describeScreen(observation);
+    return `${describeScreen(observation)}${systemLogNote(observation.systemLog)}`;
   }
 
   /**
@@ -208,7 +219,8 @@ export class ScreenPresenter {
    * the changed lines, or the whole screen when most of it changed.
    */
   update(observation: ExecutorObservation, options: ScreenUpdateOptions = {}): string {
-    return this.render(observation, options, 'none');
+    const lines = systemLines(observation, options);
+    return `${this.render(observation, withSystemEffect(options, lines), 'none')}${systemLogNote(lines)}`;
   }
 
   /** The update, told what the screenshot going out with it says against the one the model held. */
@@ -216,7 +228,7 @@ export class ScreenPresenter {
     let lead = options.lead === undefined ? '' : `${options.lead}\n\n`;
     if (observation.treeUnavailable === true) {
       // No tree to compare, but the tabs and the location still say what happened.
-      return `${lead}${this.movedSinceSeen(observation)}${this.initial(observation)}`;
+      return `${lead}${this.movedSinceSeen(observation)}${this.whole(observation)}`;
     }
     const previous = this.shown;
     const next = indexScreen(observation);
@@ -278,15 +290,16 @@ export class ScreenPresenter {
   present(observation: ExecutorObservation, options: ScreenUpdateOptions = {}): ScreenOutput {
     const compared = this.attach(observation);
     const pixels = compared === 'none' && this.pixelsDenied ? 'unavailable' : compared;
+    const lines = systemLines(observation, options);
     const text = this.render(
       observation,
       {
-        ...options,
-        expectChange: this.showingPixels && interactiveNodeCount(observation) === 0 ? false : options.expectChange,
+        ...withSystemEffect(options, lines),
+        ...(this.showingPixels && interactiveNodeCount(observation) === 0 ? { expectChange: false } : {}),
       },
       pixels,
     );
-    return this.withScreenshot(observation, text);
+    return this.withScreenshot(observation, `${text}${systemLogNote(lines)}`);
   }
 
   /**
@@ -317,6 +330,35 @@ export class ScreenPresenter {
     if (observation.pixelsWithheld === undefined) return text;
     return `${text}\n\nNo screenshot: ${withheldAdvice(observation.pixelsWithheld)}`;
   }
+}
+
+/** Opens the system log under a screen; transcript compaction keeps the paragraph it starts. */
+export const SYSTEM_LOG_HEADING = 'System log (not on the screen):';
+
+/**
+ * What the engine logged since the previous look, under the screen: the
+ * effect of an action no listing shows, such as a native dialog the target
+ * answered for the model. After the screen, so the lead and the screen's
+ * first line still open the result for the loop guards that read them. The
+ * feed hands each line out once, so every rendering of a look shows it.
+ */
+function systemLogNote(lines: readonly string[] | undefined): string {
+  if (lines === undefined || lines.length === 0) return '';
+  return `\n\n${SYSTEM_LOG_HEADING}\n${lines.map((line) => `- ${line}`).join('\n')}`;
+}
+
+/** The lines an update shows: those from the action's own looks on its way, then the observation's. */
+function systemLines(observation: ExecutorObservation, options: ScreenUpdateOptions): readonly string[] {
+  return [...(options.systemLog ?? []), ...(observation.systemLog ?? [])];
+}
+
+/**
+ * An action the system logged something for had an effect, even when no
+ * listed node changed (an `alert` the target answered): the update must not
+ * tell the model the action did nothing.
+ */
+function withSystemEffect(options: ScreenUpdateOptions, lines: readonly string[]): ScreenUpdateOptions {
+  return lines.length === 0 ? options : { ...options, expectChange: false };
 }
 
 /** The line under a screenshot: its pixel size and the coordinate space the point verbs read. */

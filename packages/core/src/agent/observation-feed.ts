@@ -15,7 +15,8 @@ import { asEngineError, TestError } from '../internal/errors.ts';
 import { rejectUnknownOptions } from '../internal/options.ts';
 import { checkObservedLocation } from '../internal/urls.ts';
 import { takesText } from '../internal/roles.ts';
-import type { StepAgentDetails, VisionDegradation } from '../run/steps.ts';
+import { bound } from '../internal/text.ts';
+import { MAX_EVENT_DETAIL_CHARS, type StepAgentDetails, type VisionDegradation } from '../run/steps.ts';
 import { describeTarget } from './actions.ts';
 import { AgentError } from './error.ts';
 import type { ExecutorObservation, ExecutorObserveOptions, ExecutorReadOptions, ExecutorReadResult, ExecutorTarget } from './executor.ts';
@@ -108,13 +109,17 @@ export class ObservationFeed {
   private observationTruncated = false;
   /** Whether any screen in this step listed a field marked as taking a one-time code. */
   private oneTimeCodeSeen = false;
+  /** Where the app log's `system` lines stood at the step's previous observation; see `systemLog`. */
+  private systemCursor: number;
 
   constructor(
     private readonly runtime: AgentContext,
     private readonly accounting: StepAccounting,
     private readonly queue: OperationQueue,
     private readonly options: ObservationFeedOptions,
-  ) {}
+  ) {
+    this.systemCursor = runtime.engine.session.appLog.systemLines().cursor;
+  }
 
   /** The newest observation of the step, if any was captured. */
   get latest(): AgentObservation | undefined {
@@ -233,13 +238,27 @@ export class ObservationFeed {
     });
   }
 
+  /**
+   * The `system` lines the engine logged since the step's previous look,
+   * redacted before they are clipped; undefined when there were none.
+   */
+  private systemLog(): readonly string[] | undefined {
+    const { lines, skipped, cursor } = this.runtime.engine.session.appLog.systemLines(this.systemCursor);
+    this.systemCursor = cursor;
+    if (lines.length === 0) return undefined;
+    const shown = lines.map((line) => bound(this.runtime.redact(line.replace(/\s+/g, ' ').trim()), MAX_EVENT_DETAIL_CHARS));
+    return skipped === 0 ? shown : [`${String(skipped)} earlier line${skipped === 1 ? '' : 's'} not shown`, ...shown];
+  }
+
   /** Projects one capture, including its permitted screenshot whenever semantic evidence is unavailable. */
   private view(observation: AgentObservation, options: ExecutorObserveOptions): ExecutorObservation {
+    const systemLog = this.systemLog();
     const metadata = {
       revision: observation.revision,
       viewport: observation.viewport,
       ...(observation.path === undefined ? {} : { path: observation.path }),
       ...(observation.tabs === undefined ? {} : { tabs: observation.tabs }),
+      ...(systemLog === undefined ? {} : { systemLog }),
     };
     const pixels = this.options.pixelsAllowed && (options.pixels === true || observation.kind === 'pixels') ? this.pixelsFor(observation) : {};
     if (observation.kind === 'pixels') {

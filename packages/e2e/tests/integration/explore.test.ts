@@ -133,6 +133,54 @@ describe('e2e explore', () => {
     expect(paths.map((entry) => entry!.split('/').at(-1)).toSorted()).toEqual(['finding-1.png', 'finding-2.png']);
   });
 
+  it('gets past native dialogs with web({ dialogs }) and tells the explorer each one, and without it fails the tap naming the option', async () => {
+    /**
+     * One charter that taps the named buttons in turn (Save opens
+     * `alert('Could not save: server error 500')`, Ask opens
+     * `confirm('Proceed?')`) and keeps each tap's result.
+     */
+    const charter = (buttons: readonly RegExp[], results: string[]) =>
+      installExploreModel({
+        plan: (call) =>
+          call.instruction.includes('(none yet')
+            ? { decision: 'step', title: 'Delete', instruction: 'Tap the buttons' }
+            : { decision: 'finish', summary: 'Done.' },
+        loop: (call) => {
+          if (call.turn > 1) results.push(call.lastToolResult);
+          const button = buttons[call.turn - 1];
+          if (button !== undefined) return [{ toolName: 'tap', input: { target: nodeIdFor(call.prompt, button) } }];
+          return [{ toolName: 'complete_step', input: { status: 'passed', summary: 'Tapped' } }];
+        },
+      });
+    const configWith = (engine: ReturnType<typeof web>, model: ModelInstance) => ({
+      targets: [{ name: 'web', engine, app: { url: `${app.url}/dialog` } }] as never,
+      agents: { default: { model } },
+      actionTimeout: 10_000,
+    });
+
+    // With the option, each tap's result tells the explorer what the dialog said and how it was answered:
+    // an app's error alert is a finding the screen never shows.
+    const accepted: string[] = [];
+    const acceptingModel = charter([/button "Save"/, /button "Ask"/], accepted);
+    const withPolicy = await runExplore(project, app, acceptingModel, { rawConfig: configWith(web({ dialogs: 'accept' }), acceptingModel), maxSteps: 1 });
+    expect(withPolicy.report.run.explore!.steps[0]).toMatchObject({ title: 'Delete', status: 'passed' });
+    expect(accepted[0]).toMatch(/^Tapped #\S+\./);
+    expect(accepted[0]).toContain(`System log (not on the screen):\n- alert dialog "Could not save: server error 500" opened; accepting it per web({ dialogs: 'accept' })`);
+    // The alert changed nothing listed, but it was the tap's effect: the tap is not called one with no effect.
+    expect(accepted[0]).not.toContain('no visible effect');
+    expect(accepted[1]).toMatch(/status "Answer" text="accepted"/);
+    expect(accepted[1]).toContain(`- confirm dialog "Proceed?" opened; accepting it per web({ dialogs: 'accept' })`);
+    // Each line is reported once, with the action it followed.
+    expect(accepted[1]).not.toContain('Could not save');
+
+    // Without the option the tap comes back to the explorer as an action failure it cannot act on, naming the option.
+    const refused: string[] = [];
+    const unansweredModel = charter([/button "Ask"/], refused);
+    await runExplore(project, app, unansweredModel, { rawConfig: configWith(web(), unansweredModel), maxSteps: 1 });
+    expect(refused.at(-1)).toContain('Action failed: unhandled confirm dialog: Proceed?');
+    expect(refused.at(-1)).toContain("web({ dialogs: 'accept' })");
+  }, 120_000);
+
   it('keeps its own timeout and ignores the config\'s maxDuration', async () => {
     const model = installExploreModel({
       plan: () => ({ decision: 'finish', summary: 'Nothing to report.' }),

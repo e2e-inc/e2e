@@ -347,6 +347,49 @@ describe('ScreenPresenter', () => {
   });
 });
 
+describe('ScreenPresenter and the system log', () => {
+  const textOf = (output: ReturnType<ScreenPresenter['present']>) => (typeof output === 'string' ? output : output.text);
+  const DIALOG = `alert dialog "Could not save" opened; accepting it per web({ dialogs: 'accept' })`;
+  const NOTE = `\n\nSystem log (not on the screen):\n- ${DIALOG}`;
+
+  it('lists what the engine logged under the screen, so the lead and the headline still open the result', () => {
+    const presenter = new ScreenPresenter();
+    presenter.open(screen('s1', HOME));
+    const tapped = textOf(presenter.present(screen('s2', [...HOME, ' #n7 alert "Saved"'], { systemLog: [DIALOG] }), { lead: 'Tapped #n3.', expectChange: true }));
+    expect(tapped.split('\n')[0]).toBe('Tapped #n3.');
+    expect(tapped.endsWith(NOTE)).toBe(true);
+    // An observe's look that changed the screen still reads as a change to a wait.
+    const looked = textOf(presenter.present(screen('s3', HOME, { systemLog: [DIALOG] }), { lead: 'Observed.' }));
+    expect(reportsScreenChange(looked)).toBe(true);
+  });
+
+  it('never calls an action that only opened a dialog one with no effect', () => {
+    const presenter = new ScreenPresenter();
+    presenter.open(screen('s1', HOME));
+    const tapped = textOf(presenter.present(screen('s2', HOME, { systemLog: [DIALOG] }), { lead: 'Tapped #n3.', expectChange: true }));
+    expect(reportsNoEffect(tapped)).toBe(false);
+    expect(tapped).not.toContain('no visible effect');
+    expect(reportsNoEffect(presenter.update(screen('s3', HOME, { systemLog: [DIALOG] }), { lead: 'Tapped #n3.', expectChange: true }))).toBe(false);
+    // Without a line, the same unchanged screen still blames the action.
+    expect(reportsNoEffect(presenter.update(screen('s4', HOME), { lead: 'Tapped #n3.', expectChange: true }))).toBe(true);
+  });
+
+  it('shows the lines on every rendering a look can get, the ones an action read on its way first', () => {
+    expect(textOf(new ScreenPresenter().open(screen('s1', HOME, { systemLog: [DIALOG] })))).toContain(NOTE);
+    expect(new ScreenPresenter().initial(screen('s1', HOME, { systemLog: [DIALOG] }))).toContain(NOTE);
+    expect(new ScreenPresenter().unlisted(screen('s1', HOME, { systemLog: [DIALOG] }))).toContain(NOTE);
+    const presenter = new ScreenPresenter();
+    presenter.open(screen('s1', HOME));
+    expect(presenter.update(screen('s2', HOME, { systemLog: ['second'] }), { systemLog: ['first'] })).toContain('\n- first\n- second');
+  });
+
+  it('adds nothing when there is no line', () => {
+    const presenter = new ScreenPresenter();
+    presenter.open(screen('s1', HOME));
+    expect(textOf(presenter.present(screen('s2', HOME, { systemLog: [] }), { lead: 'Tapped #n3.' }))).not.toContain('System log');
+  });
+});
+
 describe('ScreenPresenter and the on-screen keyboard', () => {
   const KEYBOARD = [
     ' #n20 keyboard "Padding-Left"',

@@ -99,7 +99,11 @@ function createActLoop(options: BuiltInAgentOptions): StepExecutor {
       // to leave the decision to the model; a small page is not a blind one.
       let observation = await context.observe();
       if (observation.pixels === undefined && interactiveNodeCount(observation) === 0) {
+        // The second look replaces the first, so it carries the system lines the first one read.
+        const earlier = observation.systemLog ?? [];
         observation = await context.observe({ pixels: true });
+        const systemLog = [...earlier, ...(observation.systemLog ?? [])];
+        if (systemLog.length > 0) observation = { ...observation, systemLog };
       }
       const extra: string[] = [];
       const secrets = secretsLine(context);

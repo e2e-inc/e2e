@@ -48,8 +48,9 @@ the test ran on, it shows:
 - **Steps.** The node an action landed on, the values an assertion read
   while it waited, the replay cache's decision, what the app logged, where
   the page went, and how the screen changed since the step before.
-- **App log.** Console output, uncaught exceptions, failed requests, and
-  4xx and 5xx responses, each with its step: up to 50 lines, errors and
+- **App log.** Console output, uncaught exceptions, failed requests, 4xx
+  and 5xx responses, and the dialogs [`web({ dialogs })`](/reference/web#dialogs)
+  answered, each with its step: up to 50 lines, errors and
   warnings first. An attempt keeps at most 200 errors and warnings and 100
   other lines.
 - **The agent's last turns.**

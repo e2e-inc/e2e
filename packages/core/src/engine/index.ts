@@ -579,7 +579,11 @@ export type AppLogSource = 'console' | 'error' | 'network' | 'system';
 export interface AppLogEntry {
   /**
    * Where it came from: the app's `console`, an `error` nothing caught, the
-   * `network`, or the `system` the app runs on (a crash, an OS log).
+   * `network`, or the `system` the app runs on (a crash, an OS log, a native
+   * dialog the engine answered). A `system` line also reaches the model: an
+   * agent step shows the ones logged during an action in that action's
+   * result, redacted, the newest five. Keep them to what the agent should
+   * know.
    */
   readonly source: AppLogSource;
   readonly level: 'error' | 'warning' | 'info';

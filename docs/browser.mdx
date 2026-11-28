@@ -82,6 +82,11 @@ await off();
 A function handler gets the dialog and must call `accept(text?)` or
 `dismiss()`.
 
+To answer every dialog no handler takes, set
+[`web({ dialogs: 'accept' })`](/reference/web#dialogs) or `'dismiss'` on the
+target. Use it for `e2e explore` and agent steps, which can't register a
+handler.
+
 ## Download a file
 
 ```ts

@@ -169,8 +169,10 @@ on a `web()` target), `bundleId` or `appPath` (a device target needs one),
 
 `web()` takes `browser` (`'chromium'` by default, `'firefox'`, `'webkit'`, or
 a hosted `BrowserProvider`), `viewport` (default 1280x720), `headers`,
-`basicAuth`, `locale`, `timezoneId`, `colorScheme`, `testIdAttribute`, and
-more. Two browsers on one app declaration:
+`basicAuth`, `locale`, `timezoneId`, `colorScheme`, `testIdAttribute`,
+`dialogs` (`'accept'` or `'dismiss'` answers every native dialog no
+`browser.onDialog` handler takes; set it for `e2e explore` and bug bashes),
+and more. Two browsers on one app declaration:
 
 ```ts
 const app = { url: 'http://127.0.0.1:3000' };

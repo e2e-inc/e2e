@@ -173,6 +173,14 @@ export interface ExecutorObservation {
   readonly pixels?: ExecutorPixels;
   /** Why requested pixels were withheld; the same token the report's `visionDegraded` carries. */
   readonly pixelsWithheld?: VisionDegradation;
+  /**
+   * What the engine logged as the `system` the app runs on since the step's
+   * previous observation, redacted, oldest first: a native dialog
+   * `web({ dialogs })` answered, which no screen shows. At most five lines,
+   * after one saying how many earlier ones were left out. Absent when there
+   * were none.
+   */
+  readonly systemLog?: readonly string[];
 }
 
 /** A node named by its id from the newest observation, e.g. `{ id: 'n42' }`. */

@@ -162,6 +162,20 @@ export interface AppLogRoute {
   navigated(line: string): void;
   /** Sends everything from now on, and everything still waiting, to `sink`; undefined holds it again. */
   route(sink: ((event: AppEvent, at: string) => void) | undefined): void;
+  /**
+   * The `system` lines pushed after `cursor`, unredacted, outside the log's
+   * quota and sink: an agent step shows the model what the engine logged
+   * during an action (a native dialog `web({ dialogs })` answered), even
+   * when the log is full. Without a cursor, no lines and the current one.
+   */
+  systemLines(cursor?: number): SystemLines;
+}
+
+/** What `AppLogRoute.systemLines` returns: the newest lines after the cursor, how many older ones it no longer holds, and the cursor to pass next. */
+export interface SystemLines {
+  readonly lines: readonly string[];
+  readonly skipped: number;
+  readonly cursor: number;
 }
 
 /** What the app did on its own, as the session passes it on: a log line, or where it went. */

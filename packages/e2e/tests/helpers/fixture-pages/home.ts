@@ -272,6 +272,7 @@ line2  </textarea>
 <body>
   <h1>Dialog</h1>
   <button onclick="document.getElementById('answer').textContent = confirm('Proceed?') ? 'accepted' : 'dismissed'">Ask</button>
+  <button onclick="alert('Could not save: server error 500')">Save</button>
   <output id="answer" aria-label="Answer"></output>
 </body>
 </html>`),

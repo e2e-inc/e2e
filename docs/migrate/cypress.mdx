@@ -164,7 +164,7 @@ Planned gaps are on the roadmap, and Not yet gaps have no date. Not planned gaps
 - [Locators](/reference/screen) are strict. An action or single-node assertion on several matches fails with `LOCATOR_AMBIGUOUS`. Narrow with `.filter()`, `.first()`, or `.nth()`, or loop over `await locator.all()`.
 - A string in a query matches the whole text. `{ exact: false }` matches a fragment in any case. `cy.contains` is case-sensitive and takes the first match, so pass a RegExp or add `.first()`.
 - Text matchers compare the rendered text. CSS `text-transform` applies and hidden children are left out, see [locator reads](/reference/screen#locator-reads).
-- Dialogs are not accepted for you. An `alert` or `confirm` with no handler fails the next step, where Cypress accepts it.
+- Dialogs are not accepted by default. An `alert` or `confirm` with no handler fails the next step, where Cypress accepts it. [`web({ dialogs: 'accept' })`](/reference/web#dialogs) accepts them the way Cypress does.
 
 ## Defaults that differ
 

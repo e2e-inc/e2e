@@ -83,8 +83,8 @@ export default {
     ...[shared.tests ?? 'tests/**/*.e2e.ts'].flat().filter((glob) => !glob.startsWith('!tests/bugbash/')),
     'tests/bugbash/**/*.e2e.ts',
   ],
-  // The app already runs: no command.
-  targets: [{ name: 'web', engine: web(), app: { url: 'http://127.0.0.1:3000' } }],
+  // The app already runs: no command. Explorers can't register browser.onDialog, so accept every native confirm.
+  targets: [{ name: 'web', engine: web({ dialogs: 'accept' }), app: { url: 'http://127.0.0.1:3000' } }],
   retries: 0,
   reporters: ['list'],
   credentials: {
@@ -108,6 +108,11 @@ so an account the app seeds with one (`admin`/`admin`) needs a longer
 password before it can be a credential. Pass `--config e2e.bugbash.config.ts`
 to every command below, and `open_session {config: "e2e.bugbash.config.ts"}`
 over MCP.
+
+`web({ dialogs })` is newer than `@e2e-dev/web` 0.17.0, which fails the
+config at load with `INVALID_CONFIG`. On an older package, upgrade
+`@e2e-dev/web` and `e2e` together, or leave the option out: a native dialog
+then fails the explorer's action instead of being accepted.
 
 ## 2. Plan charters
 
@@ -267,7 +272,8 @@ verify one area after another.
    config, pass its session id to every call, walk the reproduction, and
    `locate` each locator before writing it (topic `mcp`). Close your session
    when done. A scripted step that opens a native dialog needs
-   `browser.onDialog` first.
+   `browser.onDialog` first: the project's own config may not set
+   `web({ dialogs })` as the bug-bash config does.
 
 ## 7. Report
 

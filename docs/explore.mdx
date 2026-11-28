@@ -184,6 +184,21 @@ model reads the diff, commit messages, and pull request description a fork
 wrote.
 </Warning>
 
+## Get past confirmation dialogs
+
+A native `confirm()`, `alert()`, or `prompt()` with no handler fails the
+agent's action, so a charter that deletes something can't finish. Answer
+every dialog on a web target with
+[`web({ dialogs: 'accept' })`](/reference/web#dialogs):
+
+```ts title="e2e.config.ts"
+targets: [{ name: 'web', engine: web({ dialogs: 'accept' }), app: { url: 'http://localhost:3000' } }],
+```
+
+The explorer still reads each dialog's message, in the result of the action
+that opened it or, for a dialog the app opens later, of the next one, so an
+app's error `alert` can become a finding.
+
 ## If the run stops too early
 
 A run stops after 8 steps or 10 minutes. To reach further into the flow,

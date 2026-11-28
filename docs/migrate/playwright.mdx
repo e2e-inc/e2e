@@ -348,7 +348,7 @@ purpose. Use the workaround, or keep the test in Playwright.
 | `page.waitForTimeout(ms)`, `page.waitForNavigation()` | A locator assertion on the state you wait for; `browser.waitForURL(url)` |
 | `--only-changed` | `--changed-since <ref>` with a [test filter](/filters) in `filters` |
 | `page.$()`, `$eval()`, `elementHandle()`, non-JSON `evaluate` values, `locator.page()` | Locators, and `browser.evaluate` with JSON in and out, which the report records and redacts. Pass `browser` to a page object |
-| A dialog with no handler, dismissed silently | `browser.onDialog('dismiss')`. An unhandled dialog fails the next step |
+| A dialog with no handler, dismissed silently (a `beforeunload` accepted) | [`web({ dialogs: 'dismiss' })`](/reference/web#dialogs) for the target, which keeps the page on a `beforeunload` too, or a handler in a test: `browser.onDialog((dialog) => dialog.type === 'beforeunload' ? dialog.accept() : dialog.dismiss())`. Unset, an unhandled dialog fails the next step |
 | `page.goto('data:...')`, `'file://...'` | `route.fulfill({ body, contentType: 'text/html' })` on an app URL. Only `http` and `https` open |
 | `getByRole(role, { includeHidden })` | `browser.locator('role=button[include-hidden=true]')`. A role query follows the accessibility tree |
 | `--grep @smoke` for a tag, a regex positional, `file:line:column` | `--tag smoke`; a glob or a bare name; `file:line` |

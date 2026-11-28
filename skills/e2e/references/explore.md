@@ -112,6 +112,12 @@ instructions or `screen.*` actions, and `expected` is the assertion.
 
 ## When it does not fit
 
+A native `confirm()`, `alert()`, or `prompt()` fails the explorer's action
+unless the web target answers it: set `web({ dialogs: 'accept' })` (or
+`'dismiss'`) on the target, since the explorer cannot register
+`browser.onDialog`. The explorer still reads each dialog's message in the
+result of the action that opened it, or of the next one.
+
 The agents entry's `tools` and `system` carry over to the explorer; a
 hand-rolled `StepExecutor` under `executor` is replaced by the built-in agent
 for the run, with a notice on stderr, and needs a `model` on the entry (or the

@@ -516,10 +516,11 @@ background: `waitForPopup(() => trigger)` makes it active and returns it.
 - **State:** `cookies(url?)`, `setCookies`, `clearCookies`, `setViewport`,
   `emulateMedia({ colorScheme, reducedMotion })`.
 - **Dialogs and downloads:** register `onDialog('accept' | 'dismiss' |
-  handler)` before the tap that opens the dialog (an unanswered dialog
-  fails the next step with `INVALID_STATE`); `waitForDownload(() =>
-  trigger)` returns `{ path, absolutePath, suggestedFilename }`: read the
-  saved file through `absolutePath`.
+  handler)` before the tap that opens the dialog. A dialog no handler takes
+  is answered by the target's `web({ dialogs: 'accept' | 'dismiss' })`, or
+  fails the next step with `APP_NOT_OPEN` when that is unset.
+  `waitForDownload(() => trigger)` returns `{ path, absolutePath,
+  suggestedFilename }`: read the saved file through `absolutePath`.
 - **Identity:** `name` (`'chromium'`, `'firefox'`, or `'webkit'`; always
   `'chromium'` over CDP) and `version` are properties. Skip on a browser in
   the body: `test.skip(browser.name === 'firefox', 'reason')`.

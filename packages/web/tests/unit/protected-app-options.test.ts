@@ -1,5 +1,5 @@
 /**
- * The `headers`, `basicAuth`, `credentialOrigins`, `testIdAttribute`, `userAgent`, `locale`, `timezoneId`, `colorScheme`, `reducedMotion`, `initScripts`, and `screencast` options are checked at
+ * The `headers`, `basicAuth`, `credentialOrigins`, `testIdAttribute`, `userAgent`, `locale`, `timezoneId`, `colorScheme`, `reducedMotion`, `initScripts`, `screencast`, and `dialogs` options are checked at
  * config load, so a header the browser could never send or an attribute no
  * element could carry fails the run before a browser launches. What the
  * browser does with valid ones is in tests/integration.
@@ -104,6 +104,27 @@ describe('web({ testIdAttribute })', () => {
     for (const attribute of ['', 'data qa', 'data="qa"']) {
       expect(() => web({ testIdAttribute: attribute })).toThrowError(
         /testIdAttribute.*must be an attribute name/,
+      );
+    }
+  });
+});
+
+describe('web({ dialogs })', () => {
+  it('accepts the two answers', () => {
+    expect(() => web({ dialogs: 'accept' })).not.toThrow();
+    expect(() => web({ dialogs: 'dismiss' })).not.toThrow();
+  });
+
+  it('rejects any other value as INVALID_CONFIG, pointing a function at browser.onDialog', () => {
+    for (const dialogs of ['ok', '', 'synthetic-password-3141', null, true, () => undefined]) {
+      expect(() => web({ dialogs } as unknown as WebOptions)).toThrowError(
+        expect.objectContaining({ message: expect.not.stringContaining('synthetic-password-3141') }),
+      );
+      expect(() => web({ dialogs } as unknown as WebOptions)).toThrowError(
+        expect.objectContaining({
+          code: 'INVALID_CONFIG',
+          message: expect.stringMatching(/web\(\{ dialogs \}\) must be 'accept' or 'dismiss'.*browser\.onDialog/),
+        }),
       );
     }
   });
@@ -291,7 +312,7 @@ describe('web() option keys', () => {
       refused('web() has unknown key "viewprt"; did you mean "viewport"?'),
     );
     expect(() => web({ launchOptions: {} } as unknown as Parameters<typeof web>[0])).toThrow(
-      refused('web() has unknown key "launchOptions"; expected one of browser, chromiumSandbox, viewport, deviceScaleFactor, screencast, connect, headers, basicAuth, credentialOrigins, testIdAttribute, userAgent, locale, timezoneId, colorScheme, reducedMotion, initScripts, webmcp'),
+      refused('web() has unknown key "launchOptions"; expected one of browser, chromiumSandbox, viewport, deviceScaleFactor, screencast, connect, headers, basicAuth, credentialOrigins, testIdAttribute, userAgent, locale, timezoneId, colorScheme, reducedMotion, initScripts, webmcp, dialogs'),
     );
   });
 

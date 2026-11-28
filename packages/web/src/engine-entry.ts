@@ -24,7 +24,7 @@ export type {
 export { releaseEach } from './sweep.ts';
 export type { SweepOutcome } from './sweep.ts';
 export type { BrowserName, CdpTarget } from './browser-connection.ts';
-export type { Dialog, DialogHandler } from './dialogs.ts';
+export type { Dialog, DialogHandler, DialogPolicy } from './dialogs.ts';
 export type {
   Browser,
   BrowserExpectation,

@@ -851,7 +851,10 @@ trees, on both platforms, without a device.
   - Secret values never reach model input, digests, logs, reports, or
     artifacts as text. Model input is the redacted location, the redacted semantic tree (as text
     or, on request, the redacted node tree), masked pixels only when masking
-    is proven, and the sanitized prior-step records. Pixels mask secure
+    is proven, the sanitized prior-step records, and the redacted `system`
+    app-log lines an engine wrote during the step's previous action (a native
+    dialog `web({ dialogs })` answered; `systemLog` in
+    `agent/observation-feed.ts`). Pixels mask secure
     fields only, before and after a secret fill: a value the app shows
     elsewhere is in the image, a documented limit (`docs/security.mdx`), not
     a gap to close with taint or text-matching heuristics. Text downloads are

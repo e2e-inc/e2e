@@ -61,6 +61,9 @@ const MAX_WAITING_NAVIGATIONS = 50;
 const APP_LOG_SOURCES: ReadonlySet<unknown> = new Set(['console', 'error', 'network', 'system']);
 const APP_LOG_LEVELS: ReadonlySet<unknown> = new Set(['error', 'warning', 'info']);
 
+/** The newest `system` lines the route keeps for `systemLines`; an action that logs more shows only these. */
+const MAX_SYSTEM_LINES = 5;
+
 /** Whether an engine handed `appLog` an entry of the contract's shape. */
 function isAppLogEntry(value: unknown): value is AppLogEntry {
   if (typeof value !== 'object' || value === null) return false;
@@ -76,6 +79,8 @@ function createAppLogRoute(): AppLogRoute {
   // chatter before the first step never crowds out an error.
   const held = { errorsAndWarnings: 0, info: 0, navigation: 0 };
   const quota = { ...APP_LOG_LIMITS, navigation: MAX_WAITING_NAVIGATIONS };
+  let systemPushed = 0;
+  const system: string[] = [];
   const pass = (event: AppEvent): void => {
     if (sink !== undefined) {
       sink(event, timestamp());
@@ -88,7 +93,13 @@ function createAppLogRoute(): AppLogRoute {
   };
   return {
     push(entry) {
-      if (isAppLogEntry(entry)) pass({ kind: 'log', entry: { source: entry.source, level: entry.level, text: entry.text } });
+      if (!isAppLogEntry(entry)) return;
+      if (entry.source === 'system') {
+        systemPushed += 1;
+        system.push(entry.text);
+        if (system.length > MAX_SYSTEM_LINES) system.shift();
+      }
+      pass({ kind: 'log', entry: { source: entry.source, level: entry.level, text: entry.text } });
     },
     navigated(line) {
       if (typeof line === 'string' && line.trim() !== '') pass({ kind: 'navigation', line });
@@ -100,6 +111,12 @@ function createAppLogRoute(): AppLogRoute {
       held.errorsAndWarnings = 0;
       held.info = 0;
       held.navigation = 0;
+    },
+    systemLines(cursor) {
+      const after = cursor === undefined ? systemPushed : Math.min(Math.max(cursor, 0), systemPushed);
+      const count = systemPushed - after;
+      const lines = count === 0 ? [] : system.slice(-Math.min(count, system.length));
+      return { lines, skipped: count - lines.length, cursor: systemPushed };
     },
   };
 }

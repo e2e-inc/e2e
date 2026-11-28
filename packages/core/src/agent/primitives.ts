@@ -569,11 +569,14 @@ export function grammarTools(
     });
     // Each repeat is one recorded action against the budget, paced like a
     // separate call, so a lazy list gets to render between screens.
-    const scrolling = async (way: 'up' | 'down' | 'left' | 'right', id: string | undefined, count: number): Promise<void> => {
+    const scrolling = async (way: 'up' | 'down' | 'left' | 'right', id: string | undefined, count: number): Promise<ActionOutcome> => {
+      // A look between repeats takes the system lines it read; the result shows them.
+      const systemLog: string[] = [];
       for (let repeat = 0; repeat < count; repeat += 1) {
-        if (repeat > 0) await context.observe();
+        if (repeat > 0) systemLog.push(...((await context.observe()).systemLog ?? []));
         await context.actions.scroll(way, id === undefined ? undefined : { id });
       }
+      return { systemLog };
     };
     // Node-targeted scrolling rides `perform`; without it only the viewport scrolls.
     tools['scroll'] = verbs.has('tap')
@@ -949,7 +952,9 @@ function verbKit(context: StepExecutorContext, options: GrammarToolSetup) {
       try {
         const returned = await action();
         if (typeof returned === 'string') outcome = { lead: returned, expectChange };
-        else if (returned !== undefined) outcome = { lead: returned.lead, expectChange: returned.expectChange ?? expectChange };
+        else if (returned !== undefined) {
+          outcome = { lead: returned.lead ?? label.done, expectChange: returned.expectChange ?? expectChange, systemLog: returned.systemLog };
+        }
       } catch (cause) {
         if (isRuntimeHardStop(cause)) throw cause;
         const failed = await present(failureLead(label, cause));
@@ -957,7 +962,7 @@ function verbKit(context: StepExecutorContext, options: GrammarToolSetup) {
         options.onActionFailed?.(cause);
         return failed;
       }
-      return present(outcome.lead, { expectChange: outcome.expectChange, ...update });
+      return present(outcome.lead ?? label.done, { expectChange: outcome.expectChange, ...update, systemLog: outcome.systemLog });
     });
   const acting = (
     label: ActionLabel,
@@ -1007,8 +1012,11 @@ type ScreenUpdate = Omit<ScreenUpdateOptions, 'lead'>;
  * the listing is expected. Unset, the verb's own default stands.
  */
 interface ActionOutcome {
-  readonly lead: string;
+  /** Unset, the verb's own lead stands. */
+  readonly lead?: string | undefined;
   readonly expectChange?: boolean | undefined;
+  /** System lines read by looks the action took on its way; see `ScreenUpdateOptions.systemLog`. */
+  readonly systemLog?: readonly string[] | undefined;
 }
 
 /** Step handlers that report every model round trip to the harness budgets. */

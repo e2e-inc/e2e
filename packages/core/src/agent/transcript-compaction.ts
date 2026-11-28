@@ -11,7 +11,7 @@
  */
 
 import type { FilePart, ModelMessage, TextPart, ToolResultPart, UserContent } from 'ai';
-import { FULL_SCREEN_PATTERN, toolResultTexts } from './screen-update.ts';
+import { FULL_SCREEN_PATTERN, SYSTEM_LOG_HEADING, toolResultTexts } from './screen-update.ts';
 
 /** A part of a user message; a string message counts as one text part. */
 type UserPart = Exclude<UserContent, string>[number];
@@ -157,11 +157,16 @@ function isScreenItem(item: ContentItem): item is Extract<ContentItem, { type: '
   return item.type === 'text' && isFullScreen(item.text);
 }
 
-/** Everything before the screen, then the notice in place of the tree. */
+/**
+ * Everything before the screen, then the notice in place of the tree, then
+ * the system log that came with it: a dialog's message is on no later screen.
+ */
 function elideScreen(text: string): string {
   const at = text.search(FULL_SCREEN_PATTERN);
   const head = at <= 0 ? (text.split('\n', 1)[0] ?? '') : text.slice(0, at).trimEnd();
-  return `${head}\n[earlier screen elided; the newest "Current screen" plus the changes after it describe the screen]`;
+  const log = text.lastIndexOf(`\n\n${SYSTEM_LOG_HEADING}\n`);
+  const tail = log <= at ? '' : `\n\n${text.slice(log + 2).split('\n\n', 1)[0]}`;
+  return `${head}\n[earlier screen elided; the newest "Current screen" plus the changes after it describe the screen]${tail}`;
 }
 
 /** How many of the newest screenshots stay in the transcript verbatim. */

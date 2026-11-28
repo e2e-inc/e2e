@@ -122,6 +122,22 @@ describe('compactScreenHistory', () => {
     expect(compacted.slice(3)).toEqual(messages.slice(3));
   });
 
+  it('keeps the system log that came with an elided screen, which no later screen repeats', () => {
+    const LOG = `System log (not on the screen):\n- alert dialog "Could not save" opened; accepting it per web({ dialogs: 'accept' })`;
+    const withLog: ModelMessage = {
+      role: 'tool',
+      content: [{
+        type: 'tool-result', toolCallId: 'c2', toolName: 'tap',
+        output: { type: 'text', value: `Tapped #n3.\n\nThe screen changed substantially since revision b0. Current screen (revision b2, 2 nodes):\n#n1 document\n #n2 heading "X"\n\n${LOG}` },
+      }],
+    };
+    const compacted = compactScreenHistory([opening, withLog, fullScreenResult('c4', 'b4')], { keepStaleBytes: 0 });
+    expect(toolOutput(compacted[1]!)).toEqual({
+      type: 'text',
+      value: `Tapped #n3.\n\nThe screen changed substantially since revision b0.\n[earlier screen elided; the newest "Current screen" plus the changes after it describe the screen]\n\n${LOG}`,
+    });
+  });
+
   it('elides full screens that arrived with a screenshot, keeping the lead and the image', () => {
     const messages = [opening, pixelScreenResult('c1', 'b1'), pixelScreenResult('c2', 'b2'), pixelScreenResult('c3', 'b3'), pixelScreenResult('c4', 'b4')];
     expect(compactScreenHistory(messages, { keepStaleBytes: 1024 })).toBe(messages);

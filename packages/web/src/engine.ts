@@ -29,6 +29,7 @@ import { MEDIA_KEYS, mediaProblem } from './media.ts';
 import { FIELD_VALUE_CONTROL, headerProblem, originProblem } from './protected-app.ts';
 import { validatePermissions } from './permissions.ts';
 import { BROWSER_NAMES, isBrowserName } from './browser-connection.ts';
+import { DIALOG_POLICIES } from './dialogs.ts';
 
 /** App fields only a device target reads. */
 const NATIVE_APP_KEYS = ['bundleId', 'appPath', 'launchArguments'] as const;
@@ -106,6 +107,7 @@ export function web(options: WebOptions = {}): WebEngine<'web', 'attempt'> {
   if (options.deviceScaleFactor !== undefined) validateDeviceScaleFactor(options);
   if (options.screencast !== undefined) validateScreencast(options.screencast);
   if (options.webmcp !== undefined) validateWebmcp(options, provider);
+  if (options.dialogs !== undefined) validateDialogs(options.dialogs);
   const reconnecting = options.connect?.reconnectEndpoint !== undefined;
   // A per-attempt lease rides the same persistent context as `reconnectEndpoint`, with the same limits.
   const recoverable = reconnecting || provider?.scope === 'attempt';
@@ -202,6 +204,7 @@ const WEB_OPTION_KEYS: readonly string[] = Object.keys({
   reducedMotion: true,
   initScripts: true,
   webmcp: true,
+  dialogs: true,
 } satisfies Record<keyof WebOptions, true>);
 
 /** The options applied when the engine creates a browser context, which a persistent context never is. */
@@ -493,6 +496,20 @@ function validateTestIdAttribute(attribute: unknown): void {
       `web({ testIdAttribute }) must be an attribute name such as "data-testid", got ${JSON.stringify(attribute)}`,
     );
   }
+}
+
+/**
+ * Refuses a dialog policy other than the two answers, at config load. A
+ * function handler is `browser.onDialog`'s: a config value cannot see the
+ * test that opened the dialog.
+ */
+function validateDialogs(dialogs: unknown): void {
+  if (typeof dialogs === 'string' && (DIALOG_POLICIES as readonly string[]).includes(dialogs)) return;
+  // The value is not echoed: a config can pass any string here, a credential included.
+  throw new ConfigurationError(
+    'INVALID_CONFIG',
+    `web({ dialogs }) must be 'accept' or 'dismiss', got ${typeof dialogs === 'string' ? 'another string' : kindOf(dialogs)}; a function handler goes to browser.onDialog in the test`,
+  );
 }
 
 /** Refuses a sandbox opt-out that is not a boolean, at config load. */

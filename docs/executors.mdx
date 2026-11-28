@@ -176,6 +176,12 @@ root or a hidden one with `POLICY_DENIED`, and a missing file with
 The observation's `keyboardVisible` says whether an on-screen keyboard is
 showing, and is absent when the engine can't tell.
 
+`systemLog` lists what the engine logged as the `system` source since the
+step's previous observation, such as a native dialog that
+[`web({ dialogs })`](/reference/web#dialogs) answered: redacted, at most five
+lines, absent when there were none. Each line comes once, with the first look
+after it. The built-in agent shows it under the screen in that look's result.
+
 When semantic capture fails, the observation sets `treeUnavailable: true`,
 has no `tree`, and includes a screenshot if policy allows. Earlier node ids
 are invalid, and a missing tree doesn't prove a control is absent.
