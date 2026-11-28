@@ -53,6 +53,10 @@ describe('measureSinceLastRun', () => {
     mkdirSync(path.join(dir, 'build'));
     writeFileSync(path.join(dir, 'build', 'out.js'), 'ignored\n');
     writeFileSync(path.join(dir, '.e2e', 'report.json'), '{}\n');
+    // Staged content that is neither HEAD's nor the file's, which a plain `git rm --cached` refuses.
+    writeFileSync(path.join(dir, '.e2e', 'cache', 'committed.json'), '{"staged":true}\n');
+    runGit(dir, 'add', '.e2e/cache/committed.json');
+    writeFileSync(path.join(dir, '.e2e', 'cache', 'committed.json'), '{"edited":true}\n');
     const status = runGit(dir, 'status', '--porcelain');
 
     const measured = await measure(dir);

@@ -131,8 +131,8 @@ async function recordWorkingTree(root: string, written: readonly string[], signa
     };
     // A sparse checkout refuses a path outside its cone without `--sparse`, which git older than 2.34 does not know.
     const sparse = (await runGit(root, ['config', '--type=bool', '--get', 'core.sparseCheckout'], { signal })).stdout.trim() === 'true' ? ['--sparse'] : [];
-    // A file under `written` that is committed came with the index: it leaves the trees too.
-    if (leftOut.length > 0) await gitOutput(root, ['--literal-pathspecs', 'rm', '-r', '--cached', '--quiet', '--ignore-unmatch', ...sparse, '--', ...leftOut], signal, env);
+    // A file under `written` that is committed came with the index: it leaves the trees too. `--force`: git refuses to unstage one whose staged content is neither HEAD's nor the file's.
+    if (leftOut.length > 0) await gitOutput(root, ['--literal-pathspecs', 'rm', '-r', '--cached', '--force', '--quiet', '--ignore-unmatch', ...sparse, '--', ...leftOut], signal, env);
     await gitOutput(root, ['add', '--update', ...sparse], signal, env);
     const tracked = await writeTree();
     await gitOutput(root, ['add', '--all', ...sparse, ...everything], signal, env);

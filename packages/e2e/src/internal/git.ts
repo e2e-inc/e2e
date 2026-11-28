@@ -88,7 +88,8 @@ export async function gitOutput(cwd: string, args: readonly string[], signal: Ab
 export function gitFailureText(args: readonly string[], result: GitResult): string {
   const lines = result.stderr.split('\n').map((line) => line.trim()).filter((line) => line !== '');
   const said = [...(lines.find((line) => /^(fatal|error): /u.test(line)) ?? lines[0] ?? `exited with code ${result.exitCode}`).replace(/^(fatal|error): /u, '')];
-  return `git ${args[0] ?? ''}: ${said.length <= 200 ? said.join('') : `${said.slice(0, 199).join('')}…`}`;
+  // The command is the first argument that is no option of git itself, such as `--literal-pathspecs`.
+  return `git ${args.find((arg) => !arg.startsWith('-')) ?? ''}: ${said.length <= 200 ? said.join('') : `${said.slice(0, 199).join('')}…`}`;
 }
 
 /** The repository `cwd` is in, by its absolute root. */
