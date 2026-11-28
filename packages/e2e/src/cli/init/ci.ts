@@ -196,9 +196,10 @@ export interface WorkflowContext {
 
 /**
  * The jobs a pipeline holds, one per platform. `web` runs every target that
- * is not on a phone, or every target at all when the config has no phone
- * target (`'all'`, no `--target`); `ios` and `android` name their targets.
- * A platform with no targets gets no job.
+ * is neither on a phone nor one no job can run (an Electron app), or every
+ * target at all when the config has none of those (`'all'`, no `--target`);
+ * `ios` and `android` name their targets. A platform with no targets gets no
+ * job.
  */
 export interface CiJobs {
   readonly web?: readonly string[] | 'all';

@@ -150,10 +150,12 @@ GitHub, unless init goes straight on to the command it was started for.
 
 For a new project, the wizard asks for:
 
-- **The engines.** Select one, both, or none. **Web** (Playwright, the
+- **The engines.** Select any, or none. **Web** (Playwright, the
   default) adds `@e2e-dev/web`. **Mobile (iOS/Android)** adds
   `@e2e-dev/mobile`, defaults to iOS on macOS and Android elsewhere, and opens
-  Settings. Selecting none adds no engine, for HTTP tests or your own.
+  Settings. **Electron** adds `@e2e-dev/electron` and a target whose
+  `app.appPath` is the project directory. Selecting none adds no engine, for
+  HTTP tests or your own.
 - **A model provider or subscription for agent steps:** Vercel AI Gateway,
   OpenRouter, an OpenAI-compatible or local endpoint, ChatGPT, GitHub
   Copilot, OpenCode Console, SuperGrok, or **Skip for now** (for tests that
