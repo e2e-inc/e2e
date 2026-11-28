@@ -243,12 +243,11 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
         };
         listed.push(id);
         // A sheet is part of its window, which lists it as a child: the window server lists it as a window of its own,
-        // which must not be listed again below as one accessibility cannot read.
-        if let Ok(children) = element.elements("AXChildren", 64) {
-            for sheet in children.iter().filter(|child| child.text("AXRole").as_deref() == Some("AXSheet")) {
-                listed.extend(sheet.window_id());
-                sheets.extend(sheet.frame());
-            }
+        // which must not be listed again below as one accessibility cannot read. A read the app did not answer in time
+        // is no proof the window holds no sheet.
+        for sheet in window_sheets(element).map_err(|_| unanswered())? {
+            listed.extend(sheet.window_id());
+            sheets.extend(sheet.frame());
         }
         out.push(WindowInfo {
             id: id.to_string(),
@@ -296,6 +295,28 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
     }
     complete(listed.len(), unresolved)?;
     Ok(out)
+}
+
+/// The sheets a window holds, among all its children. `Err(AX_CANNOT_COMPLETE)` for a read the app did not answer in
+/// time.
+pub(crate) fn window_sheets(window: &Element) -> Result<Vec<Element>, ax::AXError> {
+    let count = match window.count("AXChildren") {
+        Ok(count) => count,
+        Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+        Err(_) => return Ok(Vec::new()),
+    };
+    let children = match window.elements("AXChildren", count.max(1)) {
+        Ok(children) => children,
+        Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+        Err(_) => return Ok(Vec::new()),
+    };
+    let mut sheets = Vec::new();
+    for child in children {
+        if crate::actions::stalled(child.attribute("AXRole"))?.as_ref().and_then(ax::Value::text) == Some("AXSheet") {
+            sheets.push(child);
+        }
+    }
+    Ok(sheets)
 }
 
 /// Whether a window server window is the sheet `sheet` (x, y, width, height) with its shadow around it: it holds the

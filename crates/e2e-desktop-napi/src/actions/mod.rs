@@ -698,9 +698,10 @@ pub fn close_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Inst
     })
 }
 
-/// Whether a window holds a sheet, as one that asks before it closes does. A read that fails is no sheet.
+/// Whether a window holds a sheet, as one that asks before it closes does. A read that fails is no sheet: the close
+/// waits on.
 fn holds_sheet(window: &Element) -> bool {
-    window.elements("AXChildren", 64).is_ok_and(|children| children.iter().any(|child| child.text("AXRole").as_deref() == Some("AXSheet")))
+    windows::window_sheets(window).is_ok_and(|sheets| !sheets.is_empty())
 }
 
 #[cfg(test)]
