@@ -1,8 +1,8 @@
 /**
  * Each entry imports only its own engine, at runtime and in its types, so a
  * project with one engine installed loads and type-checks the entry it uses:
- * the root never reaches `@e2e-dev/web`, and `./web` never reaches
- * `@e2e-dev/mobile` or agent-device.
+ * the root never reaches `@e2e-dev/web`, `./web` never reaches
+ * `@e2e-dev/mobile` or agent-device, and `./desktop` reaches neither.
  */
 
 import { readFileSync } from 'node:fs';
@@ -41,4 +41,11 @@ it('keeps the ./web entry off @e2e-dev/mobile and agent-device', () => {
 
   expect(imported).toContain('@e2e-dev/web');
   expect([...imported].filter((name) => name === '@e2e-dev/mobile' || name.includes('agent-device'))).toEqual([]);
+});
+
+it('keeps the ./desktop entry off @e2e-dev/mobile, @e2e-dev/web, and agent-device', () => {
+  const imported = packagesImportedBy('desktop.ts');
+
+  expect(imported).toContain('@e2e-dev/desktop/engine');
+  expect([...imported].filter((name) => name === '@e2e-dev/mobile' || name === '@e2e-dev/web' || name.includes('agent-device'))).toEqual([]);
 });

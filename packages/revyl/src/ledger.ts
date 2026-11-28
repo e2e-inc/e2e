@@ -1,10 +1,11 @@
 /**
- * The Revyl web sessions a run holds open, one marker file per session under
- * the system temp directory. Revyl sessions carry no tags to find a run's by,
- * but the runner and its workers share one machine: a worker writes a marker
- * before it starts a session and removes it once the session is stopped, so
- * the markers left at the end of the run name the sessions of workers that
- * died.
+ * The Revyl sessions and computers a run holds open, one marker file per
+ * session under the system temp directory. Revyl sessions carry no tags to
+ * find a run's by, but the runner and its workers share one machine: a
+ * process writes a marker before it starts a session and removes it once the
+ * session is stopped, so the markers left at the end of the run name the
+ * sessions of workers that died, and a run's leftover directory names the
+ * computers of a runner that died.
  */
 
 import { createHash } from 'node:crypto';
@@ -42,6 +43,15 @@ export async function remember(runId: string, targetName: string, sessionId: str
   const marker = markerFor(runId, targetName, sessionId);
   await mkdir(path.dirname(marker), { recursive: true, mode: 0o700 });
   await writeFile(marker, '', { mode: 0o600 });
+}
+
+/** The runs that hold markers, by their directory names: the run id with anything but letters, digits, `_`, and `-` replaced by `_`. */
+export async function runs(): Promise<string[]> {
+  const entries = await readdir(path.join(tmpdir(), 'e2e-revyl'), { withFileTypes: true }).catch((cause: unknown) => {
+    if (isMissing(cause)) return [];
+    throw cause;
+  });
+  return entries.flatMap((entry) => (entry.isDirectory() ? [entry.name] : []));
 }
 
 /** Records that `sessionId` was stopped; called only after Revyl confirmed it. */

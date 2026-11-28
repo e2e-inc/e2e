@@ -968,6 +968,12 @@ importers:
         specifier: 0.21.44
         version: 0.21.44
     devDependencies:
+      '@e2e-dev/core':
+        specifier: workspace:*
+        version: link:../core
+      '@e2e-dev/desktop':
+        specifier: workspace:*
+        version: link:../desktop
       '@e2e-dev/mobile':
         specifier: workspace:*
         version: link:../mobile

@@ -45,6 +45,8 @@
     "packages/acp/tests/live/*.ts",
     "packages/e2e/tests/live/*.ts",
     "packages/e2e/src/config/register.ts",
+    "packages/revyl/src/desktop/remote/relay.ts",
+    "packages/revyl/src/desktop/remote/server.ts",
     "scripts/microbench/child.mjs"
   ],
   "ignorePatterns": [
