@@ -49,6 +49,24 @@ test.describe('controls window', () => {
     await expect(note).toHaveValue('ada');
   });
 
+  test('reads a heading level from the description of a heading that reports none', async ({ screen }) => {
+    await expect(screen.getByRole('heading', { level: 2 })).toBeVisible();
+    await expect(screen.getByRole('heading', { level: 1 })).toHaveCount(0);
+  });
+
+  test('reads which outline rows are expanded', async ({ screen }) => {
+    await expect(screen.getByRole('treeitem', 'Fruits', { expanded: true })).toBeVisible();
+    await expect(screen.getByRole('treeitem', 'Vegetables', { expanded: false })).toBeVisible();
+    await expect(screen.getByRole('treeitem', { expanded: true })).toHaveCount(1);
+  });
+
+  test('scrolls a scroll area that lists its scroll bar after more than 16 children', async ({ screen }) => {
+    const last = screen.getByText('Line 30');
+    await expect(last).toBeHidden();
+    await screen.getByTestId('lines').scrollUntilVisible(last, { direction: 'down' });
+    await expect(last).toBeVisible();
+  });
+
   test('scrolls a list until an item shows, and selects it', async ({ screen }) => {
     const last = screen.getByText('Item 40');
     await expect(last).toBeHidden();
