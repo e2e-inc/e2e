@@ -7,7 +7,7 @@
   "scripts": {
     "build:app": "sh scripts/build-macos.sh",
     "typecheck": "tsc --noEmit",
-    "test": "tsc --noEmit && node node_modules/e2e/dist/cli/bin.js run",
+    "test": "tsc --noEmit && node node_modules/e2e/dist/cli/bin.js run && node node_modules/e2e/dist/cli/bin.js run --config e2e.depth.config.ts",
     "test:agent": "node node_modules/e2e/dist/cli/bin.js run --config e2e.agent.config.ts",
     "test:physical": "tsc --noEmit && node node_modules/e2e/dist/cli/bin.js run --config e2e.physical.config.ts"
   },

@@ -3,5 +3,5 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["e2e.config.ts", "e2e.agent.config.ts", "e2e.physical.config.ts", "tests/**/*.ts", "tests-agent/**/*.ts", "tests-physical/**/*.ts"]
+  "include": ["e2e.config.ts", "e2e.agent.config.ts", "e2e.physical.config.ts", "e2e.depth.config.ts", "tests/**/*.ts", "tests-agent/**/*.ts", "tests-physical/**/*.ts", "tests-depth/**/*.ts"]
 }
