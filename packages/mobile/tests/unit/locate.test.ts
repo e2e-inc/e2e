@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { CaptureSnapshotResult } from 'agent-device';
 import type { LocatorExpression, TextPattern } from '@e2e-dev/core/engine';
 import { resolveExpression } from '../../src/locate.ts';
 import { projectSnapshot, type RawNode } from '../../src/nodes.ts';
@@ -11,6 +14,14 @@ function exact(value: string): TextPattern {
 
 function query(kind: 'role' | 'label' | 'placeholder' | 'text' | 'displayValue' | 'testId', value: string, extra: object = {}): LocatorExpression {
   return { kind: 'query', query: { kind, value: exact(value), ...extra } };
+}
+
+/** A query over a snapshot captured on a real device, answered with the matches' test ids. */
+function captured(platform: MobilePlatform, scenario: string): (kind: Parameters<typeof query>[0], value: string) => (string | undefined)[] {
+  const raw = JSON.parse(readFileSync(path.join(import.meta.dirname, '../fixtures/snapshots', platform, `${scenario}.json`), 'utf8')) as Pick<CaptureSnapshotResult, 'nodes' | 'viewport'>;
+  let counter = 0;
+  const { index } = projectSnapshot(raw.nodes, { mintId: () => `n${++counter}`, viewport: raw.viewport });
+  return (kind, value) => resolveExpression(query(kind, value), index, platform).map((entry) => entry.node.testId);
 }
 
 function names(expression: LocatorExpression): string[] {
@@ -46,6 +57,38 @@ describe('locator expressions over a device snapshot', () => {
     expect(names(query('displayValue', 'hunter2'))).toEqual([]);
     expect(names(query('testId', 'ABOUT'))).toEqual(['About']);
     expect(names(query('placeholder', 'anything'))).toEqual([]);
+  });
+
+  it('finds a described Android node by the text it shows, and by its description only as a label', () => {
+    const found = captured('android', 'control-inventory');
+    // A text view the app describes.
+    expect(found('text', 'Plain controls, every state exposed')).toEqual(['inventory-header']);
+    expect(found('text', 'Inventory heading')).toEqual([]);
+    expect(found('label', 'Inventory heading')).toEqual(['inventory-header']);
+    // A filled field shows what was typed, an empty one its hint.
+    expect(found('text', 'Ada Lovelace')).toEqual(['name-input']);
+    expect(found('text', 'Name field')).toEqual([]);
+    expect(found('label', 'Name field')).toEqual(['name-input']);
+    expect(found('text', 'Key echo')).toEqual(['key-input']);
+    expect(found('text', 'Key echo field')).toEqual([]);
+    expect(found('label', 'Key echo field')).toEqual(['key-input']);
+    expect(found('placeholder', 'Key echo')).toEqual(['key-input']);
+  });
+
+  it('finds an iOS node by its one label as text and as label', () => {
+    const found = captured('ios', 'control-inventory');
+    expect(found('text', 'Name field')).toEqual(['name-input']);
+    expect(found('label', 'Name field')).toEqual(['name-input']);
+    expect(found('text', 'Ada Lovelace')).toEqual([]);
+    expect(found('displayValue', 'Ada Lovelace')).toEqual(['name-input']);
+  });
+
+  it('finds a node that shows no text by its name', () => {
+    let counter = 0;
+    const { index } = projectSnapshot([{ ref: 'e1', index: 0, depth: 0, type: 'android.widget.ImageButton', contentDescription: 'Close' }], { mintId: () => `n${++counter}` });
+    expect(index[0]?.node).toMatchObject({ name: 'Close' });
+    expect(index[0]?.node.text).toBeUndefined();
+    expect(resolveExpression(query('text', 'Close'), index, 'android')).toHaveLength(1);
   });
 
   it('answers text and label queries with the innermost match when an ancestor echoes the text', () => {

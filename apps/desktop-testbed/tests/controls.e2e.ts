@@ -215,6 +215,12 @@ test.describe('controls window', () => {
     });
   }
 
+  test('finds a label by its text, and the value it names by its own text or by that label', async ({ screen }) => {
+    await expect(screen.getByText('Words')).toHaveText('Words');
+    await expect(screen.getByText('5')).toHaveAccessibleName('Words');
+    await expect(screen.getByLabel('Words')).toHaveCount(2);
+  });
+
   test('waits for a disabled list to be enabled before it selects an option', async ({ screen }) => {
     await expect(screen.getByRole('combobox', 'Size')).toBeDisabled();
     // The app enables the list half a second after this tap: the select starts while it is still disabled.
