@@ -293,6 +293,22 @@ describe('the Revyl computer transport', () => {
     await connection.close(1000);
   });
 
+  it('ends a connection whose server declares a frame over the size limit, naming why', async () => {
+    states = ['active'];
+    relay = (request) => ({ output: Object.fromEntries(request.sessions.map((id) => [id, Buffer.from(`Content-Length: ${257 * 1024 * 1024}\r\n\r\n`).toString('base64')])), exited: closed(request), more: false });
+    const connection = await transport().open(context({ role: 'worker', env: { ...env, E2E_REVYL_COMPUTER: COMPUTER } }));
+    connection.output.write(frame({ id: 1, method: 'initialize', params: {} }));
+
+    expect(await read(connection, 1)).toEqual([]);
+    expect(connection.diagnostics?.()).toContain('the engine protocol stream broke: a frame declares');
+    await connection.close(1000);
+  });
+
+  it('refuses a REVYL_API_URL that would send the key over plain http to another host', async () => {
+    await expect(transport().open(context({ env: { ...env, REVYL_API_URL: 'http://backend.example' } }))).rejects.toThrow('REVYL_API_URL must use https');
+    expect(calls).toEqual([]);
+  });
+
   it('still closes a session on the Mac after its close ran out of time', async () => {
     states = ['active'];
     relay = (request) => ({ output: {}, exited: closed(request), more: false });

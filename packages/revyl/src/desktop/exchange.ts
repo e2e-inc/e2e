@@ -103,7 +103,7 @@ export class ComputerRelay {
     const output = new Writable({
       write: (chunk: Buffer, _encoding, done) => {
         if (session.exit === undefined) {
-          session.send(chunk);
+          framed(session, () => session.send(chunk));
           this.#kick();
         }
         done();
@@ -159,7 +159,7 @@ export class ComputerRelay {
       }
       for (const session of live) {
         const bytes = answer.output[session.id];
-        if (bytes !== undefined) session.receive(Buffer.from(bytes, 'base64'));
+        if (bytes !== undefined) framed(session, () => session.receive(Buffer.from(bytes, 'base64')));
         const exit = answer.exited[session.id];
         if (exit !== undefined) session.finish(exit);
         if (session.exit !== undefined && session.closing) this.#sessions.delete(session);
@@ -188,6 +188,15 @@ export class ComputerRelay {
     }
     const waiting = live.every((session) => session.queued.length === 0) && live.some((session) => session.owed || session.closeSent);
     return { sessions: live.map((session) => session.id), open, input, close, wait: waiting && !this.#more ? WAIT_MS : 0, budget: OUTPUT_BUDGET };
+  }
+}
+
+/** Runs `step` on a session's bytes; framing they break, such as a body over the size limit, ends the session with the reason. */
+function framed(session: Session, step: () => void): void {
+  try {
+    step();
+  } catch (cause) {
+    session.finish({ code: null, signal: null, stderr: `the engine protocol stream broke: ${cause instanceof Error ? cause.message : String(cause)}` });
   }
 }
 
