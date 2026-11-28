@@ -325,7 +325,12 @@ fn value_text(element: &Element) -> Option<String> {
 
 /// The element's center on screen.
 fn center(element: &Element) -> Outcome<(f64, f64)> {
-    let (x, y, width, height) = element.frame().ok_or_else(|| Failure::refused(codes::ACTION_FAILED, "the element has no frame on screen"))?;
+    // A read the app did not answer in time, or of an element gone since, is no proof it has no frame: retried, before any
+    // pointer input.
+    let (x, y, width, height) = element
+        .read_frame()
+        .map_err(|error| unread(error, "read the element's frame"))?
+        .ok_or_else(|| Failure::refused(codes::ACTION_FAILED, "the element has no frame on screen"))?;
     if width <= 0.0 || height <= 0.0 {
         return Err(Failure::refused(codes::ACTION_FAILED, "the element has no area on screen"));
     }
