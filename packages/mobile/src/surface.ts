@@ -2051,7 +2051,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * but the last typed character shows in clear, so every secure node's
    * bounds are painted over before the file is kept. A secure node without
    * bounds cannot be masked, so the screenshot is refused with POLICY_DENIED,
-   * and an image that cannot be redacted is not written at all.
+   * as is one whose image is turned 90 degrees from the screen, and an image
+   * that cannot be redacted is not written at all.
    */
   async screenshot(label: string | undefined, operation: OperationContext, budget: InputBudget): Promise<string> {
     const attempt = this.attempt;
@@ -2107,6 +2108,9 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
     }
     const data = await this.rawScreenshot(operation.signal, {}, budget);
     const masked = redactSecure(data, secure, this.knownViewport);
+    if (masked === 'turned') {
+      throw new ConfigurationError('POLICY_DENIED', 'the screenshot is turned 90 degrees from the screen, so the secure fields on screen cannot be masked; screenshot withheld');
+    }
     if (masked === undefined) {
       throw new EngineError('ENGINE_FAILURE', 'the screenshot could not be read to mask the secure fields on screen; screenshot withheld', {
         retryable: false,
@@ -2120,7 +2124,8 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * be produced or redacted costs the observation its image, not the step,
    * unless the operation's budget ran out. A screen with a secure field that
    * has no bounds to mask takes none and reports no regions masked, so the
-   * harness knows the pixels were withheld.
+   * harness knows the pixels were withheld; so does one whose image came back
+   * turned from the screen.
    */
   private async capturePixels(
     operation: OperationContext,
@@ -2139,6 +2144,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       return undefined;
     }
     const redacted = redactSecure(raw, secure, viewport);
+    if (redacted === 'turned') return { masked: 0 };
     if (redacted === undefined) return undefined;
     const size = readPngSize(redacted.data);
     if (size === undefined) return undefined;
@@ -2170,16 +2176,22 @@ function secureBounds(projected: ProjectedSnapshot): readonly Rect[] | undefined
  * when the image cannot be read or edited: the caller then withholds the
  * image rather than ship one it could not prove redacted. Bounds are in
  * logical points; the image may be at device scale, so they are scaled by
- * the image-to-viewport ratio.
+ * the image-to-viewport ratio. Returns `turned` when the image is portrait
+ * and the viewport landscape, or the reverse: an iOS simulator's simctl
+ * capture can come back portrait in landscape, and the engine does not
+ * read which way the image is turned (agent-device's `displayRotation`,
+ * reported only when the simulator answers in time), so the bounds have no
+ * place on it.
  */
 function redactSecure(
   data: Uint8Array,
   secure: readonly Rect[],
   viewport: ViewportSize | undefined,
-): { data: Uint8Array; masked: number } | undefined {
+): { data: Uint8Array; masked: number } | 'turned' | undefined {
   if (secure.length === 0) return { data, masked: 0 };
   const size = readPngSize(data);
   if (size === undefined) return undefined;
+  if (viewport !== undefined && (size.width - size.height) * (viewport.width - viewport.height) < 0) return 'turned';
   const scale = viewport !== undefined && viewport.width > 0 ? size.width / viewport.width : 1;
   const rects = secure.map((rect) => ({ x: rect.x * scale, y: rect.y * scale, width: rect.width * scale, height: rect.height * scale }));
   try {

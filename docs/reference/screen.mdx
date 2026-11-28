@@ -1350,7 +1350,7 @@ const card = await screen.getByTestId('order-summary').screenshot('summary');
 | `LOCATOR_AMBIGUOUS` | More than one match. |
 | `ACTION_FAILED`, `ENGINE_FAILURE` | The scroll or the capture failed or timed out, as on a web match that never stops animating. |
 | `UNSUPPORTED_CAPABILITY` | The engine takes no screenshots, or writes one that is not a PNG. |
-| `POLICY_DENIED` | On iOS and Android, a secure field on screen has no bounds to mask. |
+| `POLICY_DENIED` | On iOS and Android, a secure field on screen has no bounds to mask, or one is on screen and the image comes back turned 90 degrees from the screen, which an iOS simulator's capture can do in landscape. |
 
 #### `count`
 

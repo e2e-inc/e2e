@@ -1490,6 +1490,81 @@ describe('observation', () => {
     expect(treeOnly.root.children).toHaveLength(1);
   });
 
+  it('withholds the pixels and the screenshot of a screen with a secure field when the image is turned from the screen', async () => {
+    const h = harness();
+    // An iOS simulator in landscape captures in portrait: a third of 390x844 for an 844x390 screen.
+    const turned = encodePng({ width: 130, height: 282, channels: 3, pixels: new Uint8Array(130 * 282 * 3).fill(200) });
+    const upright = encodePng({ width: 282, height: 130, channels: 3, pixels: new Uint8Array(282 * 130 * 3).fill(200) });
+    let shot = turned;
+    h.fake.respond('capture.screenshot', (args) => {
+      writeFileSync((args as { path: string }).path, shot);
+      return { path: (args as { path: string }).path };
+    });
+    h.fake.respond('capture.snapshot', () => ({
+      viewport: { width: 844, height: 390 },
+      nodes: [
+        { ref: 'e1', index: 0, depth: 0, type: 'application', label: 'Bank', rect: { x: 0, y: 0, width: 844, height: 390 } },
+        { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'SecureTextField', label: 'Password', rect: { x: 0, y: 210, width: 844, height: 45 } },
+      ],
+    }));
+    await openAttempt(h);
+
+    const withheld = await h.engine.observe!(operation(), { pixels: true });
+    expect(withheld.viewport).toEqual({ width: 844, height: 390 });
+    expect(withheld.pixels).toBeUndefined();
+    expect(withheld.maskedRegionCount).toBe(0);
+    await expect(h.engine.artifacts!.screenshot('turned', operation())).rejects.toMatchObject({ category: 'configuration', code: 'POLICY_DENIED' });
+    expect(existsSync(path.join(artifactsDir, 'screenshots'))).toBe(false);
+
+    // The same screen captured upright is masked over the field.
+    shot = upright;
+    const masked = await h.engine.observe!(operation(), { pixels: true });
+    expect(masked.maskedRegionCount).toBe(1);
+    expect(await h.engine.artifacts!.screenshot('upright', operation())).toBe('screenshots/001-upright.png');
+    const written = decodePng(new Uint8Array(readFileSync(path.join(artifactsDir, 'screenshots', '001-upright.png'))));
+    const at = (x: number, y: number) => [...written.pixels.subarray((y * written.width + x) * written.channels, (y * written.width + x) * written.channels + 3)];
+    expect(at(100, 77)).toEqual([0, 0, 0]);
+    expect(at(100, 60)).toEqual([200, 200, 200]);
+
+    // A screen with no secure field has nothing to mask, so its turned image ships as it came.
+    shot = turned;
+    h.fake.respond('capture.snapshot', () => ({
+      viewport: { width: 844, height: 390 },
+      nodes: [{ ref: 'e1', index: 0, depth: 0, type: 'application', label: 'Bank', rect: { x: 0, y: 0, width: 844, height: 390 } }],
+    }));
+    const plain = await h.engine.observe!(operation(), { pixels: true });
+    expect(plain.pixels).toMatchObject({ width: 130, height: 282 });
+    expect(await h.engine.artifacts!.screenshot('plain', operation())).toBe('screenshots/002-plain.png');
+
+    // The reverse, a landscape image of a portrait screen, is withheld the same way.
+    shot = upright;
+    h.fake.respond('capture.snapshot', () => ({
+      viewport: { width: 390, height: 844 },
+      nodes: [
+        { ref: 'e1', index: 0, depth: 0, type: 'application', label: 'Bank', rect: { x: 0, y: 0, width: 390, height: 844 } },
+        { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'SecureTextField', label: 'Password', rect: { x: 0, y: 270, width: 390, height: 44 } },
+      ],
+    }));
+    const reverse = await h.engine.observe!(operation(), { pixels: true });
+    expect(reverse.viewport).toEqual({ width: 390, height: 844 });
+    expect(reverse.pixels).toBeUndefined();
+    expect(reverse.maskedRegionCount).toBe(0);
+    await expect(h.engine.artifacts!.screenshot('reverse', operation())).rejects.toMatchObject({ category: 'configuration', code: 'POLICY_DENIED' });
+
+    // A square image of a square screen is not turned, so it is masked.
+    shot = encodePng({ width: 100, height: 100, channels: 3, pixels: new Uint8Array(100 * 100 * 3).fill(200) });
+    h.fake.respond('capture.snapshot', () => ({
+      viewport: { width: 200, height: 200 },
+      nodes: [
+        { ref: 'e1', index: 0, depth: 0, type: 'application', label: 'Watch', rect: { x: 0, y: 0, width: 200, height: 200 } },
+        { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'SecureTextField', label: 'PIN', rect: { x: 0, y: 100, width: 200, height: 40 } },
+      ],
+    }));
+    const square = await h.engine.observe!(operation(), { pixels: true });
+    expect(square.viewport).toEqual({ width: 200, height: 200 });
+    expect(square.maskedRegionCount).toBe(1);
+  });
+
   it('holds the status bar in a fixed state for a screenshot taken for comparison, and only then', async () => {
     const h = harness();
     const png = encodePng({ width: 195, height: 422, channels: 4, pixels: new Uint8Array(195 * 422 * 4).fill(255) });

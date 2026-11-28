@@ -146,7 +146,7 @@ const shot = await app.screenshot('after-checkout');
 | Throws | When |
 | --- | --- |
 | `UNSUPPORTED_CAPABILITY` | The engine takes no screenshots. |
-| `POLICY_DENIED` | On iOS and Android, a secure field on screen has no bounds to mask. |
+| `POLICY_DENIED` | On iOS and Android, a secure field on screen has no bounds to mask, or one is on screen and the image comes back turned 90 degrees from the screen, which an iOS simulator's capture can do in landscape. |
 | `ENGINE_FAILURE` | The capture failed. |
 
 <Note>
