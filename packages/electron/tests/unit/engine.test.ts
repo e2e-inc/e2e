@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { electron } from '../../src/engine.ts';
-import { checkLaunchArguments, resolveOptions } from '../../src/options.ts';
+import { checkCwd, checkLaunchArguments, checkLaunchOptions, resolveOptions } from '../../src/options.ts';
 
 describe('electron()', () => {
   it('declares the capabilities of a Chromium window driven over the DevTools protocol', () => {
@@ -58,5 +58,38 @@ describe('resolveOptions', () => {
     expect(() => resolveOptions({ env: { A: 1 } } as never)).toThrow(/string value/);
     expect(() => resolveOptions({ testIdAttribute: 'data test' })).toThrow(/testIdAttribute/);
     expect(() => resolveOptions(null as never)).toThrow(/must be an object/);
+    expect(() => resolveOptions({ cwd: '' })).toThrow(/electron\(\{ cwd \}\) must be a path/);
+    expect(resolveOptions({ cwd: 'app' }).cwd).toBe('app');
+  });
+
+  it('refuses a cwd that names no directory, from the project root', () => {
+    const root = import.meta.dirname;
+    expect(() => checkCwd('electron({ cwd })', root, '.', 'INVALID_CONFIG')).not.toThrow();
+    expect(() => checkCwd('electron({ cwd })', root, undefined, 'INVALID_CONFIG')).not.toThrow();
+    expect(() => checkCwd('electron({ cwd })', root, 'no-such-directory', 'INVALID_CONFIG')).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG', message: expect.stringMatching(/no-such-directory, which is not a directory/) }));
+    expect(() => checkCwd('electron({ cwd })', root, 'engine.test.ts', 'INVALID_CONFIG')).toThrow(/not a directory/);
+  });
+});
+
+describe('checkLaunchOptions', () => {
+  const root = import.meta.dirname;
+
+  it('gives a test\'s launch its arguments, variables, and directory, with nothing by default', () => {
+    expect(checkLaunchOptions(undefined, root)).toEqual({ args: [], env: {} });
+    expect(checkLaunchOptions({ args: ['--flag'], env: { A: '1' }, cwd: '.', timeout: 1000 }, root)).toEqual({ args: ['--flag'], env: { A: '1' }, cwd: '.' });
+  });
+
+  it('refuses what the config refuses, as the test\'s own mistake', () => {
+    const refused = (options: unknown, message: RegExp): void =>
+      expect(() => checkLaunchOptions(options, root)).toThrow(expect.objectContaining({ code: 'INVALID_ARGUMENT', message: expect.stringMatching(message) }));
+    refused({ headless: true }, /headless/);
+    refused({ args: '--flag' }, /args \}\) must be a list of strings/);
+    refused({ args: ['--user-data-dir=/tmp/x'] }, /electron\.launch\(\{ args \}\) must not set --user-data-dir/);
+    refused({ args: ['--inspect=9229'] }, /--inspect/);
+    refused({ env: { A: 1 } }, /string value/);
+    refused({ env: { node_options: '--inspect' } }, /node_options: the engine starts the app with its own Node\.js switches/);
+    refused({ cwd: '' }, /cwd \}\) must be a path/);
+    refused({ cwd: 'no-such-directory' }, /not a directory/);
+    refused(null, /takes an object/);
   });
 });

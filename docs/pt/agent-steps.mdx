@@ -1,0 +1,155 @@
+---
+title: Como funcionam os passos do agente
+description: O que o modelo vê, o que ele pode fazer, como um passo termina e quanto ele custa.
+"og:image": "https://e2e.com/docs/images/og/agent-steps.png?v=321767dc3b"
+"twitter:image": "https://e2e.com/docs/images/og/agent-steps.png?v=321767dc3b"
+---
+
+Um passo do agente é uma chamada a `agent.act`, `agent.assert`,
+`agent.waitFor` ou `agent.extract`. O modelo lê a tela, pede ações e termina
+o passo com um veredito. Todo passo tem um prazo e um orçamento de chamadas
+ao modelo.
+
+## Quem faz o quê
+
+O executor escolhe as ações e retorna o veredito. O runner oculta os dados
+sensíveis da tela, autoriza e realiza cada ação, aplica os orçamentos,
+preenche os segredos e escreve o relatório. O agente embutido é o executor,
+a menos que a entrada do agente na configuração defina um
+[executor personalizado](/executors).
+
+## O que o modelo vê
+
+Para `act`, o primeiro prompt traz a instrução, os parâmetros, os passos
+concluídos e um snapshot em texto da tela com os dados sensíveis ocultados:
+papéis, nomes, textos e estados. Ele não traz HTML bruto, cookies,
+cabeçalhos nem valores do ambiente. Os campos de senha são mascarados, a
+menos que um script da página esconda um deles do e2e
+([onde a ocultação termina](/reference/security#where-redaction-stops)).
+Um valor de segredo configurado que aparece na tela vira `<secret:name>`.
+
+Depois de uma ação, o modelo recebe as mudanças na tela, ou um novo
+snapshot completo quando a maior parte da tela mudou. O id de um nó continua
+o mesmo enquanto o elemento dele existir. Uma ação que falha também retorna
+a tela atual, para que o modelo possa escolher a próxima ação.
+
+Os julgamentos padrão de `assert`, `waitFor` e `extract` veem a instrução,
+a tela atual e a localização da tela, e o `context` do agente, nunca os
+passos concluídos nem os resumos do agente que realiza as ações. Eles podem
+usar um [modelo juiz](/models#a-judge-of-its-own) separado. As asserções
+embutidas com exploração usam `agents.<name>.model`, mesmo quando `judge`
+está definido.
+
+`vision: true` adiciona uma captura de tela mascarada, e `vision: 'only'`
+avalia apenas a captura de tela. Veja a
+[referência do agente](/reference/agent#vision) para os modos. As capturas
+de tela mascaram apenas campos seguros
+([depois de um preenchimento de segredo](/reference/security#screenshots-after-a-secret-fill)).
+
+## O que o modelo pode fazer
+
+O agente recebe as ferramentas de ação que a engine do alvo suporta (`tap`,
+`type`, `press`, `select`, `scroll`, `navigate`, entrada de teclado no
+elemento em foco e ações de pixel por coordenadas quando a árvore de
+acessibilidade não basta). Veja a
+[referência das ferramentas](/reference/agent#pixel-tools-screenshot-and-the-point-verbs).
+
+Para um parâmetro `Secret`, o modelo chama `type_secret` usando apenas o
+nome e a finalidade do segredo. O e2e valida o campo e digita ele mesmo o
+valor real, para que esse valor nunca entre em prompts, transcrições,
+relatórios ou traces de IA.
+
+Uma ação sobre um elemento tem tempo limite de 15 segundos. Você também pode
+expor operações personalizadas com [ferramentas do projeto](/tools).
+
+Para evitar envios duplicados, o agente embutido só clica uma vez em botões
+Save/Submit, a menos que a tela mostre claramente que o envio não deu certo
+(como um erro de validação) ou que o toque só fechou o teclado. Um
+salvamento silencioso, sem confirmação visível, pode terminar o passo como
+`failed`, então diga ao agente como confirmar o salvamento, por exemplo
+`"save the product, then
+confirm it appears in the product list"`.
+
+Uma proteção contra loops embutida detecta falhas repetidas, ciclos ou longas
+paradas em uma tela que não muda, e leva o agente a encerrar com um veredito
+antes de gastar o orçamento ou atingir o prazo.
+
+<Accordion title="Limites da proteção contra loops e vereditos no mesmo turno">
+- **Ações que falham:** o loop avisa depois de 3 ações seguidas que falharam
+  e pede um veredito depois de 5.
+- **Observações repetidas:** chamadas a `observe` ou `screenshot` geram um
+  aviso depois de 6 consultas à tela sem mudança na listagem, na localização
+  ou nas abas (veredito em 10), ou depois de 12 consultas seguidas no total,
+  mesmo quando a tela muda (veredito em 20).
+- **Vereditos no mesmo turno:** quando um passo só pede ações, o agente pode
+  enviar o veredito no mesmo turno da última ação para economizar uma
+  chamada ao modelo. O runner recusa esse veredito se uma ação anterior
+  falhou ou se a última ação não mudou nada.
+</Accordion>
+
+## Exploração em asserções
+
+Com `explore: true`, `agent.assert` pode rolar a tela e combinar evidências
+de vários viewports usando ferramentas somente leitura. O viewport fica onde
+a exploração termina. Use para conteúdo em outra parte da tela atual, e use
+`waitFor` para mudanças ao longo do tempo. Veja
+[exploração em asserções](/reference/agent#agent-assert) para as
+ferramentas, os orçamentos e os vereditos.
+
+## Como um passo termina
+
+Um passo termina com um de três vereditos:
+
+- `passed`: a tela mostra que o passo deu certo.
+- `failed`: a condição exigida é falsa ou não pode ser demonstrada.
+  Evidência insuficiente resulta em `ASSERTION_INCONCLUSIVE`.
+- `blocked`: um pré-requisito, o ambiente ou um limite interrompeu o passo
+  antes de um veredito sobre o produto. O código de erro define o código de
+  saída.
+
+Só `failed` e `blocked` trazem um código de erro.
+
+| Bloqueado por | Códigos | Saída |
+| --- | --- | ---: |
+| Uma credencial que o app rejeitou, ou uma que não está configurada | `AUTH_CREDENTIAL_INVALID`, `AUTH_CREDENTIAL_UNAVAILABLE` | 2 |
+| Um ambiente fora do ar | `ENVIRONMENT_UNAVAILABLE` | 3 |
+| Dados pré-carregados ou um pré-requisito fora do produto que não existem | `SEED_DATA_MISSING`, `TEST_SETUP_FAILED` | 2 |
+| Um orçamento ou o relógio | `STEP_BUDGET_EXHAUSTED`, `STEP_TIMEOUT` | 1 |
+| Uma interação que o conjunto de ferramentas não consegue realizar | `AUTOMATION_UNSUPPORTED` | 1 |
+
+A [referência de erros](/reference/errors#agenterror) lista todos os códigos
+que um veredito pode trazer.
+
+## Quanto custa um passo
+
+Cada chamada tem um orçamento de chamadas ao modelo e um tempo limite
+padrão. Veja [orçamentos](/reference/agent#budgets).
+
+- `assert` sem exploração e `extract` fazem um julgamento, mais uma chamada
+  de reparo se a resposta vier malformada. Quando os dados não estão na
+  tela, `extract` falha com `ASSERTION_INCONCLUSIVE` e não retorna nenhum
+  placeholder.
+- `waitFor` não faz chamada ao modelo enquanto a tela e a localização da
+  tela continuam iguais.
+- Uma captura de tela adiciona tokens de entrada a cada chamada que a leva.
+  `act` pede uma captura apenas quando o snapshot em texto não basta.
+- O [cache de replay](/cache) reproduz os passos `act` que passaram, sem
+  chamadas ao modelo.
+- Com um [executor personalizado](/executors#what-the-executor-handles),
+  `assert` usa os orçamentos de `act`.
+
+Use `expect` para verificações exatas, e dê a cada `act` os passos rumo a um
+único [objetivo](/core-concepts#goals). Quando o provedor faz cache dos
+prompts, `--debug` mostra, por passo, a parcela dos tokens de entrada que
+veio do cache.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Ferramentas do projeto" icon="wrench" href="/tools">
+    Adicione suas próprias ferramentas ao agente.
+  </Card>
+  <Card title="Executores personalizados" icon="gears" href="/executors">
+    Mantenha o loop com o seu prompt, ou substitua-o.
+  </Card>
+</CardGroup>

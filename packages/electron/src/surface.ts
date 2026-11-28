@@ -38,18 +38,19 @@ import type {
   ViewportPoint,
 } from '@e2e-dev/core/engine';
 import { performAtPoint, performOnNode, pressKey, swipeWindow, typeText, type ActionContext } from './actions.ts';
-import { AppProcess, DISCARD_CLOSE_MS, RESTART_CLOSE_MS, type AppDownload } from './app-process.ts';
+import { AppProcess, DISCARD_CLOSE_MS, RESTART_CLOSE_MS, type AppDownload, type LaunchExtra } from './app-process.ts';
 import { answerWithin, Budget, withBudget } from './budget.ts';
 import { screenshotFile, screenshotName, withPixels } from './capture.ts';
 import { DevTools } from './devtools.ts';
 import { DialogRouter, type DialogHandler } from './dialogs.ts';
 import type { ElectronMainModule } from './fixtures.ts';
 import { closedWindow, invalidState, notActionable } from './errors.ts';
+import { checkJsonArgument, EvaluateError, functionSource } from './evaluate.ts';
 import { ensureFfmpeg } from './ffmpeg.ts';
 import { outsideApp } from './file-bound.ts';
 import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
 import { locateIn, projectRead, readWindow, type ProjectionContext, type RawRead } from './locate.ts';
-import { checkLaunchArguments, type ResolvedElectronOptions } from './options.ts';
+import { checkCwd, checkLaunchArguments, type ResolvedElectronOptions } from './options.ts';
 import type { WindowMatcher } from './fixtures.ts';
 import { Recorder } from './video.ts';
 import { ROOT_ID, Windows, type AppWindow } from './windows.ts';
@@ -63,6 +64,8 @@ const TRACE_READ_MS = 1_000;
 /** How long a window gets to say its document's title. */
 const TITLE_MS = 1_000;
 
+const NO_EXTRA: LaunchExtra = { args: [], env: {} };
+
 function crashed(): Error {
   return invalidState('the window\'s renderer crashed: reload it from the main process with electron.evaluate, or restart the app');
 }
@@ -74,6 +77,8 @@ export class ElectronSurface {
   private executable: string | undefined;
   private attempt: EngineAttemptContext | undefined;
   private userDataDir: string | undefined;
+  /** What `electron.launch()` added to this attempt's launches. */
+  private launchExtra: LaunchExtra = NO_EXTRA;
   private uploadsDir: string | undefined;
   private artifactCounter = 0;
   private recorder: Recorder | undefined;
@@ -112,6 +117,7 @@ export class ElectronSurface {
     const problem = info.app.appPath === undefined ? undefined : appPathProblem(info.projectRoot, info.app.appPath);
     if (problem !== undefined) throw new ConfigurationError('INVALID_CONFIG', problem);
     checkLaunchArguments(info.app.launchArguments);
+    checkCwd('electron({ cwd })', info.projectRoot, this.options.cwd, 'INVALID_CONFIG');
   }
 
   startAttempt(context: EngineAttemptContext): Promise<void> {
@@ -119,6 +125,7 @@ export class ElectronSurface {
     this.artifactCounter = 0;
     this.recordings = 0;
     this.dialogs.reset();
+    this.launchExtra = NO_EXTRA;
     // The app's data lives here for the whole attempt: `app.restart()` keeps it, `app.clearState()` empties it.
     this.userDataDir = mkdtempSync(path.join(tmpdir(), 'e2e-electron-'));
     return Promise.resolve();
@@ -183,11 +190,35 @@ export class ElectronSurface {
     });
   }
 
+  /** `electron.userDataDir`: the attempt's own directory, there before the app is launched so a test can put data in it. */
+  dataDirectory(): string {
+    if (this.userDataDir === undefined) throw invalidState('electron.userDataDir is read inside a test: no attempt is running');
+    return this.userDataDir;
+  }
+
+  /** `electron.launch()`: a fresh launch as `app.open()` does, with `extra` added to this and every later launch of the attempt. */
+  async launchWith(extra: LaunchExtra, operation: OperationContext): Promise<void> {
+    this.failOnDialog();
+    const budget = new Budget(operation, 'electron.launch');
+    return await this.app.serialized(async () => {
+      budget.check();
+      // Set in turn with the launches: one already under way starts with what it was asked for.
+      this.launchExtra = extra;
+      await this.app.quit(operation, RESTART_CLOSE_MS);
+      await this.launch(operation, budget);
+    });
+  }
+
+  /** The project root, which a test's relative paths resolve against. */
+  get root(): string {
+    return this.projectRoot;
+  }
+
   private async launch(operation: OperationContext, budget: Budget): Promise<void> {
     const { attempt, userDataDir, executable } = this;
     if (attempt === undefined || userDataDir === undefined) throw invalidState('app.open() runs inside a test: no attempt is running');
     if (executable === undefined) throw invalidState('the electron engine was not initialized');
-    await this.app.launch({ executable, projectRoot: this.projectRoot, app: this.appInfo, env: this.runEnv, userDataDir, attempt }, operation, budget);
+    await this.app.launch({ executable, projectRoot: this.projectRoot, app: this.appInfo, env: this.runEnv, userDataDir, attempt, extra: this.launchExtra }, operation, budget);
     await this.recorder?.snap();
   }
 
@@ -230,12 +261,22 @@ export class ElectronSurface {
         const raw = await Promise.race([readWindow(this.devtools, window), crash]);
         if (raw !== 'crashed') return raw;
       } catch (cause) {
-        if (!window.page.isClosed() && !closedWindow(cause)) throw cause;
-        this.windowList.discard(window.page);
+        if (!this.closedUnder(window, cause)) throw cause;
       } finally {
         stopWaiting();
       }
     }
+  }
+
+  /**
+   * Whether work on a window failed because the window closed, which can
+   * happen before its close event arrives. It is forgotten here, so the
+   * caller goes on with the window shown in its place.
+   */
+  private closedUnder(window: AppWindow, cause: unknown): boolean {
+    if (!window.page.isClosed() && !closedWindow(cause)) return false;
+    this.windowList.discard(window.page);
+    return true;
   }
 
   async observe(operation: OperationContext, options?: EngineObserveOptions): Promise<EngineSnapshot> {
@@ -258,17 +299,25 @@ export class ElectronSurface {
     return await withBudget(operation, 'locate', async (budget) => {
       // A crashed window is waited on briefly, for a reload already under way; every read waiting the whole timeout
       // would make each step of a test whose app crashed take it.
-      const raw = await this.readShown(new Deadline(Math.min(CRASH_RELOAD_WAIT_MS, budget.waits.remaining())));
-      if (raw === undefined) return [];
-      const sink = this.attempt?.screen;
-      if (sink !== undefined && this.leftApp(raw.window) === undefined) {
+      for (;;) {
+        const raw = await this.readShown(new Deadline(Math.min(CRASH_RELOAD_WAIT_MS, budget.waits.remaining())));
+        if (raw === undefined) return [];
+        const sink = this.attempt?.screen;
+        if (sink !== undefined && this.leftApp(raw.window) === undefined) {
+          try {
+            sink(projectRead(raw, 'tree', this.projection()));
+          } catch {
+            // The trace is evidence; a sink that throws never fails the step.
+          }
+        }
         try {
-          sink(projectRead(raw, 'tree', this.projection()));
-        } catch {
-          // The trace is evidence; a sink that throws never fails the step.
+          return await locateIn(this.devtools, raw, expression, this.projection());
+        } catch (cause) {
+          // The window closed between its read and the query (a popup that closes itself): the window shown in its
+          // place is the one to find the node in, as a read that met the closed window does.
+          if (!this.closedUnder(raw.window, cause)) throw cause;
         }
       }
-      return await locateIn(this.devtools, raw, expression, this.projection());
     });
   }
 
@@ -362,6 +411,18 @@ export class ElectronSurface {
     await this.act(operation, 'keyboard.press', window, (budget) => pressKey(window, key, budget));
   }
 
+  // --- the fixture's keyboard and mouse ---
+
+  /**
+   * `electron.keyboard.*` and `electron.mouse.*`: input to the shown window,
+   * wherever its focus and pointer are, taking its turn after the gestures
+   * before it as every action does.
+   */
+  async input(label: string, send: (window: AppWindow, budget: Budget) => Promise<void>, operation: OperationContext): Promise<void> {
+    const window = this.requireWindow();
+    await this.act(operation, label, window, (budget) => send(window, budget));
+  }
+
   // --- windows as tabs ---
 
   async switchTab(index: number, operation: OperationContext): Promise<void> {
@@ -381,6 +442,12 @@ export class ElectronSurface {
     return this.windowList.open();
   }
 
+  /** `electron.activeWindow()`: the window `screen` reads. */
+  shownWindow(): AppWindow {
+    if (!this.app.running) throw this.app.notRunning();
+    return this.windowList.require();
+  }
+
   isActiveWindow(window: AppWindow): boolean {
     return this.windowList.isShownPage(window.page);
   }
@@ -396,6 +463,28 @@ export class ElectronSurface {
   async closeWindow(window: AppWindow, operation: OperationContext): Promise<void> {
     if (window.page.isClosed()) return;
     await withBudget(operation, 'close window', (budget) => budget.send(() => this.app.closeWindow(window.page)));
+  }
+
+  /** `window.evaluate()`: runs test code in the window's page, with the app's own globals. */
+  async evaluateInWindow<R, A>(window: AppWindow, fn: (arg: A) => R | Promise<R>, arg: A, operation: OperationContext): Promise<R> {
+    this.failOnDialog();
+    if (window.page.isClosed()) throw new TestError('ACTION_FAILED', 'window.evaluate: the window has closed');
+    checkJsonArgument(arg, 'window.evaluate');
+    // Its message is the test's, never read for a pattern.
+    const run = window.page.evaluateInPage(functionSource(fn, 'window.evaluate'), arg).catch((cause: unknown) => {
+      throw cause instanceof EvaluateError ? new TestError('EVALUATE_FAILED', `window.evaluate: ${cause.message}`, { cause }) : cause;
+    });
+    // A cancelled step never awaits it.
+    run.catch(() => undefined);
+    // Not input: a timeout is the function's, and nothing the engine sent may have committed.
+    return (await withBudget(operation, 'window.evaluate', () => run)) as R;
+  }
+
+  /** `window.reload()`: the window's document loaded again. */
+  async reloadWindow(window: AppWindow, operation: OperationContext): Promise<void> {
+    this.failOnDialog();
+    if (window.page.isClosed()) throw new TestError('ACTION_FAILED', 'window.reload: the window has closed');
+    await withBudget(operation, 'window.reload', (budget) => budget.send(() => window.page.reload()));
   }
 
   /** `electron.window()`: the first open window `which` matches, waited for until the operation's deadline. */

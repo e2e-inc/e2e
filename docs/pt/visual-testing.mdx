@@ -69,11 +69,11 @@ bunx e2e run --update-snapshots
 Tire as capturas de tela na máquina que as renderiza na CI: um runner Linux
 para a web e o Android, um runner macOS com o mesmo simulador para o iOS.
 
-Sem `--update-snapshots`, uma execução na CI nunca escreve no projeto. Uma
-captura de tela ausente faz o teste falhar, e a execução a salva nos
-resultados do teste em `snapshots/<path in the project>` para você baixar e
-fazer commit. Para escrever todas de uma vez, rode `--update-snapshots` em um
-job como o job de teste:
+Sem `--update-snapshots`, a CI nunca escreve no seu repositório. Uma captura
+de tela ausente faz o teste falhar, e a nova imagem é salva em
+`.e2e/results/.../snapshots/` para você baixar e fazer commit. Para gerar de
+novo todas as imagens de referência de uma vez, adicione um workflow manual
+com `--update-snapshots`:
 
 ```yaml title=".github/workflows/screenshots.yml"
 name: Update screenshots
@@ -133,9 +133,10 @@ Na web, o e2e interrompe as animações e esconde o cursor de texto. No iOS e no
 Android, ele mantém a barra de status fixa, para que o relógio e a bateria
 coincidam em toda execução.
 
-O e2e mascara os campos seguros em toda captura de tela, inclusive depois do
-preenchimento de um segredo. O matcher falha com `POLICY_DENIED` quando a
-engine não consegue provar que todo campo seguro na tela está mascarado.
+O e2e mascara os campos seguros em toda captura de tela, mesmo depois do
+preenchimento de um segredo. Se a engine não conseguir garantir que todo campo
+seguro está mascarado, a asserção falha em vez de salvar uma imagem sem
+máscara.
 
 ## Próximos passos
 

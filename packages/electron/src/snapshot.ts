@@ -142,6 +142,11 @@ export class DomSnapshot {
     return from >= 0 && to > from && (this.blanks[to - 1] ?? 0) - (this.blanks[from] ?? 0) > 0;
   }
 
+  /** The snapshot index of the node's parent, or -1 for the document. */
+  parentOf(index: number): number {
+    return this.parents[index] ?? -1;
+  }
+
   /** The node's nearest table cell, from the DOM: Chromium gives a layout table's cells no cell role. */
   cellOf(index: number): number {
     return this.cells[index] ?? -1;

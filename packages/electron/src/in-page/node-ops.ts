@@ -209,6 +209,11 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       if (target instanceof HTMLElement || target instanceof SVGElement) target.focus();
       target.removeEventListener('focus', onFocus);
       if (holdsFocus(target)) return 'held';
+      // A composite widget hands focus to a part of itself (a grid row to its editor): the element holds it through
+      // that part, and what is typed next goes where a person who tabbed here would type.
+      const root = target.getRootNode();
+      const active = root instanceof Document || root instanceof ShadowRoot ? root.activeElement : null;
+      if (took && active !== null && target.contains(active)) return 'held';
       return took ? 'moved' : 'none';
     },
     blur() {

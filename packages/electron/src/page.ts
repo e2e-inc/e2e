@@ -7,6 +7,7 @@
 import type { Deadline } from '@e2e-dev/core/engine';
 import type { Session } from './cdp/connection.ts';
 import { Keyboard, Mouse, type InputTarget } from './cdp/input.ts';
+import { callForPlainData } from './evaluate.ts';
 
 /** How long past its operation's end a gesture may still hold the page's input, to release what it pressed. */
 const RELEASE_MS = 1_000;
@@ -14,7 +15,7 @@ const RELEASE_MS = 1_000;
 /** The isolated world the engine's own page-side reads run in, apart from the app's globals. */
 export const WORLD_NAME = '__e2e_electron__';
 
-type PageEvent = 'close' | 'crash' | 'load';
+type PageEvent = 'close' | 'crash' | 'load' | 'document';
 
 /** What a page function threw, as the protocol reports it. */
 export function thrown(details: { readonly text: string; readonly exception?: { readonly description?: string } }): string {
@@ -28,6 +29,8 @@ export class PageTarget implements InputTarget {
   private closed = false;
   private isolated: Promise<number> | undefined;
   private documents = 0;
+  /** Whether the current document fired its load event. */
+  private loaded = false;
   private gestures: Promise<unknown> = Promise.resolve();
   private readonly handlers = new Map<PageEvent, Set<() => void>>();
 
@@ -102,10 +105,18 @@ export class PageTarget implements InputTarget {
     return this.documents;
   }
 
+  /** The current document fired its load event. */
+  markLoaded(): void {
+    this.loaded = true;
+    this.emit('load');
+  }
+
   /** The page has another document: the isolated world of the last one is dropped, and its nodes are no longer this page's. */
   documentChanged(): void {
     this.isolated = undefined;
     this.documents += 1;
+    this.loaded = false;
+    this.emit('document');
   }
 
   /**
@@ -183,6 +194,45 @@ export class PageTarget implements InputTarget {
       });
     }
     return this.isolated;
+  }
+
+  /**
+   * Runs test code in the page's own world, where the app's globals are:
+   * `source` is a function expression called with `arg`. Rejects with
+   * `EvaluateError` when the code throws.
+   */
+  async evaluateInPage(source: string, arg: unknown): Promise<unknown> {
+    const { session } = this;
+    const { result: scope } = await session.send('Runtime.evaluate', { expression: 'globalThis' });
+    if (scope.objectId === undefined) throw new Error('the page has no global object to run code on');
+    try {
+      return await callForPlainData(session, { objectId: scope.objectId, source, arg, userGesture: true });
+    } finally {
+      void session.send('Runtime.releaseObject', { objectId: scope.objectId }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Reloads the page's document and resolves once the new one has loaded: a
+   * load the document before it was still finishing does not count. Rejects
+   * when the window closes or its renderer crashes instead.
+   */
+  async reload(): Promise<void> {
+    const before = this.documents;
+    let stop: () => void = () => undefined;
+    const ended = new Promise<never>((_resolve, reject) => {
+      const gone = (): void => reject(new Error('the window closed or its renderer crashed while it reloaded (Target closed)'));
+      const stops = [this.on('close', gone), this.on('crash', gone)];
+      stop = () => stops.forEach((off) => off());
+    });
+    ended.catch(() => undefined);
+    try {
+      await this.session.send('Page.reload');
+      while (this.documents === before) await Promise.race([this.next('document'), ended]);
+      if (!this.loaded) await Promise.race([this.next('load'), ended]);
+    } finally {
+      stop();
+    }
   }
 
   /** Calls a self-contained page function in the isolated world with JSON arguments and returns its JSON result. */

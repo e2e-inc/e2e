@@ -1,0 +1,392 @@
+---
+title: "@e2e-dev/core"
+sidebarTitle: Otomatisasi
+description: Kendalikan browser atau aplikasi native dari kode biasa, dengan agent opsional tanpa runner tes.
+---
+
+`@e2e-dev/core` mengendalikan browser atau aplikasi iOS maupun Android dari
+kode biasa. Paket ini menggunakan engine e2e, `screen`, dan agent tanpa runner
+tes: tidak ada file konfigurasi, laporan, atau `expect`.
+
+## Kapan menggunakannya
+
+| Kebutuhan Anda | Gunakan |
+| --- | --- |
+| Menulis tes dan menjalankannya secara lokal maupun di CI, dengan laporan | `e2e`. Lihat [panduan cepat](/quickstart). |
+| Memberi coding agent sesi langsung di aplikasi Anda | [MCP server](/mcp-server) |
+| Mengendalikan aplikasi dari program sendiri: skrip, scraper, bot, atau penyiapan data tes | `@e2e-dev/core` |
+| Membuka browser atau perangkat kedua di dalam tes | `@e2e-dev/core`. Lihat [Membuka host di dalam tes](#open-a-host-inside-a-test). |
+
+## Instalasi
+
+<CodeGroup>
+
+```bash npm
+npm install @e2e-dev/core @e2e-dev/web
+```
+
+```bash pnpm
+pnpm add @e2e-dev/core @e2e-dev/web
+```
+
+```bash bun
+bun add @e2e-dev/core @e2e-dev/web
+```
+
+</CodeGroup>
+
+Pasang `@e2e-dev/mobile` sebagai pengganti atau bersama `@e2e-dev/web` untuk
+mengendalikan perangkat mobile. `@e2e-dev/core` tidak memerlukan runner tes
+`e2e` dan berjalan pada Node.js 22.22.3+ atau 24.8+.
+
+<Note>
+Selalu impor engine melalui subpath `/engine` (seperti
+`@e2e-dev/web/engine`). Entry root mengekspor fixture `test` yang memerlukan
+paket `e2e` lengkap.
+</Note>
+
+## Kendalikan browser
+
+`launch` menyiapkan engine dan mengembalikan host. Sesi adalah satu konteks
+browser terisolasi pada host tersebut. Sesi menyediakan fixture bawaan
+`screen`, `app`, dan `platform`, serta fixture dari engine, dalam contoh ini
+`browser`.
+
+```ts title="prices.ts"
+import { launch } from '@e2e-dev/core';
+import { web } from '@e2e-dev/web/engine';
+
+await using shop = await launch(web(), { app: { url: 'https://shop.example.com' } });
+
+for (const sku of ['A-1001', 'B-2040']) {
+  await using session = await shop.newSession();
+  await session.app.open(`/products/${sku}`);
+  const soldOut = session.screen.getByText('Sold out', { exact: false, visible: true });
+  if (await soldOut.isVisible()) continue;
+  const price = await session.screen.getByTestId('sale-price').textContent();
+  console.log(sku, price);
+}
+```
+
+Jalankan dengan `node prices.ts`. Node.js dapat menjalankan file `.ts` tanpa
+langkah build.
+
+`screen` dan `app` menggunakan API yang sama seperti di tes: lihat
+[screen](/reference/screen) dan [app](/reference/app). `await using` menutup
+setiap sesi di akhir bloknya, lalu menutup host beserta browser di akhir file.
+Fitur ini memerlukan Node.js 24 atau Bun. Pada Node.js 22, panggil `close()` di
+dalam `finally`:
+
+```ts
+const shop = await launch(web(), { app: { url: 'https://shop.example.com' } });
+try {
+  const session = await shop.newSession();
+  await session.app.open('/products/A-1001');
+} finally {
+  await shop.close(); // closes the open session too
+}
+```
+
+| Aturan | Perilaku |
+| --- | --- |
+| Kepemilikan | Berikan instance engine baru untuk setiap pemanggilan `launch(web())`; pemakaian ulang akan gagal. |
+| Sesi | Setiap host hanya dapat memiliki satu sesi aktif. Tutup sesi sebelum memanggil `newSession()`, atau jalankan host lain untuk pekerjaan paralel. |
+| Perangkat | Setiap host `mobile()` mengklaim sesi perangkat sendiri. Lihat [Beberapa host pada perangkat](#several-hosts-on-devices). |
+| Batas waktu | Tindakan, penantian, dan pembacaan memiliki batas waktu default 30 detik; `app.open()` dan `app.restart()` default-nya 120 detik. Ubah dengan `launch({ timeout })` atau `session.setDefaultTimeout(ms)`. |
+| Pembatalan | Berikan `AbortSignal` ke `launch({ signal })` atau `newSession({ signal })`. |
+| Ctrl-C | Host ditutup dengan rapi saat menerima SIGINT, SIGTERM, dan SIGHUP agar browser dan perangkat tidak tertinggal. Nonaktifkan dengan `handleSignals: false`. |
+| File | Screenshot dan unduhan disimpan di folder sementara yang dihapus saat `close()`. Berikan `artifactsDir` agar file tetap disimpan. |
+
+Semua opsi tercantum di [referensi](/reference/core).
+
+### Beberapa host pada perangkat
+
+Tanpa opsi `session`, setiap host `mobile()` mengendalikan perangkat melalui
+sesi agent-device sendiri. Namanya berasal dari target dan token acak
+(`e2e-ios-<token>-0`). Host tidak pernah mengambil alih perangkat yang sedang
+dipegang sesi lain, baik sesi itu milik host lain maupun worker dari
+`e2e run`.
+
+- Boot satu perangkat bebas untuk setiap host. Di dalam tes, worker eksekusi
+  menggunakan perangkat lebih dulu: secara default, eksekusi lokal memakai
+  sebanyak perangkat yang sudah boot seperti jumlah worker dan file tes.
+  Sisakan satu perangkat bebas dengan `--workers`, atau tentukan perangkat
+  eksekusi melalui opsi `device` pada target.
+- Tanpa opsi `device`, dua host yang dibuka bersamaan dapat menganggap perangkat
+  boot yang sama masih bebas. Host yang kalah akan mencoba perangkat bebas
+  berikutnya. Jika tidak ada perangkat tersisa, peluncurannya gagal. Target
+  dengan `appPath` juga dapat bertabrakan; lihat poin berikutnya.
+- Host memegang perangkat sejak aplikasinya dibuka. Target yang hanya menyebut
+  `appPath` tidak membuka aplikasi saat peluncuran, sehingga host kedua yang
+  diluncurkan sebelum host pertama membuka aplikasinya dapat memilih perangkat
+  yang sama. Panggil `device.installApp()` lalu `app.open()` pada sesi setiap
+  host sebelum meluncurkan host berikutnya, atau tentukan perangkat setiap host
+  melalui opsi `device`.
+- Program yang berakhir tanpa menutup host yang sudah membuka aplikasi
+  (`process.exit()` atau dihentikan paksa) membiarkan perangkat tetap diklaim.
+  Hal yang sama terjadi jika sesi host gagal ditutup: `close()` melempar error
+  yang menyebut nama sesi. Host berikutnya dan `e2e run` akan melewati perangkat
+  itu sampai Anda menutup sesi yang disebutkan dalam error.
+  Ganti `SESSION` dengan nama tersebut:
+
+<CodeGroup>
+```bash npm
+npx agent-device close --session "SESSION"
+```
+
+```bash pnpm
+pnpm dlx agent-device close --session "SESSION"
+```
+
+```bash bun
+bunx agent-device close --session "SESSION"
+```
+</CodeGroup>
+
+
+## Kendalikan aplikasi di perangkat
+
+Berikan `mobile()` dan aplikasi. Kode `screen` yang sama dapat berjalan di
+browser maupun perangkat.
+
+```ts
+import { launch } from '@e2e-dev/core';
+import { mobile } from '@e2e-dev/mobile/engine';
+
+await using shopApp = await launch(mobile({ platform: 'ios' }), {
+  app: { bundleId: 'com.example.shop', linkBase: 'https://shop.example.com' },
+});
+await using session = await shopApp.newSession();
+await session.app.open('/products/A-1001');
+```
+
+`app.linkBase` membuat `app.open(path)` membuka tautan di aplikasi:
+`https://shop.example.com/products/A-1001` sebagai universal link pada contoh
+ini, atau `shopapp://products/A-1001` dengan `linkBase: 'shopapp://'`. Tanpa
+opsi ini, `app.open()` meluncurkan aplikasi tanpa menerima jalur.
+`linkBase` juga dapat digunakan pada target `e2e.config.ts`; lihat
+[konfigurasi](/reference/config#linkbase).
+
+Simulator iOS dapat menghentikan tautan dengan skema khusus pada prompt
+"Open in ...?". Jika prompt ini muncul, tap tombol `Open`:
+`session.screen.getByRole('button', 'Open')`.
+
+## Simpan status masuk
+
+`session.saveState()` menyimpan cookie dan storage sesi browser di memori,
+sehingga Anda dapat meneruskannya ke `newSession({ state })` setelah sesi
+pertama ditutup. (Tidak didukung pada perangkat mobile.)
+
+```ts
+const state = await session.saveState();
+await session.close();
+await using next = await shop.newSession({ state });
+```
+
+Untuk mempertahankan state di antara eksekusi program, enkripsi dengan kunci
+32 byte yang Anda simpan, misalnya di secret store. State tidak dapat diekspor
+sebagai teks biasa.
+
+```ts
+import { randomBytes } from 'node:crypto';
+import { SessionState } from '@e2e-dev/core';
+
+const key = randomBytes(32);
+const bytes = await state.export({ key }); // write these to disk
+const restored = await SessionState.import(bytes, { key });
+```
+
+State tersimpan hanya dapat dipulihkan pada host dengan engine, platform, dan
+aplikasi yang sama (atur nilai `app.identity` yang sama jika alamat seperti
+`localhost` dan `127.0.0.1` berbeda). Pemulihan gagal jika host tidak cocok,
+kunci salah, atau byte state telah diubah.
+
+## Berikan secret
+
+Berikan nilai secret ke `launch`, lalu isi field dengan namanya.
+
+```ts
+await using shop = await launch(web(), {
+  app: { url: 'https://shop.example.com' },
+  secrets: { SHOP_PASSWORD: process.env.SHOP_PASSWORD! },
+});
+await session.screen.getByLabel('Password').fill(shop.secret('SHOP_PASSWORD'));
+```
+
+Nilai secret tidak pernah muncul di error yang dilempar sesi, di
+`screen.tree()`, atau pada teks yang dibaca agent. Pembacaan yang diminta kode
+Anda, seperti `textContent()`, tetap mengembalikan teks halaman apa adanya.
+State yang diekspor menyimpan nilai yang diketahui sesi dalam bentuk terenkripsi,
+sehingga host yang diluncurkan tanpa nilai tersebut tetap menyamarkannya.
+
+Setiap sesi dalam program menyamarkan nilai dari semua host yang terbuka di
+dalamnya.
+
+Agent menerima secret melalui params, hanya berdasarkan namanya:
+`agent.act('Sign in with {password}', { params: { password: shop.secret('SHOP_PASSWORD') } })`.
+
+## Tangani error
+
+Setiap kegagalan menghasilkan error dengan `code`. Periksa dengan
+`isE2EError`, bukan `instanceof`.
+
+```ts
+import { isE2EError } from '@e2e-dev/core';
+
+try {
+  await session.screen.getByRole('button', 'Add to cart').tap();
+} catch (error) {
+  if (isE2EError(error) && error.code === 'LOCATOR_NOT_FOUND') console.log('not on sale');
+  else throw error;
+}
+```
+
+| Kode | Kondisi |
+| --- | --- |
+| `LOCATOR_NOT_FOUND` | Tidak ada yang cocok sebelum batas waktu. Penantian yang melewati batas waktu juga memakai kode ini. |
+| `LOCATOR_AMBIGUOUS` | Locator cocok dengan lebih dari satu node. |
+| `ACTION_FAILED` | Tindakan tidak selesai. Tindakan mungkin sudah sampai ke aplikasi, jadi jangan ulangi pembayaran. |
+| `APP_UNREACHABLE` | Tidak ada respons dari URL aplikasi. |
+| `CANCELLED` | `signal` membatalkan operasi atau sesi sudah ditutup. |
+| `WORKER_PROTOCOL` | Sesi kedua pada satu host, host kedua pada satu instance engine, atau host yang sudah ditutup. |
+
+[Error](/reference/errors) mencantumkan semua kode.
+
+## Jalankan tindakan oleh agent
+
+`createAgent` dari `@e2e-dev/core/agent` menjalankan agent pada satu sesi.
+`act`, `assert`, `waitFor`, dan `extract` bekerja seperti di
+[tes](/reference/agent). Agent memerlukan AI SDK, sementara contoh ini
+membaca hasil bertipe dengan `zod`: pasang `ai` dan `zod` bersama engine.
+
+```ts title="checkout.ts"
+import { launch } from '@e2e-dev/core';
+import { createAgent } from '@e2e-dev/core/agent';
+import { web } from '@e2e-dev/web/engine';
+import { gateway } from 'ai';
+import { z } from 'zod';
+
+await using shop = await launch(web(), { app: { url: 'https://shop.example.com' } });
+await using session = await shop.newSession();
+await session.app.open('/products/A-1001');
+
+const agent = createAgent(session, {
+  model: gateway('anthropic/claude-sonnet-5-5'),
+  cache: { dir: '.shop-bot/cache' },
+});
+
+await agent.act('Add the item to the cart and apply the coupon with the largest discount', {
+  cacheKey: 'cart-best-coupon',
+});
+// A check after the step lets the cache keep its recording.
+await session.screen.getByRole('button', /pay now/i).waitFor();
+
+const order = await agent.extract('the order total', { schema: z.object({ total: z.number() }) });
+if (order.total <= 39_000) {
+  try {
+    await session.screen.getByRole('button', /pay now/i).tap();
+  } catch (error) {
+    // A failed tap may still have reached the server:
+    // check the order list, never retry the payment.
+    console.error('check /my/orders');
+    throw error;
+  }
+} else {
+  console.log(`the total, ${order.total}, is over the limit: the order stays unpaid`);
+}
+```
+
+`createAgent` menerima opsi yang sama dengan entri [`agents`](/reference/config#agents)
+(`model`, `judge`, `maxSteps`, `context`), ditambah `cache`. Tidak ada model
+default, jadi selalu berikan model. Batas waktu default `agent.act` adalah
+120 detik (ubah per panggilan dengan `timeout`).
+
+### Putar ulang langkah yang direkam
+
+Berikan `cache` untuk merekam langkah `agent.act` yang berhasil dan memutarnya
+kembali pada eksekusi mendatang tanpa pemanggilan model. Setiap pemanggilan
+`act` harus menyebutkan `cacheKey` atau `cache: false`. Entri ditentukan oleh
+`cacheKey`, instruksi, params, aplikasi, dan jumlah pemanggilan tersebut oleh
+sesi.
+
+Rekaman disimpan saat sesi atau host ditutup, selama pemeriksaan seperti
+`locator.waitFor()`, `agent.assert()`, atau `agent.waitFor()` berhasil setelah
+langkah tersebut. Langkah agent yang gagal membuang rekaman yang belum
+dikonfirmasi, sedangkan kegagalan pada kode locator Anda sendiri (seperti
+`waitFor` yang melewati batas waktu) tidak membuang rekaman. Lihat
+[Caching](/cache) untuk cara kerja pemutaran ulang dan perbaikan otomatis.
+
+| Opsi | Bawaan | Keterangan |
+| --- | --- | --- |
+| `dir` | `.e2e/cache` | Direktori cache (relatif terhadap `cwd` milik `launch`). |
+| `mode` | `read-write` | Atur ke `read-only` agar dapat memutar ulang tanpa menulis. |
+| `strict` | `false` | Gagal saat rekaman sudah usang alih-alih beralih ke model. |
+| `store` | - | [`CacheStore`](/cache) khusus sebagai pengganti file lokal. |
+
+## Buka host di dalam tes
+
+Tes dapat membuka sesi kedua untuk pengguna atau perangkat lain. Pada contoh
+browser ini, [tes penyiapan](/authentication) menyimpan sesi masuk pengirim
+sebagai `sender`. Penerima masuk pada host terpisah yang menunjuk ke aplikasi
+yang sama. Gunakan akun tes dan percakapan yang dikhususkan untuk tes.
+
+```ts title="tests/chat.e2e.ts"
+import { randomUUID } from 'node:crypto';
+import { test } from '@e2e-dev/web';
+import { expect } from 'e2e';
+import { launch } from '@e2e-dev/core';
+import { web } from '@e2e-dev/web/engine';
+
+test('delivers a message to the recipient', { session: 'sender' }, async ({ app, screen }) => {
+  const message = `Hello ${randomUUID()}`;
+  await using host = await launch(web(), {
+    app: { url: app.baseUrl },
+    secrets: { RECIPIENT_PASSWORD: process.env.RECIPIENT_PASSWORD ?? '' },
+  });
+  const recipient = await host.newSession();
+  await recipient.app.open('/login');
+  await recipient.screen.getByLabel('Email').fill('recipient@example.test');
+  await recipient.screen.getByLabel('Password').fill(host.secret('RECIPIENT_PASSWORD'));
+  await recipient.screen.getByRole('button', 'Sign in').tap();
+  await recipient.screen.getByRole('heading', 'Chat').waitFor();
+  await app.open('/chat');
+
+  await screen.getByLabel('Message').fill(message);
+  await screen.getByRole('button', 'Send').tap();
+
+  await expect(recipient.screen.getByText(message, { exact: true })).toBeVisible();
+});
+```
+
+Jika Anda sudah menyimpan sesi masuk penerima dengan `saveState()` pada sesi
+core, pulihkan menggunakan [`newSession({ state })`](/reference/core#newsession)
+pada host dengan aplikasi, engine, dan platform yang sama. Sesi bernama milik
+runner dari `session.save()` dipulihkan melalui opsi `session` pada runner.
+
+Laporan tes juga mencakup sesi tersebut:
+
+| Di laporan | Perilaku |
+| --- | --- |
+| Langkah | Setiap langkah sesi, di bawah `launch-1`, `launch-2`, mengikuti urutan sesi dibuka oleh tes. |
+| Penggunaan model | Dihitung bersama penggunaan model oleh tes. |
+| Video | Disimpan di samping video tes jika tes merekam video, sebagai `video/launch-1.webm`. Sesi harus dibuka di dalam tes; `app.startRecording()` pada sesi tersebut gagal jika sesi sedang merekam. |
+| Secret | Host menyamarkan secret dari konfigurasi, dan laporan menyamarkan secret host sampai tes berakhir. |
+| Host atau sesi yang dibuka tes | Ditutup saat tes berakhir jika masih terbuka. Host atau sesi yang dibuka oleh fixture worker atau hook `beforeAll` dibiarkan terbuka dan tidak merekam video. |
+| Panggilan yang masih berjalan | Jika langkah, `launch`, atau `newSession` masih berjalan saat tes berakhir, tes gagal dengan `STEP_NOT_AWAITED`: sesi suatu langkah ditutup dan proses pembukaan dibatalkan. Panggilan yang gagal tetapi error-nya ditangkap oleh tes tidak membuat tes gagal. |
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Referensi @e2e-dev/core" href="/reference/core">
+    Semua opsi `launch`, sesi, state tersimpan, dan `createAgent`.
+  </Card>
+  <Card title="screen" href="/reference/screen">
+    Semua kueri dan tindakan yang tersedia pada sesi.
+  </Card>
+  <Card title="Agent" href="/reference/agent">
+    Argumen yang diterima dan nilai yang dikembalikan `act`, `assert`, `waitFor`, dan `extract`.
+  </Card>
+  <Card title="Model" href="/models">
+    Pilih dan konfigurasi model yang dipanggil agent.
+  </Card>
+</CardGroup>

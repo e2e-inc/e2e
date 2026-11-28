@@ -1,0 +1,333 @@
+---
+title: Electron
+description: Uji aplikasi Electron melalui pohon aksesibilitas Chromium, jendela demi jendela.
+---
+
+`@e2e-dev/electron` menjalankan tes pada aplikasi Electron. Engine ini
+meluncurkan aplikasi, membaca setiap jendela melalui pohon aksesibilitas
+Chromium lewat protokol DevTools, dan mengendalikannya dengan input tepercaya.
+Tes memakai API `agent`, `screen`, dan `expect` yang sama seperti tes pada
+platform lainnya.
+
+## Penyiapan
+
+Pasang runner, engine, dan Electron:
+
+<CodeGroup>
+```bash npm
+npm install --save-dev e2e @e2e-dev/electron electron
+```
+
+```bash pnpm
+pnpm add --save-dev e2e @e2e-dev/electron electron
+```
+
+```bash bun
+bun add --dev e2e @e2e-dev/electron electron
+```
+</CodeGroup>
+
+Engine meluncurkan paket `electron` yang dipasang di proyek Anda. Pada
+Electron 45 dan yang lebih baru, engine mengunduh binari satu kali per
+eksekusi sebelum tes pertama. Aplikasi dalam paket didukung sejak Electron
+22. Jalankan `npx e2e doctor` untuk memeriksa penyiapan.
+
+## Arahkan ke aplikasi
+
+Atur `app.appPath` ke direktori aplikasi atau skrip utamanya, relatif terhadap
+root proyek. `app.launchArguments` berisi argumen yang diberikan pada setiap
+peluncuran: argumen aplikasi, Electron, atau Chromium, seperti `--lang=en-US`.
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { electron } from '@e2e-dev/electron';
+
+export default {
+  targets: [
+    {
+      name: 'electron',
+      engine: electron(),
+      app: { appPath: '.', launchArguments: ['--no-update-check'] },
+    },
+  ],
+  credentials: {
+    ada: { username: 'ada', password: process.env.ADA_PASSWORD ?? '' },
+  },
+} satisfies E2EConfig;
+```
+
+Blok `credentials` berisi pengguna tes untuk tes masuk di bawah. Lihat
+[Kredensial](/authentication#credentials).
+
+## Tulis tes
+
+Impor `test` dari `@e2e-dev/electron`. `app.open()` meluncurkan aplikasi dan
+menunggu jendela dimuat. Setiap tes dimulai dengan direktori data pengguna
+yang kosong, lalu menutup aplikasi saat tes berakhir. Panggil
+`app.restart()` untuk meluncurkannya kembali dengan data yang sama, atau
+`app.clearState()` untuk meluncurkannya kembali dengan data kosong.
+
+```ts title="tests/sign-in.e2e.ts"
+import { test } from '@e2e-dev/electron';
+import { credentials, expect } from 'e2e';
+
+test('signs in and opens settings', async ({ app, screen, electron }) => {
+  const ada = credentials.user('ada');
+  await app.open();
+  await screen.getByRole('textbox', 'Username').fill(ada.username);
+  await screen.getByRole('textbox', 'Password').fill(ada.password);
+  await screen.getByRole('button', 'Sign in').tap();
+  await expect(screen.getByTestId('status')).toContainText('Signed in as ada');
+
+  await electron.waitForWindow(() => screen.getByRole('button', 'Open settings').tap());
+  await expect(screen.getByRole('heading', 'Settings')).toBeVisible();
+
+  const userData = await electron.evaluate(({ app: main }) => main.getPath('userData'));
+  expect(userData).toContain('e2e-electron-');
+});
+```
+
+## Fixture Electron
+
+| Metode | Fungsinya |
+| --- | --- |
+| `evaluate(fn, arg?)` | Menjalankan `fn` di proses utama dengan modul `electron` dan mengembalikan hasil yang dapat diserialisasi sebagai JSON |
+| `windows()` | Jendela yang terbuka, sesuai urutan dibukanya |
+| `waitForWindow(trigger, { timeout }?)` | Menjalankan `trigger`, menunggu jendela yang dibukanya, lalu menjadikan jendela itu aktif |
+| `window({ title, url }, { timeout }?)` | Menunggu jendela berdasarkan judul atau URL-nya lalu mengembalikannya tanpa menjadikannya aktif |
+| `waitForDownload(trigger, { timeout }?)` | Menjalankan `trigger` dan menunggu [unduhan](#downloads) yang dimulainya |
+| `onDialog(handler)` | Menjawab [dialog `alert()` dan `confirm()`](#handle-alert-and-confirm-dialogs) yang dibuka aplikasi |
+| `locator(selector)` | Mencari elemen pada jendela saat ini dengan selector CSS |
+
+## Bekerja dengan beberapa jendela
+
+Jendela bekerja seperti [tab pada tes browser](/reference/web#tabs). `screen`
+membaca satu jendela aktif, dimulai dari jendela pertama yang dimuat. Jendela
+yang dibuka aplikasi tidak otomatis menjadi aktif:
+`electron.waitForWindow()` menjalankan langkah yang membukanya lalu
+menjadikannya aktif. Saat jendela aktif ditutup, jendela yang membukanya
+kembali aktif, atau jendela yang aktif sebelumnya jika tidak ada.
+
+```ts
+const settings = await electron.waitForWindow(() =>
+  screen.getByRole('button', 'Open settings').tap(),
+);
+await expect(screen.getByRole('heading', 'Settings')).toBeVisible();
+
+const [main] = electron.windows();
+await main.activate();
+await settings.close();
+```
+
+Jendela memiliki `title()`, `url()`, `isActive()`, `isClosed()`, `activate()`,
+dan `close()`. Untuk mencari jendela yang dibuka aplikasi sendiri, seperti
+jendela utama setelah splash screen, gunakan `electron.window()`:
+
+```ts
+const main = await electron.window({ title: 'My App' });
+await main.activate();
+```
+
+`title` dan `url` menerima string yang harus cocok persis atau `RegExp`.
+`title` mencocokkan judul dokumen atau jendela OS, sedangkan `window.title()`
+mengembalikan judul dokumen atau judul jendela OS jika dokumen tidak memilikinya.
+Agent melihat jendela sebagai tab dan berpindah di antaranya sendiri.
+
+## Jalankan kode di proses utama
+
+Gunakan `electron.evaluate()` untuk API proses utama yang tidak dapat diakses
+dari jendela, seperti menjalankan item menu atau membuat stub dialog native:
+
+```ts
+// Trigger a menu item
+await electron.evaluate(({ Menu }) => {
+  Menu.getApplicationMenu()?.getMenuItemById('open-settings')?.click();
+});
+
+// Stub a native file dialog
+await electron.evaluate(({ dialog }, filePath) => {
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filePath] });
+}, '/tmp/report.csv');
+```
+
+`fn` dikirim sebagai teks, sehingga tidak dapat mengakses variabel dari tes.
+Kirim nilai sebagai `arg` (hanya JSON biasa; secret ditolak) dan kembalikan
+data biasa. `require` tidak tersedia di dalam `fn`; gunakan argumen `electron`
+atau `process.getBuiltinModule('node:fs')`.
+
+## Tangani dialog alert dan confirm
+
+`electron.onDialog()` menjawab dialog yang dibuka aplikasi setelahnya, seperti
+[`browser.onDialog()`](/reference/web#ondialog) pada web. Berikan `'accept'`,
+`'dismiss'`, atau fungsi, lalu panggil nilai yang dikembalikannya untuk
+menghentikan penanganan:
+
+```ts
+const off = await electron.onDialog('accept');
+await screen.getByRole('button', 'Delete').tap();
+await off();
+
+await electron.onDialog(async (dialog) => {
+  expect(dialog.message).toBe('Discard changes?');
+  await dialog.dismiss();
+});
+```
+
+Handler fungsi harus memanggil `accept()` atau `dismiss()`. Dialog yang tidak
+ditangani akan ditutup (`confirm()` mengembalikan `false`) dan menyebabkan
+langkah tes berikutnya gagal.
+
+## Unggah file
+
+`setInputFiles` melampirkan file berdasarkan jalur relatif terhadap root
+proyek, atau dari memori. Panggil metode ini pada `<input>` bertipe file atau
+tombol yang membuka pemilih file. Berikan `[]` untuk mengosongkan input:
+
+```ts
+await screen.getByTestId('attachment').setInputFiles('fixtures/report.csv');
+await screen.getByRole('button', 'Choose file').setInputFiles('fixtures/report.csv');
+await screen.getByTestId('attachment').setInputFiles({
+  name: 'note.txt',
+  mimeType: 'text/plain',
+  buffer: Buffer.from('written in the test'),
+});
+await screen.getByTestId('attachment').setInputFiles([]);
+```
+
+## Unduhan
+
+`electron.waitForDownload()` menjalankan langkah yang memulai unduhan lalu
+menunggu file selesai. File disalin ke artefak tes:
+
+```ts
+const file = await electron.waitForDownload(() => screen.getByRole('link', 'Export').tap());
+expect(file.suggestedFilename).toBe('report.csv');
+// file.absolutePath is the saved file
+```
+
+Unduhan tidak pernah masuk ke folder Downloads Anda: aplikasi menyimpannya di
+direktori data pengguna milik tes.
+
+## Rekam video
+
+Jalankan dengan `--video on` atau atur `video` di konfigurasi untuk merekam
+setiap tes. Video mengikuti jendela yang dibaca `screen`, termasuk saat
+`app.restart()`, dan disimpan sebagai satu file `.webm` bersama hasil tes.
+Untuk merekam sebagian tes, panggil `app.startRecording()` dan
+`app.stopRecording()`.
+
+Encoding memerlukan ffmpeg. Engine menggunakan ffmpeg di `PATH` atau
+mengunduhnya saat perekaman pertama. Atur `E2E_FFMPEG_PATH` untuk memakai
+instalasi sendiri.
+
+## Uji aplikasi dalam paket
+
+Untuk menguji build dalam paket, arahkan `executablePath` ke binarinya (bukan
+ke direktori `.app` di macOS) dan jangan atur `app.appPath`:
+
+```ts title="e2e.config.ts"
+{
+  name: 'electron-packaged',
+  engine: electron({
+    executablePath: 'dist/mac/MyApp.app/Contents/MacOS/MyApp',
+  }),
+}
+```
+
+- Jika build menonaktifkan fuse `EnableNodeCliInspectArguments`, `screen`,
+  `expect`, dan agent tetap berfungsi, tetapi `electron.evaluate()` gagal dan
+  `electron.window({ title })` hanya mencocokkan judul dokumen.
+- Di macOS, build tanpa tanda tangan yang membaca keychain (`safeStorage`)
+  dapat tertahan pada prompt sistem. Tambahkan `--use-mock-keychain` ke
+  `app.launchArguments`.
+
+## Jalankan di CI pada Linux
+
+Electron memerlukan display server untuk membuka jendela. Di CI Linux,
+jalankan e2e melalui `xvfb-run`:
+
+<CodeGroup>
+```bash npm
+xvfb-run --auto-servernum npx e2e run
+```
+
+```bash pnpm
+xvfb-run --auto-servernum pnpm exec e2e run
+```
+
+```bash bun
+xvfb-run --auto-servernum bunx e2e run
+```
+</CodeGroup>
+
+Engine otomatis menambahkan `--no-sandbox` di Linux.
+
+## Perbedaan dari web
+
+| Area | Pada Electron |
+| --- | --- |
+| Argumen peluncuran | Engine menambahkan `--inspect=0`, `--remote-debugging-pipe`, `--force-color-profile=srgb`, `--user-data-dir=...`, argumen agar jendela yang tertutup atau tersembunyi tetap menggambar, serta `--no-sandbox` di Linux. Parser argumen yang ketat harus mengizinkan semuanya. |
+| Worker paralel | Setiap tes mendapat direktori data pengguna sendiri, sehingga tes dapat berjalan paralel. Jika aplikasi mengganti `app.setPath('userData', ...)`, atur `workers: 1`. |
+| Clipboard | Aplikasi memakai clipboard OS, sehingga tindakan salin dari tes mengganti isi clipboard Anda. Atur `workers: 1` untuk tes clipboard. |
+| Tema dan lokal | `prefers-color-scheme` mengikuti `nativeTheme` dan OS. Teks UI Chromium mengikuti lokal OS; tambahkan `--lang=en-US` ke `app.launchArguments` untuk menetapkan bahasa Inggris. |
+| Tekan lama | Menahan selama 800 ms secara default, dibandingkan dengan 500 ms pada web. |
+| Selector CSS | `electron.locator()` mencari dokumen jendela dan shadow root terbuka satu per satu, tanpa memasuki frame. |
+| Renderer crash | Pembacaan jendela yang crash gagal sampai Anda memuatnya ulang dengan `electron.evaluate()` atau memulai ulang aplikasi. |
+
+## Keamanan
+
+- **Lingkungan terisolasi:** aplikasi tidak mewarisi lingkungan runner,
+  sehingga kunci model dan token CI tidak ikut diteruskan. Aplikasi hanya
+  menerima variabel OS minimal (`PATH`, `HOME`, lokal, direktori sementara,
+  display); teruskan kebutuhan aplikasi dengan `electron({ env })`.
+- **Field kata sandi:** nilai kata sandi tidak dapat dibaca dan digambar hitam
+  pada screenshot. Jika field kata sandi berada di dalam shadow root tertutup
+  yang tidak dapat dijangkau mask, screenshot jendela tersebut tidak diberikan.
+- **Batas file lokal:** jika jendela membuka jalur `file:` di luar direktori
+  aplikasi, agent tidak menerima observasi dan screenshot ditolak.
+- **Port inspector:** otomatisasi jendela berjalan melalui pipe privat,
+  sedangkan proses utama mendengarkan port loopback tanpa autentikasi untuk
+  `electron.evaluate()` selama setiap tes.
+
+## Batasan
+
+### Tidak tersedia di Electron
+
+- **`prompt()`:** Electron tidak mengimplementasikan `window.prompt()` dan
+  melempar error di halaman.
+- **Mode headless:** Electron selalu membuka jendela kecuali aplikasi
+  menyembunyikannya, dan `--headed` tidak berpengaruh. Gunakan `xvfb-run` di
+  CI Linux.
+- **Akselerator menu:** event keyboard langsung dikirim ke halaman, sehingga
+  pintasan menu dan `before-input-event` tidak menerimanya. Jalankan item menu
+  dengan `electron.evaluate()`.
+
+### Belum didukung
+
+- Konten di dalam `iframe` atau `webview` (guest `webview` tercantum sebagai
+  jendela, sehingga dapat diakses dengan `electron.window()`).
+- Route dan cookie (sebagai gantinya, gunakan `session.defaultSession` di
+  dalam `electron.evaluate()`).
+- Penyimpanan dan pemulihan sesi.
+- Fixture `keyboard` untuk menahan tombol.
+- Pembacaan console aplikasi dari tes.
+
+## Opsi
+
+| Opsi | Tipe | Bawaan | Fungsinya |
+| --- | --- | --- | --- |
+| `executablePath` | `string` | paket `electron` di proyek | Binari yang dijalankan, seperti [aplikasi dalam paket](#test-a-packaged-app) |
+| `env` | `Record<string, string>` | `{}` | Variabel lingkungan tambahan untuk aplikasi (kecuali `ELECTRON_RUN_AS_NODE` atau `NODE_OPTIONS`); lihat [Keamanan](#security) |
+| `testIdAttribute` | `string` | `'data-testid'` | Atribut yang dibaca `getByTestId` |
+| `settle` | `number \| false` | `100` | Waktu tunggu dalam milidetik setelah tindakan agent sebelum pembacaan berikutnya (`false` melewatinya) |
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Langkah agent" icon="robot" href="/agent-steps">
+    Minta agent mengisi formulir atau memeriksa layar.
+  </Card>
+  <Card title="Engines" icon="gears" href="/engines">
+    Cara engine ini dibuat sebagai model untuk engine Anda sendiri.
+  </Card>
+</CardGroup>
