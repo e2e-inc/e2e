@@ -375,16 +375,21 @@ pub fn type_text(text: &str, route: Route, run: &TypingRun, deadline: std::time:
             }
             Piece::Text(units) => units,
         };
-        sent = true;
         let (code, shift) = key_code(&units, &plain, &shifted);
-        for down in [true, false] {
-            let event =
-                CGEvent::new_keyboard_event(source.clone(), code, down).map_err(|_| Failure::unconfirmed(codes::INTERNAL, "could not create a key event"))?;
+        // Both events are made before either goes, as for `press`: a key-down never goes without its key-up.
+        let event = |down: bool| -> Outcome<CGEvent> {
+            let event = CGEvent::new_keyboard_event(source.clone(), code, down)
+                .map_err(|_| stopped(Failure::refused(codes::INTERNAL, "could not create a key event"), sent))?;
             // Only the Shift the character takes: a key the user holds would otherwise ride along on an HID-state event and
             // turn text into a shortcut.
             event.set_flags(if shift { CGEventFlags::CGEventFlagShift } else { CGEventFlags::CGEventFlagNull });
             event.set_string_from_utf16_unchecked(&units);
-            post(&event, route);
+            Ok(event)
+        };
+        let events = [event(true)?, event(false)?];
+        sent = true;
+        for event in &events {
+            post(event, route);
         }
         sleep(Duration::from_millis(1));
     }

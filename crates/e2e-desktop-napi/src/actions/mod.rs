@@ -617,7 +617,8 @@ pub fn press(pid: i32, window: u32, combo: &str, physical: bool, focused: Option
             return Err(Failure::refused(codes::ACTION_FAILED, "another app came forward before the key was sent, so nothing was sent"));
         }
         go("press")?;
-        input::press(&combo, route).map_err(Failure::delivered)
+        // `press` makes both events before it posts either: a failure is one that sent nothing.
+        input::press(&combo, route)
     })
 }
 
