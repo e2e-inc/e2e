@@ -70,7 +70,7 @@ import {
 } from './nodes.ts';
 import { keyboardDragStart, keyboardShownIn, type KeyboardUnknown } from './keyboard.ts';
 import { DEVICE_PERMISSIONS, type AgentDeviceClient, type ClientFactory, type DevicePermission, type LaunchPermissions, type MobileOptions, type MobilePlatform, type PermissionState } from './options.ts';
-import { maskPng } from './png.ts';
+import { harmonyScreenshotPng, maskPng } from './png.ts';
 import { above, clipTo, dragToEdge, EDGE_DIRECTION, regionSignature } from './scroll-to.ts';
 import { mobileDoctor } from './doctor.ts';
 import { deviceLabel, deviceSelection, pinnedApp, type DeviceSelection, type SlotBinding } from './bindings.ts';
@@ -2076,7 +2076,10 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
 
   /** Raw device pixels; cleanup follows the capture even when its caller abandons it. */
   private rawScreenshot(signal: AbortSignal, capture: ScreenshotCapture, budget: InputBudget): Promise<Uint8Array> {
-    return this.captureScreenshot(signal, async (shot, file) => new Uint8Array(readFileSync(shot.path ?? file)), capture, budget);
+    return this.captureScreenshot(signal, async (shot, file) => {
+      const bytes = readFileSync(shot.path ?? file);
+      return this.options.platform === 'harmonyos' ? harmonyScreenshotPng(bytes) : new Uint8Array(bytes);
+    }, capture, budget);
   }
 
   /**

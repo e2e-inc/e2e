@@ -23,6 +23,14 @@ interface Rgba {
   readonly data: Uint8Array;
 }
 
+/** HDC may write JPEG data even when the capture path ends in .png. */
+export function harmonyScreenshotPng(bytes: Uint8Array): Uint8Array {
+  if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    return new Transformer(bytes).pngSync({ filterType: FilterType.Adaptive });
+  }
+  return bytes;
+}
+
 /** Paints each requested rectangle opaque black, rounding outward and clipping to the image. */
 export function maskPng(bytes: Uint8Array, rects: readonly Rect[]): Uint8Array {
   if (rects.length === 0) return bytes;
