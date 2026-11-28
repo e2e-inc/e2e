@@ -72,12 +72,15 @@ the end of the line above it, but it cannot detect a silently dropped sentence.
   equivalent, transliterate into Cyrillic so they inflect cleanly (*ранер*,
   *фікстура*, *локатор*, *воркер*, *таргет*, *бандл*, *снепшот*, *трейс*,
   *мокати*, *комітити*).
-- Avoid calques and Russianisms: *застосунок*, not *додаток*; *є*, not
-  *являється*; *цей*, not *даний*; *брати участь*, not *приймати участь*;
-  *знімок екрана*, not *знімок екрану*.
+- Avoid calques, Russianisms, and awkward constructions: *застосунок*, not
+  *додаток*; *є*, not *являється*; *цей*, not *даний*; *брати участь*, not
+  *приймати участь*; *знімок екрана*, not *знімок екрану*; avoid *спрямувати*
+  (for «point at»), *замість + infinitive* (use *замість + noun* or
+  *замість того, щоб + infinitive*), *завалить* (use *завершує помилкою*,
+  *падає*, or *позначить як непройдений*), and *чий* for inanimate nouns.
 - Write *веб* as one word with the following noun (*вебзастосунок*,
   *вебсторінка*, *вебрушій*). Hyphenate a Latin-script prefix joined to a
-  Ukrainian word (*debug-збірка*, *release-збірка*, *preview-розгортання*,
+  Ukrainian word (*debug-збірка*, *release-збірка*, *runtime-дозвіл*,
   *CI-сервіс*).
 - Headings and titles use sentence case, like the English pages: only the first
   word and proper names start with a capital letter.
@@ -125,7 +128,7 @@ the end of the line above it, but it cannot detect a silently dropped sentence.
 | test, test suite | тест, набір тестів |
 | end-to-end test | end-to-end тест (E2E) |
 | agent, agentic | агент, агентний |
-| agent step | дія агента, виклик агента |
+| agent step | дія агента, виклик агента (не «крок агента») |
 | agent turn | хід агента |
 | deterministic | детермінований |
 | engine | рушій |
