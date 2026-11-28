@@ -26,7 +26,8 @@ for (const platform of Object.values(addon.targets)) {
   if (file === undefined) throw new Error(`${path.join(source, fileName)} is missing: the native build did not make it`);
   if (values['dry-run'] === true) continue;
   const target = platformPackageDir(addon, platform);
-  replaceAddon(file, path.join(target, fileName));
+  // Given the platform packages' own directory, the file is already in place, and replacing it would delete it.
+  if (path.resolve(file) !== path.resolve(target, fileName)) replaceAddon(file, path.join(target, fileName));
   const { version } = JSON.parse(readFileSync(path.join(target, 'package.json'), 'utf8')) as { version: string };
   writeFileSync(path.join(target, '.build.json'), `${JSON.stringify({ version })}\n`);
   process.stdout.write(`placed ${file} in ${target} for ${version}\n`);
