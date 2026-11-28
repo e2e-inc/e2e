@@ -4,7 +4,7 @@
  * modules.
  */
 
-import type { Locator } from '@e2e-dev/core/engine';
+import type { Expectable, Locator, TextMatch } from '@e2e-dev/core/engine';
 import type { DialogHandler } from './dialogs.ts';
 
 /**
@@ -88,8 +88,20 @@ export interface ElectronMouse {
   wheel(deltaX: number, deltaY: number): Promise<void>;
 }
 
+/** What `expect(electron)` asserts of the active window, each polled until the assertion timeout or `timeout`. */
+export interface ElectronExpectation {
+  /** The same matchers, negated. */
+  readonly not: ElectronExpectation;
+  /** The window's URL: a string is an absolute URL, compared as one; a `RegExp` is tested against it. */
+  toHaveURL(expected: string | RegExp, options?: { readonly ignoreCase?: boolean; readonly timeout?: number }): Promise<void>;
+  /** The window's title, the document's or else the OS window's. */
+  toHaveTitle(expected: TextMatch, options?: { readonly timeout?: number }): Promise<void>;
+  /** The `class` attribute of the one node `target` matches: a string is the whole class list, a `RegExp` is tested against it. */
+  toHaveClass(target: Locator, expected: TextMatch, options?: { readonly timeout?: number }): Promise<void>;
+}
+
 /** Deterministic Electron app management exposed to tests as `electron`. */
-export interface Electron {
+export interface Electron extends Expectable<ElectronExpectation> {
   /**
    * The directory the app keeps its data in for this test, empty until the
    * app writes to it. It exists before the app is launched, so a test can
@@ -106,6 +118,12 @@ export interface Electron {
   launch(options?: ElectronLaunchOptions): Promise<void>;
   /** The active window, the one `screen`, `expect`, and the agent act on. Throws `INVALID_STATE` when the app has no open window. */
   activeWindow(): ElectronWindow;
+  /**
+   * Waits for the active window's URL to match: a string is an absolute URL,
+   * never a glob or a path; a `RegExp` is tested against it. Rejects with `ASSERTION_FAILED` after
+   * `timeout` milliseconds, or else the assertion timeout.
+   */
+  waitForURL(url: string | RegExp, options?: { readonly timeout?: number }): Promise<void>;
   /** Keyboard input to the active window. */
   readonly keyboard: ElectronKeyboard;
   /** Pointer input to the active window. */

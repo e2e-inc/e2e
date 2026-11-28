@@ -356,7 +356,7 @@ export class ElectronSurface {
   }
 
   /** Fails the step that follows a dialog nothing answered, or whose handler failed. */
-  private failOnDialog(): void {
+  failOnDialog(): void {
     const unhandled = this.dialogs.take();
     if (unhandled !== undefined) throw unhandled;
   }
@@ -531,6 +531,58 @@ export class ElectronSurface {
     const document = await answerWithin(window.page.title(), Math.min(TITLE_MS, operation.timeoutMs));
     if (document !== undefined && document !== '') return document;
     return (await this.app.windowTitle(window.page)) ?? '';
+  }
+
+  /**
+   * The title `expect(electron).toHaveTitle` polls: the document's, read
+   * within the operation so a read the deadline cuts off is a timeout and
+   * never another title, else the OS window's for a document with none. A
+   * window whose renderer crashed is waited on as `readShown` waits on it:
+   * briefly, for the app to load it again, and then said to have crashed.
+   */
+  async currentTitle(window: AppWindow, operation: OperationContext): Promise<string> {
+    const { page } = window;
+    const read = async (): Promise<string> => {
+      const document = await page.title();
+      return document !== '' ? document : ((await this.app.windowTitle(page)) ?? '');
+    };
+    return await withBudget(operation, 'window title', async (budget) => {
+      for (;;) {
+        if (this.windowList.isCrashed(window)) {
+          let stopListening: () => void = () => undefined;
+          const loadedOrClosed = new Promise<void>((resolve) => {
+            const stops = [page.on('load', resolve), page.on('close', resolve)];
+            stopListening = () => stops.forEach((stop) => stop());
+          });
+          await answerWithin(loadedOrClosed, Math.min(CRASH_RELOAD_WAIT_MS, budget.waits.remaining()));
+          stopListening();
+          if (page.isClosed()) throw invalidState('the window closed');
+          if (this.windowList.isCrashed(window)) throw crashed();
+        }
+        // A read the renderer's crash leaves pending would never settle: the crash ends it, and the next pass waits.
+        let stopWaiting: () => void = () => undefined;
+        const crash = new Promise<'crashed'>((resolve) => {
+          stopWaiting = page.on('crash', () => resolve('crashed'));
+        });
+        try {
+          const title = await Promise.race([read(), crash]);
+          if (title !== 'crashed' || !this.windowList.isCrashed(window)) return title;
+        } finally {
+          stopWaiting();
+        }
+      }
+    });
+  }
+
+  /** Whether the shown window's renderer crashed: a wait on the window ends with that, where a closing window is waited through. */
+  get shownCrashed(): boolean {
+    const window = this.windowList.current();
+    return window !== undefined && this.windowList.isCrashed(window);
+  }
+
+  /** Whether the app is running: a wait on its window goes on through a window closing or loading, and ends when the app is gone. */
+  get appRunning(): boolean {
+    return this.app.running;
   }
 
   /** `electron.onDialog()`: answers the app's dialogs from now on, until what it returns is called. */

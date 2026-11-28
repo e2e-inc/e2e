@@ -263,6 +263,8 @@ test('opens on saved settings', async ({ electron, screen }) => {
 | [`locator`](#locator) | `Locator` |
 | [`keyboard`](#keyboard) | `ElectronKeyboard` |
 | [`mouse`](#mouse) | `ElectronMouse` |
+| [`waitForURL`](#waitforurl) | `Promise<void>` |
+| [`expect(electron)`](#window-matchers) | `ElectronExpectation` |
 
 Every async member is a recorded step named `electron.<method>`. The
 [config](/reference/config) sets each member's budget:
@@ -273,6 +275,8 @@ Every async member is a recorded step named `electron.<method>`. The
   [`actionTimeout`](/reference/config#actiontimeout), or their own `timeout`
   option.
 - `keyboard.type`: `actionTimeout` plus `delay` for each character.
+- `waitForURL`: [`assertionTimeout`](/reference/config#assertiontimeout), or
+  its own `timeout` option.
 - Every other async member: `actionTimeout`.
 - `userDataDir`, `windows`, `activeWindow`, and `locator` are not steps.
 - Every `timeout` option is in milliseconds.
@@ -283,7 +287,7 @@ The types the entries use are under [Types](#types).
 | --- | --- |
 | `APP_NOT_OPEN` | The app is not running, has no open window, or quit on its own. Open it with `app.open()`. |
 | `APP_NOT_OPEN` | The step follows a dialog that no handler answered. See [`onDialog`](#ondialog). |
-| `ACTION_FAILED` | The member's budget expired. |
+| `ACTION_FAILED` | The member's budget expired. `waitForURL` throws `ASSERTION_FAILED` instead. |
 
 #### `userDataDir`
 
@@ -609,6 +613,62 @@ await electron.mouse.up();
 | --- | --- |
 | `INVALID_ARGUMENT` | `move` or `wheel` is given anything but two finite numbers, or `button` is not one of the three names. |
 
+#### `waitForURL`
+
+```ts
+waitForURL(url: string | RegExp, options?: { timeout?: number }): Promise<void>;
+```
+
+```ts
+await electron.waitForURL(/\/workspace\/[^/]+\/debug$/);
+```
+
+- Waits for the active window's URL, polling until `timeout` or else the
+  [`assertionTimeout`](/reference/config#assertiontimeout).
+- A string is an absolute URL, compared as one. An Electron app has no base
+  URL, so a string with no scheme is refused. A string is never a glob: use a
+  `RegExp` for a pattern.
+- The wait goes on through a navigation and through the window closing while
+  the app still runs.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | `url` is neither an absolute URL nor a `RegExp`, or an option other than `timeout`. |
+| `ASSERTION_FAILED` | The URL did not match in time. The error has the last URL read. |
+
+#### Window matchers
+
+`expect(electron)` asserts on the active window.
+
+```ts
+await expect(electron).toHaveURL(/\/settings$/);
+await expect(electron).toHaveTitle('Settings');
+await expect(electron).toHaveClass(screen.getByRole('row', 'Draft'), /selected/);
+await expect(electron).not.toHaveTitle('Sign in');
+```
+
+| Matcher | Asserts |
+| --- | --- |
+| `toHaveURL(expected, { ignoreCase, timeout }?)` | The active window's URL, by the rules of [`waitForURL`](#waitforurl). `ignoreCase` compares without regard to case |
+| `toHaveTitle(expected, { timeout }?)` | The window's title: the document's, or the OS window's when the document has none |
+| `toHaveClass(target, expected, { timeout }?)` | The `class` attribute of the one node `target` matches |
+| `not` | The same matchers, negated |
+
+- Each matcher is a recorded `expect.<matcher>` step that polls until the
+  `assertionTimeout`, or its own `timeout`.
+- For `toHaveClass`, a string is the whole class list with its white space
+  collapsed, and a `RegExp` is tested against that list. An element with no
+  `class` attribute matches no string, `''` included.
+- A `target` that matches nothing yet is one more poll.
+
+| Throws | When |
+| --- | --- |
+| `INVALID_ARGUMENT` | `expected` is neither a string nor a `RegExp`, a URL string that is not absolute, or an option the matcher does not take. |
+| `LOCATOR_AMBIGUOUS` | `target` matches several nodes. |
+| `APP_NOT_OPEN` | The app is not running or quit under the wait, the step follows a dialog no handler answered, or `toHaveTitle` reads a window whose renderer crashed. |
+| `ACTION_FAILED` | A read of the window did not answer in time. |
+| `ASSERTION_FAILED` | The condition did not hold in time. The error has the last value read. |
+
 #### Windows and the active window
 
 Windows work like [tabs in a browser test](/reference/web#tabs). `screen`,
@@ -709,7 +769,7 @@ These hold on an Electron target and differ from a web target.
 
 `ElectronEngine`, `ElectronOptions`, `Electron`, `ElectronFixtures`,
 `ElectronWindow`, `ElectronKeyboard`, `ElectronMouse`,
-`ElectronLaunchOptions`, `ElectronMainModule`, `WindowMatcher`, `Dialog`, and
+`ElectronExpectation`, `ElectronLaunchOptions`, `ElectronMainModule`, `WindowMatcher`, `Dialog`, and
 `DialogHandler` are exported from `@e2e-dev/electron`. The runtime exports
 are `electron`, also the default export, and `test`, `describe`,
 `beforeEach`, `afterEach`, `beforeAll`, and `afterAll`, typed with the

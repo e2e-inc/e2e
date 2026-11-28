@@ -96,6 +96,28 @@ The agent does the checkout steps and adapts when the form changes. A test
 can also stay fully deterministic, with a `screen.getBy*` line for every
 `page.getBy*` line.
 
+While you port a spec, give actions a short timeout, so a locator that
+matches nothing fails in seconds instead of the default 30. Rerun a failure
+with `--last-failed`: it keeps the failed run's [results](/debugging#artifacts),
+where a plain run starts `results/` empty.
+
+<CodeGroup>
+```bash npm
+npx e2e run tests/checkout.e2e.ts --action-timeout 5000
+npx e2e run --last-failed --action-timeout 5000
+```
+
+```bash pnpm
+pnpm exec e2e run tests/checkout.e2e.ts --action-timeout 5000
+pnpm exec e2e run --last-failed --action-timeout 5000
+```
+
+```bash bun
+bunx e2e run tests/checkout.e2e.ts --action-timeout 5000
+bunx e2e run --last-failed --action-timeout 5000
+```
+</CodeGroup>
+
 ## Map each API
 
 Every row works today. For an API that is not here, check
@@ -425,11 +447,14 @@ an example test.
 | `electronApp.evaluate(fn, arg)` | `electron.evaluate(fn, arg)` |
 | `page.evaluate(fn, arg)` in the renderer, `page.reload()`, `page.url()` | `electron.activeWindow().evaluate(fn, arg)`, `reload()`, `url()` |
 | `page.keyboard`, `page.mouse` | `electron.keyboard`, `electron.mouse` |
-| `page.waitForURL(re)`, `page.waitForFunction(fn)` | `await expect.poll(() => window.url()).toMatch(re)`, `await expect.poll(() => window.evaluate(fn)).toBeTruthy()` |
+| `page.waitForURL(re)` | `electron.waitForURL(re)`. A string is an absolute URL: rewrite a glob or a path as a `RegExp` |
+| `page.waitForFunction(fn, arg)` | `await expect.poll(() => electron.activeWindow().evaluate(fn, arg)).toBeTruthy()` |
+| `expect(page).toHaveURL(url)`, `toHaveTitle(title)` | `expect(electron).toHaveURL(url)`, `toHaveTitle(title)` |
+| `expect(locator).toHaveClass(cls)` | `expect(electron).toHaveClass(locator, cls)` |
+| `expect(locator).toHaveCSS(name, value)` | `expect.poll` over `electron.activeWindow().evaluate()` with `getComputedStyle` |
 | `electronApp.waitForEvent('window')` | `await electron.waitForWindow(() => screen.getByRole('button', 'Open').tap())`, which makes the new window active. For a window the app opens on its own, `await electron.window({ title: 'Settings' })` |
 | `page.on('dialog')` | `await electron.onDialog('accept')`, `'dismiss'`, or a handler |
 | `page.waitForEvent('close')` | `await expect.poll(() => window.isClosed()).toBe(true)` |
-| `expect(page).toHaveTitle(title)` | `await expect.poll(() => window.title()).toBe(title)` |
 | `page.getByRole`, `getByLabel`, `getByTestId`, `locator(css)` | `screen.getByRole`, `getByLabel`, `getByTestId`, and `electron.locator(css)`, which takes CSS only: no `text=`, `:has-text()`, `:visible`, or `>>`. Use `.filter({ hasText })` and `.filter({ has })` |
 | A query for an element behind an open modal | `getByText`, `getByTestId`, or `electron.locator(css)`: the page behind a modal is `inert`, and `getByRole` and `getByLabel` leave an inert subtree out. It can be read, and `tap()` or `fill()` on it fails |
 | `page.on('console')`, `electronApp.on('console')` | Recorded in the test's trace under App log, main-process lines prefixed `[main]`. A test cannot read them |

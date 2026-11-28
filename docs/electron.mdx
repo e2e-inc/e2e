@@ -99,7 +99,8 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
 
 `electron` is what a test asks of the app itself: launch it with arguments of
 its own, find and switch windows, run code in the main process, send keys,
-answer dialogs, and wait for downloads. The sections below show each one. The
+answer dialogs, wait for downloads, and assert on the window. The sections
+below show each one. The
 [Electron engine reference](/reference/electron#the-electron-fixture) lists
 every member with its parameters, defaults, and errors.
 
@@ -196,6 +197,36 @@ const window = electron.activeWindow();
 const theme = await window.evaluate((key) => localStorage.getItem(key), 'theme');
 await window.reload();
 ```
+
+## Wait and assert on the window
+
+`expect(electron)` asserts on the active window and retries until the
+assertion timeout, as [`expect(browser)`](/reference/expect) does on the web:
+
+```ts
+await expect(electron).toHaveURL(/\/settings$/);
+await expect(electron).toHaveTitle('Settings');
+await expect(electron).toHaveClass(screen.getByRole('row', 'Draft'), /selected/);
+await expect(electron).not.toHaveTitle('Sign in');
+```
+
+- `toHaveURL` and `waitForURL` take an absolute URL or a `RegExp`. An Electron
+  app has no base URL, so a string with no scheme, such as `'settings.html'`
+  or `'**/settings'`, is `INVALID_ARGUMENT`. A string is never a glob: use a
+  `RegExp` for a pattern.
+- `toHaveClass` takes the locator first. A string is the whole class list. An
+  element with no `class` attribute matches no string, `''` included.
+- Every matcher takes `{ timeout }`, and `toHaveURL` also `{ ignoreCase }`.
+
+`electron.waitForURL()` runs the same wait as a step of its own:
+
+```ts
+await electron.waitForURL(/\/workspace\/[^/]+\/debug$/);
+```
+
+For any other condition of the page, such as a computed style, poll
+[`window.evaluate()`](#run-code-in-a-window) with
+[`expect.poll`](/reference/expect#polling-a-value).
 
 ## Keyboard and mouse
 
