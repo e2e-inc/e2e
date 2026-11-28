@@ -1,13 +1,17 @@
 /**
- * `revyl()` against a stubbed `@e2e-dev/mobile/lease`: the options it
- * refuses, and the selectors, credentials, and plugin home it leases with.
- * The lease lifecycle is `@e2e-dev/mobile`'s, tested there.
+ * `revyl()` against a stubbed `@e2e-dev/mobile/lease` and a stubbed Revyl
+ * API: the options it refuses, the device catalog it checks, the selectors,
+ * credentials, and plugin home it leases with, and the worker's recording
+ * it records an attempt with. The lease lifecycle is `@e2e-dev/mobile`'s,
+ * tested there.
  */
 
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DeviceLease, DeviceReleaseContext, DeviceRequest } from '@e2e-dev/mobile';
 import type { AgentDeviceLeaseOptions, AgentDeviceLeaseRequest } from '@e2e-dev/mobile/lease';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { revyl, type RevylOptions } from '../../src/index.ts';
 
 const mocks = vi.hoisted(() => ({
@@ -25,12 +29,45 @@ vi.mock('@e2e-dev/mobile/lease', () => ({
   },
 }));
 
+// The session id the plugin starts a lease's device under; the plugin ships no types.
+const { revylSessionIdForLease } = (await import(import.meta.resolve('@agent-device/revyl'))) as { revylSessionIdForLease: (leaseId: string) => string };
+
 const ROOT = '/project';
 const env = { REVYL_API_KEY: 'revyl-key', PATH: '/bin' };
 const options: RevylOptions = { app: 'https://builds.example.com/app.apk', device: 'Pixel 7' };
 
+const CATALOG = {
+  platforms: {
+    android: { available_models: ['Pixel 7', 'Pixel Tablet'], compatible_runtimes: { 'Pixel 7': ['Android 14'], 'Pixel Tablet': ['Android 14'] } },
+    ios: { available_models: ['iPhone 17 Pro Max', 'iPhone 16'], compatible_runtimes: { 'iPhone 17 Pro Max': ['iOS 27.0', 'iOS 26.5'], 'iPhone 16': ['iOS 27.0'] } },
+  },
+};
+
+interface Call {
+  readonly method: string;
+  readonly url: string;
+  readonly body: unknown;
+  readonly headers: Record<string, string>;
+}
+
+let calls: Call[] = [];
+let routes: Record<string, (call: Call) => Response> = {};
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
 beforeEach(() => {
   vi.clearAllMocks();
+  calls = [];
+  routes = { 'GET /api/v1/execution/device-targets': () => json(CATALOG) };
+  vi.stubGlobal('fetch', async (input: string | URL, init: RequestInit = {}) => {
+    const url = String(input);
+    const call: Call = { method: init.method ?? 'GET', url, body: init.body === undefined ? undefined : JSON.parse(String(init.body)), headers: init.headers as Record<string, string> };
+    calls.push(call);
+    const pathname = new URL(url).pathname;
+    const route = Object.entries(routes).find(([key]) => `${call.method} ${pathname}`.startsWith(key));
+    if (route === undefined) throw new Error(`no route for ${call.method} ${pathname}`);
+    return route[1](call);
+  });
   let leases = 0;
   mocks.acquire.mockImplementation(async (_request: DeviceRequest, { selectors }: AgentDeviceLeaseRequest): Promise<DeviceLease> => ({ id: `lease-${++leases}`, client: { ...selectors } }));
 });
@@ -138,4 +175,209 @@ describe('revyl()', () => {
       );
     },
   );
+  describe('device check', () => {
+    const refused = new Error('Revyl request POST /api/v1/execution/device-sessions/start failed with HTTP 422: Unprocessable Entity');
+
+    it('leases a name Revyl takes without asking the catalog, so an alias the catalog does not list still leases', async () => {
+      await revyl({ ...options, device: 'Pixel7', osVersion: '34' }).acquire(request());
+      await revyl({ device: 'iPhone 17 Pro Max', osVersion: 'iOS 26.0 beta 3' }).acquire(request({ platform: 'ios' }));
+      expect(mocks.acquire).toHaveBeenCalledTimes(2);
+      expect(calls).toEqual([]);
+    });
+
+    it('names the models Revyl lists when it refuses a model it does not list', async () => {
+      mocks.acquire.mockRejectedValueOnce(refused);
+      const failure = revyl({ ...options, device: 'iPhone 16 Pro Max' }).acquire(request({ platform: 'ios' }));
+      await expect(failure).rejects.toThrow('Revyl has no ios device "iPhone 16 Pro Max"; set `device` to one of: iPhone 17 Pro Max, iPhone 16');
+      await expect(failure).rejects.toMatchObject({ cause: refused });
+      expect(calls[0]).toMatchObject({ method: 'GET', url: 'https://backend.revyl.ai/api/v1/execution/device-targets' });
+      expect(calls[0]!.headers).toMatchObject({ Authorization: 'Bearer revyl-key' });
+    });
+
+    it('names the OS versions Revyl runs the model on when it refuses one it does not list', async () => {
+      mocks.acquire.mockRejectedValueOnce(refused);
+      await expect(revyl({ ...options, device: 'iPhone 16', osVersion: 'iOS 18.5' }).acquire(request({ platform: 'ios' }))).rejects.toThrow(
+        'Revyl runs "iPhone 16" on iOS 27.0, not "iOS 18.5"; set `osVersion` to one of those, or leave it out for Revyl\'s default',
+      );
+    });
+
+    it("keeps the allocation's error when Revyl lists both names, and when it does not answer its catalog at the run's REVYL_API_URL", async () => {
+      mocks.acquire.mockRejectedValueOnce(refused);
+      await expect(revyl({ ...options, device: 'iPhone 16', osVersion: 'iOS 27.0' }).acquire(request({ platform: 'ios' }))).rejects.toBe(refused);
+      routes['GET /api/v1/execution/device-targets'] = () => json({ detail: 'down' }, 503);
+      mocks.acquire.mockRejectedValueOnce(refused);
+      await expect(revyl({ ...options, device: 'Pixel 9' }).acquire(request({ env: { ...env, REVYL_API_URL: 'https://backend-staging.revyl.ai' } }))).rejects.toBe(refused);
+      expect(calls.at(-1)!.url).toBe('https://backend-staging.revyl.ai/api/v1/execution/device-targets');
+    });
+
+    it('keeps any failure other than an allocation refusal as it is, without asking the catalog', async () => {
+      const failed = new Error('installing the app failed: Revyl storage refused the app upload with HTTP 413.');
+      mocks.acquire.mockRejectedValueOnce(failed);
+      await expect(revyl({ ...options, device: 'Pixel7' }).acquire(request())).rejects.toBe(failed);
+      expect(calls).toEqual([]);
+    });
+  });
+
+  describe('record', () => {
+    const lease: DeviceLease = { id: 'lease-1' };
+    const sessionId = revylSessionIdForLease('lease-1');
+    const recordContext = { runId: 'run-1', targetName: 'android', attemptId: 'attempt-1', env, signal: new AbortController().signal };
+    let dir: string;
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'revyl-record-'));
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = () => json({ session_id: sessionId, workflow_run_id: 'run-9', status: 'running' });
+      routes['POST /api/v1/execution/device-proxy/run-9/start_screen_recording'] = () => json({ success: true, recording_id: 'rec-1' });
+      routes['POST /api/v1/execution/device-proxy/run-9/stop_screen_recording'] = () => new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]), { headers: { 'content-type': 'video/mp4' } });
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    it("records with the worker's screen recording of the session the plugin started for the lease, and writes the MP4 it stops with", async () => {
+      let lookedUp = 0;
+      const running = routes[`GET /api/v1/execution/device-sessions/${sessionId}`]!;
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = (call) => {
+        lookedUp = Date.now();
+        return running(call);
+      };
+      const recording = await revyl(options).record!(lease, recordContext);
+      // Timed from the start request, not from before the session lookup.
+      expect(Date.parse(recording.startedAt)).toBeGreaterThanOrEqual(lookedUp);
+      expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+        `GET /api/v1/execution/device-sessions/${sessionId}`,
+        'POST /api/v1/execution/device-proxy/run-9/start_screen_recording',
+      ]);
+
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual({ file: 'recording.mp4' });
+      expect(calls.at(-1)!.body).toEqual({ recording_id: 'rec-1' });
+      expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+    });
+
+    const stops = () => calls.filter((call) => call.url.endsWith('/stop_screen_recording'));
+    const video = () => new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]), { headers: { 'content-type': 'video/mp4' } });
+    const answers = (...responses: (() => Response)[]) => {
+      routes['POST /api/v1/execution/device-proxy/run-9/stop_screen_recording'] = () => responses.shift()!();
+    };
+
+    it('stops once after a stop that wrote the video: a stop the engine repeats reuses it', async () => {
+      const recording = await revyl(options).record!(lease, recordContext);
+      const stop = { dir, signal: new AbortController().signal };
+      await expect(recording.stop(stop)).resolves.toEqual({ file: 'recording.mp4' });
+      await expect(recording.stop(stop)).resolves.toEqual({ file: 'recording.mp4' });
+      expect(stops()).toHaveLength(1);
+    });
+
+    it('stops with a 5 minute bound, since the worker finalizes and streams the whole video in the answer', async () => {
+      const timeout = vi.spyOn(AbortSignal, 'timeout');
+      const recording = await revyl(options).record!(lease, recordContext);
+      timeout.mockClear();
+      await recording.stop({ dir, signal: new AbortController().signal });
+      expect(timeout.mock.calls).toEqual([[300_000]]);
+      timeout.mockRestore();
+    });
+
+    it('asks the stop again after a dropped connection, a gateway error, and a worker that kept the recording, and writes the video the next answer carries', async () => {
+      answers(
+        () => {
+          throw new TypeError('fetch failed');
+        },
+        () => json({ detail: 'gateway timeout' }, 504),
+        () => json({ success: false, error: 'Screen recording finalize failed; recording retained; retry stop_screen_recording' }),
+        video,
+      );
+      const recording = await revyl(options).record!(lease, recordContext);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).rejects.toThrow('recording retained');
+      expect(stops()).toHaveLength(3);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual({ file: 'recording.mp4' });
+      expect(stops()).toHaveLength(4);
+      expect(stops().map((call) => call.body)).toEqual(Array.from({ length: 4 }, () => ({ recording_id: 'rec-1' })));
+      expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+    });
+
+    it('sends a stop again on the next call after one whose signal aborted', async () => {
+      const recording = await revyl(options).record!(lease, recordContext);
+      await expect(recording.stop({ dir, signal: AbortSignal.abort() })).rejects.toThrow();
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual({ file: 'recording.mp4' });
+      expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+    });
+
+    const brokenJson = () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"success":'));
+            controller.error(new TypeError('terminated'));
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      );
+
+    it('asks a stop or a session lookup again when the connection drops while its JSON answer is read', async () => {
+      const running = routes[`GET /api/v1/execution/device-sessions/${sessionId}`]!;
+      let lookups = 0;
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = (call) => (++lookups === 1 ? brokenJson() : running(call));
+      const recording = await revyl(options).record!(lease, recordContext);
+      expect(lookups).toBe(2);
+      answers(brokenJson, video);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual({ file: 'recording.mp4' });
+      expect(stops()).toHaveLength(2);
+    });
+
+    it('asks the stop again after a download that breaks partway, leaving only the whole video', async () => {
+      answers(
+        () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new Uint8Array([9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9]));
+                controller.error(new TypeError('terminated'));
+              },
+            }),
+            { headers: { 'content-type': 'video/mp4' } },
+          ),
+        video,
+      );
+      const recording = await revyl(options).record!(lease, recordContext);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual({ file: 'recording.mp4' });
+      expect(stops()).toHaveLength(2);
+      expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+    });
+
+    it('ends a recording the worker no longer holds with no video, without asking again', async () => {
+      answers(() => json({ success: false, error: 'No active screen recording has this recording_id' }));
+      const recording = await revyl(options).record!(lease, recordContext);
+      const none = { none: 'Revyl no longer holds recording rec-1, so it has no video to return: No active screen recording has this recording_id' };
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual(none);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual(none);
+      expect(stops()).toHaveLength(1);
+      expect(existsSync(join(dir, 'recording.mp4'))).toBe(false);
+    });
+
+    it('looks the session up again after a gateway error, and starts recording once', async () => {
+      const running = routes[`GET /api/v1/execution/device-sessions/${sessionId}`]!;
+      let lookups = 0;
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = (call) => (++lookups === 1 ? json({ detail: 'bad gateway' }, 502) : running(call));
+      await revyl(options).record!(lease, recordContext);
+      expect(lookups).toBe(2);
+      expect(calls.filter((call) => call.url.endsWith('/start_screen_recording'))).toHaveLength(1);
+    });
+
+    it('fails the start when the lease has no running device, and a refused start or stop with the reason the worker gives', async () => {
+      // An ended session, even one that still names its workflow run, and one with no workflow run at all.
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = () => json({ session_id: sessionId, workflow_run_id: 'run-9', status: 'completed' });
+      await expect(revyl(options).record!(lease, recordContext)).rejects.toThrow(`Revyl reports no running device for session ${sessionId}`);
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = () => json({ session_id: sessionId, status: 'running' });
+      await expect(revyl(options).record!(lease, recordContext)).rejects.toThrow(`Revyl reports no running device for session ${sessionId}`);
+      expect(calls.filter((call) => call.url.endsWith('/start_screen_recording'))).toEqual([]);
+
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = () => json({ session_id: sessionId, workflow_run_id: 'run-9' });
+      routes['POST /api/v1/execution/device-proxy/run-9/start_screen_recording'] = () => json({ success: false, error: 'already recording' });
+      await expect(revyl(options).record!(lease, recordContext)).rejects.toThrow('Revyl refused start_screen_recording: already recording');
+
+      routes['POST /api/v1/execution/device-proxy/run-9/start_screen_recording'] = () => json({ success: true, recording_id: 'rec-1' });
+      routes['POST /api/v1/execution/device-proxy/run-9/stop_screen_recording'] = () => json({ success: false, error: 'no such recording' });
+      const recording = await revyl(options).record!(lease, recordContext);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).rejects.toThrow('Revyl refused stop_screen_recording: no such recording');
+      expect(calls.filter((call) => call.url.endsWith('/stop_screen_recording'))).toHaveLength(1);
+    });
+  });
 });

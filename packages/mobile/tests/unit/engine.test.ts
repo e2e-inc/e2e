@@ -383,6 +383,16 @@ describe('lifecycle', () => {
     });
     await expect(h.prepare(info)).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
 
+    // A local daemon that refuses the step as unsupported is logged like any other failure; only a leased device's refusal is quiet.
+    const local = harness({ device: 'iPhone 16e' });
+    local.fake.respond('command.prepare', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'prepare ios-runner is not supported by this daemon');
+    });
+    const localLines: string[] = [];
+    await local.prepare({ ...info, log: (line) => localLines.push(line) });
+    expect(localLines[1]).toMatch(/runner not prepared.*not supported/);
+    expect(local.fake.methods()).toEqual(['devices.boot', 'command.prepare']);
+
     // Android has no XCTest runner to start.
     const android = harness({ device: 'emulator-5556', platform: 'android' });
     const androidLines: string[] = [];

@@ -3,18 +3,23 @@
  * for the mobile engine, through agent-device's `@agent-device/revyl` plugin:
  * each lease comes from its own agent-device daemon, which starts a Revyl
  * device with the app installed from an `https` URL, or with no app and
- * then the target's local `app.appPath` installed on it.
+ * then the target's local `app.appPath` installed on it. Video is the
+ * worker's own screen recording of that device.
  */
 
+import path from 'node:path';
 import type { DeviceLease, DeviceProvider, DeviceRequest } from '@e2e-dev/mobile';
 import { agentDeviceLeases, agentDevicePlugin, type LeaseSelectors } from '@e2e-dev/mobile/lease';
-import { ConfigurationError, rejectUnknownKeys } from 'e2e/engine';
-import { credentialsEnv, revylCredentials } from './credentials.ts';
+import { ConfigurationError, rejectUnknownKeys, type ProviderRecordContext, type ProviderRecording, type ProviderRecordingResult } from 'e2e/engine';
+import { credentialsEnv, revylCredentials, type RevylCredentials } from './credentials.ts';
+import { RecordingGone, RevylDeviceClient } from './devices.ts';
 
 /** agent-device's name for Revyl, as the lease provider and the tenant. */
 const PROVIDER = 'revyl';
 
-const plugin = agentDevicePlugin(import.meta.resolve('@agent-device/revyl'));
+const PLUGIN = import.meta.resolve('@agent-device/revyl');
+const plugin = agentDevicePlugin(PLUGIN);
+const RECORDING_FILE = 'recording.mp4';
 
 /** Every option `revyl()` takes, kept equal to `RevylOptions` by the compiler. */
 const OPTION_KEYS: readonly string[] = Object.keys({
@@ -44,7 +49,8 @@ export interface RevylOptions {
  * device and isolated agent-device daemon per worker slot. Allocating the
  * lease starts the Revyl device, which installs `app`; releasing it ends the
  * device session via the daemon before stopping it (falling back to daemon
- * stop if the RPC does not confirm release).
+ * stop if the RPC does not confirm release). An attempt that records video
+ * gets the worker's screen recording of the device.
  */
 export function revyl(options: RevylOptions): DeviceProvider {
   rejectUnknownKeys('revyl()', options, OPTION_KEYS);
@@ -82,10 +88,54 @@ export function revyl(options: RevylOptions): DeviceProvider {
         summary: `${device}, ${options.osVersion ?? request.platform}; Revyl device started`,
         prepareHome: plugin.prepareHome,
         installAppPath: true,
+      }).catch(async (error: unknown) => {
+        if (!/\bHTTP 422\b/.test(error instanceof Error ? error.message : String(error))) throw error;
+        throw (await unlisted(credentials, request, device, options.osVersion, error)) ?? error;
       });
     },
     release: (lease, context) => leases.release(lease, context),
+    // Runs in the worker, from the lease alone: the plugin starts the device under a session id it derives from `lease.id`.
+    async record(lease: DeviceLease, context: ProviderRecordContext): Promise<ProviderRecording> {
+      const { revylSessionIdForLease } = (await import(PLUGIN)) as { revylSessionIdForLease: (leaseId: string) => string };
+      const client = new RevylDeviceClient(revylCredentials(context.env));
+      const recording = await client.startRecording(revylSessionIdForLease(lease.id), context.signal);
+      // A stop the engine repeats shares one in flight and reuses one that ended the recording; a failed stop is asked again on the next call.
+      let stopped: Promise<ProviderRecordingResult> | undefined;
+      return {
+        startedAt: recording.startedAt,
+        stop: ({ dir, signal }) =>
+          (stopped ??= client.stopRecording(recording, path.join(dir, RECORDING_FILE), signal).then(
+            () => ({ file: RECORDING_FILE }),
+            (error: unknown) => {
+              if (error instanceof RecordingGone) return { none: error.message };
+              stopped = undefined;
+              throw error;
+            },
+          )),
+      };
+    },
   };
+}
+
+/**
+ * After Revyl refused a lease with a 422, the error naming the models or OS
+ * versions Revyl lists when `device` or `osVersion` is not among them:
+ * Revyl itself answers an unknown one with a bare 422. Asked only once the
+ * allocation refused, since the allocation also takes aliases the catalog
+ * does not list, such as `Pixel7`, a bare API level, or a retired iOS beta.
+ * Nothing when Revyl lists both or does not answer.
+ */
+async function unlisted(credentials: RevylCredentials, request: DeviceRequest, device: string, osVersion: string | undefined, cause: unknown): Promise<Error | undefined> {
+  const catalog = await new RevylDeviceClient(credentials).catalog(request.platform, request.signal).catch(() => undefined);
+  if (catalog === undefined || catalog.models.length === 0) return undefined;
+  if (!catalog.models.includes(device)) {
+    return new Error(`Revyl has no ${request.platform} device "${device}"; set \`device\` to one of: ${catalog.models.join(', ')}`, { cause });
+  }
+  const versions = catalog.runtimes[device] ?? [];
+  if (osVersion !== undefined && versions.length > 0 && !versions.includes(osVersion)) {
+    return new Error(`Revyl runs "${device}" on ${versions.join(', ')}, not "${osVersion}"; set \`osVersion\` to one of those, or leave it out for Revyl's default`, { cause });
+  }
+  return undefined;
 }
 
 /** An `https` URL without credentials in it, the only app source the Revyl plugin accepts. */

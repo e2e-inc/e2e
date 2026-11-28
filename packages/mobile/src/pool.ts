@@ -417,7 +417,7 @@ export class DevicePool {
     try {
       await timed(took, 'boot', () => runCommand('boot', () => client.devices.boot(bootRequest(where)), info.signal, at));
       booted = true;
-      const runnerUp = this.options.platform !== 'ios' || (await timed(took, 'iOS runner', () => prepareRunner(client, where, info, at, movable)));
+      const runnerUp = this.options.platform !== 'ios' || (await timed(took, 'iOS runner', () => prepareRunner(client, where, info, at, movable, binding.leaseId !== undefined)));
       const app = pinnedApp(info.app, binding.installedApp);
       if (app === undefined || !runnerUp) return;
       // A build the suite installs itself is not on the device yet, so there
@@ -470,14 +470,19 @@ async function timed<T>(took: string[], name: string, step: () => Promise<T>): P
  * start runs inside that request's 90 s envelope, which a cold runner on a
  * loaded CI Mac outlasts. A runner that is busy or wedged ends the run
  * here, like a warm-up open that meets one; any other failure is logged and
- * left to the first attempt. True when the runner is up.
+ * left to the first attempt. A leased device whose runtime refuses the step
+ * as unsupported, such as a hosted device whose provider runs the runner
+ * itself, has no runner to prepare, so the slot warms on without a log line;
+ * a local daemon that refuses it is logged like any other failure. True when
+ * the runner is up or a leased device has none to start.
  */
-async function prepareRunner(client: AgentDeviceClient, where: DeviceSelection, info: EnginePrepareInfo, at: string, movable: boolean): Promise<boolean> {
+async function prepareRunner(client: AgentDeviceClient, where: DeviceSelection, info: EnginePrepareInfo, at: string, movable: boolean, leased: boolean): Promise<boolean> {
   try {
     await runCommand('prepare ios-runner', () => client.command.prepare({ action: 'ios-runner', ...where }), info.signal, at);
     return true;
   } catch (cause) {
     if (info.signal.aborted || isRunnerFailure(cause) || (movable && deviceHolder(cause) !== undefined)) throw cause;
+    if (leased && cause instanceof EngineError && cause.code === 'UNSUPPORTED_CAPABILITY') return true;
     info.log(`${at}: automation runner not prepared (${message(cause)}); the first attempt starts it`);
     return false;
   }

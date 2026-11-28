@@ -35,6 +35,9 @@ a secret. Without it, the lease fails before any test starts.
 The test runner needs only Node.js and the package dependencies: no Mac,
 Xcode, or Android SDK. Build your app separately, as a zipped iOS simulator
 `.app` or an Android `.apk`, and host it at an `https` URL Revyl can download.
+Use a release build that bundles its JavaScript. An Expo dev-client build
+opens on "Searching for development servers" and waits there for a Metro
+server the device cannot reach, so no test gets past its first screen.
 
 ## Configure a target
 
@@ -91,6 +94,12 @@ A screen read on a Revyl device takes about 2.5 s (occasionally over 5 s),
 so set `assertionTimeout` to `15_000`. With the default 5 s, an `expect` can
 time out before it even reads the screen once.
 
+On Android, Revyl cannot read the screen while an app shows its launch
+screen: the read fails with `uiautomator dump failed: null root node`
+instead of waiting, and the test fails with it. An app opened with its data
+cleared, as after `app.clearState()`, can stay on its launch screen for most
+of a minute.
+
 ## Test an app flow
 
 Tests use the same mobile APIs as on any other device, except the ones under [Limits](#limits):
@@ -112,10 +121,12 @@ test('opens the cart', async ({ app, screen }) => {
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `app` | none, so the target's `app.appPath` is installed | `https` URL of the build. A local path is refused, since Revyl cannot read it; use `app.appPath` for a local build. |
-| `device` | required | Device model as Revyl lists it, such as `iPhone 17 Pro Max` or `Pixel 7`. |
-| `osVersion` | Revyl's default for the model | OS version as Revyl lists it, such as `iOS 27.0` or `Android 14`. |
+| `device` | required | Device model as Revyl lists it, such as `iPhone 17 Pro Max` or `Pixel 7`. `revyl device targets` lists them. |
+| `osVersion` | Revyl's default for the model | OS version as Revyl lists it for that model, such as `iOS 27.0` or `Android 14`. |
 
-Unknown or invalid options fail config load with `INVALID_CONFIG`.
+Unknown or invalid options fail config load with `INVALID_CONFIG`. When
+Revyl refuses to start a `device` or `osVersion` its device catalog does not
+list for the platform, the error names the ones Revyl has.
 
 ## Limits
 
@@ -138,9 +149,12 @@ Unknown or invalid options fail config load with `INVALID_CONFIG`.
 - The app runs on Revyl's network, not yours, and port reverse is not
   available, so it cannot reach `localhost` or a server on your network.
   Point it at a server it can reach over `https`.
-- Revyl devices do not record video: an attempt that records one, such as
-  with `--video`, fails with `UNSUPPORTED_CAPABILITY`. Use `app.screenshot()`
-  for evidence instead.
+- An attempt that records video, such as with `--video`, gets Revyl's own
+  screen recording of the device as `video/recording.mp4`. Revyl stops a
+  recording at 3 minutes, or sooner when it reaches Revyl's size cap, so a
+  longer attempt's video covers its start only. A recording Revyl discarded,
+  such as an empty one, leaves that attempt without a video, and the next
+  attempt records again.
 - Revyl enters text at a point. Use `fill`. `pressSequentially` and typing
   into the focused field fail with `UNSUPPORTED_CAPABILITY`.
 - `setAppearance` and `setPermission` work on both platforms, but Revyl's

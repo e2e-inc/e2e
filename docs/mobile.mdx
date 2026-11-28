@@ -710,9 +710,11 @@ process, so `record` gets only the lease fields, not state `acquire` kept.
 It returns a `ProviderRecording` (a type from `e2e/engine`) whose `stop`
 either writes a file into the directory it gets and returns `{ file }`,
 kept as `video/<file>`, or returns `{ url, mediaType }` for a recording the
-service keeps, which the report links. A `record` that fails fails the
-attempt's launch. A `stop` that fails is tried one more time when the
-attempt ends.
+service keeps, which the report links. It returns `{ none: reason }` when
+the service ended the recording without a video, such as one it discarded:
+the attempt has no video, and the next attempt on the worker records again.
+A `record` that fails fails the attempt's launch. A `stop` that throws is
+tried again when the attempt ends and before the worker's next attempt.
 </Accordion>
 
 <Accordion title="Example: a provider for a session API">

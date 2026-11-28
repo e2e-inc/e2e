@@ -1,4 +1,4 @@
-/** `ProviderVideo`: the attempt's video as the browser provider records it, through starts that outlive their budget and stops that fail. */
+/** `ProviderVideo`: the attempt's video as the browser provider records it, through starts that outlive their budget, stops that fail, and stops that end with no video. */
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -63,5 +63,19 @@ describe('ProviderVideo', () => {
     expect(stopped).toEqual(['clip']);
     expect(await video.stop(new AbortController().signal)).toHaveLength(1);
     expect(stopped).toEqual(['clip', 'clip']);
+  });
+
+  it('lets go of a recording whose stop ended it with no video, so a later stop does not ask again', async () => {
+    let stops = 0;
+    const none: LeaseRecording = {
+      recording: { startedAt: '2026-09-28T10:00:00.000Z', stop: async () => (stops++, { none: 'the service discarded it' }) },
+      provider: 'browser provider "cloud"',
+      leaseId: 'lease-0',
+    };
+    const video = new ProviderVideo(async () => none, artifactsDir());
+    await video.arm(PAGE, new AbortController().signal);
+    await expect(video.stop(new AbortController().signal)).rejects.toMatchObject({ code: 'ENGINE_FAILURE', message: expect.stringContaining('ended without a video: the service discarded it') });
+    expect(await video.stop(new AbortController().signal)).toEqual([]);
+    expect(stops).toBe(1);
   });
 });

@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { AppError } from 'agent-device';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { OperationContext, ProviderRecordContext, ProviderRecording, ProviderRecordingResult, ProviderRecordingStopContext } from '@e2e-dev/core/engine';
 import type { DeviceLease, DeviceProvider, DeviceReleaseContext, DeviceRequest } from '../../src/provider.ts';
@@ -173,6 +174,19 @@ describe('device provider', () => {
     expect(worker.fake.methods()).toEqual(['devices.boot']);
     await worker.surface.installApp(undefined, {}, new AbortController().signal);
     expect(worker.fake.lastArgs('apps.install')).toMatchObject({ device: 'sim-0', app: 'Settings', appPath: path.join(PROJECT_ROOT, 'build/App.app') });
+  });
+
+  it("warms a leased device whose runtime refuses the runner step as unsupported as one with its runner up: no log line, and the app opens", async () => {
+    const cloud = provider();
+    const h = harness({ device: cloud.impl });
+    h.fake.respond('command.prepare', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'This lifecycle operation is unavailable for Revyl.', { reason: 'unsupported-provider-mode' });
+    });
+    const lines: string[] = [];
+    await h.prepare(prepareInfo({}, 1, (line) => lines.push(line)));
+    expect(h.fake.methods()).toEqual(['devices.boot', 'command.prepare', 'apps.open']);
+    expect(lines.filter((line) => line.includes('runner not prepared'))).toEqual([]);
+    await h.engine.finish!(finishInfo());
   });
 
   it('keeps a leased session for a replacement worker until the run finishes', async () => {
@@ -722,6 +736,22 @@ describe('device provider recording', () => {
     expect(cloud.stopped.map((context) => context.dir)).toEqual(Array(4).fill(path.join(artifactsDir, 'video')));
     await worker.engine.artifacts!.startVideo!({ ...operation(), attemptId: 'a2' });
     await worker.engine.artifacts!.stopVideo!({ ...operation(), attemptId: 'a2' });
+    expect(cloud.recorded.map(({ context }) => context.attemptId)).toEqual(['a1', 'a2']);
+  });
+
+  it('ends a provider recording that stops with no video, so the next attempt starts and records', async () => {
+    const cloud = recordingProvider({ stop: async () => ({ none: 'the service discarded an empty recording' }) });
+    const worker = await leasedWorker(cloud.impl);
+    await worker.engine.artifacts!.startVideo!(operation());
+    await expect(worker.engine.artifacts!.stopVideo!(operation())).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: expect.stringContaining('ended without a video: the service discarded an empty recording'),
+    });
+    await worker.engine.endAttempt!(cleanup());
+    expect(cloud.stopped).toHaveLength(1);
+    await worker.engine.startAttempt!({ attemptId: 'a2', artifactsDir: path.join(artifactsDir, 'retry'), signal: operation().signal, resolveSecret: noSecrets, ...ignoreTrace });
+    expect(cloud.stopped).toHaveLength(1);
+    await worker.engine.artifacts!.startVideo!({ ...operation(), attemptId: 'a2' });
     expect(cloud.recorded.map(({ context }) => context.attemptId)).toEqual(['a1', 'a2']);
   });
 
