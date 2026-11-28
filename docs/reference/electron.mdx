@@ -666,7 +666,7 @@ await expect(electron).not.toHaveTitle('Sign in');
 | `INVALID_ARGUMENT` | `expected` is neither a string nor a `RegExp`, a URL string that is not absolute, or an option the matcher does not take. |
 | `LOCATOR_AMBIGUOUS` | `target` matches several nodes. |
 | `APP_NOT_OPEN` | The app is not running or quit under the wait, or a dialog no handler answered is open. |
-| `ACTION_FAILED` | A read of the window did not answer, as after its renderer crashed. |
+| `ACTION_FAILED` | A read of the window did not answer in time. |
 | `ASSERTION_FAILED` | The condition did not hold in time. The error has the last value read. |
 
 #### Windows and the active window
