@@ -45,9 +45,9 @@ examples live at https://github.com/e2e-inc/e2e/tree/main/examples.
    existing fixtures, helpers, and locators instead of duplicating setup. If
    e2e is not installed and the user asked for it, read `setup`.
 2. Read the one matching reference (`writing-tests`: always read "A complete
-   file" and "Structure" first, then only the API sections you need; `mcp`
-   when driving live, writing steps as you walk and preferring `run_code`;
-   `agent` when adding `agent.*` steps).
+   file", "Structure", "Cases", and "Review" first, then only the API sections
+   you need; `mcp` when driving live, writing steps as you walk and preferring
+   `run_code`; `agent` when adding `agent.*` steps).
 3. Shape each file per `writing-tests` ("Structure"): one top-level `describe`
    per feature, one behavior and one goal per test, arrange -> act -> assert
    with every `expect` and `agent.assert` at the end. When `e2e.config.ts`
