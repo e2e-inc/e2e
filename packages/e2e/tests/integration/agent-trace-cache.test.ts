@@ -6,7 +6,7 @@
  * Playwright observations and actions throughout.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
@@ -696,7 +696,7 @@ describe('trace cache: a bare-point tap replays like a coordinate-driven tool', 
     expect(first.exitCode).toBe(0);
     const { entry } = readOnlyEntry(project);
     expect(entry.payload.actions).toEqual([
-      { name: 'tapAt', summary: 'tap the point (300, 60)', point: { x: 300, y: 60 }, viewport: { width: 1280, height: 720 } },
+      { name: 'tapAt', summary: 'tap the point (300, 60)', point: { x: 300, y: 60 }, viewport: { width: 1280, height: 720 }, at: '/canvas' },
     ]);
     expect(entry.payload.endAnchors).toContainEqual({ role: 'status', name: 'Hit', text: 'red' });
 
@@ -883,7 +883,7 @@ describe('trace cache: a replayed typed value is the flow\'s data on an app that
       expect(records.at(-1)!.calls).toBe(1);
       const actions = readOnlyEntry(fresh).entry.payload.actions;
       expect(actions.map((action) => action.name)).toEqual(['tool', 'tap']);
-      expect(actions[0]).toEqual({ name: 'tool', summary: 'tool type (run-time value)', derived: 'whole-node' });
+      expect(actions[0]).toEqual({ name: 'tool', summary: 'tool type (run-time value)', derived: 'whole-node', at: '/todos' });
 
       const second = await runExisting(fresh, options());
       expect(second.exitCode).toBe(0);
@@ -1039,7 +1039,8 @@ describe('trace cache: a navigate on the app replays where the app runs now', ()
     expect(first.exitCode).toBe(0);
     expect(recording.calls).toBe(1);
     const { entry } = readOnlyEntry(project);
-    expect(entry.payload.actions).toEqual([{ name: 'navigate', summary: 'navigate to "/about"', url: '/about' }]);
+    // The executor looked at the home page before it navigated, so the action records that it ran there.
+    expect(entry.payload.actions).toEqual([{ name: 'navigate', summary: 'navigate to "/about"', url: '/about', at: '/' }]);
     expect(entry.payload).toMatchObject({ startPath: '/', endPath: '/about' });
 
     await recordedOn!.close();
@@ -1050,5 +1051,715 @@ describe('trace cache: a navigate on the app replays where the app runs now', ()
     expect(replay.calls).toBe(0);
     const step = resultByTitle(second, 'opens the about page').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
     expect(step.cache).toMatchObject({ mode: 'self-finalized', replayedActions: 1, totalActions: 1 });
+  }, 240_000);
+});
+
+const DETOUR_SUITE = `import { test, expect } from 'e2e';
+
+test('increments after a wrong turn', async ({ app, agent, screen }) => {
+  await app.open();
+  await agent.act('increment the counter');
+  await expect(screen.getByRole('status')).toHaveText('1');
+});
+`;
+
+/** Opens About by mistake and goes back, `trips` times, then taps Increment: the wrong turn an agent takes before the right one. */
+function wrongTurnExecutor(record: ExecutorRecord, trips = 1): StepExecutor {
+  return {
+    name: 'wrong-turn-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      record.calls += 1;
+      let observation = await context.observe();
+      for (let trip = 0; trip < trips; trip += 1) {
+        await context.actions.tap({ id: nodeIdFor(observation.text, /link "About"/) });
+        await context.observe();
+        await context.actions.back();
+        observation = await context.observe();
+      }
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+      return { status: 'passed' as const, summary: 'the counter shows 1' };
+    },
+  };
+}
+
+describe('trace cache: a recording that leaves a screen and comes back', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/detour.e2e.ts': DETOUR_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  const options = (record: ExecutorRecord) => ({
+    appUrl: app.url,
+    config: {
+      tests: 'tests/**/*.e2e.ts',
+      agents: { default: { executor: wrongTurnExecutor(record) } },
+      cache: 'read-write' as const,
+    },
+  });
+  const detour = 'actions 1-2 left / for /about and came back with nothing typed, chosen, or set';
+
+  it('records where each action ran and reports the detour when it records and when it replays', async () => {
+    const recording: ExecutorRecord = { calls: 0, prefixes: [] };
+    const first = await runExisting(project, options(recording));
+    expect(first.exitCode).toBe(0);
+    assertValidReport(first.report);
+    const { entry } = readOnlyEntry(project);
+    expect(entry.payload.actions.map((action) => [action.name, action.at])).toEqual([
+      ['tap', '/'],
+      ['back', '/about'],
+      ['tap', '/'],
+    ]);
+    // Kept as the run found it, for a reader of the stored entry.
+    expect(entry.payload.detours).toEqual([{ from: 0, to: 2 }]);
+    const recorded = resultByTitle(first, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect(recorded.cache).toMatchObject({ mode: 'missed', reason: 'no-entry', detour, write: 'saved' });
+
+    const replay: ExecutorRecord = { calls: 0, prefixes: [] };
+    const second = await runExisting(project, options(replay));
+    expect(second.exitCode).toBe(0);
+    expect(replay.calls).toBe(0);
+    assertValidReport(second.report);
+    const replayed = resultByTitle(second, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect(replayed.cache).toMatchObject({ mode: 'self-finalized', detour });
+  }, 240_000);
+});
+
+/** Opens another site's home page, goes back, then taps Increment: the same path on two origins. */
+function otherOriginExecutor(otherUrl: string): StepExecutor {
+  return {
+    name: 'other-origin-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      await context.observe();
+      await context.actions.navigate(`${otherUrl}/`);
+      await context.observe();
+      await context.actions.back();
+      const observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+      return { status: 'passed' as const, summary: 'the counter shows 1' };
+    },
+  };
+}
+
+describe('trace cache: a detour to the same path on another origin', () => {
+  let app: FixtureApp;
+  let other: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    other = await startFixtureApp();
+    project = createProject({ 'tests/detour.e2e.ts': DETOUR_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+    await other?.close();
+  });
+
+  it("keeps the other site's origin, so its home page is not the app's", async () => {
+    const outcome = await runExisting(project, {
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: otherOriginExecutor(other.url) } }, cache: 'read-write' as const },
+    });
+    expect(outcome.exitCode).toBe(0);
+    const { entry } = readOnlyEntry(project);
+    const otherHome = `${new URL(other.url).origin}/`;
+    expect(entry.payload.actions.map((action) => action.at)).toEqual(['/', otherHome, '/']);
+    const step = resultByTitle(outcome, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect(step.cache?.detour).toBe(`actions 1-2 left / for ${otherHome} and came back with nothing typed, chosen, or set`);
+  }, 240_000);
+});
+
+/** Opens About through a link that carries a sign-in token, goes back, then taps Increment. */
+function tokenLinkExecutor(appUrl: string): StepExecutor {
+  return {
+    name: 'token-link-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      await context.observe();
+      await context.actions.navigate(`${appUrl}/about?token=Zx8aQ2pLmN4tR7vW`);
+      await context.observe();
+      await context.actions.back();
+      const observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+      return { status: 'passed' as const, summary: 'the counter shows 1' };
+    },
+  };
+}
+
+describe('trace cache: a detour through a page whose address carries a token', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/detour.e2e.ts': DETOUR_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('stores and reports the page as its route, the token as :id', async () => {
+    const outcome = await runExisting(project, {
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: tokenLinkExecutor(app.url) } }, cache: 'read-write' as const },
+    });
+    expect(outcome.exitCode).toBe(0);
+    const { entry } = readOnlyEntry(project);
+    expect(entry.payload.actions.map((action) => action.at)).toEqual(['/', '/about?token=:id', '/']);
+    const step = resultByTitle(outcome, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect(step.cache?.detour).toBe('actions 1-2 left / for /about?token=:id and came back with nothing typed, chosen, or set');
+  }, 240_000);
+});
+
+/** A value of letters only, so the route rule reads it as a word and keeps it in the path. */
+const INVITE = 'Zebracornflakes';
+
+const LATE_SECRET_SUITE = `import { test, expect, secrets } from 'e2e';
+
+test('increments after a wrong turn', async ({ app, agent, screen }) => {
+  await app.open();
+  await agent.act('increment the counter');
+  await expect(screen.getByRole('status')).toHaveText('1');
+  // The provider runs here, after the step that visited a page under the value.
+  await app.open('/echo');
+  await screen.getByLabel('Token').fill(secrets.get('invite'));
+});
+`;
+
+/** Opens a record page whose path is the invite value, goes back, then taps Increment. */
+function inviteRecordExecutor(appUrl: string): StepExecutor {
+  return {
+    name: 'invite-record-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      await context.observe();
+      await context.actions.navigate(`${appUrl}/records/${INVITE}`);
+      await context.observe();
+      await context.actions.back();
+      const observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+      return { status: 'passed' as const, summary: 'the counter shows 1' };
+    },
+  };
+}
+
+describe('trace cache: a detour through a page named by a secret a later step resolves', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/detour.e2e.ts': LATE_SECRET_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('masks the value in the stored locations and in the step\'s detour', async () => {
+    const outcome = await runExisting(project, {
+      appUrl: app.url,
+      config: {
+        tests: 'tests/**/*.e2e.ts',
+        agents: { default: { executor: inviteRecordExecutor(app.url) } },
+        cache: 'read-write' as const,
+        secrets: { invite: () => INVITE },
+      },
+    });
+    expect(outcome.exitCode).toBe(0);
+    const { entry } = readOnlyEntry(project);
+    // Settled with the value the process learned after the step; the navigate's own url is the action, as it was before locations.
+    expect(entry.payload.actions.map((action) => action.at)).toEqual(['/', '/records/<secret:invite>', '/']);
+    const step = resultByTitle(outcome, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect(step.cache?.detour).toBe('actions 1-2 left / for /records/<secret:invite> and came back with nothing typed, chosen, or set');
+  }, 240_000);
+});
+
+/** Takes the wrong turn on a step it runs from the top; after a hand-off, only taps Increment, as an agent finishing the step would. */
+function resumingExecutor(record: ExecutorRecord): StepExecutor {
+  const fromTop = wrongTurnExecutor(record);
+  return {
+    name: 'resuming-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      if (context.replayedPrefix === undefined) return fromTop.runStep(context);
+      record.calls += 1;
+      const observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+      return { status: 'passed' as const, summary: 'the counter shows 1' };
+    },
+  };
+}
+
+describe('trace cache: a recording made again after a hand-off', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/detour.e2e.ts': DETOUR_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('keeps the locations of the replayed actions, so the detour it repeated stays reported', async () => {
+    const options = (record: ExecutorRecord) => ({
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: resumingExecutor(record) } }, cache: 'read-write' as const },
+    });
+    const detour = 'actions 1-2 left / for /about and came back with nothing typed, chosen, or set';
+    expect((await runExisting(project, options({ calls: 0, prefixes: [] }))).exitCode).toBe(0);
+    // Increment no longer finds its recorded target: the replay runs the wrong turn, then the agent finishes.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      actions: payload.actions.map((action, index) => (index === 2 && action.name === 'tap' ? { ...action, target: { ...action.target, name: 'No Such Button' } } : action)),
+    }));
+    const handedOff = await runExisting(project, options({ calls: 0, prefixes: [] }));
+    expect(handedOff.exitCode).toBe(0);
+    const step = (outcome: RunOutcome) => resultByTitle(outcome, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect(step(handedOff).cache).toMatchObject({ mode: 'agent-concluded', detour, write: 'saved' });
+    expect(readOnlyEntry(project).entry.payload.actions.map((action) => [action.name, action.at])).toEqual([
+      ['tap', '/'],
+      ['back', '/about'],
+      ['tap', '/'],
+    ]);
+    const replay: ExecutorRecord = { calls: 0, prefixes: [] };
+    const replayed = await runExisting(project, options(replay));
+    expect(replay.calls).toBe(0);
+    expect(step(replayed).cache).toMatchObject({ mode: 'self-finalized', detour });
+  }, 240_000);
+});
+
+describe('trace cache: a replay that hands off after a detour', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/detour.e2e.ts': DETOUR_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('reports the trip the replay completed, not merged with the one it never reached', async () => {
+    const options = (record: ExecutorRecord, cache: 'read-write' | 'read-only') => ({
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: wrongTurnExecutor(record, 2) } }, cache },
+    });
+    const recording: ExecutorRecord = { calls: 0, prefixes: [] };
+    expect((await runExisting(project, options(recording, 'read-write'))).exitCode).toBe(0);
+    expect(readOnlyEntry(project).entry.payload.actions.map((action) => [action.name, action.at])).toEqual([
+      ['tap', '/'],
+      ['back', '/about'],
+      ['tap', '/'],
+      ['back', '/about'],
+      ['tap', '/'],
+    ]);
+    // The second About link no longer finds its target: the replay runs the first trip, then hands off.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      actions: payload.actions.map((action, index) => (index === 2 && action.name === 'tap' ? { ...action, target: { ...action.target, name: 'No Such Link' } } : action)),
+    }));
+    const handedOff: ExecutorRecord = { calls: 0, prefixes: [] };
+    const outcome = await runExisting(project, options(handedOff, 'read-only'));
+    expect(outcome.exitCode).toBe(0);
+    expect(handedOff.calls).toBe(1);
+    const step = resultByTitle(outcome, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect(step.cache).toMatchObject({
+      mode: 'agent-concluded',
+      replayedActions: 2,
+      detour: 'actions 1-2 left / for /about and came back with nothing typed, chosen, or set',
+    });
+    // A span that ends inside the prefix is reported as the recording run found it.
+    rewriteOnlyEntry(project, (payload) => ({ ...payload, detours: [{ from: 0, to: 2 }] }));
+    const finished = await runExisting(project, options({ calls: 0, prefixes: [] }, 'read-only'));
+    expect(resultByTitle(finished, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!.cache).toMatchObject({
+      mode: 'agent-concluded',
+      detour: 'actions 1-2 left / for /about and came back with nothing typed, chosen, or set',
+    });
+    // A stored location reads a record id as :id, so a trip the prefix shows counts only inside a span the recording run found.
+    rewriteOnlyEntry(project, (payload) => ({ ...payload, detours: [] }));
+    const unfound = await runExisting(project, options({ calls: 0, prefixes: [] }, 'read-only'));
+    expect(unfound.exitCode).toBe(0);
+    const again = resultByTitle(unfound, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect(again.cache).toMatchObject({ mode: 'agent-concluded', replayedActions: 2 });
+    expect(again.cache?.detour).toBeUndefined();
+  }, 240_000);
+});
+
+describe('trace cache: a scroll to a text that moves the route', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({
+      'tests/feed.e2e.ts': `import { test, expect } from 'e2e';
+
+test('marks the next story read', async ({ app, agent, screen }) => {
+  await app.open('/story-feed');
+  await agent.act('mark the next story read');
+  await expect(screen.getByRole('status')).toHaveText('read');
+});
+`,
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('records the scroll where it started, not where its last look landed', async () => {
+    const executor: StepExecutor = {
+      name: 'feed-executor',
+      version: 'test',
+      async runStep(context: StepExecutorContext) {
+        await context.observe();
+        await context.actions.scrollUntil('Next story', 'down');
+        const observation = await context.observe();
+        await context.actions.tap({ id: nodeIdFor(observation.text, /button "Mark read"/) });
+        return { status: 'passed' as const, summary: 'marked read' };
+      },
+    };
+    const outcome = await runExisting(project, { appUrl: app.url, config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor } }, cache: 'read-write' as const } });
+    expect(outcome.exitCode).toBe(0);
+    expect(readOnlyEntry(project).entry.payload.actions.map((action) => [action.name, action.at])).toEqual([
+      ['scrollUntil', '/story-feed'],
+      ['tap', '/story-feed/next-story'],
+    ]);
+  }, 240_000);
+});
+
+const VIEW_SUITE = `import { test, expect } from 'e2e';
+
+test('increments after a look at another view', async ({ app, agent, screen }) => {
+  await app.open('/?view=account');
+  await agent.act('increment the counter');
+  await expect(screen.getByRole('status')).toHaveText('1');
+});
+`;
+
+/** Opens the privacy view of the same page and goes back, then taps Increment; after a hand-off, only taps Increment. */
+function otherViewExecutor(appUrl: string, record: ExecutorRecord): StepExecutor {
+  return {
+    name: 'other-view-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      record.calls += 1;
+      if (context.replayedPrefix === undefined) {
+        await context.observe();
+        await context.actions.navigate(`${appUrl}/?view=privacy`);
+        await context.observe();
+        await context.actions.back();
+      }
+      const observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+      return { status: 'passed' as const, summary: 'the counter shows 1' };
+    },
+  };
+}
+
+describe('trace cache: a hand-off after a trip between two views of one page', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/views.e2e.ts': VIEW_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('keeps the trip the entry found, which the stored /?view=:id the replay ran on can no longer show', async () => {
+    const options = (record: ExecutorRecord) => ({
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: otherViewExecutor(app.url, record) } }, cache: 'read-write' as const },
+    });
+    const step = (outcome: RunOutcome) => resultByTitle(outcome, 'increments after a look at another view').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    const detour = 'actions 1-2 left /?view=:id for another /?view=:id and came back with nothing typed, chosen, or set';
+    const recorded = await runExisting(project, options({ calls: 0, prefixes: [] }));
+    expect(recorded.exitCode).toBe(0);
+    expect(step(recorded).cache).toMatchObject({ detour });
+    expect(readOnlyEntry(project).entry.payload.detours).toEqual([{ from: 0, to: 2 }]);
+    // Increment no longer finds its recorded target: the replay runs the trip, then the agent finishes.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      actions: payload.actions.map((action, index) => (index === 2 && action.name === 'tap' ? { ...action, target: { ...action.target, name: 'No Such Button' } } : action)),
+    }));
+    const handedOff: ExecutorRecord = { calls: 0, prefixes: [] };
+    const outcome = await runExisting(project, options(handedOff));
+    expect(outcome.exitCode).toBe(0);
+    expect(handedOff.calls).toBe(1);
+    expect(step(outcome).cache).toMatchObject({ mode: 'agent-concluded', replayedActions: 2, detour, write: 'saved' });
+    expect(readOnlyEntry(project).entry.payload.detours).toEqual([{ from: 0, to: 2 }]);
+    const replay: ExecutorRecord = { calls: 0, prefixes: [] };
+    const replayed = await runExisting(project, options(replay));
+    expect(replay.calls).toBe(0);
+    expect(step(replayed).cache).toMatchObject({ mode: 'self-finalized', detour });
+    // A read-only replay, which records nothing, confirms the return on the addresses it saw too.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      actions: payload.actions.map((action, index) => (index === 2 && action.name === 'tap' ? { ...action, target: { ...action.target, name: 'No Such Button' } } : action)),
+    }));
+    const readOnly = await runExisting(project, { ...options({ calls: 0, prefixes: [] }), config: { ...options({ calls: 0, prefixes: [] }).config, cache: 'read-only' as const } });
+    expect(readOnly.exitCode).toBe(0);
+    expect(step(readOnly).cache).toMatchObject({ mode: 'agent-concluded', replayedActions: 2, detour });
+  }, 240_000);
+});
+
+const DARK_MODE_SUITE = `import { test, expect } from 'e2e';
+
+test('turns on dark mode', async ({ app, agent, screen }) => {
+  await app.open('/preferences');
+  await agent.act('turn on dark mode');
+  await expect(screen.getByRole('status', { name: 'Dark mode' })).toHaveText('on');
+});
+`;
+
+/** Opens Display, taps the moon icon inside the Dark mode switch, by its node or at its center, then follows the link back to Preferences. */
+function darkModeExecutor(by: 'node' | 'point'): StepExecutor {
+  return {
+    name: 'dark-mode-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      let observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /link "Display"/) });
+      const { tree } = await context.observe({ tree: true });
+      const moon = findNode(tree, (node) => node.role === 'image' && node.name === 'Moon')!;
+      if (by === 'node') await context.actions.tap({ id: moon.id });
+      else await context.actions.tapAt({ x: moon.rect!.x + moon.rect!.width / 2, y: moon.rect!.y + moon.rect!.height / 2 });
+      observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /link "Preferences"/) });
+      return { status: 'passed' as const, summary: 'dark mode is on' };
+    },
+  };
+}
+
+describe('trace cache: a tap on the icon inside a switch', () => {
+  let app: FixtureApp;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+  }, 60_000);
+
+  afterAll(async () => {
+    await app?.close();
+  });
+
+  for (const by of ['node', 'point'] as const) {
+    it(`records the switch it set (a tap by ${by}), so the trip back to Preferences is no detour`, async () => {
+      const project = createProject({ 'tests/dark.e2e.ts': DARK_MODE_SUITE });
+      try {
+        const outcome = await runExisting(project, {
+          appUrl: app.url,
+          config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: darkModeExecutor(by) } }, cache: 'read-write' as const },
+        });
+        expect(outcome.exitCode).toBe(0);
+        const { entry } = readOnlyEntry(project);
+        expect(entry.payload.actions.map((action) => [action.name, 'controlRole' in action ? action.controlRole : undefined, action.at])).toEqual([
+          ['tap', undefined, '/preferences'],
+          [by === 'node' ? 'tap' : 'tapAt', 'switch', '/preferences/display'],
+          ['tap', undefined, '/preferences/display'],
+        ]);
+        expect(entry.payload.detours).toEqual([]);
+        const step = resultByTitle(outcome, 'turns on dark mode').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+        expect(step.cache?.detour).toBeUndefined();
+      } finally {
+        project.cleanup();
+      }
+    }, 240_000);
+  }
+});
+
+/**
+ * Opens About, then the echo page from it, goes back to About, then follows
+ * Home and taps Increment: a trip from About inside one from Home. After a
+ * hand-off it presses Tab on About, which sets nothing a detour reads but
+ * ends the trip from Home, then goes Home and taps Increment.
+ */
+function innerTripExecutor(appUrl: string, record: ExecutorRecord): StepExecutor {
+  return {
+    name: 'inner-trip-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      record.calls += 1;
+      let observation = await context.observe();
+      if (context.replayedPrefix === undefined) {
+        await context.actions.tap({ id: nodeIdFor(observation.text, /link "About"/) });
+        await context.observe();
+        await context.actions.navigate(`${appUrl}/echo`);
+        await context.observe();
+        await context.actions.back();
+        observation = await context.observe();
+      } else {
+        await context.actions.pressKey('Tab');
+      }
+      await context.actions.tap({ id: nodeIdFor(observation.text, /link "Home"/) });
+      observation = await context.observe();
+      await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+      return { status: 'passed' as const, summary: 'the counter shows 1' };
+    },
+  };
+}
+
+describe('trace cache: a hand-off inside a trip, after a trip it completed', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/detour.e2e.ts': DETOUR_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('keeps the inner trip the replay completed in the recording it makes again, as its report names it', async () => {
+    const options = (record: ExecutorRecord) => ({
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: innerTripExecutor(app.url, record) } }, cache: 'read-write' as const },
+    });
+    const step = (outcome: RunOutcome) => resultByTitle(outcome, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect((await runExisting(project, options({ calls: 0, prefixes: [] }))).exitCode).toBe(0);
+    expect(readOnlyEntry(project).entry.payload.detours).toEqual([{ from: 0, to: 4 }]);
+    // Home no longer finds its recorded target: the replay runs the trip to the echo page and back, then hands off on About.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      actions: payload.actions.map((action, index) => (index === 3 && action.name === 'tap' ? { ...action, target: { ...action.target, name: 'No Such Link' } } : action)),
+    }));
+    const handedOff: ExecutorRecord = { calls: 0, prefixes: [] };
+    const outcome = await runExisting(project, options(handedOff));
+    expect(outcome.exitCode).toBe(0);
+    expect(handedOff.calls).toBe(1);
+    const inner = 'actions 2-3 left /about for /echo and came back with nothing typed, chosen, or set';
+    expect(step(outcome).cache).toMatchObject({ mode: 'agent-concluded', replayedActions: 3, detour: inner, write: 'saved' });
+    expect(readOnlyEntry(project).entry.payload.detours).toEqual([{ from: 1, to: 3 }]);
+  }, 240_000);
+
+  it('claims no return at the action the replay stopped on when the screen there is not the recorded one', async () => {
+    // After a hand-off, goes home by its address wherever the replay left it, then taps Increment.
+    const goHome = (record: ExecutorRecord): StepExecutor => {
+      const fromTop = innerTripExecutor(app.url, record);
+      return {
+        name: 'go-home-executor',
+        version: 'test',
+        async runStep(context: StepExecutorContext) {
+          if (context.replayedPrefix === undefined) return fromTop.runStep(context);
+          await context.observe();
+          await context.actions.navigate(`${app.url}/`);
+          const observation = await context.observe();
+          await context.actions.tap({ id: nodeIdFor(observation.text, /button "Increment"/) });
+          return { status: 'passed' as const, summary: 'the counter shows 1' };
+        },
+      };
+    };
+    const options = (record: ExecutorRecord, cache: 'read-write' | 'read-only') => ({
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: goHome(record) } }, cache },
+    });
+    rmSync(path.join(project.dir, '.e2e', 'cache'), { recursive: true, force: true });
+    expect((await runExisting(project, options({ calls: 0, prefixes: [] }, 'read-write'))).exitCode).toBe(0);
+    // The way back from the echo page now leads to the storage page: the replay stops there, not on About where Home was recorded.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      detours: [{ from: 0, to: 4 }],
+      actions: payload.actions.map((action, index) => (index === 2 ? { name: 'navigate' as const, summary: 'navigate to /storage', url: '/storage', ...(action.at === undefined ? {} : { at: action.at }) } : action)),
+    }));
+    const outcome = await runExisting(project, options({ calls: 0, prefixes: [] }, 'read-only'));
+    expect(outcome.exitCode).toBe(0);
+    const step = resultByTitle(outcome, 'increments after a wrong turn').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    expect(step.cache).toMatchObject({ mode: 'agent-concluded', replayedActions: 3 });
+    expect(step.cache?.detour).toBeUndefined();
+  }, 240_000);
+});
+
+const MARKER_SUITE = `import { test, expect } from 'e2e';
+
+test('saves the marker after a look at About', async ({ app, agent, screen }) => {
+  await app.open('/storage');
+  await agent.act('save the marker');
+  await expect(screen.getByRole('status', { name: 'Marker' })).toHaveText('saved');
+});
+`;
+
+/** Saves the marker, opens About, and comes back to Storage by its address; after a hand-off, goes back to Storage. */
+function markerTripExecutor(appUrl: string): StepExecutor {
+  return {
+    name: 'marker-trip-executor',
+    version: 'test',
+    async runStep(context: StepExecutorContext) {
+      const observation = await context.observe();
+      if (context.replayedPrefix === undefined) {
+        await context.actions.tap({ id: nodeIdFor(observation.text, /button "Save marker"/) });
+        await context.observe();
+        await context.actions.navigate(`${appUrl}/about`);
+        await context.observe();
+      }
+      await context.actions.navigate(`${appUrl}/storage`);
+      return { status: 'passed' as const, summary: 'the marker is saved' };
+    },
+  };
+}
+
+describe('trace cache: a replay whose last action now ends on another page', () => {
+  let app: FixtureApp;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    project = createProject({ 'tests/marker.e2e.ts': MARKER_SUITE });
+  }, 60_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('claims no return at the end the replay never reached', async () => {
+    const options = (cache: 'read-write' | 'read-only') => ({
+      appUrl: app.url,
+      config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor: markerTripExecutor(app.url) } }, cache },
+    });
+    const step = (outcome: RunOutcome) => resultByTitle(outcome, 'saves the marker after a look at About').attempts.at(-1)!.steps.find((s) => s.api === 'agent.act')!;
+    const recorded = await runExisting(project, options('read-write'));
+    expect(recorded.exitCode).toBe(0);
+    expect(step(recorded).cache).toMatchObject({ detour: 'actions 2-3 left /storage for /about and came back with nothing typed, chosen, or set' });
+    expect(readOnlyEntry(project).entry.payload.detours).toEqual([{ from: 1, to: 3 }]);
+    // The way back now leads to the echo page: every action replays, and the end is not the recorded one.
+    rewriteOnlyEntry(project, (payload) => ({
+      ...payload,
+      actions: payload.actions.map((action, index) => (index === 2 && action.name === 'navigate' ? { ...action, url: '/echo' } : action)),
+    }));
+    const outcome = await runExisting(project, options('read-only'));
+    expect(outcome.exitCode).toBe(0);
+    expect(step(outcome).cache).toMatchObject({ mode: 'agent-concluded', reason: 'end-mismatch', replayedActions: 3 });
+    expect(step(outcome).cache?.detour).toBeUndefined();
   }, 240_000);
 });

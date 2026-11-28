@@ -185,6 +185,15 @@ export type TraceAnchorState = (typeof TRACE_ANCHOR_STATES)[number];
 interface ActionBase {
   /** One-line prose summary — the only view a mid-step hand-off notice shows. */
   readonly summary: string;
+  /**
+   * Where the action ran: the location of the screen the step had last
+   * looked at, spelled like `startPath`. Absent when the step had not looked
+   * again since its previous action, so a stale location is never kept, and
+   * on entries recorded before it was added. Provenance only, never replay
+   * input: it is what tells a flow that left a screen and came back
+   * (`cache/detours.ts`).
+   */
+  readonly at?: string;
 }
 
 /** The verbs that act on one node and carry no input: tap and its variants, hover, scroll into view. */
@@ -214,6 +223,12 @@ export interface NodeAction extends ActionBase {
   readonly target: TraceTargetDescriptor;
   /** Keys a tap-family action held for the click; replayed with the action. */
   readonly modifiers?: readonly KeyModifier[];
+  /**
+   * For a tap, the role of the control at the target's center when that is
+   * not the target's own role: an icon tapped inside a switch sets the
+   * switch. Provenance only, never replay input (`cache/detours.ts`).
+   */
+  readonly controlRole?: string;
 }
 
 export interface TypeAction extends ActionBase {
@@ -341,6 +356,14 @@ export type PointActionName = 'tapAt' | 'hoverAt';
 export interface PointAction extends ActionBase, TracePointEnd {
   readonly name: PointActionName;
   readonly viewport: TraceViewport;
+  /**
+   * The role of the control the point was on, the innermost interactive
+   * node containing it, unless `within` already names a node of that role:
+   * a switch whose icon is the innermost node, or an unnamed switch, which
+   * keeps no anchor. Provenance only, never replay input: a tap on a
+   * switch's icon sets the switch (`cache/detours.ts`).
+   */
+  readonly controlRole?: string;
 }
 
 /** A recorded point and, when a listed node with a durable descriptor contained it, its place inside that node's box. */
@@ -481,6 +504,21 @@ export interface ActionTrace {
    * entries.
    */
   readonly keyedBy?: TraceKeyContext;
+  /**
+   * The detours the recording run found (`cache/detours.ts`), by the
+   * actions each spans; empty when it found none. Provenance, never read by
+   * a replay: the run compared the locations it saw, before `unique()`
+   * values became placeholders, which a stored entry can no longer compare
+   * (a slug and a record id both become a placeholder). Absent on entries
+   * recorded without locations, and on older ones.
+   */
+  readonly detours?: readonly TraceDetourSpan[];
+}
+
+/** A detour as an entry keeps it: the first action of it, and the action the flow went on with once it was back. */
+export interface TraceDetourSpan {
+  readonly from: number;
+  readonly to: number;
 }
 
 /**
@@ -641,7 +679,9 @@ function mapActionText(action: RecordedAction, map: TraceTextMap): RecordedActio
  * Applies `map` to every recorded string a screen value can appear in: typed
  * and selected values, navigated URLs, both location paths, target and
  * anchor text, and the prose summaries. Keys (`press`), secret names,
- * executor identity, and provenance are vocabulary and are left alone. The
+ * executor identity, and provenance are vocabulary and are left alone, and
+ * so is the location each action ran at, which is provenance too and
+ * `cache/template.ts` maps on its own. The
  * one list of text-bearing fields lives here, beside the union it walks;
  * `undefined` from `map` makes the whole result `undefined`.
  */

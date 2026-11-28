@@ -43,6 +43,7 @@ import { AttemptGuestSessions } from './guests.ts';
 import { runSerialUnit, type SerialAttemptStart, type SerialHost, type SharedSerialSession } from './serial.ts';
 import { interruptedInPhase, interruptedSkip, pairKey, unitResult, unstartedResult } from './units.ts';
 import { carriedSecrets, processSecrets, redactForSession, sessionLedger, staticSecretLedger } from '@e2e-dev/core/lib/run/secrecy';
+import { settledDetour } from '@e2e-dev/core/lib/cache/detours';
 import { SessionStaging } from '@e2e-dev/core/lib/run/sessions';
 import { isOwnStep, StepRecorder, type StepHoldRequest, type StepProgress } from '@e2e-dev/core/lib/run/steps';
 import { holdAttemptSteps, readHeldScreen, type AttemptHolds, type HoldReads, type StepHold } from './step-hold.ts';
@@ -1084,6 +1085,13 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
         const write = writes.get(step.index);
         if (step.cache !== undefined && write !== undefined) step.cache.write = write;
       }
+    }
+    // A secret a later step resolved may be in an earlier step's detour,
+    // which names locations (`settledDetour`), the detour of a step another
+    // session ran included, whatever this attempt's own cache. Masked with
+    // every value the process has learned, which keeps a closed session's.
+    for (const step of record.steps) {
+      if (step.cache?.detour !== undefined) step.cache.detour = settledDetour(step.cache.detour, processSecrets);
     }
     return record;
   }

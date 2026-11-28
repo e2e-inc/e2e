@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 import { createAgentCacheContext, settleStagedTraces } from '@e2e-dev/core/lib/cache/context';
 import { recordedProvenance } from '@e2e-dev/core/lib/cache/recorder';
 import { FileCacheStore } from '@e2e-dev/core/lib/cache/store';
@@ -296,6 +296,37 @@ describe('settleStagedTraces', () => {
     }
   });
 
+  it('writes a recording that fits the store only without its locations without them', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'e2e-cache-located-'));
+    try {
+      const store = new FileCacheStore({ directory, maxBytes: 1_048_576, writable: true });
+      // 50 batch uploads that fit the limit alone, each with a long location that tips it over.
+      const actions = Array.from({ length: 50 }, (_, index) => ({
+        name: 'upload' as const,
+        summary: `upload 5 files into button "Attach ${String(index)}"`,
+        target: { role: 'button', name: `Attach ${String(index)}` },
+        paths: Array.from({ length: 5 }, (_unused, file) => `/data/${String(file)}/${'f'.repeat(3_900)}.csv`),
+        at: `/form/${'a'.repeat(4_000)}`,
+      }));
+      const switchTap = { name: 'tap' as const, summary: 'tap image "Moon"', target: { role: 'image', name: 'Moon' }, controlRole: 'switch', at: '/form' };
+      const context = contextWith(store);
+      context.staged.push({ kind: 'write', keyHash: KEY_A, trace: { ...trace('large'), actions: [...actions.slice(1), switchTap], detours: [] }, stepIndex: 1 });
+      const writes = await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+      expect(writes.get(1)).toBe('saved');
+      const read = await store.read(KEY_A);
+      assert(read.status === 'hit');
+      expect(read.entry.payload.actions).toHaveLength(50);
+      expect(read.entry.payload.actions.some((action) => action.at !== undefined || 'controlRole' in action)).toBe(false);
+      expect(read.entry.payload).not.toHaveProperty('detours');
+      // The same flow recorded again is kept as stored, not written again.
+      const again = contextWith(store);
+      again.staged.push({ kind: 'write', keyHash: KEY_A, trace: { ...trace('large'), actions: [...actions.slice(1), switchTap], detours: [] }, stepIndex: 1 });
+      expect((await settleStagedTraces(again, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true })).get(1)).toBe('kept');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('reports a confirmed recording as not written when a custom store rejects its write', async () => {
     const store = memoryStore();
     const rejecting: CacheStore = {
@@ -358,6 +389,77 @@ describe('settleStagedTraces', () => {
     context.staged.push({ kind: 'keep', keyHash: KEY_A, stepIndex: 1, recordedFor: STEP });
     await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
     expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload).toEqual({ ...recorded, recordedFor: STEP });
+  });
+
+  it('writes a recording whose detours differ from the stored entry\'s, though its actions are the same', async () => {
+    const store = memoryStore();
+    const tapTwice = trace('same actions');
+    const flow = (detours: ActionTrace['detours']): ActionTrace => ({ ...tapTwice, actions: [...tapTwice.actions, ...tapTwice.actions], ...(detours === undefined ? {} : { detours }) });
+    store.entries.set(KEY_A, JSON.stringify(buildTraceEntry(flow([]))));
+    const context = contextWith(store);
+    context.staged.push({ kind: 'write', keyHash: KEY_A, trace: flow([{ from: 0, to: 2 }]), stepIndex: 1 });
+    const writes = await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+    expect(writes.get(1)).toBe('saved');
+    expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.detours).toEqual([{ from: 0, to: 2 }]);
+  });
+
+  it('keeps an entry recorded before detours were kept when the new recording has none', async () => {
+    const store = memoryStore();
+    const stored = trace('same actions');
+    store.entries.set(KEY_A, JSON.stringify(buildTraceEntry(stored)));
+    const before = store.entries.get(KEY_A);
+    const context = contextWith(store);
+    context.staged.push({ kind: 'write', keyHash: KEY_A, trace: { ...stored, detours: [] }, stepIndex: 1 });
+    const writes = await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+    expect(writes.get(1)).toBe('kept');
+    expect(store.entries.get(KEY_A)).toBe(before);
+  });
+
+  it('masks a secret resolved while the store read for the same-flow check ran', async () => {
+    const store = memoryStore();
+    const ledger = new SecretLedger();
+    const read = store.read;
+    // Another session resolves the secret while settlement waits on the store.
+    const context = contextWith({ ...store, read: async (keyHash) => {
+      ledger.register('token', 'token-2718-value');
+      return read(keyHash);
+    } });
+    const located: ActionTrace = { ...trace('invited'), actions: [{ name: 'tap', summary: 'tap button "X"', target: { role: 'button', name: 'X' }, at: '/invite?code=token-2718-value' }] };
+    context.staged.push({ kind: 'write', keyHash: KEY_A, trace: located, stepIndex: 1, redact: ledger.redact });
+    await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+    expect(store.entries.get(KEY_A)).not.toContain('token-2718-value');
+  });
+
+  it('masks a secret a later step resolved in the locations it writes', async () => {
+    const store = memoryStore();
+    const ledger = new SecretLedger();
+    const context = contextWith(store);
+    const located: ActionTrace = { ...trace('invited'), actions: [{ name: 'tap', summary: 'tap button "X"', target: { role: 'button', name: 'X' }, at: '/invite?code=token-2718-value' }] };
+    context.staged.push({ kind: 'write', keyHash: KEY_A, trace: located, stepIndex: 1, redact: ledger.redact });
+    // A provider-backed secret resolves in a later step, before the attempt settles.
+    ledger.register('token', 'token-2718-value');
+    await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+    const stored = store.entries.get(KEY_A)!;
+    expect(stored).not.toContain('token-2718-value');
+    expect(readTraceEntry(JSON.parse(stored))?.payload.actions[0]?.at).toBe('/invite?code=<secret:token>');
+  });
+
+  it('keeps an entry whose flow differs from the new recording only in where each action ran and what control a point was on', async () => {
+    const store = memoryStore();
+    const located = (at: string, controlRole: string): ActionTrace => ({
+      ...trace('same flow'),
+      actions: [
+        { name: 'tap', summary: 'tap button "X"', target: { role: 'button', name: 'X' }, at },
+        { name: 'tapAt', summary: 'tap the point (5, 5)', point: { x: 5, y: 5 }, viewport: { width: 100, height: 100 }, controlRole },
+      ],
+    });
+    const stored = JSON.stringify(buildTraceEntry(located('/requests/1001', 'button')));
+    store.entries.set(KEY_A, stored);
+    const context = contextWith(store);
+    context.staged.push({ kind: 'write', keyHash: KEY_A, trace: located('/requests/1002', 'switch'), stepIndex: 1 });
+    const writes = await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+    expect(writes.get(1)).toBe('kept');
+    expect(store.entries.get(KEY_A)).toBe(stored);
   });
 
   it('writes the identity digest into a confirmed kept entry that cut a long test id before entries kept one', async () => {

@@ -21,8 +21,8 @@ import type { ActionEvent, ActionHook, BeforeActionHook, ClickOptions, JsonValue
 import { PROJECT_TOOL_EVENT_PREFIX, READ_ONLY_GRAMMAR, type GrammarActionName } from './action-names.ts';
 import { actionEvent, containerKey, describeAction, type PlacedPoint, type Placement, type RecordableAction } from './actions.ts';
 import { describePosition, hasTwinsWithoutTestId } from '../cache/relocate.ts';
-import { appNavigation } from '../cache/route.ts';
-import { isTapActionName, type NodeActionName, type PointActionName, type RecordedAction } from '../cache/trace.ts';
+import { appLocation, appNavigation } from '../cache/route.ts';
+import { isNodeAction, isTapActionName, type NodeActionName, type PointActionName, type RecordedAction } from '../cache/trace.ts';
 import { derivedJoinReason, derivedReason } from './derived.ts';
 import { ActionHookError, AgentError, toAgentError } from './error.ts';
 import {
@@ -49,6 +49,9 @@ import { authorizeUploadPaths } from './upload-paths.ts';
 
 /** Actions available during assertions, shared by every dispatcher. */
 const ASSERTION_ACTIONS = new Set<string>(Object.values(READ_ONLY_GRAMMAR).flat());
+
+/** The node verbs that press a control, whose enclosing control the trace notes (`withControl`). */
+const TAP_VERBS: ReadonlySet<NodeActionName> = new Set<NodeActionName>(['tap', 'doubleTap', 'longPress', 'secondaryTap']);
 
 /**
  * How many times a targeted action re-finds its node after the engine reports
@@ -171,6 +174,8 @@ export class ActionDispatcher {
    * of is still judged whole. A mutating project tool ends the run.
    */
   private typedRun: TypedValue[] = [];
+  /** The look the previous recorded action ran on; an action on the same look records no location. */
+  private tracedOn: AgentObservation | undefined;
 
   /** The newest look when the last action ran: a later action addressed from it acts on a screen that action may have changed (`placementOf`). */
   private actedFrom: AgentObservation | undefined;
@@ -317,6 +322,7 @@ export class ActionDispatcher {
           name: verb,
           point: clamped,
           viewport: { width: observation.viewport.width, height: observation.viewport.height },
+          ...(hit.control === undefined ? {} : { control: hit.control }),
           ...handle,
         };
       });
@@ -404,7 +410,8 @@ export class ActionDispatcher {
         this.accounting.reserveAction();
         await this.before();
         this.typedRun = [];
-        this.options.trace()?.recordGap(call.name);
+        const trace = this.options.trace();
+        if (trace !== undefined) trace.recordGap(call.name, this.freshLocation());
       }
       const name = `${PROJECT_TOOL_EVENT_PREFIX}${call.name}`;
       const value = await instrumentPhase(this.runtime, { api: this.accounting.api, kind: 'engine', phase: 'agent.action', name }, body);
@@ -775,6 +782,8 @@ export class ActionDispatcher {
     this.accounting.reserveAction();
     await this.before();
     const redaction = { redact: this.runtime.redact, redactCut: this.runtime.redactCut };
+    // The look the action starts from, for a verb that looks again while it runs (`recordTrace`).
+    const startedOn = this.feed.latest;
     let action: RecordableAction;
     try {
       action = await instrumentPhase(
@@ -794,14 +803,47 @@ export class ActionDispatcher {
     if (action.name !== 'scrollUntil' || this.verbs.has('scrollTo')) this.actedFrom = this.feed.latest;
     else if (action.screens > 0) this.actedFrom = undefined;
     this.armAfter(action.name);
-    this.recordTrace(action);
+    this.recordTrace(action, startedOn);
     await this.notify(action.name, (fields) => actionEvent(action, { ...fields, summary: describeAction(action, redaction).summary }));
   }
 
+  /**
+   * Where the action being recorded ran: the location of `observed`, the
+   * newest look unless the action took looks of its own, spelled as the
+   * start and end paths are (`appLocation`), so a page on another origin
+   * keeps its origin. Undefined unless the step looked again since the
+   * previous recorded action: two actions on one look may stand on
+   * different screens (a link tapped, then back), and a location the step
+   * never saw would invent a route the flow did not take.
+   */
+  private freshLocation(observed: AgentObservation | undefined = this.feed.latest): string | undefined {
+    const at = observed?.location !== undefined && observed !== this.tracedOn ? appLocation(observed.location, this.runtime.app.base?.origin) : undefined;
+    this.tracedOn = this.feed.latest;
+    return at;
+  }
+
+  /**
+   * A tap with the control at its target's center on the newest look, when
+   * that is another node: an icon tapped inside a switch sets the switch,
+   * which the detour check reads (`NodeAction.controlRole`).
+   */
+  private withControl(action: RecordableAction): RecordableAction {
+    if (!isNodeAction(action) || !TAP_VERBS.has(action.name) || action.node.rect === undefined) return action;
+    const observed = this.feed.latest;
+    if (observed === undefined) return action;
+    const { x, y, width, height } = action.node.rect;
+    const { control } = hitTest(observed, { x: x + width / 2, y: y + height / 2 });
+    return control === undefined ? action : { ...action, control };
+  }
+
   /** Writes a committed action to the step's trace cache, when caching is on. */
-  private recordTrace(action: RecordableAction): void {
+  private recordTrace(action: RecordableAction, startedOn: AgentObservation | undefined): void {
     const trace = this.options.trace();
     if (trace === undefined) return;
+    // A scroll to a text looks at every page it turns, so the newest look is
+    // where it ended; it ran where it started. Every other verb resolves its
+    // target on the newest look, which may be one it took itself.
+    const at = this.freshLocation(action.name === 'scrollUntil' ? startedOn : undefined);
     // A typed value the step read off the screen (its tree, or a screenshot
     // it was shown) or reckoned from the date is this run's data, not the
     // flow's: it is recorded as a gap so replay hands over before it rather
@@ -818,13 +860,13 @@ export class ActionDispatcher {
           : this.feed.oneTimeCodeShown ? { inputPurpose: 'one-time-code' as const } : {}),
       });
       const index = trace.recordedCount;
-      if (derived === undefined) trace.record(action);
-      else trace.recordDerivedGap(derived);
+      if (derived === undefined) trace.record(action, at);
+      else trace.recordDerivedGap(derived, at);
       this.joinTyped(trace, index, action.value);
       return;
     }
     if (!keepsTypedRun(action)) this.typedRun = [];
-    trace.record(action);
+    trace.record(this.withControl(action), at);
   }
 
   /**

@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { buildModel, formatDuration, formatTokens, onTarget, selectedTarget, statusTabs, stepDepths, timedVideos, videoName, videoPosition, type Artifact, type Step } from '../../app/data.ts';
 import { ListView } from '../../app/list.tsx';
+import { TestView } from '../../app/test.tsx';
 import fixture from '../../../e2e/schema/fixtures/report-v1.valid.json' with { type: 'json' };
 
 // The page's own tsconfig checks this file: the model it tests reads the DOM.
@@ -170,5 +171,34 @@ describe('videos of a test that drove a second session', () => {
     expect(videos.map((each) => videoName(each, videos))).toEqual(['test part 1', 'launch-1', 'test part 2']);
     const alone = timedVideos([video('video', at(0)), video('video-part2', at(10))], { mode: 'link', base: 'results' });
     expect(alone.map((each) => videoName(each, alone))).toEqual(['part 1', 'part 2']);
+  });
+});
+
+describe('a step whose recording takes a detour', () => {
+  const DETOUR = 'actions 1-3 left /settings for /settings/notifications and came back with nothing typed, chosen, or set';
+  /** The fixture's first test as its page renders it, its first step as `edit` makes it. */
+  const page = (edit: (step: Step) => Step): string => {
+    const [result] = REPORT.run.results;
+    const attempts = result!.attempts.map((attempt) => ({ ...attempt, steps: attempt.steps.map((each, index) => (index === 0 ? edit(each) : each)) }));
+    const report = { ...REPORT, run: { ...REPORT.run, results: [{ ...result!, attempts }] } } as Report;
+    const model = buildModel({ report, media: { mode: 'none' }, resultsDir: '.e2e/results', traces: {}, sources: {} });
+    return renderToStaticMarkup(createElement(TestView, { model, result: model.results[0]!, attemptParam: null }));
+  };
+
+  it('is tagged on its row, and names the actions in its detail once open', () => {
+    expect(page((step) => step)).toMatch(/>detour</);
+    // A passing step opens closed; a failed one opens with its detail.
+    expect(page((step) => step)).not.toContain(DETOUR);
+    const open = page((step) => ({ ...step, status: 'failed' }) as Step);
+    expect(open).toMatch(/>detour</);
+    expect(open).toContain(DETOUR);
+  });
+
+  it('is not tagged when the recording takes none', () => {
+    const none = page((step) => {
+      const { detour: _detour, ...cache } = step.cache!;
+      return { ...step, cache };
+    });
+    expect(none).not.toMatch(/>detour</);
   });
 });

@@ -31,6 +31,7 @@ import {
   type DerivedReason,
   type RecordedAction,
   type TraceAnchorState,
+  type TraceDetourSpan,
   type TraceEntry,
   type TraceKeyContext,
   type TracePointEnd,
@@ -142,6 +143,7 @@ function readActionTrace(document: unknown): ActionTrace | undefined {
   const actions = each(actionsRaw, readRecordedAction);
   if (actions === undefined) return undefined;
   const keyedBy = readKeyContext(raw['keyedBy']);
+  const detours = readDetourSpans(raw['detours'], actions.length);
 
   return {
     actions,
@@ -159,7 +161,29 @@ function readActionTrace(document: unknown): ActionTrace | undefined {
     ...(endWaitMs === undefined ? {} : { endWaitMs }),
     ...(truncated === undefined ? {} : { truncated }),
     ...(keyedBy === undefined ? {} : { keyedBy }),
+    ...(detours === undefined ? {} : { detours }),
   };
+}
+
+/**
+ * Stored detour spans, each inside the trace and in order, or undefined for
+ * anything else: provenance, so a malformed list is dropped and the trace
+ * is read for detours afresh.
+ */
+function readDetourSpans(document: unknown, actions: number): TraceDetourSpan[] | undefined {
+  if (!Array.isArray(document) || document.length > MAX_TRACE_ACTIONS) return undefined;
+  const spans: TraceDetourSpan[] = [];
+  for (const item of document) {
+    if (typeof item !== 'object' || item === null) return undefined;
+    const { from, to } = item as Record<string, unknown>;
+    if (!Number.isInteger(from) || !Number.isInteger(to)) return undefined;
+    const start = from as number;
+    const end = to as number;
+    // A detour spans two actions at least: one that left, one that came back.
+    if (start < (spans.at(-1)?.to ?? 0) || end - start < 2 || end > actions) return undefined;
+    spans.push({ from: start, to: end });
+  }
+  return spans;
 }
 
 /** One side of the recorded delta: absent reads as empty, anything malformed or over the cap as undefined. */
@@ -180,7 +204,20 @@ function readModifiers(document: unknown): readonly KeyModifier[] | undefined {
   return modifiers;
 }
 
+/**
+ * One stored action, with the location it ran at when the entry has a
+ * readable one. The location is provenance, never replay input: a malformed
+ * one is dropped, and the action still replays.
+ */
 function readRecordedAction(document: unknown): RecordedAction | undefined {
+  const action = readActionBody(document);
+  if (action === undefined) return undefined;
+  const at = readInputText((document as Record<string, unknown>)['at']);
+  return at === undefined ? action : { ...action, at };
+}
+
+/** One stored action without its provenance (`at`), which `readRecordedAction` adds. */
+function readActionBody(document: unknown): RecordedAction | undefined {
   if (typeof document !== 'object' || document === null || Array.isArray(document)) {
     return undefined;
   }
@@ -192,9 +229,12 @@ function readRecordedAction(document: unknown): RecordedAction | undefined {
   if (isNodeActionName(name)) {
     const target = readDescriptor(raw['target']);
     if (target === undefined) return undefined;
-    if (raw['modifiers'] === undefined) return { name, summary, target };
+    // Provenance: a malformed role is dropped, and the action still replays.
+    const controlRole = readBoundedText(raw['controlRole'], MAX_TRACE_DESCRIPTOR_CHARS);
+    const read = { name, summary, target, ...(controlRole === undefined ? {} : { controlRole }) };
+    if (raw['modifiers'] === undefined) return read;
     const modifiers = isTapActionName(name) ? readModifiers(raw['modifiers']) : undefined;
-    return modifiers === undefined ? undefined : { name, summary, target, modifiers };
+    return modifiers === undefined ? undefined : { ...read, modifiers };
   }
   switch (name) {
     case 'type': {
@@ -283,7 +323,16 @@ function readRecordedAction(document: unknown): RecordedAction | undefined {
       const end = readPointEnd(raw);
       const viewport = readViewport(raw['viewport']);
       if (end === undefined || viewport === undefined) return undefined;
-      return { name, summary, point: end.point, viewport, ...(end.within === undefined ? {} : { within: end.within }) };
+      // Provenance: a malformed role is dropped, and the point still replays.
+      const controlRole = readBoundedText(raw['controlRole'], MAX_TRACE_DESCRIPTOR_CHARS);
+      return {
+        name,
+        summary,
+        point: end.point,
+        viewport,
+        ...(end.within === undefined ? {} : { within: end.within }),
+        ...(controlRole === undefined ? {} : { controlRole }),
+      };
     }
     case 'dragAt': {
       const from = readPointEnd(raw['from']);

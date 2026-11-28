@@ -22,7 +22,7 @@ npx e2e doctor [--check-model]     # can a run start: config, engine setup, mode
 npx e2e init [directory] [--yes]   # scaffold a project, refresh the agent skill
 npx e2e guide [topic]              # print this skill; topics: setup, writing-tests, agent,
                                    # running, explore, debugging, mcp, bug-bash
-npx e2e cache ls|clear|stats       # inspect or empty the replay cache
+npx e2e cache <command>            # ls, show, check, clear, stats: the replay cache
 npx e2e mcp [--target <name>]      # MCP server for a coding agent (topic mcp)
 npx e2e upgrade [version|tag]      # e2e and its @e2e-dev packages, and this skill's copies
 npx e2e feedback -m <text> [opts]  # report a problem with e2e itself (topic debugging)
@@ -66,8 +66,10 @@ Full reference: docs/reference/cli.mdx.
 ## The replay cache
 
 Entries live under `.e2e/cache/` by default, one file per key. `e2e cache
-ls` lists them, `stats` sums them, `clear` deletes them; with a custom
-`cache.store` these file-store commands refuse (exit 2). `--no-cache` turns the cache
+ls` lists them, `show <entry>` prints one action by action, `check` lists
+every detour to read before you commit (it exits 0), `stats` sums them,
+`clear` deletes them; with a custom `cache.store` these file-store commands
+refuse (exit 2), except `show` given a file path, which reads that file. `--no-cache` turns the cache
 off for one run; `--strict-cache` fails a step whose committed recording no
 longer replays (`REPLAY_STALE`) instead of calling the model.
 

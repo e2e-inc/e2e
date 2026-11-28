@@ -11,6 +11,7 @@
 
 import { isModelUnreachable } from '@e2e-dev/core/lib/agent/error';
 import { settleStagedTraces, type AgentCacheContext } from '@e2e-dev/core/lib/cache/context';
+import { settledDetour } from '@e2e-dev/core/lib/cache/detours';
 import { inLoadOf } from '../collect/collect-file.ts';
 import { collect, type CollectedFile } from '../collect/collect.ts';
 import type { TestIdentity } from '@e2e-dev/core/lib/run/records';
@@ -35,7 +36,7 @@ import { captureFailureEvidence } from './failure-evidence.ts';
 import type { ArtifactSink, AttemptFixtures } from '@e2e-dev/core/lib/run/fixtures';
 import { findRegistered, runHook, type Realm } from './realm.ts';
 import type { FailureEvidence } from '@e2e-dev/core/lib/run/records';
-import { sessionLedger } from '@e2e-dev/core/lib/run/secrecy';
+import { processSecrets, sessionLedger } from '@e2e-dev/core/lib/run/secrecy';
 import type { StepRecord, StepRecorder } from '@e2e-dev/core/lib/run/steps';
 
 /** A queue: each piece of work starts once every piece queued before it has settled. */
@@ -428,6 +429,11 @@ export function createStandaloneTestRun(env: StandaloneTestEnvironment, test: St
               implicatesUnconfirmed: failure === undefined || implicatesUnconfirmed,
             },
       );
+    }
+    // A secret a later line resolved may be in an earlier step's detour,
+    // which names locations: masked as a runner attempt masks it (`execute.ts`).
+    for (const step of steps.all()) {
+      if (step.cache?.detour !== undefined) step.cache.detour = settledDetour(step.cache.detour, processSecrets);
     }
     // Parked until teardown: a body that outlived its turn finds every harness call refused.
     budget.end();

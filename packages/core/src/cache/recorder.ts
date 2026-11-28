@@ -73,15 +73,51 @@ export class TraceRecorder {
     return this.actions.length;
   }
 
+  /** Where each action recorded so far ran, as its step saw it: undefined for one taken without a fresh look. */
+  get locations(): readonly (string | undefined)[] {
+    return this.actions.map((action) => action.at);
+  }
+
   /** When the last action or gap was recorded; undefined before the first. */
   get lastActionAtMs(): number | undefined {
     return this.lastActionAt;
   }
 
-  /** Records one committed grammar action. */
-  record(action: RecordableAction): void {
-    this.push(this.toRecorded(action, describeAction(action, { redact: this.redact, redactCut: this.redactCut })));
+  /**
+   * Records one committed grammar action, and where it ran when the caller
+   * knows (`RecordedAction.at`). The location is provenance, not replay
+   * input, so one the entry cannot keep whole is left out rather than
+   * poisoning the trace.
+   */
+  record(action: RecordableAction, at?: string): void {
+    this.push(this.located(this.toRecorded(action, describeAction(action, { redact: this.redact, redactCut: this.redactCut })), at));
     this.lastActionAt = Date.now();
+  }
+
+  /** `action` with the location it ran at, redacted; one the entry cannot keep whole is left out. */
+  private located(action: RecordedAction, at: string | undefined): RecordedAction {
+    const location = at === undefined || at === '' ? undefined : this.redact(at);
+    return location === undefined || location.length > MAX_TRACE_INPUT_CHARS ? action : { ...action, at: location };
+  }
+
+  /**
+   * Gives the actions a replay ran the locations their recording kept,
+   * where the replay ran them without looking first (a replay does not look
+   * before a `back` on the route it ends on). Position for position: a
+   * replay records the recording's actions in order before it hands off, so
+   * a recording made again after a hand-off keeps the trip it repeated.
+   * Returns the positions it gave one, whose locations read as an entry
+   * stores them (`DetourInput.stored` in `cache/detours.ts`).
+   */
+  keepLocations(replayed: readonly RecordedAction[]): ReadonlySet<number> {
+    const kept = new Set<number>();
+    replayed.forEach((recorded, index) => {
+      const own = this.actions[index];
+      if (own === undefined || own.name !== recorded.name || own.at !== undefined || recorded.at === undefined) return;
+      this.actions[index] = { ...own, at: recorded.at };
+      kept.add(index);
+    });
+    return kept;
   }
 
   /**
@@ -89,8 +125,8 @@ export class TraceRecorder {
    * than skipping it: the grammar cannot reproduce the mutation, and a replay
    * that silently dropped a state change would prove nothing.
    */
-  recordGap(toolName: string): void {
-    this.push({ name: 'tool', summary: bound(`tool ${this.redact(toolName)}`, MAX_TRACE_SUMMARY_CHARS) });
+  recordGap(toolName: string, at?: string): void {
+    this.push(this.located({ name: 'tool', summary: bound(`tool ${this.redact(toolName)}`, MAX_TRACE_SUMMARY_CHARS) }, at));
     this.lastActionAt = Date.now();
   }
 
@@ -99,8 +135,8 @@ export class TraceRecorder {
    * that said so (`agent/derived.ts`). Replay hands the step over before it,
    * so the executor derives the value afresh, and the report can say why.
    */
-  recordDerivedGap(reason: DerivedReason): void {
-    this.push({ name: 'tool', summary: DERIVED_GAP_SUMMARY, derived: reason });
+  recordDerivedGap(reason: DerivedReason, at?: string): void {
+    this.push(this.located({ name: 'tool', summary: DERIVED_GAP_SUMMARY, derived: reason }, at));
     this.lastActionAt = Date.now();
   }
 
@@ -124,8 +160,10 @@ export class TraceRecorder {
     // An earlier gap already ends replay before these pieces, so they never
     // replay: drop them without a new gap rather than keep the code as `type`.
     const handedOff = this.actions.slice(0, index).some((action) => action.name === 'tool');
+    // The gap stands where the first piece was typed, so the location stays for the detour check.
+    const at = this.actions[index]?.at;
     this.actions.length = index;
-    if (!handedOff) this.recordDerivedGap(reason);
+    if (!handedOff) this.recordDerivedGap(reason, at);
   }
 
   /**
@@ -160,7 +198,8 @@ export class TraceRecorder {
     const startPath = this.anchorPath(conclusion.startPath);
     const endPath = this.anchorPath(conclusion.endPath);
     return {
-      actions: [...this.actions],
+      // A secret the step resolved after an action ran is masked in that action's location too.
+      actions: this.actions.map((action) => (action.at === undefined ? action : { ...action, at: this.redact(action.at) })),
       executor: {
         name: conclusion.executor.name,
         ...(conclusion.executor.version === undefined ? {} : { version: conclusion.executor.version }),
@@ -207,7 +246,9 @@ export class TraceRecorder {
     };
     const requireTarget = (): TraceTargetDescriptor => require(target);
     if (isNodeAction(action)) {
-      const recorded: RecordedAction = { name: action.name, summary, target: requireTarget() };
+      const role = action.control?.role;
+      const controlRole = role === undefined || role === action.node.role ? undefined : role;
+      const recorded: RecordedAction = { name: action.name, summary, target: requireTarget(), ...(controlRole === undefined ? {} : { controlRole }) };
       // A tap with held keys replays with them, so the trace keeps them.
       if ('modifiers' in action && action.modifiers !== undefined) return { ...recorded, modifiers: [...action.modifiers] };
       return recorded;
@@ -263,12 +304,16 @@ export class TraceRecorder {
       case 'tapAt':
       case 'hoverAt': {
         const within = withinOf(target, action.under, action.point);
+        // Left out only when the stored anchor already names the control's role: an unnamed switch keeps no anchor at all.
+        const role = action.control?.role;
+        const controlRole = role === undefined || within?.target.role === role ? undefined : role;
         return {
           name: action.name,
           summary,
           point: action.point,
           viewport: { width: action.viewport.width, height: action.viewport.height },
           ...(within === undefined ? {} : { within }),
+          ...(controlRole === undefined ? {} : { controlRole }),
         };
       }
       case 'dragAt': {
@@ -303,14 +348,23 @@ export class TraceRecorder {
   private push(action: RecordedAction): void {
     // A scroll repeated in the same direction on the same target is one
     // action that ran several times, not several actions: a long list paged
-    // to its end fits the trace, and replays with the same repeats.
+    // to its end fits the trace, and replays with the same repeats, a
+    // settled look between them. The folded scroll keeps the first location
+    // a repeat was seen on: a route the page moved to while scrolling is
+    // not kept, a documented limit of the detour check.
     const last = this.actions[this.actions.length - 1];
     if (action.name === 'scroll' && last?.name === 'scroll' && sameScroll(last, action)) {
       // The smallest coverage of the repeats decides the viewport fallback,
       // so a list that shrank on the way is never promoted by its first size.
-      const { spans: previous, ...rest } = last;
+      const { spans: previous, at: first, ...rest } = last;
       const spans = previous === undefined || action.spans === undefined ? undefined : Math.min(previous, action.spans);
-      this.actions[this.actions.length - 1] = { ...rest, times: (last.times ?? 1) + 1, ...(spans === undefined ? {} : { spans }) };
+      const at = first ?? action.at;
+      this.actions[this.actions.length - 1] = {
+        ...rest,
+        times: (last.times ?? 1) + 1,
+        ...(spans === undefined ? {} : { spans }),
+        ...(at === undefined ? {} : { at }),
+      };
       return;
     }
     if (this.actions.length >= this.maxActions) {

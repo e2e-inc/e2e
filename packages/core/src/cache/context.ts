@@ -45,7 +45,17 @@ export type StagedTrace = {
   /** Index of the step in the attempt's step timeline. */
   readonly stepIndex: number;
 } & (
-  | { readonly kind: 'write'; readonly trace: ActionTrace }
+  | {
+      readonly kind: 'write';
+      readonly trace: ActionTrace;
+      /**
+       * A live redactor that knows every value the process learns. A secret
+       * a later step, or another session, resolves may already be in an
+       * action's location, so settlement masks the locations again before
+       * the write.
+       */
+      readonly redact?: (text: string) => string;
+    }
   | { readonly kind: 'keep'; readonly recordedFor: TraceProvenance }
   /** What the step decided itself when it concluded: it evicted its entry, or had nothing to record. */
   | { readonly kind: 'decided'; readonly outcome: 'evicted' | 'no-change' }
@@ -118,19 +128,62 @@ export type CacheWrite = 'saved' | 'kept' | 'unconfirmed' | 'evicted' | 'no-chan
  * agent read the value this time) differ between live runs, so a step that
  * runs live each time (it types a value read off the screen) would otherwise
  * rewrite an entry a committed cache directory carries. A replay stops at a
- * gap whatever its rule, which only names the hand-off in the report.
+ * gap whatever its rule, which only names the hand-off in the report. Where
+ * each action ran (`at`) and the control a tap was on (`controlRole`) are
+ * provenance too, and a page between the start and the end may carry a
+ * fresh id on every run. The detours the run found (`detours`) do count,
+ * as spans of action positions: each run finds them on the addresses it
+ * saw, so two runs of one flow find the same spans, and an entry that kept
+ * an old recording's detours would hide a new one from `e2e cache check`. An entry
+ * recorded before detours were kept has none, which reads as an empty list:
+ * a flow with no detour leaves it as stored, so a committed cache does not
+ * churn once for every step that runs live.
  */
 async function holdsSameFlow(store: CacheStore, keyHash: string, trace: ActionTrace): Promise<boolean> {
   const existing = await store.read(keyHash);
   return existing.status === 'hit' && flowOf(existing.entry.payload) === flowOf(trace);
 }
 
+/** `trace` with every action's location redacted again, by the ledger as it is now. */
+function redactLocations(trace: ActionTrace, redact: (text: string) => string): ActionTrace {
+  return { ...trace, actions: trace.actions.map((action) => (action.at === undefined ? action : { ...action, at: redact(action.at) })) };
+}
+
+/** Whether a trace keeps where any of its actions ran: a location, or the control a tap reached. */
+function placed(trace: ActionTrace): boolean {
+  return trace.detours !== undefined || trace.actions.some((action) => action.at !== undefined || 'controlRole' in action);
+}
+
+/**
+ * A trace without where its actions ran (locations, the control a tap
+ * reached) and the detours found on them, read afterwards by its actions
+ * alone (`cache/detours.ts`).
+ */
+function withoutProvenance(trace: ActionTrace): ActionTrace {
+  const { detours: _detours, ...rest } = trace;
+  return {
+    ...rest,
+    actions: trace.actions.map((action) => {
+      const { at: _at, ...unplaced } = action;
+      if (!('controlRole' in unplaced)) return unplaced;
+      const { controlRole: _controlRole, ...tap } = unplaced;
+      return tap;
+    }),
+  };
+}
+
 /** The part of a trace that decides what a replay does, as canonical JSON. */
 function flowOf(trace: ActionTrace): string {
-  const { summary: _summary, endWaitMs: _endWaitMs, keyedBy: _keyedBy, recordedBy: _recordedBy, actions, ...flow } = trace;
+  const { summary: _summary, endWaitMs: _endWaitMs, keyedBy: _keyedBy, recordedBy: _recordedBy, actions, detours, ...flow } = trace;
   return canonicalJson({
     ...flow,
-    actions: actions.map((action) => {
+    ...(detours === undefined || detours.length === 0 ? {} : { detours }),
+    actions: actions.map((recorded) => {
+      const { at: _at, ...action } = recorded;
+      if ('controlRole' in action) {
+        const { controlRole: _controlRole, ...tap } = action;
+        return tap;
+      }
       if (action.name !== 'tool') return action;
       const { derived: _derived, ...gap } = action;
       return gap;
@@ -235,7 +288,19 @@ export async function settleStagedTraces(context: AgentCacheContext, settlement:
         outcomes.set(entry.stepIndex, 'kept');
         continue;
       }
-      const written = await context.store.write(entry.keyHash, entry.trace);
+      // Masked right before the write, so a value learned while the store read ran is masked too; the flow ignores locations.
+      const trace = entry.redact === undefined ? entry.trace : redactLocations(entry.trace, entry.redact);
+      let written = await context.store.write(entry.keyHash, trace);
+      if (written === undefined && placed(trace)) {
+        // Where actions ran is provenance: a recording that fits the store only without it is written without it, as an earlier version wrote it,
+        // and kept when the store holds it so already.
+        const unplaced = withoutProvenance(trace);
+        if (await holdsSameFlow(context.store, entry.keyHash, unplaced)) {
+          outcomes.set(entry.stepIndex, 'kept');
+          continue;
+        }
+        written = await context.store.write(entry.keyHash, unplaced);
+      }
       outcomes.set(entry.stepIndex, written === undefined ? 'not-written' : 'saved');
     } catch {
       // The cache is disposable; a failed flush is a slower next run only.

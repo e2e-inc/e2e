@@ -97,6 +97,75 @@ describe('TraceRecorder', () => {
     expect(readTraceEntry(JSON.parse(JSON.stringify(buildTraceEntry(trace!))))).toBeDefined();
   });
 
+  it('keeps where each action ran, redacted, and reads it back', () => {
+    const recorder = makeRecorder({ secrets: new Map([['token', 's3cr3t-token']]) });
+    recorder.record({ name: 'tap', node: upgradeButton }, '/settings');
+    recorder.record({ name: 'back' });
+    recorder.record({ name: 'tap', node: upgradeButton }, '/reset?code=s3cr3t-token');
+    const trace = recorder.finalize(conclusion);
+    expect(trace?.truncated).toBeUndefined();
+    expect(trace?.actions.map((action) => action.at)).toEqual(['/settings', undefined, '/reset?code=<secret:token>']);
+    const read = readTraceEntry(JSON.parse(JSON.stringify(buildTraceEntry(trace!))));
+    expect(read?.payload.actions.map((action) => action.at)).toEqual(['/settings', undefined, '/reset?code=<secret:token>']);
+  });
+
+  it('records the role of the control a node tap landed in when it is not the target\'s own, and reads it back', () => {
+    const toggle = redacted({ ref: { id: 's1', revision: 'r1' }, role: 'switch', name: 'Dark mode' });
+    const icon = redacted({ ref: { id: 'i1', revision: 'r1' }, role: 'img', name: 'Moon' });
+    const recorder = makeRecorder();
+    recorder.record({ name: 'tap', node: icon, control: toggle });
+    recorder.record({ name: 'tap', node: upgradeButton, control: upgradeButton });
+    const trace = recorder.finalize(conclusion)!;
+    expect(trace.actions.map((action) => ('controlRole' in action ? action.controlRole : undefined))).toEqual(['switch', undefined]);
+    const read = readTraceEntry(JSON.parse(JSON.stringify(buildTraceEntry(trace))));
+    expect(read?.payload.actions[0]).toMatchObject({ name: 'tap', target: { role: 'img', name: 'Moon' }, controlRole: 'switch' });
+  });
+
+  it('masks a secret resolved after an action ran in that action\'s location', () => {
+    const ledger = new SecretLedger();
+    const recorder = new TraceRecorder({ redact: ledger.redact, redactCut: ledger.redactCut });
+    recorder.record({ name: 'tap', node: upgradeButton }, '/invite?code=token-2718-value');
+    // A provider-backed fill resolves the value only inside a later action.
+    ledger.register('token', 'token-2718-value');
+    recorder.record({ name: 'typeSecret', node: passwordField, secret: 'token' }, '/invite');
+    const trace = recorder.finalize(conclusion);
+    expect(JSON.stringify(trace)).not.toContain('token-2718-value');
+    expect(trace?.actions[0]?.at).toBe('/invite?code=<secret:token>');
+  });
+
+  it('leaves out a location too long to keep whole, and replays without it', () => {
+    const recorder = makeRecorder();
+    recorder.record({ name: 'tap', node: upgradeButton }, `/${'a'.repeat(MAX_TRACE_INPUT_CHARS)}`);
+    const trace = recorder.finalize(conclusion);
+    expect(trace?.truncated).toBeUndefined();
+    expect(trace?.actions[0]?.at).toBeUndefined();
+  });
+
+  it('reads stored detour spans back, and drops a malformed list without failing the entry', () => {
+    const recorder = makeRecorder();
+    recorder.record({ name: 'tap', node: upgradeButton }, '/a');
+    recorder.record({ name: 'back' }, '/b');
+    const trace = recorder.finalize(conclusion)!;
+    const stored = (detours: unknown) => readTraceEntry(JSON.parse(JSON.stringify({ ...buildTraceEntry(trace), payload: { ...trace, detours } })));
+    expect(stored([{ from: 0, to: 2 }])?.payload.detours).toEqual([{ from: 0, to: 2 }]);
+    expect(stored([])?.payload.detours).toEqual([]);
+    for (const malformed of [[{ from: 1, to: 1 }], [{ from: 0, to: 1 }], [{ from: 0, to: 3 }], [{ from: 0, to: 2 }, { from: 1, to: 2 }], [{ from: '0', to: 2 }], 'none']) {
+      const read = stored(malformed);
+      expect(read).toBeDefined();
+      expect(read?.payload).not.toHaveProperty('detours');
+    }
+  });
+
+  it('reads an entry whose action location is malformed, without the location', () => {
+    const recorder = makeRecorder();
+    recorder.record({ name: 'tap', node: upgradeButton });
+    const document = JSON.parse(JSON.stringify(buildTraceEntry(recorder.finalize(conclusion)!)));
+    document.payload.actions[0].at = 42;
+    const read = readTraceEntry(document);
+    expect(read).toBeDefined();
+    expect(read?.payload.actions[0]).not.toHaveProperty('at');
+  });
+
   it('records a secret fill by name only, with page strings redacted', () => {
     const secrets = new Map([['member-password', 'hunter2']]);
     const recorder = makeRecorder({ secrets });
@@ -209,6 +278,16 @@ describe('TraceRecorder', () => {
     expect(read?.payload.actions[0]).toMatchObject({ name: 'scroll', direction: 'down', times: 5 });
   });
 
+  it('folds repeated scrolls whatever route each was seen on, keeping the first location a repeat was seen on', () => {
+    const recorder = makeRecorder();
+    recorder.record({ name: 'scroll', direction: 'down' });
+    recorder.record({ name: 'scroll', direction: 'down' }, '/away');
+    recorder.record({ name: 'scroll', direction: 'down' }, '/articles/next-story');
+    const trace = recorder.finalize(conclusion);
+    // One action, so replay keeps its settled look between repeats and the action cap counts it once.
+    expect(trace?.actions).toEqual([{ name: 'scroll', summary: 'scroll down', direction: 'down', times: 3, at: '/away' }]);
+  });
+
   it('marks a gap that ends replay for a mutating project tool', () => {
     const recorder = makeRecorder();
     recorder.record({ name: 'tap', node: upgradeButton });
@@ -231,6 +310,20 @@ describe('TraceRecorder', () => {
       typeDigits(recorder);
       recorder.gapFrom(1, 'minted-token');
       expect(recorder.finalize(conclusion)?.actions).toEqual([expect.objectContaining({ name: 'navigate' }), gap]);
+    });
+
+    it('keeps where the first piece was typed on the gap, and where a derived fill or a project tool ran', () => {
+      const recorder = makeRecorder();
+      recorder.record({ name: 'type', node: digitBox, value: '482' }, '/verify');
+      recorder.record({ name: 'type', node: digitBox, value: '913' });
+      recorder.gapFrom(0, 'minted-token');
+      recorder.recordDerivedGap('whole-node', '/profile');
+      recorder.recordGap('open_billing', '/settings');
+      expect(recorder.finalize(conclusion)?.actions).toEqual([
+        { ...gap, at: '/verify' },
+        { ...gap, derived: 'whole-node', at: '/profile' },
+        { name: 'tool', summary: 'tool open_billing', at: '/settings' },
+      ]);
     });
 
     it('keeps recording after the gap', () => {
@@ -379,6 +472,27 @@ describe('TraceRecorder: bare-point taps', () => {
       within: { target: { role: 'img', name: 'Map' }, fx: 0.75, fy: 0.3 },
     });
     expect(trace?.truncated).toBeUndefined();
+  });
+
+  it('records the role of the control a point was on when an inner node holds the point, and reads it back', () => {
+    const toggle = redacted({ ref: { id: 's1', revision: 'r1' }, role: 'switch', name: 'Dark mode', rect: { x: 100, y: 200, width: 60, height: 30 } });
+    const icon = redacted({ ref: { id: 'i1', revision: 'r1' }, role: 'img', name: 'Moon', rect: { x: 110, y: 205, width: 20, height: 20 } });
+    const recorder = makeRecorder();
+    recorder.record({ name: 'tapAt', point: { x: 120, y: 215 }, viewport, under: icon, control: toggle });
+    recorder.record({ name: 'tapAt', point: { x: 130, y: 210 }, viewport, under: toggle, control: toggle });
+    const trace = recorder.finalize({ ...conclusion, startPath: '/settings' });
+    expect(trace?.actions.map((action) => (action.name === 'tapAt' ? action.controlRole : undefined))).toEqual(['switch', undefined]);
+    const read = readTraceEntry(JSON.parse(JSON.stringify(buildTraceEntry(trace!))));
+    expect(read?.payload.actions[0]).toMatchObject({ name: 'tapAt', controlRole: 'switch', within: { target: { role: 'img', name: 'Moon' } } });
+  });
+
+  it('records the role of an unnamed control a point was on, which keeps no anchor', () => {
+    const unnamed = redacted({ ref: { id: 's2', revision: 'r1' }, role: 'switch', rect: { x: 0, y: 0, width: 12, height: 12 } });
+    const recorder = makeRecorder();
+    recorder.record({ name: 'tapAt', point: { x: 6, y: 6 }, viewport, under: unnamed, control: unnamed });
+    const action = recorder.finalize({ ...conclusion, startPath: '/settings' })?.actions[0];
+    expect(action).not.toHaveProperty('within');
+    expect(action).toMatchObject({ name: 'tapAt', controlRole: 'switch' });
   });
 
   it('records a point under an anonymous container by the viewport alone, since a group among groups cannot be re-found', () => {

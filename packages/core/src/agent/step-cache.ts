@@ -15,13 +15,15 @@
 import { deltaEvidenced, deltaMismatch, describeDelta, type DeltaMismatch } from '../cache/anchors.ts';
 import type { AgentCacheContext, ClaimedKey } from '../cache/context.ts';
 import { decideTraceReplay, opensWithNavigate, type TraceReplayMissReason } from '../cache/decide.ts';
-import { sameRoute } from '../cache/route.ts';
+import { boundDetour, describeDetour, findDetours, findDetoursAfterReplay, findReplayedDetours, type TraceDetour } from '../cache/detours.ts';
+import { routeLocation, sameRoute } from '../cache/route.ts';
 import { keyContextChanges, type CacheAgentIdentity } from '../cache/identity.ts';
 import { recordedProvenance, TraceRecorder } from '../cache/recorder.ts';
 import { expandTrace, templateParams, templatesCollide, templateTrace, type ParamTemplate } from '../cache/template.ts';
 import { targetLabel, type ActionTrace, type DerivedReason, type RecordedModel, type TraceEntry, type TraceTargetDescriptor } from '../cache/trace.ts';
 import { readTraceEntry } from '../cache/trace-read.ts';
 import { sleep } from '../internal/time.ts';
+import { processSecrets } from '../run/secrecy.ts';
 import type { StepCacheInfo } from '../run/steps.ts';
 import type { JsonValue } from '../types.ts';
 import type { RecordableAction } from './actions.ts';
@@ -144,11 +146,21 @@ export class StepTraceSession {
   /** The claimed key and the step it names, which an entry records as its provenance. */
   private readonly claim: ClaimedKey;
   private readonly recorder: TraceRecorder | undefined;
+  /**
+   * Where the actions ran, folded as the recording folds them: the step's
+   * recorder, or in a mode that writes nothing one kept for that alone, so
+   * a hand-off can confirm a return on the addresses its replay saw.
+   */
+  private readonly placed: TraceRecorder;
   private readonly options: StepCacheOptions;
   private readonly redaction: NodeRedaction;
   private info: StepCacheInfo | undefined;
   private recordedBy: RecordedModel | undefined;
   private prefix: ReplayedPrefix | undefined;
+  /** How many actions a replay that handed off ran, the entry's spans it ran to their end (this step's recording keeps them), and the actions it gave the entry's locations. */
+  private replayed:
+    | { readonly executed: number; readonly spans: readonly Pick<TraceDetour, 'from' | 'to'>[]; readonly kept: ReadonlySet<number> }
+    | undefined;
   private startPath: string | undefined;
   private startedMs = Date.now();
   /** When the replay handed the step to the executor, if it did. */
@@ -199,6 +211,7 @@ export class StepTraceSession {
         maxActions: options.maxActions,
       });
     }
+    this.placed = this.recorder ?? new TraceRecorder({ ...this.redaction, maxActions: options.maxActions });
   }
 
   /** How the cache participated, for the step's report detail. */
@@ -211,21 +224,21 @@ export class StepTraceSession {
     return this.prefix;
   }
 
-  /** Records one committed grammar action into the step trace. */
-  record(action: RecordableAction): void {
-    this.recorder?.record(action);
+  /** Records one committed grammar action into the step trace, with the location it ran at when known. */
+  record(action: RecordableAction, at?: string): void {
+    this.placed.record(action, at);
     this.countAfterEndMismatch();
   }
 
   /** Records one mutating project-tool call as a replay-ending gap. */
-  recordGap(toolName: string): void {
-    this.recorder?.recordGap(toolName);
+  recordGap(toolName: string, at?: string): void {
+    this.placed.recordGap(toolName, at);
     this.countAfterEndMismatch();
   }
 
   /** Records a fill whose value was this run's data as a replay-ending gap, with the rule that said so. */
-  recordDerivedGap(reason: DerivedReason): void {
-    this.recorder?.recordDerivedGap(reason);
+  recordDerivedGap(reason: DerivedReason, at?: string): void {
+    this.placed.recordDerivedGap(reason, at);
     this.countAfterEndMismatch();
   }
 
@@ -482,7 +495,17 @@ export class StepTraceSession {
       this.info = this.missed(stopReason, outcome.total, outcome.derived, detail);
       return undefined;
     }
-    this.handOff(outcome, stopReason, detail);
+    // Where the replay saw its actions run, before the ones it ran without looking take where they were recorded.
+    const places = this.placed.locations;
+    // The replayed actions are this step's recording now; the ones it ran without looking keep where they were recorded.
+    const kept = this.recorder?.keepLocations(trace.actions.slice(0, outcome.executed)) ?? new Set<number>();
+    // So are the detours they made: the report names them, and this step's recording keeps them (`findDetoursAfterReplay`).
+    // A replay that found no target looked at the screen it stopped on; one whose end never reached the recorded route saw where it stayed.
+    const looked = stopReason === 'target-not-found' || stopReason === 'target-ambiguous' || stopReason === 'viewport-changed';
+    const stop = looked ? screens.at(-1)?.path : end?.seen;
+    const ran = findReplayedDetours(trace, outcome.executed, stop === undefined ? undefined : { stop, places });
+    if (trace.detours !== undefined) this.replayed = { executed: outcome.executed, spans: ran.map(({ from, to }) => ({ from, to })), kept };
+    this.handOff(outcome, stopReason, detail, this.describeDetours(ran));
     return undefined;
   }
 
@@ -501,8 +524,8 @@ export class StepTraceSession {
    */
   private async endStateMatches(trace: ActionTrace, start: SemanticScreen, screens: readonly ObservedScreen[]): Promise<EndStateCheck> {
     if (!this.host.traceEligible) return { matches: false };
-    const arrived = await this.endScreen(trace);
-    if (arrived === undefined) return { matches: false };
+    const { arrived, seen } = await this.endScreen(trace);
+    if (arrived === undefined) return { matches: false, ...(seen === undefined ? {} : { seen }) };
     // Both captures may predate a secret the replay resolved; read with the
     // ledger as it is now, an unchanged node is no change.
     const baseline = baselineScreen(screens, arrived.path);
@@ -511,7 +534,8 @@ export class StepTraceSession {
       // A recording with no delta fails the evidence too, but nothing of it
       // showed before the replay acted: that is the generic detail.
       const recorded = (trace.endAnchors?.length ?? 0) > 0 || (trace.goneAnchors?.length ?? 0) > 0;
-      return recorded ? { matches: false, failure: 'already-showing' } : { matches: false };
+      const stood = arrived.path === undefined ? {} : { seen: arrived.path };
+      return recorded ? { matches: false, failure: 'already-showing', ...stood } : { matches: false, ...stood };
     }
     const beforeNodes = baselineNodes ?? redactNodesAgain(start.nodes, this.redaction);
     // Every look the wait takes must still be on the recorded end route: a
@@ -526,7 +550,7 @@ export class StepTraceSession {
       initial: arrived,
       ...(trace.endWaitMs === undefined ? {} : { waitMs: trace.endWaitMs }),
     })) && this.host.traceEligible;
-    return matches ? { matches } : { matches, ...(mismatch === undefined ? {} : { failure: mismatch }) };
+    return matches ? { matches } : { matches, ...(mismatch === undefined ? {} : { failure: mismatch }), ...(arrived.path === undefined ? {} : { seen: arrived.path }) };
   }
 
   /**
@@ -534,15 +558,15 @@ export class StepTraceSession {
    * polling while a navigation the last action started commits. A route
    * that never matches is another screen, whatever it shows: a link that
    * now lands on a page sharing the recorded one's layout is exactly the
-   * flow that went wrong.
+   * flow that went wrong. When it never matches, where the screen stayed.
    */
-  private async endScreen(trace: ActionTrace): Promise<SemanticScreen | undefined> {
+  private async endScreen(trace: ActionTrace): Promise<{ readonly arrived?: SemanticScreen; readonly seen?: string }> {
     const startedMs = Date.now();
     const recorded = trace.endPath;
     for (let attempt = 0; ; attempt += 1) {
       const observation = await probeScreen(this.host, 'raw');
-      if (observation?.kind !== 'semantic' || !this.host.traceEligible) return undefined;
-      if (recorded === undefined || observation.path === undefined || sameRoute(recorded, observation.path)) return observation;
+      if (observation?.kind !== 'semantic' || !this.host.traceEligible) return {};
+      if (recorded === undefined || observation.path === undefined || sameRoute(recorded, observation.path)) return { arrived: observation };
       // The last delay repeats until the timeout, as in `pollSettled`.
       const delay = END_PATH_DELAYS_MS[attempt] ?? END_PATH_DELAYS_MS[END_PATH_DELAYS_MS.length - 1]!;
       if (
@@ -550,7 +574,7 @@ export class StepTraceSession {
         this.host.remainingMs() <= delay ||
         this.host.signal.aborted
       ) {
-        return undefined;
+        return { seen: observation.path };
       }
       await sleep(delay, this.host.signal);
     }
@@ -558,16 +582,19 @@ export class StepTraceSession {
 
   private selfFinalize(trace: ActionTrace, outcome: ReplayOutcome): StepVerdict {
     this.replayedWhole = true;
+    // A replayed trace has its `unique()` values filled in: named as an entry spells a location.
+    const detour = this.describeDetours(findDetours(trace, routeLocation));
     this.info = {
       mode: 'self-finalized',
       replayedActions: outcome.executed,
       totalActions: outcome.total,
       entry: this.keyHash,
+      ...(detour === undefined ? {} : { detour }),
     };
     return { status: 'passed', summary: replaySummary(outcome.executed, trace.summary) };
   }
 
-  private handOff(outcome: ReplayOutcome, stopReason: HandOffReason, detail: string | undefined): void {
+  private handOff(outcome: ReplayOutcome, stopReason: HandOffReason, detail: string | undefined, detour: string | undefined): void {
     this.handedOffMs = Date.now();
     if (stopReason === 'end-mismatch') this.actionsAfterEndMismatch = 0;
     this.prefix = {
@@ -584,6 +611,7 @@ export class StepTraceSession {
       totalActions: outcome.total,
       entry: this.keyHash,
       ...(detail === undefined ? {} : { detail: this.reportable(detail) }),
+      ...(detour === undefined ? {} : { detour }),
     };
   }
 
@@ -656,10 +684,37 @@ export class StepTraceSession {
       if (this.info !== undefined) this.info = { ...this.info, notRecorded: 'param-collision' };
       return 'skipped';
     }
-    const templated = templateTrace(trace, this.options.templates);
+    // Each action's location is kept with a minted segment and every query
+    // value as `:id`: a token or code a URL's query carried mid-flow never
+    // reaches the entry.
+    const templated = templateTrace(withRouteLocations(trace), this.options.templates);
     if (templated === undefined) return 'skipped';
-    this.cache.staged.push({ kind: 'write', keyHash: this.keyHash, trace: templated, stepIndex: this.options.stepIndex });
+    // The detours are found here, on the addresses this run saw, and kept in
+    // the entry: a stored location reads `:id` for each record id and query
+    // value and a placeholder for each `unique()` value, so it no longer
+    // tells two records apart the way this run's did. After a hand-off, the
+    // replayed actions keep the spans their entry found.
+    const detours = this.replayed === undefined ? findDetours(trace) : findDetoursAfterReplay(trace, this.replayed.spans, this.replayed.executed, this.replayed.kept);
+    const located = trace.actions.some((action) => action.at !== undefined);
+    const staged = located ? { ...templated, detours: detours.map(({ from, to }) => ({ from, to })) } : templated;
+    // Settled with every value the process has learned by then, a closed session's included (`processSecrets`).
+    this.cache.staged.push({ kind: 'write', keyHash: this.keyHash, trace: staged, stepIndex: this.options.stepIndex, redact: processSecrets.redact });
+    // The report names the detours of the recording it stages, and none when that has none.
+    if (this.info !== undefined) {
+      const { detour: _replayed, ...info } = this.info;
+      const detour = this.describeDetours(detours);
+      this.info = detour === undefined ? info : { ...info, detour };
+    }
     return 'staged';
+  }
+
+  /**
+   * Detours as the report names them, or undefined for none: redacted, then
+   * cut between words to the bound (`boundDetour`). Joined with commas: the
+   * report line separates its own parts with semicolons (`cacheLine`).
+   */
+  private describeDetours(detours: readonly TraceDetour[]): string | undefined {
+    return detours.length === 0 ? undefined : boundDetour(this.options.redact(detours.map(describeDetour).join(', ')));
   }
 
   /**
@@ -708,6 +763,8 @@ export class StepTraceSession {
 interface EndStateCheck {
   readonly matches: boolean;
   readonly failure?: 'already-showing' | DeltaMismatch;
+  /** Where the replay's end stood when it did not match: off the recorded route, or on it with another delta or query value. */
+  readonly seen?: string;
 }
 
 /**
@@ -818,4 +875,16 @@ export function recordedVerdictOf(summary: string): string {
   if (!summary.startsWith(REPLAY_NOTICE_START)) return summary;
   const at = summary.indexOf(RECORDED_VERDICT_SEPARATOR);
   return at === -1 ? summary : summary.slice(at + RECORDED_VERDICT_SEPARATOR.length);
+}
+
+/** The trace with each action's location spelled as an entry keeps it (`routeLocation`). */
+function withRouteLocations(trace: ActionTrace): ActionTrace {
+  return {
+    ...trace,
+    actions: trace.actions.map((action) => {
+      if (action.at === undefined) return action;
+      const at = routeLocation(action.at);
+      return at === action.at ? action : { ...action, at };
+    }),
+  };
 }

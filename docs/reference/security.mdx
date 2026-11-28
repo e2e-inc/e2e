@@ -264,7 +264,7 @@ agent's `system`, and an `e2e explore` goal.
 | Config output | Output printed while the config loads appears after it loads. If the load fails, it's withheld. |
 | Minimum length | A static value shorter than 6 characters is `INVALID_CONFIG`. A provider that returns one fails the fill. |
 | Assertions | Unaffected. Redaction rewrites only what the runner reports. |
-| Cache entries | Secret values and their cut parts never enter them. |
+| Cache entries | Secret values and their cut parts never enter them, except a value the run learns only after the step that met it: one a secret provider returns later, or a static secret of a host opened later from another installed copy of `@e2e-dev/core`, which the run forgets once that host closes. The screen locations an entry stores, and that step's `step.cache.detour`, are spelled when the step ends, without the app's origin and with ids and query values as `:id`; a stored location also holds a `unique()` value as its placeholder, and the detour text holds the value the run used. A value learned later is masked there only where they still spell it as the run saw it, so one that included the origin, an id, or a `unique()` value can stay, whole or in part. In a serial group, a value a later test returns can stay in an earlier test's entry, since that entry is written when the earlier test ends. |
 
 ### Provider keys
 

@@ -29,7 +29,8 @@ The run summary breaks down what happened to your `agent.act` steps:
 
 `not saved` counts steps that passed without writing a recording, usually
 because no assertion followed the step or the step caused no visible UI
-change.
+change. `detoured` counts steps whose recording takes a
+[detour](#find-detours-in-a-recording).
 
 ## When a recording is written
 
@@ -248,9 +249,18 @@ separate digit boxes are a gap from the first character.
 ## What a recording holds
 
 Each entry is a JSON file under `.e2e/cache/` containing the recorded
-actions, target descriptions, typed text, a short summary, and the expected
+actions, the screen each action ran on, the detours the recording run
+found, target descriptions, typed text, a short summary, and the expected
 end-state checks. Recordings never store prompts, transcripts, screenshots,
 DOM trees, or secret values (secret fills store only the secret's name).
+
+A stored screen keeps the route but not its values: every query value, and
+every path segment or query key that reads as an id or a token, is stored
+as `:id`. A path segment of letters only reads as a route word and is
+stored as it is. A web address that holds a configured secret's marker is
+stored as its markers alone (`<secret:token>`), since the secret may hold
+part of the address's punctuation and leave no boundary to read the rest
+by.
 
 <Warning>
 Non-secret typed values are stored verbatim. Review cache diffs before
@@ -340,25 +350,84 @@ To refresh a stale recording:
    `cache.strict` off if your config sets it).
 2. Commit the updated cache file.
 
+## Find detours in a recording
+
+A detour is a part of a recording that leaves a screen and comes back to it
+with nothing typed, chosen, or set on the way. An agent that opens the wrong
+page and backs out records one, and every replay repeats it. The step still
+passes.
+
+A step whose recording has a detour reports it in `step.cache.detour`, on
+its [trace page](/debugging#traces), and in the HTML report. The run summary
+counts it as `detoured`:
+
+```text
+cache: replayed all 4 recorded actions, no model call; detour: actions 1-3 left /settings for /settings/notifications and came back with nothing typed, chosen, or set
+```
+
+Before you commit recordings, read the list
+[`e2e cache check`](#inspect-the-cache) prints. It exits 0 whatever it finds,
+because a correct recording can take a detour too. To remove a wrong turn,
+delete the entry file and run the test again in `read-write` mode. If the
+agent takes the same wrong turn, name the destination in the instruction.
+
+<Accordion title="What counts as a detour">
+- A detour comes back to the same address, record id and query included:
+  `/orders/7` to `/orders/8` and back to `/orders/7` is one, `/orders/7`
+  to `/orders/8` is not. Both pages are stored as `/orders/:id`, so the
+  text reads `left /orders/:id for another /orders/:id`.
+- Addresses are read as replay reads routes: an empty path segment
+  doesn't count (`/docs/` is `/docs`), and in an app that routes in the
+  fragment, a query before `#` and one after it are one query.
+- On a device, the address is the screen title. Two screens with the same
+  title count as one. On Android, a screen with no toolbar (a React Native
+  header, for example) reports only the app, so a detour between such
+  screens isn't found.
+- A typed value, a secret fill, a select, a check, an upload, a drag, a key
+  press, a project tool, or a tap on or inside a checkbox, switch, radio,
+  option, slider, or spin button ends a detour. A hover sets nothing.
+- A plain button tap does not end a detour. A tap that deletes a record and
+  returns to the list, or adds to a cart before `back`, takes one in a
+  correct recording.
+- Repeated scrolls are recorded as one action, on the screen the first one
+  ran on. A page that moves to another address while you scroll it, a feed
+  that pages its URL for example, isn't seen as a departure.
+- An instruction that asks to look at a page and return records one on
+  purpose.
+- When a replay hands off partway through a detour, a trip inside it is
+  read again on the stored screens, where two records or two query values
+  of one route read alike (`/orders/:id`). Such a trip can be a false hint.
+- An entry recorded by an earlier version has no screens, and neither has
+  one recorded on an engine that reports no location. There, only a tap
+  or a navigate, then scrolls or hovers, then `back`, counts, and only as a
+  hint: its text ends in `(recorded without locations: a hint only)`.
+</Accordion>
+
 ## Inspect the cache
 
 <CodeGroup>
 ```bash npm
-npx e2e cache ls      # one row per entry: test, target, instruction digest, age, actions
-npx e2e cache stats   # entry count and size
-npx e2e cache clear   # delete every entry
+npx e2e cache ls                  # one row per entry: entry, test, target, instruction digest, age, actions
+npx e2e cache show 4f1c0a9d3b62   # one entry, action by action
+npx e2e cache check               # every detour, to read before you commit
+npx e2e cache stats               # entry count and size
+npx e2e cache clear               # delete every entry
 ```
 
 ```bash pnpm
-pnpm exec e2e cache ls      # one row per entry: test, target, instruction digest, age, actions
-pnpm exec e2e cache stats   # entry count and size
-pnpm exec e2e cache clear   # delete every entry
+pnpm exec e2e cache ls                  # one row per entry: entry, test, target, instruction digest, age, actions
+pnpm exec e2e cache show 4f1c0a9d3b62   # one entry, action by action
+pnpm exec e2e cache check               # every detour, to read before you commit
+pnpm exec e2e cache stats               # entry count and size
+pnpm exec e2e cache clear               # delete every entry
 ```
 
 ```bash bun
-bunx e2e cache ls      # one row per entry: test, target, instruction digest, age, actions
-bunx e2e cache stats   # entry count and size
-bunx e2e cache clear   # delete every entry
+bunx e2e cache ls                  # one row per entry: entry, test, target, instruction digest, age, actions
+bunx e2e cache show 4f1c0a9d3b62   # one entry, action by action
+bunx e2e cache check               # every detour, to read before you commit
+bunx e2e cache stats               # entry count and size
+bunx e2e cache clear               # delete every entry
 ```
 </CodeGroup>
 
@@ -374,6 +443,6 @@ lowers the cost of a model call. The replay cache skips the call.
     `mode`, `store`, `dir`.
   </Card>
   <Card title="CLI reference" icon="terminal" href="/reference/cli#e2e-cache">
-    `e2e cache ls`, `stats`, `clear`.
+    `e2e cache ls`, `show`, `check`, `stats`, `clear`.
   </Card>
 </CardGroup>

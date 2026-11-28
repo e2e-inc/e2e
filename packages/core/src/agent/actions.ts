@@ -28,7 +28,13 @@ import type { ActionDetails, ActionEvent, ScrollDirection } from '../types.ts';
 
 /** One committed grammar action, addressed by the node it actually ran against. */
 export type RecordableAction =
-  | ({ readonly name: NodeActionName; readonly node: RedactedNode; readonly modifiers?: readonly KeyModifier[] } & Placement)
+  | ({
+      readonly name: NodeActionName;
+      readonly node: RedactedNode;
+      readonly modifiers?: readonly KeyModifier[];
+      /** For a tap, the innermost interactive node at the target's center, when the screen listed one. */
+      readonly control?: RedactedNode;
+    } & Placement)
   | ({ readonly name: 'type'; readonly node: RedactedNode; readonly value: string } & Placement)
   | ({ readonly name: 'typeSecret'; readonly node: RedactedNode; readonly secret: string } & Placement)
   | ({ readonly name: 'press'; readonly node: RedactedNode; readonly key: string } & Placement)
@@ -77,7 +83,12 @@ export type RecordableAction =
    * that node sat: the trace records the point's place inside that box so
    * replay can follow the node when the layout shifts.
    */
-  | ({ readonly name: PointActionName; readonly viewport: ViewportSize } & PlacedPoint)
+  | ({
+      readonly name: PointActionName;
+      readonly viewport: ViewportSize;
+      /** The innermost interactive node the point was on, when the screen listed one. */
+      readonly control?: RedactedNode;
+    } & PlacedPoint)
   /**
    * A drag from one bare viewport point to another, with the viewport it was
    * placed in; each end is placed the way a point action's one point is, so

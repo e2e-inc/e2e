@@ -1,7 +1,7 @@
 /** Routes: a location reduced to the screen it names, across the URL shapes apps use. */
 
 import { describe, expect, it } from 'vitest';
-import { appLocation, appNavigation, sameRoute } from '@e2e-dev/core/lib/cache/route';
+import { appLocation, appNavigation, routeLocation, sameRoute } from '@e2e-dev/core/lib/cache/route';
 
 /** Whether every location names the same screen as the first. */
 const alike = (first: string, ...others: string[]) => others.every((other) => sameRoute(first, other));
@@ -84,6 +84,106 @@ describe('route identity', () => {
     }
     expect(alike('Settings', 'General')).toBe(false);
     expect(alike('Settings', '/Settings')).toBe(false);
+  });
+});
+
+describe('routeLocation', () => {
+  it('spells a location with every minted segment and every query value as :id', () => {
+    expect(routeLocation('/orders/123/edit')).toBe('/orders/:id/edit');
+    expect(routeLocation('/auth/magic/Zx8aQ2pLmN4tR7')).toBe('/auth/magic/:id');
+    expect(routeLocation('/callback?state=eyJhbGciOi.x1.y2&code=482913')).toBe('/callback?code=:id&state=:id');
+    expect(routeLocation('/settings?tab=notes#top')).toBe('/settings?tab=:id');
+    expect(routeLocation('/search?q=&page=2')).toBe('/search?page=:id&q=');
+    expect(routeLocation('/#/companies/1?view=list')).toBe('/#/companies/:id?view=:id');
+    expect(routeLocation('https://idp.test/authorize?client_id=app&nonce=n0nce4c0ffee99')).toBe('https://idp.test/authorize?client_id=:id&nonce=:id');
+    expect(routeLocation('/files/a%2Fb/caf%C3%A9')).toBe('/files/a%2Fb/caf%C3%A9');
+  });
+
+  it('stores no query code, even one the route rule reads as a word', () => {
+    // RFC 6749's example code: letters only but for one digit, so not minted.
+    expect(sameRoute('/callback?code=SplxlOBeZQQYbYS6WxSbIA', '/callback?code=other')).toBe(false);
+    expect(routeLocation('/callback?code=SplxlOBeZQQYbYS6WxSbIA')).toBe('/callback?code=:id');
+    expect(routeLocation('/orders/123/?code=SplxlOBeZQQYbYSWxSbIAqrTuvXyz')).toBe('/orders/:id?code=:id');
+  });
+
+  it('stores a web address that holds a secret marker as its markers alone, since the secret may hold its punctuation', () => {
+    for (const location of [
+      '/invite/<secret:token>/accept',
+      '/invite/x<secret:token>y',
+      'https://idp.test/invite/<secret:token>',
+      '<secret:token>/accept?code=Xy9',
+      // A secret that ended in `?code=`: the value after it reads as a path segment.
+      '/<secret:token>/SyntheticNonce',
+      'http://127.0.0.1:4280<secret:token>color=Lavender',
+    ]) {
+      expect(routeLocation(location)).toBe('<secret:token>');
+    }
+    expect(routeLocation('https://<secret:tenant>.example.org/callback?code=SampleOnlyDoNotUse')).toBe('<secret:tenant>');
+    expect(routeLocation('<secret:gateway>:8443/callback?code=SyntheticCallbackValue')).toBe('<secret:gateway>');
+    // A URL parser spells a marker percent-encoded.
+    expect(routeLocation('/%3Csecret:callback%3ESampleCallbackWord')).toBe('<secret:callback>');
+    // A query value that is a marker is a query value.
+    expect(routeLocation('/invite?code=<secret:token>')).toBe('<secret:token>');
+    // A device title that opens with a marker is no address.
+    expect(routeLocation('<secret:app> › Settings')).toBe('<secret:app> › Settings');
+    expect(routeLocation('<secret:app> › Delete it?')).toBe('<secret:app> › Delete it?');
+  });
+
+
+  it('keeps the query values out of a file app\'s location, and spells its path as a route', () => {
+    expect(routeLocation('file:///srv/app/about.html?tab=summary')).toBe('file:///srv/app/about.html?tab=:id');
+    expect(routeLocation('file:///srv/app/index.html#/orders/123')).toBe('file:///srv/app/index.html#/orders/:id');
+    expect(routeLocation('file:///index.html')).toBe('file:///index.html');
+    expect(routeLocation('file:///')).toBe('file:///');
+  });
+
+  it('stores a path parameter\'s value as :id, as a query value', () => {
+    expect(routeLocation('https://a.test:8080/x;jsessionid=ABCDEF/y')).toBe('https://a.test:8080/x;jsessionid=:id/y');
+    expect(routeLocation('/cart;mode/items')).toBe('/cart;mode/items');
+  });
+
+  it('stores a token in a path segment as :id, a signed token\'s dots included', () => {
+    expect(routeLocation('/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fw')).toBe('/reset/:id');
+    expect(routeLocation('/docs/v1.2.3')).toBe('/docs/v1.2.3');
+    expect(routeLocation('/settings/notifications')).toBe('/settings/notifications');
+  });
+
+  it('spells a fragment route with its document path, so the location names a page the app serves', () => {
+    expect(routeLocation('/#/list')).toBe('/#/list');
+    expect(routeLocation('/app/#/orders/123?x=abc')).toBe('/app/#/orders/:id?x=:id');
+    expect(routeLocation('https://other.test/app/#/orders/123')).toBe('https://other.test/app/#/orders/:id');
+  });
+
+  it('spells a lone surrogate a cache file holds as a URL parser does, without throwing', () => {
+    expect(routeLocation('/settings/\ud800')).toBe('/settings/%EF%BF%BD');
+  });
+
+
+  it('keeps a location that is not a web address as it is', () => {
+    expect(routeLocation('com.example / Settings')).toBe('com.example / Settings');
+    expect(routeLocation('about:blank')).toBe('about:blank');
+  });
+
+  it('spells a spelling as itself, and two addresses of one route alike', () => {
+    for (const location of [
+      '/orders/123/edit?tab=notes',
+      '/callback?code=482913&state=eyJhbGciOi.x1.y2',
+      '/',
+      'https://idp.test/a b/c',
+      '/invite/<secret:token>',
+      '/app/#/orders/123?x=abc',
+      'https://<secret:tenant>.example.org/callback?code=abc',
+      '<secret:gateway>/orders/123?token=abc',
+      '<secret:gateway>:8443/orders/123?token=abc',
+      '/x;jsessionid=ABCDEF/y',
+      '<secret:invite>welcome?code=MockCallbackCode',
+      'file:///index.html',
+      'file:///srv/app/about.html?tab=summary',
+      '/reset/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fw',
+    ]) {
+      expect(routeLocation(routeLocation(location))).toBe(routeLocation(location));
+    }
+    expect(routeLocation('/orders/123?tab=notes')).toBe(routeLocation('/orders/456?tab=history'));
   });
 });
 
