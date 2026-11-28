@@ -175,6 +175,135 @@ test('retries with the resolved fragment', ({ value }) => {
     }
   }, 30_000);
 
+  it.each([
+    ['answers for the test file itself', `
+    const url = new URL(specifier);
+    const resolved = pathToFileURL(realpathSync(fileURLToPath(url)));
+    resolved.search = url.search;
+    return { url: resolved.href, shortCircuit: true };`],
+    ['adds to the query of the test file', `
+    const result = next(specifier, context);
+    return { ...result, url: result.url + '&instrumented=1' };`],
+    ['appends a literal ? query to the test file', `
+    const result = next(specifier, context);
+    return { ...result, url: result.url + '?instrumented=1' };`],
+    ['percent-encodes the loader parameter name', `
+    const result = next(specifier, context);
+    return { ...result, url: result.url.replace(/([?&])e2e=/, '$1%652e=') };`],
+  ])('reuses a worker fixture on retry when a resolver registered after the loader %s', (_case, answer) => {
+    const project = createProject({
+      'e2e.config.ts': `import './instrument.mjs';\n${workerFakeConfigSource(1, 'retries: 1,')}`,
+      'instrument.mjs': `
+import { realpathSync } from 'node:fs';
+import { registerHooks } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+registerHooks({ resolve(specifier, context, next) {
+  if (specifier.startsWith('file:') && new URL(specifier).pathname.endsWith('/retry.e2e.ts')) {${answer}
+  }
+  return next(specifier, context);
+} });
+`,
+      'tests/retry.e2e.ts': `
+import { test as base, expect } from 'e2e';
+import { appendFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+const test = base.extend<{}, { value: number }>({
+  value: [async ({}, use) => {
+    appendFileSync('events.txt', 'setup\\n');
+    writeFileSync('worker.lock', '', { flag: 'wx' });
+    try {
+      await use(1);
+    } finally {
+      rmSync('worker.lock');
+      appendFileSync('events.txt', 'teardown\\n');
+    }
+  }, { scope: 'worker' }],
+});
+test('retries with the same worker fixture', ({ value }) => {
+  expect(value).toBe(1);
+  if (existsSync('retried')) return;
+  writeFileSync('retried', '');
+  throw new Error('intentional first-attempt failure');
+});
+`,
+    });
+    try {
+      const report = runFixtureCLI(project.dir);
+      expect(report.run.results[0]).toMatchObject({
+        status: 'flaky',
+        attempts: [{ status: 'failed', error: { message: 'intentional first-attempt failure' } }, { status: 'passed' }],
+      });
+      expect(readFileSync(path.join(project.dir, 'events.txt'), 'utf8')).toBe('setup\nteardown\n');
+    } finally {
+      project.cleanup();
+    }
+  }, 30_000);
+
+  it.each([
+    // The parameter lands before the fragment, in the middle of the URL the loader returned.
+    ['sets a query parameter', "const url = new URL(result.url);\n  url.searchParams.set('instrumented', '1');\n  return { ...result, url: url.href };", ['?variant=one#one', '?variant=two#one']],
+    // The text lands after the loader's, and starts the query of an import that has none.
+    ['appends to the URL', "return { ...result, url: result.url + (result.url.includes('?') ? '&' : '?') + 'instrumented=1' };", ['', '?variant=two']],
+    // A naive `?` append lands right after the loader's parameter, which must keep its `?` separator when stripped.
+    ['appends a literal ? query to the URL', "return { ...result, url: result.url + '?instrumented=1' };", ['?variant=one&keep=1', '?variant=two&keep=1']],
+  ] as const)('reuses each helper import on retry when a resolver registered after the loader %s', (_case, rewrite, [first, second]) => {
+    const project = createProject({
+      'e2e.config.ts': `import './instrument.mjs';\n${workerFakeConfigSource(1, 'retries: 1,')}`,
+      'instrument.mjs': `
+import { registerHooks } from 'node:module';
+registerHooks({ resolve(specifier, context, next) {
+  const result = next(specifier, context);
+  if (!result.url.startsWith('file:') || !new URL(result.url).pathname.endsWith('/support.ts')) return result;
+  ${rewrite}
+} });
+`,
+      'tests/support.ts': `
+import { test as base } from 'e2e';
+import { appendFileSync, rmSync, writeFileSync } from 'node:fs';
+const variant = new URL(import.meta.url).searchParams.get('variant') ?? 'none';
+export const test = base.extend<{}, { value: string }>({
+  value: [async ({}, use) => {
+    appendFileSync('events.txt', 'setup ' + variant + '\\n');
+    writeFileSync('worker-' + variant, '', { flag: 'wx' });
+    try {
+      await use(variant);
+    } finally {
+      rmSync('worker-' + variant);
+      appendFileSync('events.txt', 'teardown ' + variant + '\\n');
+    }
+  }, { scope: 'worker' }],
+});
+test.beforeEach(() => {});
+`,
+      'tests/retry.e2e.ts': `
+import { expect } from 'e2e';
+import { existsSync, writeFileSync } from 'node:fs';
+import { test as one } from './support.ts${first}';
+import { test as two } from './support.ts${second}';
+
+for (const [index, test] of [one, two].entries()) {
+  test('retries import ' + index, ({ value }) => {
+    const marker = 'retried-' + value;
+    if (existsSync(marker)) return;
+    writeFileSync(marker, '');
+    throw new Error('intentional first-attempt failure');
+  });
+}
+`,
+    });
+    try {
+      const report = runFixtureCLI(project.dir);
+      expect(report.run.results.map((test) => test.attempts.map((attempt) => attempt.status))).toEqual([
+        ['failed', 'passed'],
+        ['failed', 'passed'],
+      ]);
+      const variants = [first, second].map((suffix) => new URL(`file:///support.ts${suffix}`).searchParams.get('variant') ?? 'none');
+      const events = readFileSync(path.join(project.dir, 'events.txt'), 'utf8').trim().split('\n');
+      expect(events.toSorted()).toEqual(variants.flatMap((variant) => [`setup ${variant}`, `teardown ${variant}`]).toSorted());
+    } finally {
+      project.cleanup();
+    }
+  }, 30_000);
+
   it.each(['before', 'after'])('reuses each user-fragment helper on retry with a resolver registered %s the loader', (order) => {
     const config = workerFakeConfigSource(1, 'retries: 1,');
     const project = createProject({

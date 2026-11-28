@@ -197,15 +197,21 @@ A worker fixture outlives every test, so it sees worker fixtures only: its
 own kind, and the [built-in fixtures](/reference/test#fixtures) whose scope is
 worker on the target.
 
-Declare shared worker fixtures in a module your test files import. On
-Node.js, keep fixture registration synchronous. A top-level `await` in the
-fixture module or one of its dependencies can cause another setup on reload
-while the earlier instance is still active. Await asynchronous setup inside
-the fixture function. ES module imports with
-different URL queries or fragments each get their own fixture instance.
-On Bun, declare worker fixtures in a module your test files import. When Bun
-reloads a test file, any worker fixture declared in that file gets a new
-instance. The old instance stays set up until the worker ends.
+Declare shared worker fixtures in a module your test files import. The
+runner reloads a module after a failed test and to register its hooks, and
+each runtime handles that reload differently:
+
+- On Node.js, keep fixture registration synchronous. A top-level `await` in
+  the fixture module or one of its dependencies can cause another setup on
+  reload while the earlier instance is still active. Await asynchronous
+  setup inside the fixture function.
+- On Node.js, ES module imports with different URL queries or fragments each
+  get their own fixture instance. If an older version of e2e in the same
+  process registered the module loader first, worker fixtures go by file
+  path, and those imports share one instance.
+- On Bun, a worker fixture declared in a test file gets a new instance each
+  time Bun reloads the file. The old instance stays set up until the worker
+  ends.
 
 ## Read fixtures in hooks
 

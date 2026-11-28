@@ -290,7 +290,9 @@ confirm the runner collects and executes the intended test.
   keep fixture registration synchronous. A top-level `await` in the fixture
   module or one of its dependencies can cause another setup on reload.
   Await setup inside the fixture function. ES module imports with different
-  URL queries or fragments get separate instances.
+  URL queries or fragments get separate instances, unless an older e2e
+  version in the same process registered the loader first: then they share
+  one instance per file.
 - **Typing across targets:** `as const satisfies E2EConfig` on the config,
   then `base.extend<{}, {}, typeof config>()`. Passing `typeof config` also
   types the `services` fixture.

@@ -131,11 +131,12 @@ export interface FreshLoad {
   readonly module: Promise<unknown>;
 }
 
+/** How many fresh imports this copy of e2e made on Bun, where no loader counts them for every copy. */
 let bunImports = 0;
 
 function importFresh(absolutePath: string, cacheKey: string, graph: boolean | string): FreshLoad {
   registerLoader();
-  // Older installs can still emit their own module-N entry and graph keys.
+  // An older copy of e2e in the process numbers its own loads `<cacheKey>-<n>`; the prefix keeps this copy's keys apart from them.
   const key = onBun ? `${cacheKey}-${++bunImports}` : `fresh-${cacheKey}-${nextFreshLoadSequence()}`;
   const graphName = graph === true ? key : graph === false ? undefined : graph;
   if (onBun) return { key: undefined, module: import('./bun-loader.ts').then((loader) => loader.importFreshOnBun(absolutePath, graphName)) };
