@@ -13,3 +13,15 @@ export function requireKey(key: unknown): asserts key is string {
       '(for example "Enter", "Control+a", "Shift+Tab")',
   );
 }
+
+/**
+ * A keypress that types one printable character, rather than an editing
+ * shortcut or navigation key. The cache uses the parsed key so `Shift+a`
+ * (one typed character) does not become an incorrectly replayable OTP action.
+ * Control/Meta/Alt combinations may activate commands, not type characters.
+ */
+export function pressedTextCharacter(key: string): string | undefined {
+  const parsed = parseKey(key);
+  if (parsed?.key.kind !== 'char' || parsed.modifiers.some((modifier) => modifier !== 'Shift')) return undefined;
+  return parsed.key.char;
+}
