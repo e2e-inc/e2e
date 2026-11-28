@@ -342,12 +342,12 @@ describe('revyl()', () => {
       expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
     });
 
-    it('fails a stop for good, without asking again, once the worker no longer holds the recording', async () => {
+    it('ends a recording the worker no longer holds with no video, without asking again', async () => {
       answers(() => json({ success: false, error: 'No active screen recording has this recording_id' }));
       const recording = await revyl(options).record!(lease, recordContext);
-      await expect(recording.stop({ dir, signal: new AbortController().signal })).rejects.toThrow(
-        'Revyl no longer holds recording rec-1, so it has no video to return: No active screen recording has this recording_id',
-      );
+      const none = { none: 'Revyl no longer holds recording rec-1, so it has no video to return: No active screen recording has this recording_id' };
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual(none);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual(none);
       expect(stops()).toHaveLength(1);
       expect(existsSync(join(dir, 'recording.mp4'))).toBe(false);
     });

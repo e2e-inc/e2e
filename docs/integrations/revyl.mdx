@@ -152,7 +152,9 @@ list for the platform, the error names the ones Revyl has.
 - An attempt that records video, such as with `--video`, gets Revyl's own
   screen recording of the device as `video/recording.mp4`. Revyl stops a
   recording at 3 minutes, or sooner when it reaches Revyl's size cap, so a
-  longer attempt's video covers its start only.
+  longer attempt's video covers its start only. A recording Revyl discarded,
+  such as an empty one, leaves that attempt without a video, and the next
+  attempt records again.
 - Revyl enters text at a point. Use `fill`. `pressSequentially` and typing
   into the focused field fail with `UNSUPPORTED_CAPABILITY`.
 - `setAppearance` and `setPermission` work on both platforms, but Revyl's

@@ -10,9 +10,9 @@
 import path from 'node:path';
 import type { DeviceLease, DeviceProvider, DeviceRequest } from '@e2e-dev/mobile';
 import { agentDeviceLeases, agentDevicePlugin, type LeaseSelectors } from '@e2e-dev/mobile/lease';
-import { ConfigurationError, rejectUnknownKeys, type ProviderRecordContext, type ProviderRecording } from 'e2e/engine';
+import { ConfigurationError, rejectUnknownKeys, type ProviderRecordContext, type ProviderRecording, type ProviderRecordingResult } from 'e2e/engine';
 import { credentialsEnv, revylCredentials, type RevylCredentials } from './credentials.ts';
-import { RevylDeviceClient } from './devices.ts';
+import { RecordingGone, RevylDeviceClient } from './devices.ts';
 
 /** agent-device's name for Revyl, as the lease provider and the tenant. */
 const PROVIDER = 'revyl';
@@ -99,14 +99,15 @@ export function revyl(options: RevylOptions): DeviceProvider {
       const { revylSessionIdForLease } = (await import(PLUGIN)) as { revylSessionIdForLease: (leaseId: string) => string };
       const client = new RevylDeviceClient(revylCredentials(context.env));
       const recording = await client.startRecording(revylSessionIdForLease(lease.id), context.signal);
-      // A stop the engine repeats shares one in flight and reuses one that wrote the video; a failed stop is asked again on the next call.
-      let stopped: Promise<{ readonly file: string }> | undefined;
+      // A stop the engine repeats shares one in flight and reuses one that ended the recording; a failed stop is asked again on the next call.
+      let stopped: Promise<ProviderRecordingResult> | undefined;
       return {
         startedAt: recording.startedAt,
         stop: ({ dir, signal }) =>
           (stopped ??= client.stopRecording(recording, path.join(dir, RECORDING_FILE), signal).then(
             () => ({ file: RECORDING_FILE }),
             (error: unknown) => {
+              if (error instanceof RecordingGone) return { none: error.message };
               stopped = undefined;
               throw error;
             },

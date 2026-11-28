@@ -483,12 +483,16 @@ is open. The recording covers the whole browser window, tabs and address
 bar included.
 
 `record` returns a `ProviderRecording` from `e2e/engine`. When the attempt
-collects its video, its `stop` does one of two things:
+collects its video, its `stop` does one of three things:
 
 - Writes a file into the directory it gets and returns `{ file }`. e2e keeps
   it as `video/<file>` beside the attempt's other artifacts.
 - Returns `{ url, mediaType }` for a recording the service keeps. The
   report links to it.
+- Returns `{ none: reason }` when the service ended the recording without a
+  video, such as one it discarded. The attempt has no video, and the stop
+  fails with `ENGINE_FAILURE` naming the reason. A `stop` that throws
+  instead is tried again.
 
 <Accordion title="Example record method">
 

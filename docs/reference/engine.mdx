@@ -2357,11 +2357,17 @@ async stopVideo(context) {
   a link must be an `http(s)` URL with a media type.
 - It returns `{ path: 'video/<file>', startedAt }` or
   `{ url, mediaType, startedAt }` for `stopVideo` to hand back.
+- A provider whose service ended the recording without a video, such as
+  one it discarded, returns `{ none: reason }`. The recording is over, so
+  the engine lets go of it and the next attempt records again, and the stop
+  throws `ENGINE_FAILURE` with the reason, so a required video reports why
+  it is missing. A `stop` that throws instead leaves the recording running,
+  and the engine stops it again.
 - The target argument's type is exported as `ProviderRecordingTarget`.
 
 | Throws | When |
 | --- | --- |
-| `ENGINE_FAILURE` | `stop` throws or returns anything else. The message names the provider and the lease. |
+| `ENGINE_FAILURE` | `stop` throws, returns `{ none: reason }`, or returns anything else. The message names the provider and the lease, and the reason for `none`. |
 
 ```ts
 /** Handed to a provider's `record`, once per attempt that records video. */
@@ -2393,12 +2399,16 @@ export interface ProviderRecordingStopContext {
 
 /**
  * What a stopped recording became: a file the provider wrote into the
- * directory it was given, by name, or a recording its service keeps, by
- * `http(s)` URL and media type.
+ * directory it was given, by name, a recording its service keeps, by
+ * `http(s)` URL and media type, or none, with the reason, when the service
+ * ended the recording without a video, such as one it discarded. A stop
+ * that rejects leaves the recording running, so the engine stops it again;
+ * `none` ends it.
  */
 export type ProviderRecordingResult =
   | { readonly file: string }
-  | { readonly url: string; readonly mediaType: string };
+  | { readonly url: string; readonly mediaType: string }
+  | { readonly none: string };
 
 export function isProviderRecording(value: unknown): value is ProviderRecording;
 

@@ -1,4 +1,4 @@
-/** `stopProviderRecording`: a provider's file or link becomes the attempt's segment, and anything else is refused, naming the provider and lease. */
+/** `stopProviderRecording`: a provider's file or link becomes the attempt's segment, a recording it ended without a video fails with its reason, and anything else is refused, naming the provider and lease. */
 
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -76,6 +76,18 @@ describe('stopProviderRecording', () => {
       code: 'ENGINE_FAILURE',
       message: expect.stringContaining('browser provider "cloud" recording lease lease-7 has no video directory to write into'),
     });
+  });
+
+  it('fails a recording the provider ended without a video, with its reason, and refuses a none with no reason', async () => {
+    await expect(stopProviderRecording(recording(async () => ({ none: ' the service discarded an empty recording ' })), target())).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: 'browser provider "cloud" recording lease lease-7 ended without a video: the service discarded an empty recording',
+    });
+    for (const result of [{ none: ' ' }, { none: true }]) {
+      await expect(stopProviderRecording(recording(async () => result), target())).rejects.toMatchObject({
+        message: expect.stringContaining('finished without naming a file'),
+      });
+    }
   });
 
   it('names the provider and the lease when the stop itself fails', async () => {

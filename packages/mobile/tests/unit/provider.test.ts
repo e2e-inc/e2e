@@ -739,6 +739,22 @@ describe('device provider recording', () => {
     expect(cloud.recorded.map(({ context }) => context.attemptId)).toEqual(['a1', 'a2']);
   });
 
+  it('ends a provider recording that stops with no video, so the next attempt starts and records', async () => {
+    const cloud = recordingProvider({ stop: async () => ({ none: 'the service discarded an empty recording' }) });
+    const worker = await leasedWorker(cloud.impl);
+    await worker.engine.artifacts!.startVideo!(operation());
+    await expect(worker.engine.artifacts!.stopVideo!(operation())).rejects.toMatchObject({
+      code: 'ENGINE_FAILURE',
+      message: expect.stringContaining('ended without a video: the service discarded an empty recording'),
+    });
+    await worker.engine.endAttempt!(cleanup());
+    expect(cloud.stopped).toHaveLength(1);
+    await worker.engine.startAttempt!({ attemptId: 'a2', artifactsDir: path.join(artifactsDir, 'retry'), signal: operation().signal, resolveSecret: noSecrets, ...ignoreTrace });
+    expect(cloud.stopped).toHaveLength(1);
+    await worker.engine.artifacts!.startVideo!({ ...operation(), attemptId: 'a2' });
+    expect(cloud.recorded.map(({ context }) => context.attemptId)).toEqual(['a1', 'a2']);
+  });
+
   it('does not begin another attempt or record when a retained provider stop wait is cancelled', async () => {
     const stopped = deferred<ProviderRecordingResult>();
     const cloud = recordingProvider({ stop: async () => {

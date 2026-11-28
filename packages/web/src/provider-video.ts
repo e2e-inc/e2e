@@ -52,19 +52,18 @@ export class ProviderVideo implements AttemptVideo {
 
   /**
    * Stops the recording as the attempt's one segment; nothing when none was
-   * started. A stop that failed keeps the recording, so the attempt's close
-   * tries once more instead of leaving it running on a browser later
-   * attempts share.
+   * started. A provider stop that rejected keeps the recording, so the
+   * attempt's close tries once more instead of leaving it running on a
+   * browser later attempts share. One that resolved ended it, whatever it
+   * resolved to, such as `none` for a recording without a video.
    */
   stop(signal: AbortSignal): Promise<readonly VideoSegment[]> {
     const started = this.started;
     if (started === undefined) return Promise.resolve([]);
-    this.stopping ??= this.stopLease(started, signal).then(
-      (segment) => {
-        if (this.started === started) this.started = undefined;
-        return [segment];
-      },
-    ).finally(() => {
+    const ended = (): void => {
+      if (this.started === started) this.started = undefined;
+    };
+    this.stopping ??= this.stopLease(started, signal, ended).then((segment) => [segment]).finally(() => {
       this.stopping = undefined;
     });
     return this.stopping;
@@ -79,9 +78,17 @@ export class ProviderVideo implements AttemptVideo {
     await this.stop(signal).catch(() => undefined);
   }
 
-  /** Ends one of the provider's recordings as a segment of the attempt. */
-  private stopLease(started: LeaseRecording, signal: AbortSignal): Promise<VideoSegment> {
-    return stopProviderRecording(started.recording, {
+  /** Ends one of the provider's recordings as a segment of the attempt, calling `ended` once the provider's stop resolved. */
+  private stopLease(started: LeaseRecording, signal: AbortSignal, ended: () => void = () => undefined): Promise<VideoSegment> {
+    const { recording } = started;
+    return stopProviderRecording({
+      startedAt: recording.startedAt,
+      stop: async (context) => {
+        const result = await recording.stop(context);
+        ended();
+        return result;
+      },
+    }, {
       artifactsDir: this.artifactsDir,
       provider: started.provider,
       leaseId: started.leaseId,

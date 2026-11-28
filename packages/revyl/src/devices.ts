@@ -40,6 +40,9 @@ export interface DeviceRecording {
   readonly startedAt: string;
 }
 
+/** A stop of a recording the worker no longer holds, such as one it discarded: no stop brings its video back. */
+export class RecordingGone extends Error {}
+
 export class RevylDeviceClient {
   readonly #apiUrl: string;
   readonly #apiKey: string;
@@ -82,7 +85,7 @@ export class RevylDeviceClient {
    * broken download, or a worker that kept the recording to be stopped
    * again: the worker answers a repeated stop of the same recording with the
    * same video while the session lasts. A recording the worker no longer
-   * holds fails for good.
+   * holds fails for good, with `RecordingGone`.
    */
   async stopRecording(recording: DeviceRecording, file: string, signal: AbortSignal): Promise<void> {
     for (let attempt = 1; ; attempt += 1) {
@@ -125,7 +128,7 @@ export class RevylDeviceClient {
     const reason = typeof body.error === 'string' ? body.error : 'no reason given';
     if (reason.includes('recording retained')) return new Error(`Revyl refused stop_screen_recording: ${reason}`);
     if (reason.includes('No active screen recording')) {
-      throw new Error(`Revyl no longer holds recording ${recordingId}, so it has no video to return: ${reason}`);
+      throw new RecordingGone(`Revyl no longer holds recording ${recordingId}, so it has no video to return: ${reason}`);
     }
     throw new Error(`Revyl refused stop_screen_recording: ${reason}`);
   }

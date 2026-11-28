@@ -34,12 +34,16 @@ export interface ProviderRecordingStopContext {
 
 /**
  * What a stopped recording became: a file the provider wrote into the
- * directory it was given, by name, or a recording its service keeps, by
- * `http(s)` URL and media type.
+ * directory it was given, by name, a recording its service keeps, by
+ * `http(s)` URL and media type, or none, with the reason, when the service
+ * ended the recording without a video, such as one it discarded. A stop
+ * that rejects leaves the recording running, so the engine stops it again;
+ * `none` ends it.
  */
 export type ProviderRecordingResult =
   | { readonly file: string }
-  | { readonly url: string; readonly mediaType: string };
+  | { readonly url: string; readonly mediaType: string }
+  | { readonly none: string };
 
 /** A recording a provider's service makes of the browser or device it leased, as `record` started it. */
 export interface ProviderRecording {
@@ -77,8 +81,9 @@ export function isProviderRecording(value: unknown): value is ProviderRecording 
  * is checked, since the engine trusts nothing it did not write: a file must be
  * a plain name that exists in the directory, a link an `http(s)` URL with a
  * media type. The URL is kept in its parsed form and the start time as an
- * ISO timestamp, the shapes the report schema admits. Every failure names
- * the provider and the lease.
+ * ISO timestamp, the shapes the report schema admits. A recording that
+ * ended with `none` fails with its reason, as any recording that left no
+ * video does. Every failure names the provider and the lease.
  */
 export async function stopProviderRecording(recording: ProviderRecording, target: ProviderRecordingTarget): Promise<VideoSegment> {
   const dir = path.join(target.artifactsDir, 'video');
@@ -97,6 +102,8 @@ export async function stopProviderRecording(recording: ProviderRecording, target
   const startedAt = new Date(recording.startedAt).toISOString();
   if (isWrittenFile(result, dir)) return { path: path.posix.join('video', result.file), startedAt };
   if (isLink(result)) return { url: hostedVideoUrl(result.url)!, mediaType: result.mediaType.trim(), startedAt };
+  const none = typeof result === 'object' && result !== null ? (result as { none?: unknown }).none : undefined;
+  if (typeof none === 'string' && none.trim() !== '') throw new EngineError('ENGINE_FAILURE', `${what} ended without a video: ${none.trim()}`, { retryable: false });
   throw new EngineError('ENGINE_FAILURE', `${what} finished without naming a file it wrote into ${dir} or an http(s) URL with a media type`, { retryable: false });
 }
 
