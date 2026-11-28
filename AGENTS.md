@@ -1021,7 +1021,7 @@ trees, on both platforms, without a device.
   `@agent-device/*` plugin pins another version than `@e2e-dev/mobile`, has
   no `@e2e-dev/mobile` peer, or peers on it with a floor that does not ship
   that pin: a tagged `@e2e-dev/mobile@<floor>` pinning another agent-device,
-  or an untagged floor at or below the engine's current version
+  or an untagged floor below the engine's current version
   (`scripts/agent-device-pins.ts`, reading the tags). An agent-device bump
   moves every pin and every such floor in one change.
 - The root `release` script publishes with no `--tag`, so versioned releases

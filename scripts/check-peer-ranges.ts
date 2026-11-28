@@ -51,7 +51,10 @@ function git(...args: string[]): string | undefined {
 /** The engine's releases from its `@e2e-dev/mobile@<version>` tags; undefined in a checkout without them. */
 function engineReleases(): EngineReleases | undefined {
   const prefix = '@e2e-dev/mobile@';
-  const versions = (git('tag', '--list', `${prefix}*`) ?? '').split('\n').map((tag) => tag.trim()).filter((tag) => tag.startsWith(prefix)).map((tag) => tag.slice(prefix.length));
+  const listed = git('tag', '--list', `${prefix}*`);
+  // A git that cannot run is not a checkout without tags: the floors would go unchecked with only a note.
+  if (listed === undefined) throw new Error(`check-peer-ranges: git could not list the ${prefix} tags, so the agent-device floors cannot be checked`);
+  const versions = listed.split('\n').map((tag) => tag.trim()).filter((tag) => tag.startsWith(prefix)).map((tag) => tag.slice(prefix.length));
   if (versions.length === 0) return undefined;
   const pins = new Map<string, string | undefined>();
   const pinOf = (version: string): string | undefined => {

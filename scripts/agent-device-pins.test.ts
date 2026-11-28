@@ -75,7 +75,12 @@ describe('agentDevicePins', () => {
     for (const problem of problems) assert.match(problem, /raise it to >=0\.12\.10/);
   });
 
-  it('flags a floor naming a release that was never tagged and is not the next one', () => {
+  it('accepts an untagged floor at the current engine version, as the release commit has it before publish tags it', () => {
+    const { problems } = agentDevicePins([{ ...engine, version: '0.12.10' }, provider('@e2e-dev/limrun', 'agent-device', '0.21.44', '0.12.10')], history);
+    assert.deepEqual(problems, []);
+  });
+
+  it('flags an untagged floor below the current engine version', () => {
     const { problems } = agentDevicePins([engine, provider('@e2e-dev/limrun', 'agent-device', '0.21.44', '0.12.7')], history);
     assert.equal(problems.length, 1);
     assert.match(problems[0]!, /no @e2e-dev\/mobile 0\.12\.7 release is tagged/);

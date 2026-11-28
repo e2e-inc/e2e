@@ -9,7 +9,7 @@
  * The provider's peer floor on the engine is what keeps a user's install in
  * step, so it must name an engine release that ships the same pin: a tagged
  * `@e2e-dev/mobile@<floor>` whose manifest pins it, or, with no such tag, the
- * release still to come, above the engine's current version.
+ * release still to come, at or above the engine's current version.
  */
 
 import { wideRangeFloor, type PackageManifest } from './public-packages.ts';
@@ -98,7 +98,8 @@ export function agentDevicePins(manifests: readonly PackageManifest[], releases:
     const fix = `raise it to >=${expected}, the first ${ENGINE} release on agent-device ${version}`;
     if (release.tagged && release.agentDevice !== version) {
       problems.push(`${manifest.name} peers on ${ENGINE} ${JSON.stringify(range)}, but ${ENGINE} ${floor} pins agent-device ${JSON.stringify(release.agentDevice)}, not ${JSON.stringify(version)}: ${fix}`);
-    } else if (!release.tagged && compareVersions(floor, current) <= 0) {
+    } else if (!release.tagged && compareVersions(floor, current) < 0) {
+      // An untagged floor at the current version is the release being cut: `version-packages` moves the engine before publish tags it.
       problems.push(`${manifest.name} peers on ${ENGINE} ${JSON.stringify(range)}, but no ${ENGINE} ${floor} release is tagged, and ${current} is the engine's current version: ${fix}`);
     }
   }
