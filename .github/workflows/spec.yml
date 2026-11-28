@@ -264,8 +264,10 @@ jobs:
       # Electron needs the system packages Chromium does.
       - name: Install Chromium's system packages
         uses: ./.github/actions/chromium
+      # Core reads and writes screenshots through @e2e-dev/util's addon, built here from the checkout.
+      - uses: ./.github/actions/rust-toolchain
       - name: Build
-        run: pnpm --filter @e2e-dev/core --filter e2e --filter @e2e-dev/electron run build
+        run: pnpm --filter @e2e-dev/util run build:native && pnpm --filter @e2e-dev/util --filter @e2e-dev/core --filter e2e --filter @e2e-dev/electron run build
       # The engine's own launches and page-side code on real Electron windows.
       - name: Electron integration tests
         run: xvfb-run --auto-servernum pnpm --filter @e2e-dev/electron run test:integration
@@ -289,8 +291,10 @@ jobs:
       - uses: ./.github/actions/workspace-install
         with:
           agent-device-version: ${{ inputs.agent-device-version }}
+      # Core reads and writes screenshots through @e2e-dev/util's addon, built here from the checkout.
+      - uses: ./.github/actions/rust-toolchain
       - name: Build
-        run: pnpm --filter @e2e-dev/core --filter e2e --filter @e2e-dev/electron run build
+        run: pnpm --filter @e2e-dev/util run build:native && pnpm --filter @e2e-dev/util --filter @e2e-dev/core --filter e2e --filter @e2e-dev/electron run build
       - name: Electron unit tests
         run: pnpm --filter @e2e-dev/electron test
       - name: Electron integration tests
