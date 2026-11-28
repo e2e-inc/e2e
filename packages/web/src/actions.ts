@@ -100,18 +100,29 @@ async function setChecked(target: ActionTarget, checked: boolean, operation: Con
  */
 const UNRENDERED = 'the control and its labels are not visible';
 
+/** Where to click a stand-in label, relative to the top-left corner of its padding box, as Playwright reads `position`. */
+interface StandIn {
+  label: HTMLLabelElement;
+  position: { x: number; y: number };
+}
+
 /**
- * Runs in the page. A component library (Element Plus) hides a native
- * checkbox or radio under its label's styled spans with `z-index: -1`, or
- * gives it no box at all, so Playwright refuses the input itself (`<span>
- * intercepts pointer events`, `element is not visible`) though a user's click
- * there reaches it through the label. Returns that label, or null to click the
- * control itself. The choice reads the control and its labels only, past
- * anything else on top (a loading mask, a modal): Playwright's checks on the
- * label wait that out, or fail on it. Throws `UNRENDERED` while none of them
- * is rendered (a dialog not open yet), since nothing tells the two apart then.
+ * Runs in the page. Returns the label to click in place of a checkbox or
+ * radio that a click cannot reach at its own centre, and the point to click
+ * it at, or null to click the control itself. Element Plus hides the native
+ * input under its label's styled spans with `z-index: -1` or gives it no box,
+ * and `sr-only` clips it, so Playwright refuses the input (`<span> intercepts
+ * pointer events`, `element is not visible`) though a user's click reaches it
+ * through the label. The point is the control's centre when it falls inside
+ * the label, else the centre of the label's first line, and it is the point
+ * hit-tested here: a label with a link or other control there is never
+ * chosen. The choice reads the control and its labels only, past anything
+ * else on top (a loading mask, a modal), which Playwright's checks on the
+ * label then wait out or fail on. Throws `UNRENDERED` while the point hits
+ * none of them yet (a dialog not open, or not taking pointer events), so the
+ * read is retried.
  */
-function pickStandIn(node: Element, unrendered: string): HTMLLabelElement | null {
+function pickStandIn(node: Element, unrendered: string): StandIn | null {
   if (!(node instanceof HTMLInputElement) || (node.type !== 'checkbox' && node.type !== 'radio') || node.matches(':disabled')) {
     return null;
   }
@@ -121,41 +132,39 @@ function pickStandIn(node: Element, unrendered: string): HTMLLabelElement | null
   const INTERACTIVE = 'a,button,input,select,textarea,summary,[contenteditable],[role="button"],[role="link"]';
   const hasBox = ({ width, height }: DOMRect): boolean => width > 0 && height > 0;
   const centre = ({ left, top, width, height }: DOMRect): [number, number] => [left + width / 2, top + height / 2];
-  const topmost = (x: number, y: number): Element | undefined =>
-    root.elementsFromPoint(x, y).find((hit) => hit === node || labels.some((label) => label.contains(hit)));
-  const pressesInteractive = (label: HTMLLabelElement, hit: Element | undefined): boolean =>
-    label.contains(hit?.closest(INTERACTIVE) ?? null);
+  const inside = (x: number, y: number, { left, top, right, bottom }: DOMRect): boolean => x >= left && x <= right && y >= top && y <= bottom;
+  const ours = (hit: Element): boolean => hit === node || labels.some((label) => label.contains(hit));
+  const topmost = (x: number, y: number): Element | undefined => root.elementsFromPoint(x, y).find(ours);
+  const accepts = (label: HTMLLabelElement, hit: Element): boolean => label.contains(hit) && !label.contains(hit.closest(INTERACTIVE));
+  const standIn = (label: HTMLLabelElement, x: number, y: number): StandIn => {
+    const { left, top } = label.getBoundingClientRect();
+    const { borderLeftWidth, borderTopWidth } = getComputedStyle(label);
+    return { label, position: { x: x - left - Number.parseFloat(borderLeftWidth), y: y - top - Number.parseFloat(borderTopWidth) } };
+  };
   node.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   const box = node.getBoundingClientRect();
-  if (!hasBox(box)) {
-    const shown = labels.filter((label) => hasBox(label.getBoundingClientRect()) && label.checkVisibility({ visibilityProperty: true }));
-    if (shown.length === 0) throw new Error(unrendered);
-    return (
-      shown.find((label) => {
-        label.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-        return !pressesInteractive(label, topmost(...centre(label.getBoundingClientRect())));
-      }) ?? null
-    );
+  if (hasBox(box)) {
+    const [x, y] = centre(box);
+    const hits = root.elementsFromPoint(x, y);
+    const hit = hits.find(ours);
+    const label = hit === undefined ? undefined : labels.find((own) => own.contains(hit));
+    if (hit !== undefined && label !== undefined && inside(x, y, label.getBoundingClientRect())) {
+      return accepts(label, hit) ? standIn(label, x, y) : null;
+    }
+    if (hits.includes(node)) return null;
   }
-  const [x, y] = centre(box);
-  const hit = topmost(x, y);
-  if (hit === undefined) throw new Error(unrendered);
-  const label = labels.find((own) => own.contains(hit));
-  if (label === undefined || pressesInteractive(label, hit)) return null;
-  const outer = label.getBoundingClientRect();
-  return x >= outer.left && x <= outer.right && y >= outer.top && y <= outer.bottom ? label : null;
-}
-
-/**
- * Runs in the page: where a click on the label lands, the centre of its
- * control relative to the label, or none for a control with no box, which
- * takes the label's centre.
- */
-function controlPoint(label: HTMLLabelElement): { x: number; y: number } | null {
-  const box = label.control?.getBoundingClientRect();
-  if (box === undefined || box.width === 0 || box.height === 0) return null;
-  const outer = label.getBoundingClientRect();
-  return { x: box.left + box.width / 2 - outer.left, y: box.top + box.height / 2 - outer.top };
+  const shown = labels.filter((label) => hasBox(label.getBoundingClientRect()) && label.checkVisibility({ visibilityProperty: true }));
+  if (shown.length === 0) throw new Error(unrendered);
+  let missed = false;
+  for (const label of shown) {
+    label.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const [x, y] = centre(label.getClientRects()[0] ?? label.getBoundingClientRect());
+    const hit = topmost(x, y);
+    if (hit === undefined) missed = true;
+    else if (accepts(label, hit)) return standIn(label, x, y);
+  }
+  if (missed) throw new Error(unrendered);
+  return null;
 }
 
 /**
@@ -174,6 +183,7 @@ async function clickControl(
   const deadline = new Deadline(options.timeout);
   const remaining = (): number => Math.max(1, deadline.remaining());
   let label: ElementHandle<HTMLLabelElement> | undefined;
+  let position: { x: number; y: number } | undefined;
   let firstRead = true;
   await pollCondition({
     deadline,
@@ -187,8 +197,14 @@ async function clickControl(
           target.kind === 'locator'
             ? await target.locator.evaluateHandle(pickStandIn, UNRENDERED, { timeout: remaining() })
             : await target.element.evaluateHandle(pickStandIn, UNRENDERED);
-        label = handle.asElement() ?? undefined;
-        if (label === undefined) void handle.dispose().catch(() => undefined);
+        try {
+          position = await handle.evaluate((standIn) => standIn?.position);
+          const picked = await handle.evaluateHandle((standIn) => standIn?.label);
+          label = picked.asElement() ?? undefined;
+          if (label === undefined) void picked.dispose().catch(() => undefined);
+        } finally {
+          void handle.dispose().catch(() => undefined);
+        }
         return true;
       } catch (cause) {
         if (message(cause).includes(UNRENDERED)) return undefined;
@@ -207,9 +223,8 @@ async function clickControl(
     return;
   }
   try {
-    const position = await label.evaluate(controlPoint);
     signal.throwIfAborted();
-    await label.click({ ...click, timeout: remaining(), ...(position === null ? {} : { position }) });
+    await label.click({ ...click, timeout: remaining(), ...(position === undefined ? {} : { position }) });
   } finally {
     void label.dispose().catch(() => undefined);
   }
