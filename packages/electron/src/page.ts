@@ -149,14 +149,6 @@ export class PageTarget implements InputTarget {
 
   /** Set while a recording's screencast runs on the page: a capture then leaves the screencast alone. */
   recording = false;
-  /**
-   * Makes the window draw where a screencast is not enough to, and resolves
-   * with what puts it back as it was; set by what follows the app, on the
-   * platforms that need it.
-   */
-  keepDrawing: (() => Promise<(() => Promise<void>) | undefined>) | undefined;
-  private drawing: Promise<(() => Promise<void>) | undefined> | undefined;
-  private holds = 0;
   private captures = 0;
 
   /**
@@ -168,37 +160,12 @@ export class PageTarget implements InputTarget {
   async captured<T>(capture: () => Promise<T>): Promise<T> {
     this.captures += 1;
     if (!this.recording && this.captures === 1) await this.session.send('Page.startScreencast', { format: 'jpeg', quality: 1, maxWidth: 16, maxHeight: 16 }).catch(() => undefined);
-    const release = await this.hold();
     try {
       return await capture();
     } finally {
       this.captures -= 1;
-      // Before the screencast ends: the end of the screencast is what hides the window's renderer again.
-      await release();
       if (!this.recording && this.captures === 0) await this.session.send('Page.stopScreencast').catch(() => undefined);
     }
-  }
-
-  /**
-   * Keeps the window drawing, hidden or not, until the function it resolves
-   * with is called: for a capture, and for as long as a recording runs. The
-   * window is put back as it was when the last hold lets go.
-   */
-  async hold(): Promise<() => Promise<void>> {
-    this.holds += 1;
-    this.drawing ??= this.keepDrawing?.().catch(() => undefined) ?? Promise.resolve(undefined);
-    await this.drawing;
-    let released = false;
-    return async () => {
-      if (released) return;
-      released = true;
-      this.holds -= 1;
-      if (this.holds > 0) return;
-      const { drawing } = this;
-      this.drawing = undefined;
-      const restore = await drawing;
-      await restore?.().catch(() => undefined);
-    };
   }
 
   /** The execution context of the engine's isolated world in the page's main frame, made once per document. */

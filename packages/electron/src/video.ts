@@ -84,14 +84,11 @@ export class Recorder {
       void taken.then(() => session.send('Page.screencastFrameAck', { sessionId: frame.sessionId })).catch(() => undefined);
     });
     page.recording = true;
-    // A window the app hides sends no frame on Windows unless it is held drawing.
-    const release = await page.hold();
     this.source = {
       page,
       stop: async () => {
         off();
         page.recording = false;
-        await release();
         await session.send('Page.stopScreencast').catch(() => undefined);
       },
     };
@@ -102,7 +99,6 @@ export class Recorder {
       off();
       page.recording = false;
       this.source = undefined;
-      await release();
       return;
     }
     // A window shown again repaints nothing: the video would hold the window before it.

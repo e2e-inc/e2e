@@ -197,6 +197,7 @@ export class AppProcess {
       await answerWithin(app.process.browser.root.send('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath: downloads }), Math.min(left(), DOWNLOADS_SETUP_MS));
     } else {
       await placeDownloads(main, downloads, Math.min(left(), DOWNLOADS_SETUP_MS));
+      await keepWindowsDrawing(main, Math.min(left(), ANSWER_MS));
     }
     const versions = await answerWithin(readVersions(app, main), left());
     if (versions !== undefined) setup.attempt.environment(versions);
@@ -264,7 +265,6 @@ export class AppProcess {
       if (!attaching.delete(info.targetId)) return;
       const page = new PageTarget(info.targetId, app.process.browser.session(sessionId), info.url, info.openerId === undefined ? undefined : app.pages.get(info.openerId));
       app.pages.set(info.targetId, page);
-      if (process.platform === 'win32') page.keepDrawing = () => unthrottle(app, page.targetId);
       // A window that has loaded nothing has no renderer and never answers: it becomes a window once it does.
       await this.follow(page, report);
       if (current() && !page.isClosed()) this.windows.add(page);
@@ -422,41 +422,6 @@ export class AppProcess {
   }
 }
 
-/**
- * Turns off the background throttling of one window's renderer, and resolves
- * with what turns it back on; undefined when it was off already, or the app
- * has no inspector to ask. Windows draws nothing of a window the app hid
- * while its renderer is throttled, screencast or not: a screenshot of one
- * never returns, nor does the app's own `webContents.capturePage()`
- * (measured on Electron 45). With throttling off it draws at once. macOS
- * draws one for the screencast alone. Linux under xvfb hangs on such a
- * window now and then with throttling off too, for a reason not yet found.
- */
-async function unthrottle(app: RunningApp, targetId: string): Promise<(() => Promise<void>) | undefined> {
-  const main = await answerWithin(app.main, ANSWER_MS);
-  if (main === undefined) return undefined;
-  const restore = async (): Promise<void> => {
-    await answerWithin(
-      main.evaluate(({ webContents }, id) => {
-        const contents = webContents.fromDevToolsTargetId(id);
-        if (contents !== undefined && !contents.isDestroyed()) contents.setBackgroundThrottling(true);
-      }, targetId),
-      ANSWER_MS,
-    );
-  };
-  const turnedOff = main.evaluate(({ webContents }, id) => {
-    const contents = webContents.fromDevToolsTargetId(id);
-    if (contents === undefined || contents.isDestroyed() || !contents.getBackgroundThrottling()) return false;
-    contents.setBackgroundThrottling(false);
-    return true;
-  }, targetId);
-  const answered = await answerWithin(turnedOff, ANSWER_MS);
-  if (answered === true) return restore;
-  // A busy main process runs the call later, when no capture waits for it any more: throttling goes back on then.
-  if (answered === undefined) void turnedOff.then((off) => (off ? restore() : undefined)).catch(() => undefined);
-  return undefined;
-}
-
 const NO_INSPECTOR =
   'the app\'s main process opened no inspector, so electron.evaluate cannot run in it and windows are known by their document titles only: a packaged app built with the EnableNodeCliInspectArguments fuse off ignores --inspect';
 
@@ -602,6 +567,25 @@ async function placeDownloads(main: MainProcess, directory: string, withinMs: nu
       for (const contents of webContents.getAllWebContents()) place(contents.session);
       electronApp.on('session-created', place);
     }, directory),
+    withinMs,
+  );
+}
+
+/**
+ * Keeps the app's windows drawing while the app hides them, as the engine's
+ * launch switches keep covered ones: `hide()` stops a window's compositor on
+ * Windows and Linux, and a screenshot of it then never returns and a
+ * recording gets no frame, whatever the DevTools protocol asks for. Electron
+ * keeps the compositor of a window whose contents have background throttling
+ * off, so it is turned off for every window, the ones opened later too. Only
+ * the main process can: an app with no inspector keeps the limit.
+ */
+async function keepWindowsDrawing(main: MainProcess, withinMs: number): Promise<void> {
+  await answerWithin(
+    main.evaluate(({ app: electronApp, webContents }) => {
+      for (const contents of webContents.getAllWebContents()) contents.setBackgroundThrottling(false);
+      electronApp.on('web-contents-created', (_event, contents) => contents.setBackgroundThrottling(false));
+    }, undefined),
     withinMs,
   );
 }
