@@ -60,6 +60,13 @@ test.describe('controls window', () => {
     await expect(screen.getByRole('treeitem', { expanded: true })).toHaveCount(1);
   });
 
+  test('swipes a scroll area whose rows are its children by half its height', async ({ screen }) => {
+    await screen.getByTestId('lines').swipe({ direction: 'down' });
+    // Half of a 100-point view is two or three lines, not a share of all 100.
+    await expect(screen.getByText('Line 1', { exact: true })).toBeHidden();
+    await expect(screen.getByText('Line 5', { exact: true })).toBeVisible();
+  });
+
   test('scrolls a scroll area that lists its scroll bar after more than 16 children', async ({ screen }) => {
     const last = screen.getByText('Line 30');
     await expect(last).toBeHidden();

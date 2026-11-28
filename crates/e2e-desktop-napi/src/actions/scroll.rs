@@ -96,6 +96,18 @@ pub(super) fn repeat(element: &Element, action: &str, count: usize) -> Outcome<(
     Ok(())
 }
 
+/// How far a scroll area's own children other than its scroll bars reach along the axis: its content, when it holds the
+/// content directly (a table, or each row of a SwiftUI `ScrollView`). The first 16 and the last 4 are measured, as
+/// `scroll_bar` reads them.
+fn children_span(element: &Element, vertical: bool) -> Option<f64> {
+    let first = element.elements("AXChildren", 16).ok()?;
+    let last = if first.len() < 16 { Vec::new() } else { element.last_elements("AXChildren", 4).unwrap_or_default() };
+    let frames: Vec<_> = first.iter().chain(&last).filter(|child| child.text("AXRole").as_deref() != Some("AXScrollBar")).filter_map(Element::frame).collect();
+    let start = frames.iter().map(|&(x, y, _, _)| if vertical { y } else { x }).fold(f64::INFINITY, f64::min);
+    let end = frames.iter().map(|&(x, y, width, height)| if vertical { y + height } else { x + width }).fold(f64::NEG_INFINITY, f64::max);
+    (end > start).then_some(end - start)
+}
+
 pub(super) fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
     let vertical = matches!(direction, "up" | "down");
     let forward = matches!(direction, "down" | "right");
@@ -108,12 +120,11 @@ pub(super) fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outco
         };
         let (_, _, width, height) = element.frame().unwrap_or((0.0, 0.0, 0.0, 0.0));
         let visible = if vertical { height } else { width };
-        let content = element
-            .element("AXContents")
-            .or_else(|| element.elements("AXChildren", 16).ok()?.into_iter().find(|child| child.text("AXRole").as_deref() != Some("AXScrollBar")))
-            .and_then(|contents| contents.frame())
-            .map(|(_, _, width, height)| if vertical { height } else { width })
-            .unwrap_or(0.0);
+        let content = match element.element("AXContents") {
+            Some(contents) => contents.frame().map(|(_, _, width, height)| if vertical { height } else { width }),
+            None => children_span(element, vertical),
+        }
+        .unwrap_or(0.0);
         let step = if content > visible && visible > 0.0 { pages * visible / (content - visible) } else { pages * 0.25 };
         if let Some(current) = current
             && settable(&bar, "AXValue", "scroll")?

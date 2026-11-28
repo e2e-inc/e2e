@@ -92,10 +92,10 @@ struct DraftAlert: View {
   }
 }
 
-/// A scroll area that names no `AXVerticalScrollBar` and lists its 30 lines, then its scroll bar, as its own children, as an
-/// app's own scroll view can.
+/// A scroll area that names no `AXVerticalScrollBar` and lists its 100 lines, then its scroll bar, as its own children, as
+/// an app's own scroll view can: no child is the whole content.
 final class FlatScroll: NSScrollView {
-  let lines = (1...30).map { NSTextField(labelWithString: "Line \($0)") }
+  let lines = (1...100).map { NSTextField(labelWithString: "Line \($0)") }
   override func accessibilityVerticalScrollBar() -> Any? { nil }
   override func accessibilityChildren() -> [Any]? { lines + [verticalScroller].compactMap { $0 } }
 }
