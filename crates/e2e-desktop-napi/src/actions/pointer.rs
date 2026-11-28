@@ -105,6 +105,9 @@ pub(super) fn aimed(aim: Result<Aim, AXError>, clicks: bool, when: &str) -> Outc
         Ok(Aim::Control) => {
             Err(Failure::refused(codes::ACTION_FAILED, format!("{when}, a control inside this element is under the pointer, so the click would press it")))
         }
+        Ok(Aim::Other) if !clicks => {
+            Err(Failure::refused(codes::ACTION_FAILED, format!("{when}, another element is under the pointer, so the pointer was not moved there")))
+        }
         Ok(Aim::Other) => Err(Failure::refused(codes::ACTION_FAILED, format!("{when}, another element is under the pointer, so no click was sent there"))),
         Err(error) => Err(unread(error, "find the element under the pointer")),
     }

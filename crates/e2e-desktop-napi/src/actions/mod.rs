@@ -1035,6 +1035,9 @@ mod tests {
         // A click refuses the control, a hover does not; a stall is a retryable stall, not a covering element.
         assert_eq!(aimed(Ok(Aim::Control), true, "after the move").expect_err("the click would press the button").code, codes::ACTION_FAILED);
         assert!(aimed(Ok(Aim::Control), false, "before the move").is_ok());
+        // A covered hover says it did not move the pointer, not that it sent no click.
+        assert!(aimed(Ok(Aim::Other), false, "before the move").expect_err("covered").message.ends_with("so the pointer was not moved there"));
+        assert!(aimed(Ok(Aim::Other), true, "before the move").expect_err("covered").message.ends_with("so no click was sent there"));
         let stall = aimed(Err(crate::ax::AX_CANNOT_COMPLETE), true, "after the move").expect_err("the app did not answer");
         assert_eq!((stall.code, stall.delivery), (codes::APP_UNRESPONSIVE, crate::failure::Delivery::NotDelivered));
     }
