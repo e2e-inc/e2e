@@ -496,8 +496,9 @@ export class DesktopSurface {
    * `pressSequentially` go through the real keyboard, and keys typed while
    * the app is still coming forward could miss it. In the background the
    * app's keys go to its own event queue, which the driver sends only while
-   * the window is key, so there is nothing to wait for. Never fails the open:
-   * an app that names no key window is read as it is.
+   * the window is key, so there is nothing to wait for. An app that names no
+   * key window in time is read as it is; the open fails only when it was
+   * cancelled (`CANCELLED`) or the app quit while it was waited for.
    */
   private async keyWindow(operation: OperationContext, deadline: number): Promise<void> {
     if (!this.foreground) return;
