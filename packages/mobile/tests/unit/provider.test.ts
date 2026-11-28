@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { AppError } from 'agent-device';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { OperationContext, ProviderRecordContext, ProviderRecording, ProviderRecordingResult, ProviderRecordingStopContext } from '@e2e-dev/core/engine';
 import type { DeviceLease, DeviceProvider, DeviceReleaseContext, DeviceRequest } from '../../src/provider.ts';
@@ -173,6 +174,19 @@ describe('device provider', () => {
     expect(worker.fake.methods()).toEqual(['devices.boot']);
     await worker.surface.installApp(undefined, {}, new AbortController().signal);
     expect(worker.fake.lastArgs('apps.install')).toMatchObject({ device: 'sim-0', app: 'Settings', appPath: path.join(PROJECT_ROOT, 'build/App.app') });
+  });
+
+  it("warms a leased device whose runtime refuses the runner step as unsupported as one with its runner up: no log line, and the app opens", async () => {
+    const cloud = provider();
+    const h = harness({ device: cloud.impl });
+    h.fake.respond('command.prepare', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'This lifecycle operation is unavailable for Revyl.', { reason: 'unsupported-provider-mode' });
+    });
+    const lines: string[] = [];
+    await h.prepare(prepareInfo({}, 1, (line) => lines.push(line)));
+    expect(h.fake.methods()).toEqual(['devices.boot', 'command.prepare', 'apps.open']);
+    expect(lines.filter((line) => line.includes('runner not prepared'))).toEqual([]);
+    await h.engine.finish!(finishInfo());
   });
 
   it('keeps a leased session for a replacement worker until the run finishes', async () => {

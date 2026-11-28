@@ -7,11 +7,15 @@
 
 import { writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { RevylCredentials } from './credentials.ts';
 import { DEFAULT_API_URL } from './web/client.ts';
 
 /** Revyl's backend gives up on a proxied worker call after 30 s. */
 const REQUEST_TIMEOUT_MS = 35_000;
+const READ_ATTEMPTS = 3;
+/** Session states Revyl never brings back to a running device. */
+const ENDED_STATUSES = new Set(['failed', 'completed', 'cancelled', 'timeout', 'stopping']);
 // Revyl's edge refuses requests without a client user agent.
 const USER_AGENT = `e2e-revyl/${(createRequire(import.meta.url)('../package.json') as { version: string }).version}`;
 
@@ -25,6 +29,8 @@ export interface DeviceCatalog {
 export interface DeviceRecording {
   readonly workflowRunId: string;
   readonly recordingId: string;
+  /** When the start was asked for, as an ISO timestamp: the recording's first frame is at or just after it. */
+  readonly startedAt: string;
 }
 
 export class RevylDeviceClient {
@@ -38,7 +44,7 @@ export class RevylDeviceClient {
 
   /** The models Revyl lists for `platform`, and the OS versions each one runs. */
   async catalog(platform: string, signal: AbortSignal): Promise<DeviceCatalog> {
-    const listed = fields(fields(fields(await json(await this.#request('GET', '/api/v1/execution/device-targets', undefined, signal), 'device-targets')).platforms)[platform]);
+    const listed = fields(fields(fields(await this.#read('/api/v1/execution/device-targets', 'device-targets', signal)).platforms)[platform]);
     const models = Array.isArray(listed.available_models) ? listed.available_models.filter((model): model is string => typeof model === 'string') : [];
     const runtimes = Object.fromEntries(
       Object.entries(fields(listed.compatible_runtimes)).map(([model, versions]) => [model, Array.isArray(versions) ? versions.filter((version): version is string => typeof version === 'string') : []]),
@@ -52,12 +58,15 @@ export class RevylDeviceClient {
    * at its size cap.
    */
   async startRecording(sessionId: string, signal: AbortSignal): Promise<DeviceRecording> {
-    const session = await json(await this.#request('GET', `/api/v1/execution/device-sessions/${encodeURIComponent(sessionId)}`, undefined, signal), 'device session');
+    const session = await this.#read(`/api/v1/execution/device-sessions/${encodeURIComponent(sessionId)}`, 'device session', signal);
     const workflowRunId = session.workflow_run_id;
-    if (typeof workflowRunId !== 'string' || workflowRunId === '') throw new Error(`Revyl reports no running device for session ${sessionId}`);
+    if (typeof workflowRunId !== 'string' || workflowRunId === '' || (typeof session.status === 'string' && ENDED_STATUSES.has(session.status))) {
+      throw new Error(`Revyl reports no running device for session ${sessionId}`);
+    }
+    const startedAt = new Date().toISOString();
     const started = action(await json(await this.#request('POST', `${proxy(workflowRunId)}/start_screen_recording`, {}, signal), 'start_screen_recording'), 'start_screen_recording');
     if (typeof started.recording_id !== 'string' || started.recording_id === '') throw new Error('Revyl started a recording without naming it');
-    return { workflowRunId, recordingId: started.recording_id };
+    return { workflowRunId, recordingId: started.recording_id, startedAt };
   }
 
   /**
@@ -72,6 +81,19 @@ export class RevylDeviceClient {
     }
     action(await json(response, 'stop_screen_recording'), 'stop_screen_recording');
     throw new Error('Revyl stopped the recording without returning a video');
+  }
+
+  /** A GET's JSON object, asked again after a rate limit, a gateway error, or a dropped connection, none of which change anything. */
+  async #read(path: string, what: string, signal: AbortSignal): Promise<Readonly<Record<string, unknown>>> {
+    for (let attempt = 1; ; attempt += 1) {
+      const response = await this.#request('GET', path, undefined, signal).catch((error: unknown) => {
+        if (!(error instanceof TypeError) || signal.aborted || attempt >= READ_ATTEMPTS) throw error;
+        return undefined;
+      });
+      const transient = response === undefined || response.status === 429 || (response.status >= 502 && response.status <= 504);
+      if (response !== undefined && (!transient || attempt >= READ_ATTEMPTS)) return json(response, what);
+      await delay(500 * attempt, undefined, { signal });
+    }
   }
 
   #request(method: 'GET' | 'POST', path: string, body: unknown, signal: AbortSignal): Promise<Response> {

@@ -215,8 +215,15 @@ describe('revyl()', () => {
     afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
     it("records with the worker's screen recording of the session the plugin started for the lease, and writes the MP4 it stops with", async () => {
+      let lookedUp = 0;
+      const running = routes[`GET /api/v1/execution/device-sessions/${sessionId}`]!;
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = (call) => {
+        lookedUp = Date.now();
+        return running(call);
+      };
       const recording = await revyl(options).record!(lease, recordContext);
-      expect(Date.parse(recording.startedAt)).not.toBeNaN();
+      // Timed from the start request, not from before the session lookup.
+      expect(Date.parse(recording.startedAt)).toBeGreaterThanOrEqual(lookedUp);
       expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
         `GET /api/v1/execution/device-sessions/${sessionId}`,
         'POST /api/v1/execution/device-proxy/run-9/start_screen_recording',
@@ -227,9 +234,30 @@ describe('revyl()', () => {
       expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
     });
 
+    it('stops once: a stop the engine repeats gets the first outcome, since the worker hands the video back only once', async () => {
+      const recording = await revyl(options).record!(lease, recordContext);
+      const stop = { dir, signal: new AbortController().signal };
+      await expect(recording.stop(stop)).resolves.toEqual({ file: 'recording.mp4' });
+      await expect(recording.stop(stop)).resolves.toEqual({ file: 'recording.mp4' });
+      expect(calls.filter((call) => call.url.endsWith('/stop_screen_recording'))).toHaveLength(1);
+    });
+
+    it('looks the session up again after a gateway error, and starts recording once', async () => {
+      const running = routes[`GET /api/v1/execution/device-sessions/${sessionId}`]!;
+      let lookups = 0;
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = (call) => (++lookups === 1 ? json({ detail: 'bad gateway' }, 502) : running(call));
+      await revyl(options).record!(lease, recordContext);
+      expect(lookups).toBe(2);
+      expect(calls.filter((call) => call.url.endsWith('/start_screen_recording'))).toHaveLength(1);
+    });
+
     it('fails the start when the lease has no running device, and a refused start or stop with the reason the worker gives', async () => {
-      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = () => json({ session_id: sessionId, status: 'completed' });
+      // An ended session, even one that still names its workflow run, and one with no workflow run at all.
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = () => json({ session_id: sessionId, workflow_run_id: 'run-9', status: 'completed' });
       await expect(revyl(options).record!(lease, recordContext)).rejects.toThrow(`Revyl reports no running device for session ${sessionId}`);
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = () => json({ session_id: sessionId, status: 'running' });
+      await expect(revyl(options).record!(lease, recordContext)).rejects.toThrow(`Revyl reports no running device for session ${sessionId}`);
+      expect(calls.filter((call) => call.url.endsWith('/start_screen_recording'))).toEqual([]);
 
       routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = () => json({ session_id: sessionId, workflow_run_id: 'run-9' });
       routes['POST /api/v1/execution/device-proxy/run-9/start_screen_recording'] = () => json({ success: false, error: 'already recording' });

@@ -383,15 +383,15 @@ describe('lifecycle', () => {
     });
     await expect(h.prepare(info)).rejects.toMatchObject({ code: 'ENGINE_FAILURE' });
 
-    // A runtime that runs the runner itself (a hosted device's) refuses the step: nothing to log, and the slot opens its app.
-    const hosted = harness({ device: 'iPhone 16e' });
-    hosted.fake.respond('command.prepare', () => {
-      throw new AppError('UNSUPPORTED_OPERATION', 'This lifecycle operation is unavailable for Revyl.', { reason: 'unsupported-provider-mode' });
+    // A local daemon that refuses the step as unsupported is logged like any other failure; only a leased device's refusal is quiet.
+    const local = harness({ device: 'iPhone 16e' });
+    local.fake.respond('command.prepare', () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'prepare ios-runner is not supported by this daemon');
     });
-    const hostedLines: string[] = [];
-    await hosted.prepare({ ...info, log: (line) => hostedLines.push(line) });
-    expect(hosted.fake.methods()).toEqual(['devices.boot', 'command.prepare', 'apps.open']);
-    expect(hostedLines).toEqual(['booting iPhone 16e (1 of 1)', expect.stringMatching(/^iPhone 16e: boot \d+\.\ds, iOS runner \d+\.\ds, open Settings \d+\.\ds$/)]);
+    const localLines: string[] = [];
+    await local.prepare({ ...info, log: (line) => localLines.push(line) });
+    expect(localLines[1]).toMatch(/runner not prepared.*not supported/);
+    expect(local.fake.methods()).toEqual(['devices.boot', 'command.prepare']);
 
     // Android has no XCTest runner to start.
     const android = harness({ device: 'emulator-5556', platform: 'android' });

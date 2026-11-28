@@ -96,14 +96,13 @@ export function revyl(options: RevylOptions): DeviceProvider {
     async record(lease: DeviceLease, context: ProviderRecordContext): Promise<ProviderRecording> {
       const { revylSessionIdForLease } = (await import(PLUGIN)) as { revylSessionIdForLease: (leaseId: string) => string };
       const client = new RevylDeviceClient(revylCredentials(context.env));
-      const startedAt = new Date().toISOString();
       const recording = await client.startRecording(revylSessionIdForLease(lease.id), context.signal);
+      // The worker hands the video back only to the call that stops it, so a stop the engine repeats gets the first one's outcome.
+      let stopped: Promise<{ readonly file: string }> | undefined;
       return {
-        startedAt,
-        stop: async ({ dir, signal }) => {
-          await client.stopRecording(recording, path.join(dir, RECORDING_FILE), signal);
-          return { file: RECORDING_FILE };
-        },
+        startedAt: recording.startedAt,
+        stop: ({ dir, signal }) =>
+          (stopped ??= client.stopRecording(recording, path.join(dir, RECORDING_FILE), signal).then(() => ({ file: RECORDING_FILE }))),
       };
     },
   };
