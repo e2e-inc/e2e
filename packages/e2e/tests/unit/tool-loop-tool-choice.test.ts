@@ -283,6 +283,9 @@ describe('AI SDK warning filtering', () => {
     await fixtures.agent.act('look around');
 
     const messages = emitWarning.mock.calls.map(([warning]) => String(warning));
+    expect(messages).toContain(
+      'AI SDK Warning System: To turn off warning logging, set the AI_SDK_LOG_WARNINGS global to false.',
+    );
     expect(messages.some((message) => message.includes('toolChoice'))).toBe(false);
     expect(messages.some((message) => message.includes('temperature'))).toBe(true);
     expect(globalWarnings.AI_SDK_LOG_WARNINGS).toBeUndefined();
@@ -357,6 +360,101 @@ describe('AI SDK warning filtering', () => {
 
     expect(emitWarning).not.toHaveBeenCalled();
     expect(globalWarnings.AI_SDK_LOG_WARNINGS).toBeUndefined();
+  });
+
+  it('retains toolChoice warnings for unrelated concurrent callers and calls inside custom tools', async () => {
+    delete globalWarnings.AI_SDK_LOG_WARNINGS;
+    const emitWarning = vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
+
+    let releaseTurn!: () => void;
+    const turnStarted = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    const customToolWithAiCall = defineTool(
+      {
+        inputSchema: z.object({}),
+        execute: async () => {
+          await Promise.resolve();
+          const logger = globalWarnings.AI_SDK_LOG_WARNINGS;
+          if (typeof logger === 'function') {
+            logger({ warnings: [DOWNGRADE], provider: 'custom-tool-provider', model: 'custom-tool-model' });
+          }
+          return 'ran-custom-tool';
+        },
+      },
+      { mutates: false },
+    );
+
+    const model = installFakeLoopModel(({ turn }) => {
+      if (turn === 1) {
+        releaseTurn();
+        return {
+          toolCalls: [{ toolName: 'customToolWithAiCall', input: {} }],
+          warnings: [DOWNGRADE],
+        };
+      }
+      return [conclude];
+    });
+    const { fixtures } = runtime({ agents: { default: { tools: { customToolWithAiCall }, model } } });
+
+    const unrelatedConcurrent = (async () => {
+      await turnStarted;
+      const logger = globalWarnings.AI_SDK_LOG_WARNINGS;
+      if (typeof logger === 'function') {
+        logger({ warnings: [DOWNGRADE], provider: 'unrelated-provider', model: 'unrelated-model' });
+      }
+    })();
+
+    await Promise.all([fixtures.agent.act('run custom tool'), unrelatedConcurrent]);
+
+    const messages = emitWarning.mock.calls.map(([warning]) => String(warning));
+    expect(messages.some((message) => message.includes('custom-tool-provider / custom-tool-model') && message.includes('toolChoice'))).toBe(true);
+    expect(messages.some((message) => message.includes('unrelated-provider / unrelated-model') && message.includes('toolChoice'))).toBe(true);
+    expect(globalWarnings.AI_SDK_LOG_WARNINGS).toBeUndefined();
+  });
+
+  it('emits the AI SDK first-use notice once and deduplicates deprecated warnings by code', async () => {
+    delete globalWarnings.AI_SDK_LOG_WARNINGS;
+    const emitWarning = vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
+
+    const model = installFakeLoopModel(({ turn }) =>
+      turn === 1
+        ? {
+            toolCalls: [{ toolName: 'peek', input: {} }],
+            warnings: [
+              { type: 'deprecated', setting: 'legacyOptA', message: 'Use newOptA instead.' },
+              { type: 'deprecated', setting: 'legacyOptA', message: 'Use newOptA instead.' },
+              { type: 'deprecated', setting: 'legacyOptB', message: 'Use newOptB instead.' },
+            ],
+          }
+        : [conclude],
+    );
+    const { fixtures } = runtime({ agents: { default: { tools: { peek }, model } } });
+
+    await fixtures.agent.act('first');
+    await fixtures.agent.act('second');
+
+    const calls = emitWarning.mock.calls.map(([warning, options]) => ({
+      message: String(warning),
+      options: options as { type?: string; code?: string } | undefined,
+    }));
+    const noticeCalls = calls.filter((call) =>
+      call.message.includes('AI SDK Warning System: To turn off warning logging, set the AI_SDK_LOG_WARNINGS global to false.'),
+    );
+    expect(noticeCalls.length).toBeLessThanOrEqual(1);
+
+    const depACalls = calls.filter((call) => call.message.includes('legacyOptA'));
+    const depBCalls = calls.filter((call) => call.message.includes('legacyOptB'));
+    expect(depACalls).toHaveLength(1);
+    expect(depACalls[0]!.options).toEqual({
+      type: 'DeprecationWarning',
+      code: 'AISDK_DEP_PROVIDER_fake_002Dloop__legacyOptA',
+    });
+    expect(depBCalls).toHaveLength(1);
+    expect(depBCalls[0]!.options).toEqual({
+      type: 'DeprecationWarning',
+      code: 'AISDK_DEP_PROVIDER_fake_002Dloop__legacyOptB',
+    });
   });
 });
 

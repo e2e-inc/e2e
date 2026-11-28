@@ -27,6 +27,7 @@ import {
   isForcedToolChoiceDowngraded,
   isForcedToolChoiceRejected,
   withFilteredToolChoiceWarnings,
+  withoutFilteredToolChoiceWarnings,
 } from './model/tool-choice.ts';
 import { missingCredentialError, withMissingCredentialNamed } from './model/missing-credential.ts';
 import { withStallGuard } from './model/stall.ts';
@@ -481,7 +482,8 @@ class LoopRun {
           let result: unknown;
           try {
             // Read per call: a handler replaced after the tools were built is the one that runs.
-            result = tool.execute!(input, options);
+            // Exit the warning filter context so AI SDK calls inside custom tools retain their warnings.
+            result = withoutFilteredToolChoiceWarnings(() => tool.execute!(input, options));
           } catch (error) {
             this.ranCalls.set(options.toolCallId, Promise.resolve('failed'));
             throw error;
