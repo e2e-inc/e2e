@@ -52,5 +52,21 @@ export default {
 } satisfies E2EConfig;
 ```
 
+For macOS apps, `revylDesktop()` from `@e2e-dev/revyl/desktop` runs the `@e2e-dev/desktop` engine
+on a Revyl Mac computer and drives it from the runner:
+
+```sh
+npm install --save-dev e2e @e2e-dev/desktop @e2e-dev/revyl
+```
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { revylDesktop } from '@e2e-dev/revyl/desktop';
+
+export default {
+  targets: [{ engine: revylDesktop(), app: { bundleId: 'com.apple.calculator' } }],
+} satisfies E2EConfig;
+```
+
 See the [integration guide](https://e2e.com/docs/integrations/revyl) for every option
 and the limits.

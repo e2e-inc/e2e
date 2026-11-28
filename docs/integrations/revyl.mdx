@@ -1,7 +1,7 @@
 ---
 title: Test apps and websites on Revyl
 sidebarTitle: Revyl
-description: "Run e2e mobile app tests on Revyl's hosted iOS simulators and Android emulators, and web tests in Revyl's hosted Chrome, with @e2e-dev/revyl."
+description: "Run e2e mobile app tests on Revyl's hosted iOS simulators and Android emulators, web tests in Revyl's hosted Chrome, and macOS desktop tests on Revyl Mac computers, with @e2e-dev/revyl."
 ---
 
 `@e2e-dev/revyl` is a hosted device provider for the mobile engine.
@@ -10,6 +10,9 @@ Use the standard `app`, `screen`, and `expect` APIs to test your app's user flow
 For websites, `revylBrowsers()` from `@e2e-dev/revyl/web` is a
 [browser provider](/reference/web#hosted-browsers) that runs each test in Chrome on
 Revyl ([Run web targets in browsers](#run-web-targets-in-browsers)).
+For macOS apps, `revylDesktop()` from `@e2e-dev/revyl/desktop` runs the
+[desktop engine](/desktop) on a Revyl Mac computer
+([Run desktop targets on Revyl Macs](#run-desktop-targets-on-revyl-macs)).
 
 ## Install and authenticate
 
@@ -238,6 +241,97 @@ Unknown or invalid options fail config load with `INVALID_CONFIG`.
   could. If the run itself dies, Revyl ends each session after
   `idleTimeoutSeconds` without activity.
 
+## Run desktop targets on Revyl Macs
+
+`revylDesktop()` runs the [desktop engine](/desktop) on a Revyl Mac
+computer and drives it from the runner, so desktop tests use the same
+`app`, `screen`, and `expect` APIs as on your own Mac. The runner can run
+on any OS.
+
+Install the integration alongside the desktop engine:
+
+<CodeGroup>
+```bash npm
+npm install --save-dev e2e @e2e-dev/desktop @e2e-dev/revyl
+```
+
+```bash pnpm
+pnpm add -D e2e @e2e-dev/desktop @e2e-dev/revyl
+```
+
+```bash bun
+bun add -d e2e @e2e-dev/desktop @e2e-dev/revyl
+```
+</CodeGroup>
+
+Use `revylDesktop()` as the target's engine. It takes the
+[desktop engine's options](/desktop) too:
+
+```ts title="e2e.config.ts"
+import type { E2EConfig } from 'e2e';
+import { revylDesktop } from '@e2e-dev/revyl/desktop';
+
+export default {
+  targets: [
+    {
+      name: 'mac',
+      engine: revylDesktop({ computer: process.env.REVYL_COMPUTER_ID }),
+      app: { bundleId: 'com.apple.calculator' },
+    },
+  ],
+} satisfies E2EConfig;
+```
+
+Import `test` from `@e2e-dev/desktop` as usual. Without `computer`, each
+run creates a Mac and stops it when the run ends, and Revyl then deletes it.
+With the id of a persistent Revyl computer, the run uses that one. If it's
+running, the run leaves it running. If it's stopped, the run starts it and
+stops it again at the end, which keeps its disk. A computer keeps what the
+first run on it set up, so later runs on it start faster.
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `computer` | none | Id of a persistent Revyl computer to run on. A blank id, as an unset variable reads, names none. |
+| `lifetimeSeconds` | `3600` | Seconds a computer the run creates or starts lives at most, 300 to 86400. Revyl stops it then even when the run can't. |
+
+Unknown or invalid options fail config load with `INVALID_CONFIG`.
+
+When the run starts, the provider sets up the Mac:
+
+1. It installs `@e2e-dev/desktop` and `@e2e-dev/core` with npm, at the
+   versions your project has. Those versions must be on the npm registry.
+   This happens once per version on each computer.
+2. It gives the Mac's `node` Accessibility and Screen Recording, by
+   writing the Mac's TCC database with `sudo`.
+3. It starts a relay under a LaunchAgent in the Mac's desktop session.
+   The engine runs there.
+
+The run's `app.appPath` build is uploaded to the Mac, and a computer keeps
+one copy of each build.
+
+### Desktop limits
+
+- Revyl reaches a computer only through short commands, one at a time, so
+  each engine call takes a round trip of about 1.5 seconds. On Revyl, a tap
+  takes about 3 seconds, and a test runs several times slower than on your
+  own Mac.
+- The `desktop` fixture (`windows()`, `window()`, `waitForWindow()`,
+  `keyboard`, `closeApp()`) works only in the engine's own process, so a
+  test on Revyl can't use it. Use `screen`, `app`, and `expect`.
+- An `appPath` build is uploaded 64 KiB at a time, about 1.5 seconds per
+  piece, so a large build takes minutes the first time a computer gets it.
+- One run at a time per computer. A run ends any engine an earlier run left
+  on the computer, so two runs on the same persistent computer stop each
+  other.
+- The engine on the Mac receives the run's environment, as any
+  [engine server](/reference/engine-protocol#engine-servers) does, through Revyl's API.
+- `e2e doctor` checks `REVYL_API_KEY` and the state of the persistent
+  computer `computer` names, without starting one. It doesn't check the
+  Mac's own setup, which the run does when it starts.
+- When the run ends, the provider stops each computer it created or
+  started. If the run itself dies, Revyl stops the computer after
+  `lifetimeSeconds`, and the next run on the same machine stops it sooner.
+
 ## Next
 
 <CardGroup cols={2}>
@@ -246,5 +340,8 @@ Unknown or invalid options fail config load with `INVALID_CONFIG`.
   </Card>
   <Card title="Mobile API" icon="code" href="/reference/mobile">
     Look up the device fixture and provider contract.
+  </Card>
+  <Card title="Desktop testing" icon="desktop" href="/desktop">
+    Point the desktop engine at a macOS app and write its tests.
   </Card>
 </CardGroup>

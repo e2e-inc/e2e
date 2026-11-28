@@ -33,7 +33,7 @@ const json = (body: unknown, status = 200): Response => new Response(JSON.string
 /** A fresh run per test: the provider keeps its run's open sessions on disk, under the run id. */
 let runId = '';
 
-/** Where the provider keeps the run's markers for target `web`, as `src/web/ledger.ts` builds it. */
+/** Where the provider keeps the run's markers for target `web`, as `src/ledger.ts` builds it. */
 const markerDir = (): string => path.join(tmpdir(), 'e2e-revyl', runId, createHash('sha256').update('web').digest('hex').slice(0, 16));
 const markers = (): string[] => (existsSync(markerDir()) ? readdirSync(markerDir()) : []);
 
@@ -132,6 +132,11 @@ describe('revylBrowsers()', () => {
 
     expect(calls.every((call) => call.url.startsWith('https://backend-staging.revyl.ai/api/'))).toBe(true);
     expect(lines).toEqual([`session ${lease.id}`]);
+  });
+
+  it('refuses a REVYL_API_URL that would send the key over plain http to another host, before calling Revyl', async () => {
+    await expect(revylBrowsers(options).acquire(request({ env: { ...env, REVYL_API_URL: 'http://backend.example' } }))).rejects.toThrow('REVYL_API_URL must use https');
+    expect(calls).toEqual([]);
   });
 
   it('fails without REVYL_API_KEY before calling Revyl', async () => {

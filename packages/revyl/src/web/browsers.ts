@@ -9,7 +9,7 @@ import { releaseEach, type BrowserLease, type BrowserProvider, type BrowserRelea
 import { ConfigurationError, rejectUnknownKeys, type ProviderRecordContext, type ProviderRecording } from 'e2e/engine';
 import { revylCredentials } from '../credentials.ts';
 import { DEFAULT_API_URL, RevylWebClient, type WebViewport } from './client.ts';
-import { forget, prune, remember, remembered } from './ledger.ts';
+import { forget, prune, remember, remembered } from '../ledger.ts';
 
 const APP_URL = 'https://app.revyl.ai';
 const RECORDING_FILE = 'recording.mp4';
