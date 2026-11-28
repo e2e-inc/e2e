@@ -25,7 +25,7 @@ export interface PackageManifest {
   peerDependencies?: Record<string, string>;
 }
 
-const WIDE_RANGE = /^>=(\d+)\.\d+\.\d+ <(\d+)$/;
+const WIDE_RANGE = /^>=(\d+)\.(\d+)\.(\d+) <(\d+)$/;
 
 /**
  * Every publishable package under `packages/`: a named manifest without
@@ -70,7 +70,13 @@ export function widePeerRange(version: string): string {
 /** Whether `range` has the shape `widePeerRange` produces, whatever its floor. */
 export function isWidePeerRange(range: string): boolean {
   const match = WIDE_RANGE.exec(range);
-  return match !== null && Number(match[2]) === Number(match[1]) + 1;
+  return match !== null && Number(match[4]) === Number(match[1]) + 1;
+}
+
+/** The floor of a range `widePeerRange` produces, as `major.minor.patch`; undefined for any other shape. */
+export function wideRangeFloor(range: string): string | undefined {
+  const match = WIDE_RANGE.exec(range);
+  return match === null || Number(match[4]) !== Number(match[1]) + 1 ? undefined : `${match[1]}.${match[2]}.${match[3]}`;
 }
 
 /** The peers in `peers` that name another public package, with the range each declares. */

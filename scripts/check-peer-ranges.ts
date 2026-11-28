@@ -19,8 +19,9 @@
  * listing every offending peer.
  */
 
+import { execFileSync } from 'node:child_process';
 import { relative } from 'node:path';
-import { agentDevicePins } from './agent-device-pins.ts';
+import { agentDevicePins, compareVersions, type EngineReleases } from './agent-device-pins.ts';
 import { REPO_ROOT, isWidePeerRange, publicPackages, siblingPeers } from './public-packages.ts';
 
 const packages = publicPackages();
@@ -38,8 +39,38 @@ for (const { path, manifest } of packages) {
   }
 }
 
-const pins = agentDevicePins(packages.map(({ manifest }) => manifest));
+/** Runs git in the repository; undefined when it fails (no git, a path the tag does not have). */
+function git(...args: string[]): string | undefined {
+  try {
+    return execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return undefined;
+  }
+}
+
+/** The engine's releases from its `@e2e-dev/mobile@<version>` tags; undefined in a checkout without them. */
+function engineReleases(): EngineReleases | undefined {
+  const prefix = '@e2e-dev/mobile@';
+  const versions = (git('tag', '--list', `${prefix}*`) ?? '').split('\n').map((tag) => tag.trim()).filter((tag) => tag.startsWith(prefix)).map((tag) => tag.slice(prefix.length));
+  if (versions.length === 0) return undefined;
+  const pins = new Map<string, string | undefined>();
+  const pinOf = (version: string): string | undefined => {
+    if (!pins.has(version)) {
+      const manifest = git('show', `${prefix}${version}:packages/mobile/package.json`);
+      pins.set(version, manifest === undefined ? undefined : (JSON.parse(manifest) as { dependencies?: Record<string, string> }).dependencies?.['agent-device']);
+    }
+    return pins.get(version);
+  };
+  const tagged = new Set(versions);
+  return {
+    release: (version) => (tagged.has(version) ? { tagged: true, agentDevice: pinOf(version) } : { tagged: false }),
+    releasedWith: (pin) => versions.filter((version) => !version.includes('-') && pinOf(version) === pin).toSorted(compareVersions),
+  };
+}
+
+const pins = agentDevicePins(packages.map(({ manifest }) => manifest), engineReleases());
 problems.push(...pins.problems);
+for (const note of pins.notes) process.stderr.write(`${note}\n`);
 
 if (problems.length > 0) {
   process.stderr.write(`${problems.join('\n')}\n`);
