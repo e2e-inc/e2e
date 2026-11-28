@@ -15,7 +15,8 @@ import { below, random } from './random.ts';
 import { screenshots } from './screenshots.ts';
 
 const ROOT = path.join(import.meta.dirname, '..', '..', '..');
-const TRACKED = execFileSync('git', ['ls-files', '*.png'], { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
+// NUL-separated, so a name git would quote (non-ASCII, say) comes back as the path itself.
+const TRACKED = execFileSync('git', ['ls-files', '-z', '*.png'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter(Boolean);
 const PNGS = TRACKED.map((file) => ({ file, bytes: new Uint8Array(readFileSync(path.join(ROOT, file))) }));
 
 /** Whether two byte arrays hold the same bytes; `toEqual` on megabytes prints megabytes. */
