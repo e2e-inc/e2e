@@ -188,7 +188,6 @@ pub fn format_number(number: f64) -> String {
     if number.fract() == 0.0 && number.abs() < 1e15 { format!("{}", number as i64) } else { format!("{number}") }
 }
 
-/// Decodes one CoreFoundation value. `Err` carries an AX error a multiple-attribute read put in the value's place.
 /// The values of a batch read, from what each slot decoded to. A batch that succeeds can still carry an error in one
 /// slot: a gone element fails the whole read, and so does a stall, since a value the app did not answer in time is not
 /// a value it lacks. Any other error is an attribute with no value.
@@ -212,6 +211,7 @@ pub fn text_of(string: CFStringRef) -> String {
     String::from_utf16_lossy(&units)
 }
 
+/// Decodes one CoreFoundation value. `Err` carries an AX error a multiple-attribute read put in the value's place.
 fn decode(value: CFTypeRef) -> Result<Value, AXError> {
     if value.is_null() {
         return Err(AX_NO_VALUE);
