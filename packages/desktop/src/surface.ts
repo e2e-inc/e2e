@@ -521,7 +521,7 @@ export class DesktopSurface {
       signal: operation.signal,
       timeoutMs: operation.timeoutMs,
       onCutOff: () => this.driver?.cancelInput(inputId),
-    }).catch((cause: unknown) => {
+    }).catch(async (cause: unknown) => {
       // Already closed: the driver found no such window, or no app, as when it quit with the window after the check
       // above, and pressed nothing. One accessibility cannot read is still open.
       // A locked screen hides an open window from the lists the driver finds it in: no proof that it closed.
@@ -529,7 +529,11 @@ export class DesktopSurface {
         this.unlessLocked();
         return;
       }
-      if (cause instanceof DriverFailure && cause.notDelivered && cause.code === 'APP_NOT_FOUND') return;
+      if (cause instanceof DriverFailure && cause.notDelivered && cause.code === 'APP_NOT_FOUND') {
+        if (!(await this.running(pid))) return;
+        // Accessibility lost the app while its process runs: no proof the window closed.
+        throw new EngineError('NODE_STALE', `close window: ${this.appName ?? 'the app'} could not be reached while it runs`, { retryable: true, cause });
+      }
       // The app is open and the window is there: it has no close button, or accessibility cannot reach it.
       if (cause instanceof DriverFailure && cause.notDelivered && (cause.code === 'WINDOW_NOT_FOUND' || cause.code === 'ACTION_NOT_SUPPORTED')) throw notActionable(`close window: ${cause.message}`);
       throw translate(cause, 'close window', true);
