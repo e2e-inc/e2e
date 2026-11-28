@@ -332,7 +332,7 @@ describe('snapshot projection', () => {
       { ref: 'e6', index: 5, parentIndex: 0, depth: 1, type: 'android.widget.EditText', label: 'Type your name', value: 'Type your name', contentDescription: 'Name field', placeholder: 'Type your name', hintShowing: true, editable: true },
       { ref: 'e7', index: 6, parentIndex: 0, depth: 1, type: 'android.widget.Switch', label: 'Wi-Fi switch', checked: false },
       { ref: 'e8', index: 7, parentIndex: 0, depth: 1, type: 'android.widget.RadioButton', label: 'Medium', checked: true },
-      { ref: 'e9', index: 8, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Plain', roleDescription: 'Link' },
+      { ref: 'e9', index: 8, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Plain', roleDescription: 'Summary' },
       { ref: 'e10', index: 9, parentIndex: 0, depth: 1, type: 'android.widget.TextView', label: 'Total', contentDescription: '' },
     ]);
     const [, header, tablist, tab, filled, empty, toggle, radio, plain, total] = projected.index.map((entry) => entry.node);
@@ -349,6 +349,74 @@ describe('snapshot projection', () => {
     expect(plain).toMatchObject({ role: 'group', name: 'Plain' });
     expect(total).toMatchObject({ role: 'text', name: 'Total', text: 'Total' });
     expect(total?.attributes).not.toHaveProperty('placeholder');
+  });
+
+  it('reads an Android node described as a Link as a link, once per name', () => {
+    const projected = project([
+      { ref: 'e1', index: 0, depth: 0, type: 'android.widget.FrameLayout' },
+      // React Native's role="link" (expo-router's Link) on a Pressable, and on a Text from React Native 0.84.
+      { ref: 'e2', index: 1, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Add note', roleDescription: 'Link' },
+      // Before 0.84 a Text link holds a Button for its link span under the same name.
+      { ref: 'e3', index: 2, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Go to home screen', roleDescription: 'Link' },
+      { ref: 'e4', index: 3, parentIndex: 2, depth: 2, type: 'android.widget.Button', label: 'Go to home screen', roleDescription: 'Link' },
+      // A link inside plain text, and a link card holding another link.
+      { ref: 'e5', index: 4, parentIndex: 0, depth: 1, type: 'android.widget.TextView', label: 'Read the terms' },
+      { ref: 'e6', index: 5, parentIndex: 4, depth: 2, type: 'android.widget.Button', label: 'terms', roleDescription: 'Link' },
+      // A disabled link card isn't an echo, so the link inside it keeps its own state.
+      { ref: 'e7', index: 6, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Order 42', roleDescription: 'Link', enabled: false },
+      { ref: 'e8', index: 7, parentIndex: 6, depth: 2, type: 'android.widget.Button', label: 'Track parcel', roleDescription: 'Link' },
+      // Unnamed links share no name, so neither echoes the other.
+      { ref: 'e9', index: 8, parentIndex: 0, depth: 1, type: 'android.view.View', roleDescription: 'Link' },
+      { ref: 'e10', index: 9, parentIndex: 8, depth: 2, type: 'android.widget.Button', roleDescription: 'Link' },
+      // Only a direct Button child echoes, so a link card keeps a same-named link Button two levels down, or one directly inside that isn't a Button.
+      { ref: 'e11', index: 10, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Docs', roleDescription: 'Link' },
+      { ref: 'e12', index: 11, parentIndex: 10, depth: 2, type: 'android.view.ViewGroup' },
+      { ref: 'e13', index: 12, parentIndex: 11, depth: 3, type: 'android.widget.Button', label: 'Docs', roleDescription: 'Link' },
+      { ref: 'e14', index: 13, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Help', roleDescription: 'Link' },
+      { ref: 'e15', index: 14, parentIndex: 13, depth: 2, type: 'android.view.View', label: 'Help', roleDescription: 'Link' },
+      // A plain Button under a same-named link isn't a link span, so it echoes nothing.
+      { ref: 'e16', index: 15, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Share', roleDescription: 'Link' },
+      { ref: 'e17', index: 16, parentIndex: 15, depth: 2, type: 'android.widget.Button', label: 'Share' },
+      // An accessibilityLabel names the Text apart from its span, which still echoes the text's own words.
+      { ref: 'e18', index: 17, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Home', contentDescription: 'Go to home', roleDescription: 'Link' },
+      { ref: 'e19', index: 18, parentIndex: 17, depth: 2, type: 'android.widget.Button', label: 'Home', roleDescription: 'Link' },
+      // A disabled Text link: React Native disables the Text, and the span it echoes is the link.
+      { ref: 'e20', index: 19, parentIndex: 0, depth: 1, type: 'android.view.View', label: 'Profile', roleDescription: 'Link', enabled: false },
+      { ref: 'e21', index: 20, parentIndex: 19, depth: 2, type: 'android.widget.Button', label: 'Profile', roleDescription: 'Link', enabled: true },
+      // A span echoes only a Text described as a Link, so a disabled plain Text keeps its state to itself.
+      { ref: 'e22', index: 21, parentIndex: 0, depth: 1, type: 'android.widget.TextView', label: 'Terms', enabled: false },
+      { ref: 'e23', index: 22, parentIndex: 21, depth: 2, type: 'android.widget.Button', label: 'Terms', roleDescription: 'Link', enabled: true },
+      // Another link span in the disabled Text link doesn't echo it, so it keeps its own state.
+      { ref: 'e24', index: 23, parentIndex: 19, depth: 2, type: 'android.widget.Button', label: 'Edit', roleDescription: 'Link', enabled: true },
+    ]);
+    const nodes = projected.index.slice(1).map((entry) => `${entry.node.role} ${entry.node.name ?? ''}`.trim());
+    expect(nodes).toEqual([
+      'link Add note',
+      'group Go to home screen',
+      'link Go to home screen',
+      'text Read the terms',
+      'link terms',
+      'link Order 42',
+      'link Track parcel',
+      'link',
+      'link',
+      'link Docs',
+      'group',
+      'link Docs',
+      'link Help',
+      'link Help',
+      'link Share',
+      'button Share',
+      'group Go to home',
+      'link Home',
+      'group Profile',
+      'link Profile',
+      'link Edit',
+      'text Terms',
+      'link Terms',
+    ]);
+    const disabled = (ref: string) => projected.index.find((entry) => entry.ref === ref)?.node.states?.disabled === true;
+    expect(['e7', 'e8', 'e21', 'e24', 'e22', 'e23'].map(disabled)).toEqual([true, false, true, false, true, false]);
   });
 
   it('reads the role and state React Native spells into an iOS accessibility value, and reports the rest as the value', () => {

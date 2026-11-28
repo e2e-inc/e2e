@@ -405,11 +405,46 @@ function roleOf(kind: string, android: boolean, parentKind: string | undefined):
  * description React Native writes for the roles Android has no class for
  * (`Tab`, `Tab List`, `Radio Group`), read through the words it spells into
  * an iOS value. Undefined when neither names a contract role.
+ *
+ * `Link` is not among those words: iOS reports a link as a `Link` element,
+ * which is a `link` already. On Android a `Link`-described node is a `link`
+ * unless it only echoes its link span ({@link echoedLinks}).
  */
-function describedRole(source: RawNode): string | undefined {
+function describedRole(source: RawNode, echoesLink: boolean): string | undefined {
   if (source.heading === true) return 'heading';
   if (source.roleDescription === undefined) return undefined;
+  if (describesLink(source)) return echoesLink ? undefined : 'link';
   return REACT_NATIVE_ROLE_DESCRIPTIONS[source.roleDescription.toLowerCase()];
+}
+
+/** Whether React Native described a node as a `Link` (`role="link"`). */
+function describesLink(node: RawNode): boolean {
+  return node.roleDescription?.toLowerCase() === 'link';
+}
+
+/**
+ * The link spans that echo the `Text` they sit in, each with that `Text`'s
+ * position. Before React Native 0.84, a `Text` with `role="link"`
+ * (expo-router's `Link`) holds a virtual `Button` child for its link span,
+ * described as a `Link` and named by the span's text. A tap on the text lands on
+ * that button, so the button is the link and the text keeps its class role,
+ * also when an `accessibilityLabel` gives the text a different name.
+ */
+function echoedLinks(raw: readonly RawNode[], parents: readonly (number | undefined)[]): ReadonlyMap<number, number> {
+  const echoes = new Map<number, number>();
+  raw.forEach((node, position) => {
+    const parent = parents[position];
+    if (parent === undefined || !describesLink(node) || kindOf(node) !== 'button') return;
+    const text = raw[parent] as RawNode;
+    const name = rawName(node);
+    if (name !== undefined && describesLink(text) && nonEmpty(text.label) === name) echoes.set(position, parent);
+  });
+  return echoes;
+}
+
+/** The name an Android node goes by: its content description, else its label. */
+function rawName(node: RawNode): string | undefined {
+  return nonEmpty(node.contentDescription) ?? nonEmpty(node.label);
 }
 
 /**
@@ -639,6 +674,8 @@ export function projectSnapshot(
 ): ProjectedSnapshot {
   const viewport = options.viewport ?? viewportOf(raw);
   const parents = parentPositions(raw);
+  const echoes = echoedLinks(raw, parents);
+  const echoedTexts = new Set(echoes.values());
   const children = new Map<number, number[]>();
   const roots: number[] = [];
   parents.forEach((parent, position) => {
@@ -664,7 +701,7 @@ export function projectSnapshot(
     // `Other`: it is the role the app declared, and iOS had no trait for it.
     // Only an `Other` carries that encoding; a native control's value is its own.
     const spelled = android || kind !== 'other' ? undefined : reactNativeValue(source.value);
-    const role = editableRole(spelled?.role ?? describedRole(source) ?? roleOf(kind, android, parent?.kind), source.editable);
+    const role = editableRole(spelled?.role ?? describedRole(source, echoedTexts.has(position)) ?? roleOf(kind, android, parent?.kind), source.editable);
     const editable = source.editable === true || (role !== undefined && TEXT_INPUT_ROLES.has(role));
     const value = showsHint(source, android, editable) ? '' : spelled === undefined ? source.value : spelled.value;
     // iOS names a secure field by class; UIAutomator flags a password
@@ -693,8 +730,12 @@ export function projectSnapshot(
     index.push(entry);
     const childNodes = kids.filter((child) => child !== folded?.child).map((child) => build(child, entry, onKeyboard));
     const covered = !onKeyboard && source.focused !== true && underKeyboard(source.rect, options.keyboard) && childNodes.every((child) => child.states?.hidden === true);
+    // An echoing link span takes the disabled state of its `Text`, which
+    // React Native sets on the `Text` alone.
+    const echoedText = echoes.get(position);
+    const disabled = source.enabled === false || (echoedText !== undefined && (raw[echoedText] as RawNode).enabled === false);
     const states = {
-      ...(source.enabled === false ? { disabled: true } : {}),
+      ...(disabled ? { disabled: true } : {}),
       ...(source.selected === true ? { selected: true } : {}),
       ...(source.focused === true ? { focused: true } : {}),
       ...(source.visibleToUser === false || covered ? { hidden: true } : {}),

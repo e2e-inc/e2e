@@ -1455,7 +1455,7 @@ to `combobox`.
 | Role | iOS | Android |
 | --- | --- | --- |
 | `button` | `Button` | `Button`, `ImageButton`, `MaterialButton` |
-| `link` | `Link` | |
+| `link` | `Link` | React Native's `role="link"`, see below |
 | `textbox` | `TextField`, `SearchField`, `TextView`, `SecureTextField` | `EditText`, `AutoCompleteTextView`, `TextInputEditText`, `SearchView` |
 | `combobox` | | `Spinner` |
 | `switch` | `Switch`, `Toggle` | `Switch`, `SwitchCompat`, `SwitchMaterial`, `ToggleButton` |
@@ -1492,6 +1492,15 @@ takes the role in place of its type's: `alert`, `checkbox`, `combo box`,
 and `timer` give are not `getByRole` roles.
 On iOS only an `Other` carries one, and the state words after the role set
 `checked` and `expanded`; only what follows them is the node's value.
+
+On Android, React Native's `role="link"`, which expo-router's `Link` sets, is
+a `link`, and a `Text` link matches once. Before React Native 0.84, Android
+names a `Text` link by its text, even when an `accessibilityLabel` gives it a
+different name on iOS.
+
+React Native writes the Android description in the device's language, so
+on a device whose word for it isn't one of these, such as French `Lien` for
+`Link`, the node keeps its type's role.
 
 `StaticText` and `Text` on iOS and `TextView` on Android are `text`, and an
 Android `WebView` is `document`. Neither is a `getByRole` role: find text
