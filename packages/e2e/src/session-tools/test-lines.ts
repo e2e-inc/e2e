@@ -261,7 +261,12 @@ export class SessionTestLines {
     const body = this.entries.map((entry) => ('line' in entry ? entry.line : `// ${entry.tool}: no test line: ${entry.reason}`));
     const imports = ['credentials', 'secrets'].filter((name) => body.some((line) => line.includes(`${name}.`)));
     const count = `in order (${String(this.entries.filter((entry) => 'line' in entry).length)} lines)`;
-    const { testRan, attached, hasAgent } = this.options;
+    const { testRan, attached, hasAgent, engineFixtures = [] } = this.options;
+    const fixtures = fixturesIn(body, engineFixtures);
+    const used = fixtures.filter((name) => engineFixtures.includes(name));
+    const fixtureHint = (testRan !== undefined || attached === true) && used.length > 0
+      ? ` Include ${used.join(' and ')} in the test's fixtures.`
+      : '';
     const agentGuidance =
       hasAgent === true
         ? ' Prefer agent.act for user flows, with agent among the test fixtures (keep screen lines for low-level mechanics under test or a sign-in setup). Give the agent the steps for one test goal, and split into calls when a later step needs a known screen state, risks maxSteps or maxModelCalls budgets, or needs a middle step boundary. Wait for the intermediate screen state before continuing.'
@@ -280,14 +285,14 @@ export class SessionTestLines {
             ]
           : [
               `Draft test body from this session's actions, ${count}:`,
-              `Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ ${fixturesIn(body, this.options.engineFixtures ?? []).join(', ')} }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice.${agentGuidance} See topic writing-tests, Structure.`,
+              `Split these lines into tests, one behavior each: its arrange lines, the act under test, then its checks together at the end. Each test body is async ({ ${fixtures.join(', ')} }) => { ... }. Every test needs a check of its outcome; add one where none is here. A check of a screen the flow later leaves belongs to its own test. Name a locator a test uses twice.${agentGuidance} See topic writing-tests, Structure.`,
             ];
     return [
       lead,
       '',
       ...body,
       '',
-      `${place}${imports.length === 0 ? '' : ` Import ${imports.join(' and ')} from 'e2e'.`}`,
+      `${place}${fixtureHint}${imports.length === 0 ? '' : ` Import ${imports.join(' and ')} from 'e2e'.`}`,
     ].join('\n');
   }
 
@@ -546,12 +551,32 @@ export class SessionTestLines {
     if (id === undefined) return { reason: 'the action names no node' };
     const listed = this.listed(id);
     if (listed === undefined) return { reason: `#${id.replace(/^#/, '')} is not on the newest screen` };
+    const frames = listed.node.framePath ?? [];
+    if (frames.length === 0) {
+      if (listed.ancestors.some((ancestor) => ancestor.role === 'iframe')) return { reason: 'the observed iframe has no document-scoped locator' };
+      return this.findLocator(listed, (expression) => expression);
+    }
+    if (!this.options.engineFixtures?.includes('browser')) return { reason: 'no browser fixture to scope the locator to its frame' };
+    if (frames.some((selector) => this.options.redact(selector) !== selector || selector.includes('<secret:'))) {
+      return { reason: 'the frame selector contains a redacted secret' };
+    }
+    const inFrame = (expression: LocatorExpression) =>
+      frames.reduceRight<LocatorExpression>((source, selector) => ({ kind: 'frame', selector, source }), expression);
+    const found = await this.findLocator(listed, inFrame);
+    if ('reason' in found) return found;
+    const root = 'browser' + frames.map((selector) => `.frameLocator(${JSON.stringify(selector)})`).join('');
+    const scoped = { ...found, code: root + found.code.replace(/^screen/, '') };
+    if (!frames.some((selector) => selector.includes(':nth-child('))) return scoped;
+    return { ...scoped, comment: [found.comment, 'frame selected by position; a named frame holds up better'].filter(Boolean).join('; ') };
+  }
+
+  private async findLocator(listed: Listed, scopeExpression: (expression: LocatorExpression) => LocatorExpression): Promise<Found> {
     const { node } = listed;
     let tries = MAX_TRIES;
     const attempt = async (expression: LocatorExpression, within: ExecutorNode = listed.root): Promise<Probe | undefined> => {
       if (tries <= 0) return undefined;
       tries -= 1;
-      return this.probe(expression, listed, within);
+      return this.probe(scopeExpression(expression), listed, within);
     };
     let twins: { readonly located: Located; readonly probe: Probe } | undefined;
     let match: SemanticNode | undefined;

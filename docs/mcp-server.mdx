@@ -128,6 +128,8 @@ Tapped #n31.
 Test line: await screen.getByRole("button", "Sign in").tap();
 ```
 
+For a control inside an observed iframe, the line starts from `browser.frameLocator(...)` instead of `screen`. If a frame in that path is inside a shadow root, the action still runs but prints no replay line.
+
 The agent copies the lines it needs into the test as it walks the flow.
 `test_lines` returns every line so far, in order, with guidance matching
 whether the session is a fresh recording, a resumed test, or an attached

@@ -66,8 +66,8 @@ export interface RawNodeData {
 export interface RawObservedNode extends RawNodeData {
   /** Index of the nearest included ancestor, or -1 for the root. */
   parent: number;
-  /** Unique CSS selector of this `<iframe>` element; set only for iframes. */
-  frameSelector?: string;
+  /** Parent-document selector of an iframe; null when the iframe is inside a shadow root. */
+  frameSelector?: string | null;
 }
 
 /** One walked document. */

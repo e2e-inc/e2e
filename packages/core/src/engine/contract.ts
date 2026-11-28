@@ -245,7 +245,8 @@ export interface SemanticNode {
   readonly selector?: string;
   /**
    * Enclosing nested-document chain as selectors of each boundary node,
-   * outermost first. Absent for nodes in the main document.
+   * outermost first. Absent in the main document and when an enclosing iframe
+   * is inside a shadow root and has no document-scoped selector.
    */
   readonly framePath?: readonly string[];
   /** Child nodes. */

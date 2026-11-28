@@ -84,7 +84,7 @@ Everything a session does is a catalog tool run through
   node on the newest screen reads like its node.
 - The grammar verbs (`tap`, `type`, `press`, `select`, `check`, `scroll`,
   `drag`, `upload`, `navigate`, `back`, ...): each reports what changed and
-  the `Test line:` that repeats it, or `No test line:` and why.
+  the `Test line:` that repeats it, or `No test line:` and why. For a control inside an observed web frame, keep the `browser.frameLocator(...)` scope.
 - `type_secret`: fills a configured secret by name; its test line names
   `credentials.user(name)` or `secrets.get(name)`, never the value.
 - `locate`: tries one semantic locator and returns how many nodes match and

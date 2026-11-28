@@ -1628,13 +1628,10 @@ export const readSemanticsFunction = <Mode extends SemanticMode>(
   };
 
   /**
-   * The selector used to re-enter one iframe. Unanchored is fine here: it is
-   * resolved against the document it was just read from, within this
-   * observation, and never stored. This is the one place a selector is
-   * derived: each `namedSelectorOf` probe is a document-wide query, and no
-   * runner consumes a per-node selector, so neither read mode pays for one.
+   * A shadow-local path does not identify the frame in its parent document.
+   * Capture it by element handle, but do not offer the path for replay.
    */
-  const frameSelectorOf = (el: Element): string => pathTo(el).selector;
+  const frameSelectorOf = (el: Element): string | null => el.getRootNode() === el.ownerDocument ? pathTo(el).selector : null;
 
   /**
    * The role both read modes report for one element.

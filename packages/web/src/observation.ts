@@ -59,8 +59,8 @@ export interface CaptureDeps {
 }
 
 export interface CaptureOptions {
-  /** Enclosing frame selectors, outermost first; empty for the main document. */
-  readonly framePath: readonly string[];
+  /** Enclosing frames, outermost first; null entries count toward depth but cannot be replayed. */
+  readonly framePath: readonly (string | null)[];
   /** Remaining node budget shared across every document of the observation. */
   readonly budget: number;
   /**
@@ -135,7 +135,7 @@ async function captureInto(
   scope: CaptureScope,
   stage: (id: string, target: ListedTarget) => void,
   host: DocumentHost,
-  framePath: readonly string[],
+  framePath: readonly (string | null)[],
   budget: number,
   signal: AbortSignal,
 ): Promise<CapturedDocument> {
@@ -237,7 +237,8 @@ async function captureInto(
     nodeCount += child.nodeCount;
     truncated ||= child.truncated;
   }
-  return { tree: assembleTree(nodes, ids, framePath, frameChildren), nodeCount, truncated };
+  const replayPath = framePath.every((selector) => selector !== null) ? framePath : [];
+  return { tree: assembleTree(nodes, ids, replayPath, frameChildren), nodeCount, truncated };
 }
 
 /**

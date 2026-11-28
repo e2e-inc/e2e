@@ -97,6 +97,42 @@ describe('e2e mcp test lines', { timeout: 120_000 }, () => {
     await app?.close();
   });
 
+  it.each(['closed', 'open'])('taps the observed button in a %s shadow frame without drafting a locator for its twin', async (mode) => {
+    await client.callTool({ name: 'open_session', arguments: {} });
+    try {
+      await call('navigate', { url: `${app.url}/shadow-frame?${mode}` });
+      const screen = (await call('observe')).text;
+      expect(screen.match(/button "Frame button"/g)).toHaveLength(2);
+      const tap = await call('tap', { target: nodeId(screen, /button "Frame button"/) });
+      expect(tap.isError, tap.text).toBe(false);
+      expect((await call('observe')).text).toMatch(/button "Frame clicked"[\s\S]*button "Frame button"/);
+      expect(tap.text).toContain('No test line: the observed iframe has no document-scoped locator');
+      expect((await call('test_lines')).text).not.toContain('.tap();');
+    } finally {
+      await client.callTool({ name: 'close_session', arguments: {} });
+    }
+  });
+
+  it('records and replays a tap inside nested frames', async () => {
+    await client.callTool({ name: 'open_session', arguments: {} });
+    try {
+      const openFrame = () => call('navigate', { url: `${app.url}/frame-nested` });
+      await openFrame();
+      const screen = (await call('observe')).text;
+      const tap = await call('tap', { target: nodeId(screen, /button "Frame button"/) });
+      const line = tap.text.split('\n')[1]?.replace(/^Test line: /, '') ?? '';
+      expect(line).toContain(`await browser.frameLocator(${JSON.stringify('[name="outer"]')}).frameLocator(`);
+      expect(line).toContain('.getByRole("button", "Frame button").tap(); // frame selected by position');
+      expect((await call('test_lines')).text).toContain(line);
+      await openFrame();
+      const result = await call('run_code', { code: line });
+      expect(result.isError, result.text).toBe(false);
+      expect((await call('observe')).text).toContain('button "Frame clicked"');
+    } finally {
+      await client.callTool({ name: 'close_session', arguments: {} });
+    }
+  });
+
   it('answers each action with its test line, and the drafted lines pass a run', async () => {
     const opened = await client.callTool({ name: 'open_session', arguments: {} });
     expect(opened.isError).not.toBe(true);

@@ -32,11 +32,13 @@ interface Fake {
   readonly placeholder?: string;
   /** Top edge; every node is 100 by 20 at x 0, so no two boxes overlap. */
   readonly y: number;
+  readonly framePath?: readonly string[];
   readonly children?: readonly Fake[];
 }
 
 const listed = (node: Fake): ExecutorNode => ({
   id: node.id,
+  ...(node.framePath === undefined ? {} : { framePath: node.framePath }),
   ...(node.role === undefined ? {} : { role: node.role }),
   ...(node.name === undefined ? {} : { name: node.name }),
   ...(node.text === undefined ? {} : { text: node.text }),
@@ -118,6 +120,7 @@ async function harness(options: {
   const presenter = new ScreenPresenter();
   const lines = new SessionTestLines({
     query: locateQuery,
+    engineFixtures: ['browser'],
     resolve: async (expression: LocatorExpression): Promise<readonly NodeRef[]> => {
       resolves += 1;
       return (options.matches[describeExpression(expression)] ?? []).map((node) => ({ id: `located-${node.id}`, revision: 'l1' }));
@@ -195,6 +198,13 @@ describe('SessionTestLines', () => {
   });
 
   const save: Fake = { id: 'n2', role: 'button', name: 'Save', y: 40 };
+
+  it.each(['sk-live-0000', '<secret:apiKey>'])('does not probe or print a secret frame selector (%s)', async (value) => {
+    const session = await harness({ screen: [{ ...save, framePath: [`iframe[name="${value}"]`] }], matches: {} });
+    expect(noteOf(await session.run('tap', { target: save.id }))).toBe('No test line: the frame selector contains a redacted secret.');
+    expect(session.resolves()).toBe(0);
+    expect(await session.run('test_lines', {})).not.toContain(value);
+  });
 
   it('answers an action with its line after the lead, and test_lines collects it', async () => {
     const session = await harness({ screen: [save], matches: { 'getByRole("button", name: "Save")': [save] } });
@@ -617,6 +627,8 @@ describe('SessionTestLines', () => {
         "Put them in that test where it stopped, in place of the line that failed or after its last step. Keep the test's checks together at its end, with one that checks its outcome. See topic writing-tests, Structure.",
       ].join('\n'),
     );
+    session.lines.ran(['await browser.frameLocator("iframe").getByRole("button", "Save").tap();']);
+    expect(session.lines.draft()).toContain("Include browser in the test's fixtures.");
     expect(session.tools.test_lines?.description).toContain('Use these lines to continue the existing test');
     expect(session.tools.test_lines?.description).not.toMatch(/split the draft into tests/i);
   });
