@@ -225,12 +225,13 @@ async function filterSinceLastRun(first: Selection, options: FilterSelectionOpti
   const { config, selectionFilters, signal, notice } = options;
   if (selectionFilters.lastFailed !== undefined) return keepFirst(first, notice, { skipped: '--last-failed' }, LAST_FAILED);
   const candidates = filterCandidates(first);
-  const { unchanged, judged, changes, owed } = await planSinceLastRun(candidates, first.pairs, measured, signal);
+  const { unchanged, judged, changes, owed, pruned } = await planSinceLastRun(candidates, first.pairs, measured, signal);
+  const gone = pruned === 0 ? undefined : `git no longer holds the working tree ${plural(pruned, 'test')} last passed against`;
   if (unchanged.length === 0 && judged.length === 0) {
     if (measured.missing !== undefined) return keepFirst(first, notice, { skipped: measured.missing }, `--since-last-run: ${measured.missing}, so every test runs`);
-    return keepFirst(first, notice, { skipped: 'no test to leave out or judge' });
+    return keepFirst(first, notice, { skipped: gone ?? 'no test to leave out or judge' });
   }
-  const unasked = owed === 0 ? '' : `; ${owed === 1 ? '1 test runs' : `${owed} tests run`} unasked`;
+  const unasked = owed === 0 ? '' : `; ${owed === 1 ? '1 test runs' : `${owed} tests run`} unasked${gone === undefined ? '' : ` (${gone})`}`;
   const counts = { since: 'last-run', files: changes?.files.length ?? 0 } as const;
   const leftOut: AppliedTestFilters = {
     excluded: new Map(unchanged.map((test) => [test.id, { filter: SINCE_LAST_RUN_FILTER, reason: UNCHANGED }])),

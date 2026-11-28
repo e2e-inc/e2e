@@ -186,8 +186,9 @@ export interface TestFilterChanges {
    * With `--since-last-run`, the tree of the tracked files as the run found
    * them in the working tree: `git diff base head` is the change to tracked
    * files, edits not committed yet included, which a diff to `HEAD` misses.
-   * A file untracked at either end is in `files` and in neither tree. A
-   * filter that diffs must diff `base` to `head` when it is set.
+   * `files` also lists a changed file that is untracked, which `head` does
+   * not hold; `base` holds no file that was untracked then. A filter that
+   * diffs must diff `base` to `head` when it is set.
    * Absent with `--changed-since`, where the change runs to the working tree.
    */
   readonly head?: string | undefined;

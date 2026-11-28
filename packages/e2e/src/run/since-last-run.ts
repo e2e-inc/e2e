@@ -31,6 +31,9 @@ import { lastFailedIds } from './last-run.ts';
 /** The `schemaVersion` of a `since-last-run.json`; the shape is `schema/since-last-run-v1.schema.json`. */
 const SCHEMA_VERSION = 'since-last-run-1';
 
+/** A config digest as `since-last-run-1` allows it: a SHA-256 in hex. */
+const CONFIG_DIGEST = /^[a-f0-9]{64}$/u;
+
 /** Past this a file is not ours to read: a real one holds about 250 bytes a test and target. */
 const MAX_RECORD_BYTES = 64 * 1024 * 1024;
 
@@ -174,7 +177,7 @@ async function readRecord(recordPath: string): Promise<LastRunRecord | { readonl
   }
   try {
     const document: unknown = JSON.parse(text);
-    if (isPlainObject(document) && document.schemaVersion === SCHEMA_VERSION && typeof document.configDigest === 'string' && isPlainObject(document.settled)) {
+    if (isPlainObject(document) && Object.keys(document).length === 3 && document.schemaVersion === SCHEMA_VERSION && typeof document.configDigest === 'string' && CONFIG_DIGEST.test(document.configDigest) && isPlainObject(document.settled)) {
       const settled = Object.entries(document.settled).filter((entry): entry is [string, Settled] => isSettled(entry[1]));
       if (settled.length === Object.keys(document.settled).length) return { configDigest: document.configDigest, settled: new Map(settled) };
     }
@@ -186,7 +189,7 @@ async function readRecord(recordPath: string): Promise<LastRunRecord | { readonl
 
 function isSettled(value: unknown): value is Settled {
   const isTree = (tree: unknown): boolean => typeof tree === 'string' && COMMIT_HASH.test(tree);
-  return isPlainObject(value) && typeof value.testId === 'string' && isTree(value.tree) && isTree(value.tracked);
+  return isPlainObject(value) && Object.keys(value).length === 3 && typeof value.testId === 'string' && value.testId !== '' && isTree(value.tree) && isTree(value.tracked);
 }
 
 /**
@@ -201,6 +204,8 @@ export interface LastRunPlan {
   /** The change since the tree `judged` share; undefined when no test is judged. */
   readonly changes: TestFilterChanges | undefined;
   readonly owed: number;
+  /** How many of the owed would have been judged, had git not pruned the tree they last passed against. */
+  readonly pruned: number;
 }
 
 /**
@@ -215,7 +220,7 @@ export async function planSinceLastRun(candidates: readonly TestFilterCandidate[
   const split = splitByTree(candidates, pairs, measured.settled, measured.tree);
   const changes = split.base === undefined ? undefined : await changesSince(measured, split.base, interrupt);
   const judged = changes === undefined ? [] : split.judged;
-  return { unchanged: split.unchanged, judged, changes, owed: candidates.length - split.unchanged.length - judged.length };
+  return { unchanged: split.unchanged, judged, changes, owed: candidates.length - split.unchanged.length - judged.length, pruned: split.judged.length - judged.length };
 }
 
 /**

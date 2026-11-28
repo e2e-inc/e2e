@@ -10,7 +10,9 @@ import { Video } from './snippets/video.jsx';
 With `--changed-since <ref>`, a test filter leaves out the tests the change
 since that ref can't affect, and starts the files of the likeliest to fail first. The
 decision filter asks a [decision model](/decision-models), such as Jev, about
-each test. Without the flag, as on `main` and locally, every test runs.
+each test. Without the flag, as on `main`, every test runs. Locally,
+[`--since-last-run`](#run-only-what-changed-since-the-last-run) measures
+the change from your last run.
 
 <Video>
   <video src="/images/filters.mp4" aria-label="Two runs side by side. With --changed-since, the decision filter leaves out 25 of 27 tests and the run passes in 12 seconds. The full run is still going after 30 seconds." muted loop playsInline controls />
@@ -125,7 +127,8 @@ bunx e2e run --since-last-run
 - When files changed, the filters judge the tests that passed before the
   change. A test that failed, was interrupted, or is new runs without
   asking, until it passes.
-- With no filters configured, any change runs every test.
+- With no filters configured, a change runs every test that passed before
+  it.
 
 The decision filter reads the diff of tracked files, uncommitted edits
 included, and an untracked file by name only. The flag needs a git

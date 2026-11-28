@@ -365,7 +365,8 @@ describe('--since-last-run', () => {
     writeFileSync(file, JSON.stringify({ ...record, settled: pruned }));
     const gone = await run(project);
     expect(executed(gone.report)).toEqual(['alpha', 'beta', 'gamma']);
-    expect(gone.notices).toEqual(['no test to leave out or judge, so no filter ran']);
+    expect(gone.notices).toEqual(['git no longer holds the working tree 3 tests last passed against, so no filter ran']);
+    expect(gone.report.run.changes).toEqual({ skipped: 'git no longer holds the working tree 3 tests last passed against' });
     expect(recordOf(project, first.report)).toEqual(Object.fromEntries(Object.values(record.settled).map((entry) => [entry.testId.split('::').at(-1), entry.tree])));
 
     writeFileSync(file, '{');

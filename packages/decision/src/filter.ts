@@ -417,9 +417,10 @@ function testsIn(tests: readonly TestFilterCandidate[]): string {
  * change, never the working tree, then each file no commit changes by name
  * alone, since CI may have written it. With `changes.head`, from a
  * `--since-last-run` run, the diff runs between the two trees of tracked
- * files, since the edits a developer has not committed are the change; a
- * file untracked at either end still goes by name alone. Stops adding files
- * once the diff is past `MAX_DIFF_BYTES`.
+ * files, since the edits a developer has not committed are the change; an
+ * untracked file still goes by name alone, and one tracked since the last
+ * run shows as added, without what it held while untracked. Stops adding
+ * files once the diff is past `MAX_DIFF_BYTES`.
  */
 async function changeDiff({ base, head, root, files }: TestFilterChanges, signal: AbortSignal): Promise<string> {
   const [to, unread] = head === undefined ? ['HEAD', 'not committed'] : [head, 'untracked'];

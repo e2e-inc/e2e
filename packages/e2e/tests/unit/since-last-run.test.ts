@@ -133,6 +133,11 @@ describe('measureSinceLastRun', () => {
       JSON.stringify({ ...record, settled: { result: { ...entry, tree: '--help' } } }),
       JSON.stringify({ ...record, settled: { result: { testId: 'test', tree } } }),
       JSON.stringify({ ...record, settled: { result: 'test' } }),
+      // As strict as the schema: a digest that is not one, an empty test id, a key the schema does not name.
+      JSON.stringify({ ...record, configDigest: 'main' }),
+      JSON.stringify({ ...record, settled: { result: { ...entry, testId: '' } } }),
+      JSON.stringify({ ...record, settled: { result: { ...entry, extra: 1 } } }),
+      JSON.stringify({ ...record, extra: 1 }),
     ]) {
       writeRecord(dir, content);
       expect(await measure(dir)).toMatchObject({ settled: new Map(), missing: "the last run's record is not a since-last-run-1 document" });
@@ -250,6 +255,7 @@ describe('planSinceLastRun', () => {
       unchanged: ['b'],
       judged: ['a'],
       owed: 1,
+      pruned: 0,
       changes: { base: first.tracked, head: second.tracked, root: realpathSync(dir), files: ['added.ts', 'local.ts', 'src/app.ts', 'src/gone.ts'] },
     });
     expect(Object.isFrozen(plan.changes) && Object.isFrozen(plan.changes?.files)).toBe(true);
@@ -262,12 +268,12 @@ describe('planSinceLastRun', () => {
     const commit = initRepo(dir);
     const measured = await measure(dir);
     const plan = (tree: string) => planSinceLastRun([candidate('a')], [pair('a')], { ...measured, settled: settledOf(['a', { tree, tracked: tree }]), missing: undefined }, live());
-    expect(await plan('b'.repeat(40))).toEqual({ unchanged: [], judged: [], changes: undefined, owed: 1 });
+    expect(await plan('b'.repeat(40))).toEqual({ unchanged: [], judged: [], changes: undefined, owed: 1, pruned: 1 });
     expect(await plan(commit)).toMatchObject({ judged: [expect.objectContaining({ id: 'a' })], owed: 0 });
-    expect(await plan(runGit(dir, 'hash-object', '-w', 'file.txt'))).toMatchObject({ judged: [], owed: 1 });
+    expect(await plan(runGit(dir, 'hash-object', '-w', 'file.txt'))).toMatchObject({ judged: [], owed: 1, pruned: 1 });
     const aborted = new AbortController();
     aborted.abort();
-    expect(await planSinceLastRun([candidate('a')], [pair('a')], { ...measured, settled: new Map(), missing: 'none' }, aborted.signal)).toEqual({ unchanged: [], judged: [], changes: undefined, owed: 1 });
+    expect(await planSinceLastRun([candidate('a')], [pair('a')], { ...measured, settled: new Map(), missing: 'none' }, aborted.signal)).toEqual({ unchanged: [], judged: [], changes: undefined, owed: 1, pruned: 0 });
     await expect(planSinceLastRun([candidate('a')], [pair('a')], { ...measured, settled: settledOf(['a', { tree: commit, tracked: commit }]), missing: undefined }, aborted.signal)).rejects.toMatchObject({ code: 'INTERRUPTED' });
   });
 });

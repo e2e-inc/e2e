@@ -813,14 +813,15 @@ overrides it for one run.
 | `ai-trace.json` | `--ai-trace` |
 | `timings.json` | How long each file took, which sets the [start order](#workers); see [Cache the timings history](/ci#cache-the-timings-history) |
 | `report-with-reruns.json` | Written by a `--last-failed` rerun: the first run and every rerun since as one report, with the same run id as `report.json`. A run without `--last-failed` removes it |
-| `since-last-run.json` | Written by a [`--since-last-run`](/reference/cli#since-last-run) run once its filters decided, even when no test then starts: every test that has passed, with the working tree it passed against. A run without the flag takes out the tests it saw fail or did not reach |
+| `since-last-run.json` | Written by a [`--since-last-run`](/reference/cli#since-last-run) run once its filters decided, even when no test then starts: every settled test (one that passed, skipped itself, or a filter left out), with the working tree it was settled against. A run without the flag takes out the tests it saw fail or did not reach |
 | `results/` | One directory per test: its [trace page](/debugging#traces), `trace.md`, when the [`trace`](#trace) mode keeps one, and its screenshots, videos, downloads, and logs, one `attempt-<n>/` per attempt. Cleared once a run's tests start. A `--last-failed` rerun keeps the files the runs before it name and writes its own attempts under each test's `rerun-<n>/` |
 | `sessions/` | The run's encrypted `test.setup` sessions, deleted when it ends |
 | `videos/<session>/` | [`e2e mcp`](/reference/mcp#recording) session recordings |
 
 - A run that stops before its tests start writes nothing here: `NO_TESTS`, a
   collection error, `UNSUPPORTED_ARTIFACT`, `NO_LAST_RUN`, an app command
-  that fails to start, or an interrupt. The previous run's `report.json`,
+  that fails to start, or an interrupt. Only `since-last-run.json` is still
+  written once the filters have decided. The previous run's `report.json`,
   `ai-trace.json`, and `results/` stay as they were, so `--last-failed` still
   reads the last run that executed.
 - An `e2e mcp` session writes its attempt's artifacts under `results/mcp/` and

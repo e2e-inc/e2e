@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { TestFilterCandidate, TestFilterContext } from 'e2e';
@@ -119,7 +119,7 @@ export function commitAll(repo: ChangedRepo): void {
 
 /**
  * The tracked files of `repo` as the working tree has them, as a tree
- * object written through a scratch index: what a `--since-last-run` run
+ * object written through a scratch copy of the index: what a `--since-last-run` run
  * hands a filter as `changes.base` and `changes.head`. The checkout's own
  * index stays as it was.
  */
@@ -127,7 +127,7 @@ export function trackedTree(repo: ChangedRepo): string {
   const index = path.join(mkdtempSync(path.join(os.tmpdir(), 'e2e-decision-index-')), 'index');
   onTestFinished(() => rmSync(path.dirname(index), { recursive: true, force: true }));
   const env = { ...process.env, GIT_INDEX_FILE: index };
-  execFileSync('git', ['read-tree', 'HEAD'], { cwd: repo.root, env });
+  copyFileSync(path.join(repo.root, '.git', 'index'), index);
   execFileSync('git', ['add', '--update'], { cwd: repo.root, env });
   return execFileSync('git', ['write-tree'], { cwd: repo.root, env, encoding: 'utf8' }).trim();
 }

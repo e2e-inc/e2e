@@ -109,9 +109,9 @@ export type GitBudgetFailure = { readonly kind: 'interrupted' } | { readonly kin
 
 /**
  * Runs `work`, every git call of which takes its signal, within `budgetMs`
- * and the caller's `interrupt`. An `E2EError` that `work` throws stands;
- * anything else is rethrown as `failure` makes it: `interrupted` once
- * `interrupt` aborted, else `failed` with the reason, which is the budget
+ * and the caller's `interrupt`. Once `interrupt` aborted, whatever `work`
+ * threw is rethrown as `failure` makes `interrupted`. Otherwise an `E2EError`
+ * stands, and anything else is `failed` with the reason, which is the budget
  * once it ran out.
  */
 export async function withGitBudget<T>(interrupt: AbortSignal, budgetMs: number, work: (signal: AbortSignal) => Promise<T>, failure: (failed: GitBudgetFailure) => Error): Promise<T> {
