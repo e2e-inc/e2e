@@ -4,8 +4,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Deadline, type OperationContext } from '@e2e-dev/core/engine';
+import { waitReady } from '../../src/actionability.ts';
 import { DevTools } from '../../src/devtools.ts';
 import { activeUnder, queryAll, type NodeOps } from '../../src/in-page/node-ops.ts';
+import type { AppWindow } from '../../src/windows.ts';
 import { openTestWindow, type TestWindow } from './test-window.ts';
 
 const devtools = new DevTools();
@@ -276,5 +279,23 @@ describe('queryAll', () => {
     expect(await run(await element('#fixed'), 'viewportIntersection')).toEqual({ intersects: true, ratio: 1 });
     expect(await run(await element('#below'), 'viewportIntersection')).toEqual({ intersects: false, ratio: 0 });
     expect(await run(await element('#boxless'), 'viewportIntersection')).toEqual({ intersects: false, ratio: 0 });
+  });
+});
+
+describe('waitReady', () => {
+  it('refuses a control a modal dialog in a closed shadow root makes inert, which no page-side walk reaches', async () => {
+    await window.setContent(`<select id="background"><option>A</option><option>B</option></select><span id="host"></span><script>
+      const root = document.getElementById('host').attachShadow({ mode: 'closed' });
+      root.innerHTML = '<dialog><p>Closed modal</p></dialog>';
+      globalThis.openClosedModal = () => root.querySelector('dialog').showModal();
+    </script>`);
+    const ready = async (): Promise<unknown> => {
+      const operation = { signal: new AbortController().signal, timeoutMs: 300, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext;
+      const target = { devtools, window: { page: window.page } as AppWindow, backendNodeId: await element('#background'), operation, deadline: new Deadline(300) };
+      return await waitReady(target, 'checkSelect', { label: 'B' }).then(() => 'ready', (error: unknown) => error);
+    };
+    expect(await ready()).toBe('ready');
+    await window.inPage(() => (globalThis as unknown as { openClosedModal: () => void }).openClosedModal());
+    expect(await ready()).toMatchObject({ message: expect.stringMatching(/it is inert \(a modal or the app blocks it\)/) });
   });
 });
