@@ -121,6 +121,16 @@ function platformName(): string {
   return `${platform}-${arch}`;
 }
 
+/** Whether `specifier` resolves from this package. */
+function resolves(specifier: string): boolean {
+  try {
+    ownRequire.resolve(specifier);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 let loaded: Binding | undefined;
 
 /** The addon, loaded on first use. Throws `NativeUtilUnavailableError` when no build loads. */
@@ -140,7 +150,9 @@ export function binding(): Binding {
     } catch (error) {
       // A build that was there and failed to load says the most, so it is the cause; else the last absence, the
       // platform package's. A checkout build is usually absent, so only when every candidate is was nothing installed.
-      const absent = (error as { code?: unknown }).code === 'MODULE_NOT_FOUND';
+      // A platform package whose manifest resolves is there, missing only its addon (a workspace link before
+      // `build:native`, or a damaged install), which no reinstall advice fits.
+      const absent = (error as { code?: unknown }).code === 'MODULE_NOT_FOUND' && !(specifier === packageName && resolves(`${specifier}/package.json`));
       if (absent) missing = error;
       else loadFailure = error;
       failures.push(`${specifier}: ${(error instanceof Error ? error.message : String(error)).split('\n', 1)[0] ?? ''}`);
