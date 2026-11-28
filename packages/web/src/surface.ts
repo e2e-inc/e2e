@@ -1144,18 +1144,7 @@ export class PlaywrightSurface {
   viewportIntersection(ref: NodeRef, operation: OperationContext): Promise<ViewportIntersection> {
     return this.guard(operation, 'measure viewport intersection', (currentOperation) => this.readingTab(async () => {
       const target = await this.requireSession().refs.lookup(ref);
-      let element: ElementHandle;
-      if (target.kind === 'element') {
-        element = target.element;
-      } else {
-        // A strict locator that matches anything but one element no longer names the node it located.
-        const handles = await target.locator.elementHandles();
-        if (handles.length !== 1) {
-          for (const handle of handles) void handle.dispose().catch(() => undefined);
-          throw new EngineError('NODE_STALE', `node reference ${ref.id} no longer matches one element`, { retryable: true });
-        }
-        element = handles[0]!;
-      }
+      const element = target.kind === 'element' ? target.element : await soleElement(target.locator);
       try {
         currentOperation.signal.throwIfAborted();
         const measured = await element.evaluate(measureViewportIntersection);
