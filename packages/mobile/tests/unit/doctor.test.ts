@@ -266,7 +266,9 @@ describe('doctor', () => {
       controller.abort();
       throw new Error('aborted');
     });
-    await expect(h.engine.doctor!({ ...info(h, dir), signal: controller.signal })).rejects.toMatchObject({ code: 'CANCELLED' });
+    const error = await h.engine.doctor!({ ...info(h, dir), signal: controller.signal }).then(() => undefined, (cause: unknown) => cause);
+    // The cancel surfaces from the inventory read itself, not from a later command that found the signal aborted.
+    expect(error).toMatchObject({ code: 'CANCELLED', message: expect.stringMatching(/^devices /) });
   });
 
   it('reads a binary Info.plist that plutil wrote, with UTF-16 strings and nested containers', () => {
