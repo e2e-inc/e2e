@@ -948,11 +948,17 @@ describe('desktop fixture: windows', () => {
 
   it('waits for a window by its title, a string exactly or a RegExp, and leaves the active window as it is', async () => {
     const alone = windows(() => [mine]);
-    const { surface, fake } = await launched({ listWindows: [alone, alone, alone, windows(() => [mine, panel])] });
+    const archive = { id: 'w-archive', title: 'Archive Controls' };
+    let archived = false;
+    const { surface, fake } = await launched({ listWindows: [alone, alone, alone, windows(() => (archived ? [mine, archive, panel] : [mine, panel]))] });
     const desktop = createDesktopFixture(surface, fixtureContext());
     const found = await desktop.window({ title: 'Controls' });
     expect(await found.title()).toBe('Controls');
     expect(await desktop.window({ title: /^contr/i })).toBe(found);
+    // Sticky and global flags hold as on a string's own match: /y only at the start, /g from the start of each title.
+    archived = true;
+    expect(await desktop.window({ title: /Controls/y })).toBe(found);
+    expect(await desktop.window({ title: /Controls/g })).not.toBe(found);
     expect(await found.isActive()).toBe(false);
     await surface.observe(operation(), undefined);
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });

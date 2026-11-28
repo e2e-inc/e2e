@@ -152,9 +152,13 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
         throw new ConfigurationError('INVALID_ARGUMENT', 'desktop.window() takes { title }, a string or a RegExp; desktop.windows() lists every window');
       }
       const { title } = which;
-      // Without the flags that make a RegExp remember where its last match ended.
-      const pattern = typeof title === 'string' ? undefined : new RegExp(title.source, title.flags.replace(/[gy]/g, ''));
-      const matches = (window: OpenWindow): boolean => (pattern === undefined ? window.title === title : pattern.test(window.title));
+      // A copy, with every flag: a sticky RegExp matches only at the start of a title. Each test starts it there.
+      const pattern = typeof title === 'string' ? undefined : new RegExp(title);
+      const matches = (window: OpenWindow): boolean => {
+        if (pattern === undefined) return window.title === title;
+        pattern.lastIndex = 0;
+        return pattern.test(window.title);
+      };
       const operation = context.operation(stepTimeout(options?.timeout, 'desktop.window'));
       return handle(
         await waitFor(
