@@ -221,7 +221,7 @@ export class AppProcess {
   private start(setup: LaunchSetup): RunningApp {
     const { appPath, launchArguments } = setup.app;
     const args = [`--user-data-dir=${setup.userDataDir}`, ...(appPath === undefined ? [] : [path.resolve(setup.projectRoot, appPath)]), ...(launchArguments ?? []), ...(setup.extra?.args ?? [])];
-    const process = new ElectronProcess({ executable: setup.executable, args, cwd: path.resolve(setup.projectRoot, setup.extra?.cwd ?? this.options.cwd ?? '.'), env: launchEnv(setup.env, { ...this.options.env, ...setup.extra?.env }) });
+    const process = new ElectronProcess({ executable: setup.executable, args, cwd: path.resolve(setup.projectRoot, setup.extra?.cwd ?? this.options.cwd ?? '.'), env: launchEnv(setup.env, [this.options.env, setup.extra?.env ?? {}]) });
     let withoutMain: () => void = () => undefined;
     const none = new Promise<undefined>((resolve) => {
       withoutMain = () => resolve(undefined);
@@ -583,20 +583,24 @@ async function placeDownloads(main: MainProcess, directory: string, withinMs: nu
 
 /**
  * The app's environment: the few variables of the run's that a process needs
- * to start and draw (`INHERITED_ENV`, and the locale's `LC_*`), with the
- * engine's `env` option over them. The rest of the run's environment stays
+ * to start and draw (`INHERITED_ENV`, and the locale's `LC_*`), with each of
+ * `layers` over them in turn: the engine's `env` option, then a test's own. The rest of the run's environment stays
  * with the runner: it holds provider keys and tokens, and an app can log or
  * upload what it is given. Never `ELECTRON_RUN_AS_NODE`, which would start
  * the binary as plain Node.js, nor `NODE_OPTIONS`.
  */
-export function launchEnv(runEnv: Readonly<Record<string, string | undefined>>, extra: Readonly<Record<string, string>>): Record<string, string> {
+export function launchEnv(runEnv: Readonly<Record<string, string | undefined>>, layers: readonly Readonly<Record<string, string>>[], platform: NodeJS.Platform = process.platform): Record<string, string> {
   const env: Record<string, string> = {};
-  // Windows reads a variable's name in any case.
+  // Windows reads a variable's name in any case: a later layer's `path` replaces an earlier `PATH`, never sits beside it.
+  const set = (key: string, value: string): void => {
+    if (platform === 'win32') for (const known of Object.keys(env)) if (known !== key && known.toUpperCase() === key.toUpperCase()) delete env[known];
+    env[key] = value;
+  };
   for (const [key, value] of Object.entries(runEnv)) {
     const name = key.toUpperCase();
-    if (value !== undefined && (INHERITED_ENV.has(name) || name.startsWith('LC_'))) env[key] = value;
+    if (value !== undefined && (INHERITED_ENV.has(name) || name.startsWith('LC_'))) set(key, value);
   }
-  for (const [key, value] of Object.entries(extra)) if (!REFUSED_ENV.has(key.toUpperCase())) env[key] = value;
+  for (const layer of layers) for (const [key, value] of Object.entries(layer)) if (!REFUSED_ENV.has(key.toUpperCase())) set(key, value);
   return env;
 }
 
