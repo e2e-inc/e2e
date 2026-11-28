@@ -231,17 +231,25 @@ export interface CiTarget {
 /** Phone platforms run in their own job, on a runner with a simulator or an emulator. */
 const PHONES = new Set(['ios', 'android']);
 
+/** Platforms no job of the pipeline can run: an Electron app needs a display, which the web job's runner has none of. */
+const NO_JOB = new Set(['electron']);
+
+/** The targets the pipeline leaves out, for the caller to say so. */
+export function targetsWithoutJob(targets: readonly CiTarget[]): readonly CiTarget[] {
+  return targets.filter((target) => NO_JOB.has(target.platform));
+}
+
 /**
  * The jobs for a config's targets. iOS and Android targets get a job each;
  * the rest, web and HTTP-only alike, run in the web job, which names them
- * with `--target` only when the config has phone targets too.
+ * with `--target` only when the config has targets it does not run. A target
+ * no job can run (`targetsWithoutJob`) is in none.
  */
 export function ciJobs(targets: readonly CiTarget[], builds: { ios: IosBuild; android: AndroidBuild }): CiJobs {
   const named = (platform: string) => targets.filter((target) => target.platform === platform).map((target) => target.name);
-  const others = targets.filter((target) => !PHONES.has(target.platform)).map((target) => target.name);
-  const phones = targets.some((target) => PHONES.has(target.platform));
+  const others = targets.filter((target) => !PHONES.has(target.platform) && !NO_JOB.has(target.platform)).map((target) => target.name);
   return {
-    ...(others.length === 0 ? {} : { web: phones ? others : 'all' }),
+    ...(others.length === 0 ? {} : { web: others.length < targets.length ? others : 'all' }),
     ...(named('ios').length === 0 ? {} : { ios: { targets: named('ios'), build: builds.ios } }),
     ...(named('android').length === 0 ? {} : { android: { targets: named('android'), build: builds.android } }),
   };

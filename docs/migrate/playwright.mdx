@@ -415,8 +415,8 @@ purpose. Use the workaround, or keep the test in Playwright.
 A suite that drives an Electron app with Playwright's `_electron` moves to the
 [Electron engine](/electron), not the web one: a target with
 `engine: electron()` and `app: { appPath: '.' }`, and `test` from
-`@e2e-dev/electron`. `e2e init` has no Electron preset yet, so write the
-config by hand.
+`@e2e-dev/electron`. `npx e2e init --engine electron` writes that config and
+an example test.
 
 | Playwright | e2e |
 | --- | --- |

@@ -26,6 +26,9 @@ bun add --dev e2e @e2e-dev/electron electron
 ```
 </CodeGroup>
 
+In a project with no e2e config yet, `npx e2e init --engine electron` writes
+the config and an example test for you.
+
 The engine launches the `electron` package installed in your project. On
 Electron 45 and newer, it downloads the binary once per run before the first
 test. Packaged apps work back to Electron 22. Run `npx e2e doctor` to check
