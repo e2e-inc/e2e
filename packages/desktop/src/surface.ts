@@ -522,8 +522,10 @@ export class DesktopSurface {
       timeoutMs: operation.timeoutMs,
       onCutOff: () => this.driver?.cancelInput(inputId),
     }).catch((cause: unknown) => {
-      // Already closed: the driver found no such window, and pressed nothing. One accessibility cannot read is still open.
+      // Already closed: the driver found no such window, or no app, as when it quit with the window after the check
+      // above, and pressed nothing. One accessibility cannot read is still open.
       if (cause instanceof DriverFailure && cause.notDelivered && cause.code === 'WINDOW_NOT_FOUND' && cause.details.kind === undefined) return;
+      if (cause instanceof DriverFailure && cause.notDelivered && cause.code === 'APP_NOT_FOUND') return;
       // The app is open and the window is there: it has no close button, or accessibility cannot reach it.
       if (cause instanceof DriverFailure && cause.notDelivered && (cause.code === 'WINDOW_NOT_FOUND' || cause.code === 'ACTION_NOT_SUPPORTED')) throw notActionable(`close window: ${cause.message}`);
       throw translate(cause, 'close window', true);

@@ -1030,11 +1030,13 @@ describe('desktop fixture: windows', () => {
   });
 
   it('closes a window through its handle, and leaves one that already closed alone', async () => {
-    const { surface, fake } = await launched({ listWindows: [windows(() => [mine, panel])], closeWindow: [ok({}), failure('WINDOW_NOT_FOUND', 'not_delivered', 'the app has no window')] });
+    const { surface, fake } = await launched({ listWindows: [windows(() => [mine, panel])], closeWindow: [ok({}), failure('WINDOW_NOT_FOUND', 'not_delivered', 'the app has no window'), failure('APP_NOT_FOUND', 'not_delivered', 'no process is running')] });
     const desktop = createDesktopFixture(surface, fixtureContext());
     const controls = (await desktop.windows())[1]!;
     await controls.close();
     expect(fake.of('closeWindow').map((call) => call.args)).toEqual([[fake.pid, 'w-panel']]);
+    await controls.close();
+    // The app quit with the window between the engine's check and the driver's call.
     await controls.close();
   });
 
