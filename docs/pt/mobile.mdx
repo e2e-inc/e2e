@@ -228,14 +228,14 @@ Android. Cada framework de UI os define do seu jeito:
   correspondem quando escritos por completo.
 - No Android, o Compose esconde as test tags até que um composable raiz
   defina `Modifier.semantics { testTagsAsResourceId = true }`. Sem isso,
-  `getByTestId` não encontra nada. O iOS lê uma tag do Compose Multiplatform
-  como ela é, então uma tela compartilhada define a flag na activity
-  Android dela.
-- No SwiftUI, um `.accessibilityIdentifier()` em um contêiner como uma
-  `VStack` substitui os ids de todos os elementos dentro dele. `getByTestId`
-  então falha com `LOCATOR_AMBIGUOUS` no id do contêiner e não encontra nada
-  para os ids dos filhos. Coloque `.accessibilityElement(children: .contain)`
-  antes do identificador para manter os dois.
+  `getByTestId` não encontra as tags. (O iOS lê as tags do Compose
+  Multiplatform sem alteração, então só a sua activity Android precisa dessa
+  flag.)
+- No SwiftUI, colocar `.accessibilityIdentifier()` em um contêiner como uma
+  `VStack` sobrescreve os identificadores dos filhos dele, o que causa
+  correspondências ambíguas. Adicione
+  `.accessibilityElement(children: .contain)` antes do identificador para
+  preservar os dois.
 - No Flutter, envolva o `Semantics` de um botão em `MergeSemantics` para que o
   id e o papel de botão fiquem no mesmo nó.
 - No NativeScript, `testID` e `accessibilityIdentifier` definem o mesmo id:
@@ -276,12 +276,11 @@ await device.openLink('myapp://orders/42');
 await expect(screen.getByText('Order #42')).toBeVisible();
 ```
 
-`device.setNetwork('offline')` e `device.setAirplaneMode(true)` funcionam
-somente no Android. Um simulador iOS compartilha a rede do Mac, e o simctl só
-consegue mudar a barra de status dele, então no iOS os dois falham com
-`UNSUPPORTED_CAPABILITY`. `setNetwork('online')` e `setAirplaneMode(false)`
-não fazem nada no iOS, então um hook de limpeza que as duas plataformas rodam
-ainda passa.
+`device.setNetwork('offline')` e `device.setAirplaneMode(true)` só funcionam
+no Android. Como os simuladores iOS compartilham a rede do Mac que os hospeda,
+chamar esses métodos no iOS lança um erro de capability não suportada. Chamar
+`setNetwork('online')` ou `setAirplaneMode(false)` no iOS não faz nada e é
+seguro, então hooks de limpeza compartilhados continuam passando.
 
 No Android, `setNetwork('offline')` desliga somente o Wi-Fi, e o app pode
 continuar online pela rede celular. Para deixar o app offline, use
@@ -591,7 +590,7 @@ dispositivo com nome correspondente vence, então dê a cada aparelho um nome
 rede), ou um aparelho Android conectado, conta como inicializado e entra no
 pool ao lado dos simuladores inicializados.
 
-Configure o aparelho uma única vez:
+Configuração única do aparelho:
 
 <Tabs>
   <Tab title="iOS">
@@ -629,7 +628,8 @@ um aparelho, eles falham com a mensagem do agent-device.
   `app.permissions`, `device.setPermission`, `app.clearState()`,
   `device.setLocation`, `device.clearLocation`, `device.setAppearance`, os
   métodos de biometria e `device.clearKeychain`. O mesmo vale para
-  `device.clipboard`, `device.setClipboard` e `device.fold`.
+  `device.clipboard`, `device.setClipboard`, `device.fold`, `device.lock` e
+  `device.unlock`.
 - Para começar do zero em um iPhone, reinstale com
   `device.installApp(path, { reinstall: true })`. Defina `app.bundleId` ou a
   opção `app` para que o agent-device saiba qual app remover.
@@ -724,10 +724,11 @@ chega ao reporter.
 **`release`** roda depois que o último worker sai, dentro de
 `cleanupTimeout`, em todo caminho de saída: uma falha, uma interrupção ou um
 `prepare` que lançou um erro. Ele recebe o objeto que `acquire` retornou,
-então um provedor pode guardar campos próprios nele. Somente os campos de
-`DeviceLease` chegam aos workers. Quando um slot não consegue fazer a reserva,
-a execução termina antes de qualquer teste, e a engine ainda libera toda
-reserva que obteve.
+então um provedor pode guardar campos próprios nele, e recebe também
+`context`, com `timeoutMs`, o orçamento de limpeza restante em milissegundos
+no momento em que `release` começa. Somente os campos de `DeviceLease` chegam
+aos workers. Quando um slot não consegue fazer a reserva, a execução termina
+antes de qualquer teste, e a engine ainda libera toda reserva que obteve.
 
 **`client`** é a configuração do cliente do agent-device, como dados JSON,
 aplicada por cima do nome da sessão e do endereço `daemon`. Uma reserva que
@@ -868,7 +869,9 @@ export function cloudDevices(options: { provider: string; device: string; osVers
 
 ### Limitações conhecidas de dispositivos
 
-- `placeholder` é o único atributo que um nó de dispositivo tem.
+- Um nó de dispositivo expõe apenas `label`, `resource-id`, `class`,
+  `placeholder` e o `content-desc` do Android por meio de `getAttribute()`.
+  Veja [`getAttribute`](/reference/screen#getattribute).
 - Uma aba do React Native (`accessibilityRole="tab"`) no iOS tem o papel
   `other`. Busque-a por test id ou rótulo e faça a asserção `toBeSelected`.
   Checkboxes, radios e `toBeChecked` funcionam nas duas plataformas.
@@ -905,61 +908,33 @@ export function cloudDevices(options: { provider: string; device: string; osVers
 
 ## Solução de problemas
 
-Uma falha de dispositivo mostra a própria mensagem do agent-device. Sob o
-controle do agente, uma falha da engine sem código mais específico é
-reportada como `APP_UNREACHABLE`, então leia a mensagem antes do código:
-muitas vezes não foi o app que falhou.
+Falhas de dispositivo mostram a mensagem de erro original do agent-device;
+leia a própria mensagem, não só o código de erro que a envolve.
 
-**O runner de automação do iOS está ocupado, travado ou não consegue
-apresentar um snapshot.** Uma tela pesada ou animada pode sobrecarregar o
-runner, e uma execução interrompida com Ctrl-C pode deixá-lo ocupado. A
-mensagem nomeia o runner e a primeira ação a tomar, geralmente rodar de novo.
-Se a próxima execução encontrar o mesmo problema, pare o daemon e reinicie o
-simulador com os comandos abaixo.
+**O runner de automação do iOS está ocupado ou travado.** Animações pesadas
+ou uma execução interrompida com Ctrl-C podem travar o runner. Tente rodar de
+novo uma vez; se o problema continuar, pare o daemon e reinicie o simulador
+com os comandos abaixo.
 
-**`device.installApp()` no Android informa que não há bundle id nem pacote.**
-O agent-device não conseguiu identificar qual é o pacote do build, então
-`app.open()` não tem o que iniciar. Quando não consegue ler o manifest do APK,
-ele recorre ao `aapt` do Android SDK, encontrado em `ANDROID_SDK_ROOT`,
-`ANDROID_HOME`, `~/Library/Android/sdk` no macOS, ou `~/Android/Sdk`. Defina o
-`app.bundleId` do alvo. Ou exporte `ANDROID_HOME` e depois pare o daemon do
-agent-device para que a próxima execução o inicie com a variável.
+**`device.installApp()` não consegue detectar o pacote Android.** Se o
+agent-device não conseguir ler o manifest do APK, defina `app.bundleId`
+explicitamente na sua configuração ou exporte `ANDROID_HOME` e reinicie o
+daemon do agent-device.
 
-**O Android informa conteúdo insuficiente do app em primeiro plano, ou o iOS
-informa que o app não está rodando.** O agent-device ainda não conseguiu ler a
-tela, muitas vezes por causa de um app que ainda está carregando depois de uma
-inicialização a frio. No iOS, isso só conta até a primeira tela legível depois
-de `app.open()`, `app.restart()` ou `device.openLink()`, como em um iPhone
-físico que ainda está iniciando o app; um app que fecha mais tarde falha na
-hora. Uma ação de localizador que espera ou um `expect` espera durante esse
-estado, como espera por um elemento que ainda não está lá. Se a tela ainda
-estiver ilegível quando a espera se esgotar, o passo falha com essa mensagem.
-Leituras imediatas como `count()` e `isVisible()`, em vez disso, não veem
-nenhuma correspondência, então `not.toBeVisible()` pode passar enquanto a tela
-está ilegível, inclusive em um app que caiu antes de renderizar. Uma
-observação, como o próximo turno do agente, falha nesse estado na hora.
+**O Android informa conteúdo insuficiente em primeiro plano / o iOS informa
+que o app não está rodando.** Isso geralmente significa que o app ainda está
+em uma inicialização a frio. Localizadores com espera e `expect()` aguardam a
+inicialização a frio terminar, enquanto leituras imediatas como `isVisible()`
+ou `count()` não veem nenhuma correspondência. Por isso, `not.toBeVisible()`
+pode passar enquanto a tela está ilegível, inclusive em um app que caiu antes
+de renderizar. Prefira verificações positivas com `expect(...).toBeVisible()`
+depois de iniciar o app.
 
-**Um tempo limite no dispositivo.** Um boot de simulador, uma conexão com o
-runner ou uma inicialização de app que estoura o tempo limite no dispositivo é
-`ENGINE_FAILURE` com a mensagem e a dica do agent-device, nunca
-`LAUNCH_TIMEOUT`, `ACTION_FAILED` ou `STEP_TIMEOUT`.
-
-**Uma ação que dura mais que o seu tempo limite.** Um toque, um
-preenchimento, uma tecla, um gesto de deslizar ou um `back` recebe o seu
-`timeout` (o padrão é `actionTimeout`). Se o dispositivo não responder a
-tempo, o passo falha com `ACTION_FAILED` e não é tentado novamente: a entrada
-pode ter chegado ao dispositivo. Um toque, toque duplo, foco, marcação ou
-desmarcação pendente é cancelado quando o passo para de esperar por ele ou
-quando a execução é interrompida. Uma entrada já enviada ao dispositivo ainda
-pode terminar. Um `longPress` que segura por pelo menos o tempo restante é
-recusado antes de ser enviado; aumente o `timeout` dele. Snapshots e capturas
-de tela rodam dentro do tempo limite da chamada que os faz, então um
-dispositivo que para de responder faz o passo falhar com `ACTION_FAILED` em
-vez de prendê-lo até o tempo limite do teste. `locator.waitFor`, `expect` e
-`toHaveScreenshot` dão tempo extra ao último snapshot, até o tempo do mais
-lento até então e dentro do tempo limite do teste, então uma tela que aparece
-durante ele ainda passa. Um elemento que nunca aparece falha como
-`LOCATOR_NOT_FOUND`, ou como `ASSERTION_FAILED` no caso de `expect`.
+**Tempos limite no dispositivo.** Se um boot de simulador, uma inicialização
+de app ou uma ação estourar o tempo limite, o e2e faz o passo falhar em vez de
+tentar novamente uma ação que pode já ter chegado ao dispositivo. Para gestos
+longos como `longPress`, aumente `actionTimeout` ou passe um `timeout` por
+chamada.
 
 <CodeGroup>
 ```bash npm
