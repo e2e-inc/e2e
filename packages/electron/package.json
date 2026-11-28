@@ -64,7 +64,7 @@
     "@e2e-dev/core": "workspace:*",
     "@napi-rs/image": "1.16.0",
     "@types/node": "26.6.11",
-    "devtools-protocol": "0.0.1755318",
+    "devtools-protocol": "0.0.1756183",
     "e2e": "workspace:*",
     "electron": "45.5.0",
     "typescript": "7.0.2",
