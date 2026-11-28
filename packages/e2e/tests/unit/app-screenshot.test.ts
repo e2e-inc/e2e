@@ -119,13 +119,22 @@ describe('captureAppScreenshot', () => {
     expect({ width: image.width, height: image.height }).toEqual({ width: 10, height: 10 });
   });
 
-  it('refuses a clip outside the viewport and keeps no file', async () => {
-    const { engine } = engineWith(screenImage(1, { x: 0, y: 0, width: 0, height: 0 }));
+  it('refuses a clip outside the viewport before it captures', async () => {
+    const { engine, asked } = engineWith(screenImage(1, { x: 0, y: 0, width: 0, height: 0 }));
     await expect(captureAppScreenshot(engine, artifactsDir, { label: 'far', region: { fullPage: false, clip: { x: 0, y: 400, width: 10, height: 10 } } })).rejects.toMatchObject({
       code: 'INVALID_ARGUMENT',
       message: expect.stringMatching(/clip \{ x: 0, y: 400, width: 10, height: 10 \} is outside the 100x50 viewport; .*pass fullPage/),
     });
+    expect(asked).toEqual([]);
     expect(existsSync(path.join(artifactsDir, 'screenshots', '001-far.png'))).toBe(false);
+  });
+
+  it('keeps no file when the cut finds nothing of the clip in the screenshot', async () => {
+    // Inside the viewport, and less than one pixel of the screenshot once rounded.
+    const { engine, asked } = engineWith(screenImage(1, { x: 0, y: 0, width: 0, height: 0 }));
+    await expect(captureAppScreenshot(engine, artifactsDir, { label: 'edge', region: { fullPage: false, clip: { x: 10, y: 10, width: 0.2, height: 0.2 } } })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(asked).toHaveLength(1);
+    expect(existsSync(path.join(artifactsDir, 'screenshots', '001-edge.png'))).toBe(false);
   });
 
   it('hands a full page and its clip to an engine that declares fullPageScreenshots, and leaves its file as it wrote it', async () => {

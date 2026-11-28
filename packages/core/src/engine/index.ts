@@ -642,7 +642,7 @@ export interface EngineDisposeContext extends EngineCleanupContext {
 }
 
 export interface EngineObserveOptions {
-  /** Requests masked viewport pixels for the same revision as the tree. */
+  /** Requests masked pixels of the viewport, or of the whole page with `fullPage`, for the same revision as the tree. */
   readonly pixels?: boolean;
   /** Allows independently masked pixels to replace a failed semantic capture. */
   readonly pixelFallback?: boolean;

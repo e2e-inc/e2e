@@ -4,6 +4,7 @@ import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { describeValue } from '../config/validate.ts';
 import { TestError } from '../internal/errors.ts';
+import type { ImageBox } from '../internal/image.ts';
 import { isPlainObject, rejectUnknownOptions } from '../internal/options.ts';
 import { clipOutsideViewport, cutScreenshotFile, describeClip, parseScreenshotRegion, type ScreenshotRegion } from '../internal/screenshot-region.ts';
 import type { LocatorEngine } from '../locator/engine.ts';
@@ -57,6 +58,7 @@ export async function captureAppScreenshot(engine: LocatorEngine, artifactsDir: 
   if (clip === undefined) return artifacts.screenshot(label, engine.operation());
   // The viewport read and the capture each get the budget a plain screenshot has, so a slow read on a heavy page does not starve the capture.
   const viewport = await engine.viewport(engine.deadline());
+  if (!overlapsViewport(clip, viewport)) throw clipOutsideViewport(API, clip, viewport);
   const relative = await artifacts.screenshot(label, engine.operation());
   const file = path.join(artifactsDir, relative);
   let kept = false;
@@ -67,4 +69,9 @@ export async function captureAppScreenshot(engine: LocatorEngine, artifactsDir: 
   } finally {
     if (!kept) rmSync(file, { force: true });
   }
+}
+
+/** Whether any of `clip` lies inside a viewport of `size`. */
+function overlapsViewport(clip: ImageBox, size: { readonly width: number; readonly height: number }): boolean {
+  return clip.x < size.width && clip.y < size.height && clip.x + clip.width > 0 && clip.y + clip.height > 0;
 }

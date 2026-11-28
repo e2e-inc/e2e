@@ -35,11 +35,10 @@ const UNREAD = 'the window\'s document could not be read to check what its masks
  */
 type Region = EngineScreenshotOptions | undefined;
 
-/** A capture's pixels, how many CSS pixels wide they are, and, on a whole page, how far it is scrolled. */
+/** A capture's pixels and, on a whole page, how many CSS pixels wide they are and how far the page is scrolled. */
 interface Shot {
   readonly image: Buffer;
-  readonly width: number;
-  readonly scroll?: { readonly x: number; readonly y: number };
+  readonly page?: { readonly width: number; readonly scroll: { readonly x: number; readonly y: number } };
 }
 
 /** A capture with its masks painted over, or why it is withheld; `masked` says how many regions the masks cover either way. */
@@ -100,12 +99,15 @@ async function captureUnderMasks(devtools: DevTools, window: AppWindow, unmaskab
 /** The window's viewport as a PNG: one image pixel per CSS pixel, or per device pixel. */
 async function captureViewport(window: AppWindow, scale: 'css' | 'device'): Promise<Shot> {
   const { page } = window;
-  const [{ cssVisualViewport: scrolled }, { width, height }, ratio] = await Promise.all([page.session.send('Page.getLayoutMetrics'), page.evaluate(viewportSize), page.evaluate(pixelRatio)]);
-  // A clip is in the document's coordinates, so the window's is where the document is scrolled to. It is the window's
-  // whole inner size, scrollbars included, as a capture with no clip is.
-  const clip = scale === 'css' && ratio !== 1 ? { x: scrolled.pageX, y: scrolled.pageY, width, height, scale: 1 / ratio } : undefined;
+  let clip: { x: number; y: number; width: number; height: number; scale: number } | undefined;
+  if (scale === 'css') {
+    const [{ cssVisualViewport: scrolled }, { width, height }, ratio] = await Promise.all([page.session.send('Page.getLayoutMetrics'), page.evaluate(viewportSize), page.evaluate(pixelRatio)]);
+    // A clip is in the document's coordinates, so the window's is where the document is scrolled to. It is the window's
+    // whole inner size, scrollbars included, as a capture with no clip is.
+    if (ratio !== 1) clip = { x: scrolled.pageX, y: scrolled.pageY, width, height, scale: 1 / ratio };
+  }
   const { data } = await page.captured(() => page.session.send('Page.captureScreenshot', { format: 'png', ...(clip === undefined ? {} : { clip }) }));
-  return { image: Buffer.from(data, 'base64'), width };
+  return { image: Buffer.from(data, 'base64') };
 }
 
 /**
@@ -137,7 +139,7 @@ async function capturePage(window: AppWindow, scale: 'css' | 'device', region: E
   const zoom = scrolled.zoom ?? 1;
   const clip = { x: kept.x * zoom, y: kept.y * zoom, width: kept.width * zoom, height: kept.height * zoom, scale: scale === 'css' ? 1 / ratio : 1 };
   const { data } = await page.captured(() => page.session.send('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true }));
-  return { image: Buffer.from(data, 'base64'), width: kept.width, scroll: { x: scrolled.pageX, y: scrolled.pageY } };
+  return { image: Buffer.from(data, 'base64'), page: { width: kept.width, scroll: { x: scrolled.pageX, y: scrolled.pageY } } };
 }
 
 /** The most pixels on a side one `Page.captureScreenshot` paints; Chromium's limit for a single compositor frame. */
@@ -163,13 +165,14 @@ export async function withPixels(devtools: DevTools, raw: RawRead, snapshot: Eng
   const data = new Uint8Array(capture.image);
   const size = readPngSize(data);
   if (size === undefined) throw new Error('the window capture is not a PNG');
+  const css = capture.page?.width ?? (await raw.window.page.evaluate(viewportSize)).width;
   const pixels: ObservationPixels = {
     data,
     mediaType: 'image/png',
     width: size.width,
     height: size.height,
-    scale: capture.width > 0 ? size.width / capture.width : 1,
-    ...(capture.scroll === undefined ? {} : { scroll: capture.scroll }),
+    scale: css > 0 ? size.width / css : 1,
+    ...(capture.page === undefined ? {} : { scroll: capture.page.scroll }),
   };
   return { ...snapshot, pixels, maskedRegionCount: capture.masked };
 }

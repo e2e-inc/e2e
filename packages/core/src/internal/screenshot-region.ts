@@ -82,7 +82,7 @@ function decodeScreenshot(file: string, api: string): RgbaImage {
     return decodePng(bytes);
   } catch (cause) {
     if (isE2EError(cause)) throw cause;
-    throw new ConfigurationError('UNSUPPORTED_CAPABILITY', `${api} cuts a PNG of the viewport, and this engine's screenshot is not one`, { cause });
+    throw new ConfigurationError('UNSUPPORTED_CAPABILITY', `${api} cuts a PNG of the viewport, and this engine's screenshot could not be read as one`, { cause });
   }
 }
 

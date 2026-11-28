@@ -156,7 +156,7 @@ run only in a browser, so a test that uses it declares
 | `page.goto(path)` | `app.open(path)`; `browser.goto(url, { waitUntil, timeout })` for the options |
 | `page.goBack()`, `goForward()`, `reload()`, `url()`, `title()`, `setViewportSize()` | `browser.back()`, `forward()`, `reload()`, `url()`, `title()`, `setViewport()` |
 | `page.waitForURL(url)` | `browser.waitForURL(url)` with a glob, a `RegExp`, or an exact URL |
-| `page.screenshot({ fullPage, clip })` | `app.screenshot(label, { fullPage, clip })`, attached to the report |
+| `page.screenshot({ fullPage, clip })` | `app.screenshot(label, { fullPage, clip })`, attached to the report; `fullPage` on web and Electron only |
 | `locator.screenshot()` | `locator.screenshot(label)`, the part of the match inside the viewport, attached to the report |
 | A fresh `context` for each test | the same for each attempt; `app.restart()` recreates it, `app.clearState()` also clears storage |
 
