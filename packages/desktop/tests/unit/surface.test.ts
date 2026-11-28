@@ -1188,9 +1188,20 @@ describe('desktop fixture: windows', () => {
     expect(await opened.title()).toBe('Controls');
   });
 
+  it('takes a window a read brings back within the timeout', async () => {
+    const alone = windows(() => [mine]);
+    const { surface } = await launched({ listWindows: [alone, alone, alone, windows(() => [mine, panel], 930), windows(() => [mine, panel])] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const started = Date.now();
+    const opened = await desktop.waitForWindow(() => Promise.resolve(), { timeout: 1_000 });
+    // Found within the last tenth of the timeout, which a margin before the end would refuse.
+    expect(Date.now() - started).toBeGreaterThan(900);
+    expect(await opened.title()).toBe('Controls');
+  });
+
   it('takes no window a read brings back after the wait ended', async () => {
     const alone = windows(() => [mine]);
-    const late = windows(() => [mine, panel], 950);
+    const late = windows(() => [mine, panel], 1_050);
     const { surface } = await launched({ listWindows: [alone, alone, alone, late] });
     const desktop = createDesktopFixture(surface, fixtureContext());
     await expect(desktop.waitForWindow(() => Promise.resolve(), { timeout: 1_000 })).rejects.toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/^no window opened within 1000ms/) });

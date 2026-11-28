@@ -9,7 +9,8 @@ import type { DesktopPlatform } from './options.ts';
 import type { DesktopSurface, OpenWindow } from './surface.ts';
 
 /** How long before a step's end a wait for a window gives up, at most. */
-const WAIT_MARGIN_MS = 250;
+/** The least of a wait a read of the windows needs: a trigger that leaves less gets one look instead. */
+const READ_MS = 250;
 
 /**
  * One window of the running app. The same window is the same object for as
@@ -104,17 +105,16 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
    * ends. Each read gets the time left in the wait, and a match it brings back
    * after the wait ended is not taken. With `looksOnce` (a trigger that took
    * all of the wait, or all but too little for a read) it looks once, with the
-   * operation's own budget. Without `margin` it reads to the end of `waitMs`.
+   * operation's own budget. No outer step timer runs (`timeout: false`
+   * below), so it reads to the end of `waitMs`.
    * `timedOut` gets the last list read, and the failure of the last read when
    * it read none.
    */
-  const waitFor = async <T>(pick: (windows: readonly OpenWindow[]) => T | undefined, operation: OperationContext, waitMs: number, timedOut: (windows: readonly OpenWindow[], unread?: Error) => string, { looksOnce = false, margin = true }: { looksOnce?: boolean; margin?: boolean } = {}): Promise<T> => {
+  const waitFor = async <T>(pick: (windows: readonly OpenWindow[]) => T | undefined, operation: OperationContext, waitMs: number, timedOut: (windows: readonly OpenWindow[], unread?: Error) => string, { looksOnce = false }: { looksOnce?: boolean } = {}): Promise<T> => {
     let windows: readonly OpenWindow[] = [];
     let unread: Error | undefined;
     let found: T | undefined;
-    // A wait for a window ends a little before the step's own end, so it reports what it waited for rather than a bare
-    // timeout; a read of the list alone keeps the whole budget.
-    const deadline = new Deadline(looksOnce ? 0 : Math.max(1, waitMs - (margin ? Math.min(WAIT_MARGIN_MS, waitMs / 10) : 0)));
+    const deadline = new Deadline(looksOnce ? 0 : Math.max(1, waitMs));
     await pollCondition({
       deadline,
       signal: operation.signal,
@@ -145,7 +145,7 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
   };
   /** The open windows, read again while the app does not answer for them, within the operation's budget. */
   const listed = (operation: OperationContext): Promise<readonly OpenWindow[]> =>
-    waitFor((windows) => windows, operation, operation.timeoutMs, (_windows, unread) => `the app's windows could not be read: ${unread?.message ?? 'no read answered in time'}`, { margin: false });
+    waitFor((windows) => windows, operation, operation.timeoutMs, (_windows, unread) => `the app's windows could not be read: ${unread?.message ?? 'no read answered in time'}`);
   const desktop: Desktop = {
     platform: surface.platform,
     windows: async () => (await listed(context.operation())).map(handle),
@@ -162,7 +162,7 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
       await trigger();
       const triggerMs = Date.now() - started;
       // The one look with the operation's own budget is for a trigger that took the wait, not for time a slow read spent.
-      const triggerTookIt = triggerMs >= waitMs - Math.min(WAIT_MARGIN_MS, waitMs / 10);
+      const triggerTookIt = triggerMs >= waitMs - Math.min(READ_MS, waitMs / 10);
       const opened = await waitFor(
         // Not a dialog macOS put over the app, which `screen` never reads on its own either.
         (windows) => windows.find((window) => window.readable && !before.has(window.id)),
@@ -196,8 +196,6 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
           operation,
           operation.timeoutMs,
           (windows) => `no window has the title ${String(title instanceof RegExp ? title : JSON.stringify(title))}; open: ${windows.map((window) => JSON.stringify(window.title)).join(', ') || 'none'}`,
-          // The lookup owns its deadline (no outer step timer, below), so it reads to the end of the timeout asked for.
-          { margin: false },
         ),
       );
     },
