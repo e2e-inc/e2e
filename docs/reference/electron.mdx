@@ -662,7 +662,7 @@ These hold on an Electron target and differ from a web target.
 
 | Area | On Electron |
 | --- | --- |
-| Finding elements | An element inside an `inert` subtree, such as the page behind a modal, is not in the tree: `getByRole`, `getByText`, and `getByLabel` don't find it, and [`electron.locator()`](#locator) does. |
+| Finding elements | An element inside an `inert` subtree, such as the page behind a modal, has no role or label: `getByRole` and `getByLabel` don't find it. `getByText`, `getByTestId`, and [`electron.locator()`](#locator) do, and input to it, such as `tap()` or `fill()`, fails with `it is inert`. |
 | `aria-owns` | An element `aria-owns` names reads under its owner, so query results, `.or()`, and `first()` order it there, not in document order. |
 | Parallel workers | Each test gets its own user-data directory, so tests run in parallel. If your app overrides `app.setPath('userData', ...)`, set `workers: 1`. |
 | Clipboard | The app uses your OS clipboard, so a test's copy overwrites yours. Set `workers: 1` for clipboard tests. |
