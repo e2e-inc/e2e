@@ -1036,11 +1036,12 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   /** Registers one skipped test. */
   skip(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
-   * Inside a running test: skips it when `condition` is true (or always,
+   * Inside a running test: skips it when `condition` is truthy (or always,
    * with no condition) by throwing, so nothing after the call runs. The
    * attempt is reported `skipped` with `reason`; steps that already ran stay
    * in the report without deciding the status, and teardown still runs. A
-   * setup test cannot skip: its sessions are owed.
+   * setup test cannot skip: its sessions are owed. A Promise or function
+   * condition fails the test with `INVALID_ARGUMENT`: await or call it first.
    * Outside a test body this form is `COLLECTION_ERROR`; use the `skip`
    * option to skip at collection.
    */
@@ -1051,12 +1052,13 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
   fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
-   * Inside a running test: skips it as fixme when `condition` is true (or
-   * always, with no condition), as `test.skip` does. The skip cause is
-   * `fixme`, and the reason `fixme`, or `fixme: <reason>` when `reason` is not
-   * blank. A setup test cannot skip. Outside a test body this form is
-   * `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a test fixme at
-   * collection.
+   * Inside a running test: skips it as fixme when `condition` is truthy (or
+   * always, with no condition), as `test.skip` does, and a Promise or
+   * function condition fails the test with `INVALID_ARGUMENT`. The skip
+   * cause is `fixme`, and the reason `fixme`, or `fixme: <reason>` when
+   * `reason` is not blank. A setup test cannot skip. Outside a test body
+   * this form is `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a
+   * test fixme at collection.
    */
   fixme(condition: boolean, reason?: string): void;
   fixme(reason?: string): void;
@@ -1106,21 +1108,24 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   fail(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
    * Inside a running test: marks it expected to fail when `condition` is
-   * true (or always, with no condition). The body keeps running. A test
+   * truthy (or always, with no condition). The body keeps running. A test
    * failure then passes the test, keeping the error and `reason` in the
    * report; a pass fails it with `UNEXPECTED_PASS`. Infrastructure failures
    * and interrupts are not covered. A setup test or a serial group member
-   * cannot be marked. Outside a test body this form is `COLLECTION_ERROR`;
-   * use `test.fail(title, fn)` or the `fail` option to mark at collection.
+   * cannot be marked, and a Promise or function condition fails the test
+   * with `INVALID_ARGUMENT`. Outside a test body this form is
+   * `COLLECTION_ERROR`; use `test.fail(title, fn)` or the `fail` option to
+   * mark at collection.
    */
   fail(condition: boolean, reason?: string): void;
   fail(reason?: string): void;
   /**
-   * Triples the running test's timeout in force when `condition` is true (or
-   * always), as Playwright's `test.slow()` does: once per attempt, so a
+   * Triples the running test's timeout in force when `condition` is truthy
+   * (or always), as Playwright's `test.slow()` does: once per attempt, so a
    * second call does nothing. In a `beforeAll` hook it triples that hook's
    * timeout. Otherwise it follows `setTimeout`'s rules; `reason` is not
-   * reported.
+   * reported. A Promise or function condition fails the call with
+   * `INVALID_ARGUMENT`.
    */
   slow(condition: boolean, reason?: string): void;
   slow(reason?: string): void;

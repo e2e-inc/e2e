@@ -68,6 +68,7 @@ const HOSTILE = `
     { name: 'not-rows', async onRunFinished() { return 'done'; } },
     { name: 'rejects-finish', async onRunFinished() { throw new Error('upload failed'); } },
     { name: 'throws-summary', onSummary() { throw new Error('summary broke'); } },
+    { name: 'rejects-summary', async onSummary() { await null; throw new Error('summary rejected'); } },
     {
       name: 'rewrites',
       onEvent(event) {
@@ -133,6 +134,7 @@ describe('reporters of every kind in one run', () => {
       'e2e: reporter "not-rows" returned something other than summary rows; dropped',
       'e2e: reporter "rejects-finish" failed: upload failed',
       'e2e: reporter "throws-summary" threw in onSummary: summary broke',
+      'e2e: reporter "rejects-summary" threw in onSummary: summary rejected',
     ]) {
       expect(warnings.filter((line) => line === expected), expected).toHaveLength(1);
     }

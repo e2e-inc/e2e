@@ -7,6 +7,7 @@
 import path from 'node:path';
 import { leaveWorkBehind } from '@e2e-dev/core/lib/internal/abandoned';
 import { errorMessage } from '@e2e-dev/core/lib/internal/errors';
+import { isPromiseLike } from '@e2e-dev/core/lib/internal/promise-like';
 import { budgetText, withAbort } from '@e2e-dev/core/lib/internal/time';
 import { builtinId } from '../report/builtin-id.ts';
 import { pauseLinePrinter } from '../report/list-steps.ts';
@@ -240,7 +241,7 @@ export async function finishReporters(reporters: readonly Reporter[], finished: 
       // thenable is adopted inside the hook's own output context.
       const result = inContext(reporter, processOutput, () => {
         const value: unknown = reporter.onSummary?.(rows, finished);
-        return typeof (value as PromiseLike<unknown> | undefined)?.then === 'function' ? Promise.resolve(value) : undefined;
+        return isPromiseLike(value) ? Promise.resolve(value) : undefined;
       }, true);
       result?.catch(broke);
     } catch (cause) {

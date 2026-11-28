@@ -150,6 +150,16 @@ describe('registration', () => {
     ).rejects.toThrow(/synchronously/);
   });
 
+  it('rejects a describe body that returns a callable thenable, as it does a Promise', async () => {
+    // oxlint-disable-next-line unicorn/no-thenable -- a function that is a thenable is the case under test
+    const thenable = Object.assign(() => {}, { then: () => {} });
+    await expect(
+      collectModule(async () => {
+        test.describe('bad', (() => thenable) as never);
+      }),
+    ).rejects.toThrow(/synchronously/);
+  });
+
   it('records skip modes, and test.only as the only option', async () => {
     const registration = await collectModule(async () => {
       test.skip('skipped', noop);
@@ -600,6 +610,12 @@ describe('registration', () => {
     expect(() => test.fail(true, 'not here')).toThrow(CollectionError);
     expect(() => test.fail(false)).toThrow(/must be called inside a test body/);
     expect(() => test.fail(false)).toThrow(/describe\.fail\(title, fn\).*test or describe option/);
+  });
+
+  it('points a Promise condition outside a test body at the body, not at the await', async () => {
+    const pending = Promise.resolve(false) as unknown as boolean;
+    expect(() => test.skip(pending, 'not here')).toThrow(/must be called inside a test body/);
+    expect(() => test.fail(pending, 'not here')).toThrow(/must be called inside a test body/);
   });
 
   it('validates titles', async () => {

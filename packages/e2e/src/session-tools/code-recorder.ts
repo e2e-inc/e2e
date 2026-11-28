@@ -9,6 +9,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { classifyError, type E2EError } from '@e2e-dev/core/lib/internal/errors';
 import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
+import { isPromiseLike } from '@e2e-dev/core/lib/internal/promise-like';
 
 /** What became of one line: the value it resolved with, or the error it failed with. */
 export type Outcome = { readonly source: string; readonly read: boolean; readonly value: unknown } | { readonly source: string; readonly error: E2EError };
@@ -176,7 +177,7 @@ export class Recorder {
    * the same way; and a promise is the code's own to await.
    */
   private given(value: unknown, text: string, depth = 0): unknown {
-    if ((typeof value !== 'object' && typeof value !== 'function') || value === null || isThenable(value)) return value;
+    if ((typeof value !== 'object' && typeof value !== 'function') || value === null || isPromiseLike(value)) return value;
     if (Array.isArray(value) && !isData(value, 0) && depth < MAX_DEPTH) {
       const items = value.map((item, index) => this.given(item, `${text}[${String(index)}]`, depth + 1));
       this.sources.set(items, text);
@@ -202,7 +203,7 @@ export class Recorder {
       if (recording) this.slots.push({ source: `${called};`, error: classifyError(cause) });
       throw cause;
     }
-    if (!isThenable(returned)) return this.given(returned, called);
+    if (!isPromiseLike(returned)) return this.given(returned, called);
     // A line's own strings are written by name where a test has one; a step of a chain, such as the query that finds a field, keeps what it was given.
     return recording ? this.line(spelled(true), returned, text, args, alongside ? ALONGSIDE : '') : Promise.resolve(returned).then((value) => this.given(value, called));
   }
@@ -356,10 +357,6 @@ function memberText(text: string, key: string): string {
 function isCallback(value: object): boolean {
   const source = Function.prototype.toString.call(value);
   return !source.startsWith('class') && !/\{\s*\[native code\]\s*\}$/.test(source);
-}
-
-function isThenable(value: unknown): value is PromiseLike<unknown> {
-  return (typeof value === 'object' || typeof value === 'function') && value !== null && typeof Reflect.get(value, 'then') === 'function';
 }
 
 /** Whether a value is plain data all the way down, with no members of its own to call. */

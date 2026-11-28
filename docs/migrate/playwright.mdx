@@ -188,7 +188,7 @@ run only in a browser, so a test that uses it declares
 | --- | --- |
 | `import { test, expect } from '@playwright/test'` | `import { test } from '@e2e-dev/web'` and `import { expect } from 'e2e'` |
 | `{ page }` in a test | `{ screen, app, browser }` |
-| `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)`, `test.fixme(title, fn)`, `test.fixme(condition, reason)` | the same, but a serial group takes `skip` on the group instead; the conditional forms work inside a test body or `beforeEach` |
+| `test()`, `test.describe()`, `test.only`, `test.fail()`, `test.skip(title, fn)`, `test.skip(condition, reason)`, `test.fixme(title, fn)`, `test.fixme(condition, reason)` | the same, but a serial group takes `skip` on the group instead; the conditional forms work inside a test body or `beforeEach`. `test.skip(process.env.CI)` always skips: write `test.skip(!!process.env.CI)`. A Promise or function condition fails with `INVALID_ARGUMENT`: await or call it first |
 | `test.setTimeout()` | the same inside a test body, `beforeEach`, or `beforeAll` (that hook's own timeout); `afterEach` and `afterAll` cannot call it. In a `describe` callback, pass `{ timeout }` to `test.describe` instead. There is no `0` for no timeout: pass a large value |
 | `test.slow()`, `test.slow(condition, description)` | the same inside a test body or `beforeEach`: triples the test's timeout in force; in `beforeAll`, that hook's own timeout. Once per attempt, as in Playwright. At describe level (any form) it is a `COLLECTION_ERROR`: call it in a `beforeEach` |
 | `beforeEach`, `afterEach`, `beforeAll`, `afterAll` | the same, with no title; `beforeAll` and `afterAll` get worker fixtures, not `browser`, `app`, or `screen` |
