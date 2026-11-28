@@ -173,10 +173,24 @@ export interface TestFilterCandidate {
   readonly setupFile?: string;
 }
 
-/** What a run's test filters judge: every file that differs from the base commit. */
+/** What a run's test filters judge: every file that differs from the base. */
 export interface TestFilterChanges {
-  /** The commit the change is measured from: the merge base of the base ref and HEAD. */
+  /**
+   * What the change is measured from, as `git diff` takes it: with
+   * `--changed-since`, the commit that is the merge base of the base ref and
+   * HEAD; with `--since-last-run`, the tree of the tracked files in the
+   * working tree the tests the filter is given last passed against.
+   */
   readonly base: string;
+  /**
+   * With `--since-last-run`, the tree of the tracked files as the run found
+   * them in the working tree: `git diff base head` is the change to tracked
+   * files, edits not committed yet included, which a diff to `HEAD` misses.
+   * A file untracked at either end is in `files` and in neither tree. A
+   * filter that diffs must diff `base` to `head` when it is set.
+   * Absent with `--changed-since`, where the change runs to the working tree.
+   */
+  readonly head?: string | undefined;
   /** Absolute path of the git repository root, spelled as on disk like `projectRoot`; `files` are relative to it. */
   readonly root: string;
   /**

@@ -58,6 +58,7 @@ import { refuseBun } from './public-ownership.ts';
 import { processSecrets, registerProviderKeys, registerStaticSecrets, staticOutputLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { warnOfNodeDebug } from './node-debug.ts';
 import { nextRerunDir, pruneArtifacts } from '@e2e-dev/core/lib/run/artifacts';
+import { recordSinceLastRun, type SinceLastRun } from './since-last-run.ts';
 import { carryForward, fileDurationKey, lastFailedIds, readLastRun, readWithReruns, reportArtifactPaths, retainCollectedHistory, type RerunCollection } from './last-run.ts';
 import { loadTimings, writeTimings } from './timings.ts';
 import { childProcessSpawner } from './worker/handle.ts';
@@ -67,12 +68,11 @@ import type { RecordingMode } from '@e2e-dev/core/lib/types';
 import type { BuiltinReporter, E2EConfig, Reporter } from '../run-types.ts';
 import { modelLabel } from '@e2e-dev/core/lib/config/agent';
 import { boundedInt, describeValue, positiveInt, timerMs } from '@e2e-dev/core/lib/config/validate';
-import { validateChangedSince } from './changes.ts';
 import { detectVcs, type VcsInfo } from '../internal/vcs.ts';
 import type { EnginePrepareResult } from '@e2e-dev/core/lib/engine/index';
 import type { AppProcesses } from '@e2e-dev/core/lib/run/managed-process';
 import { PreparedEngines, recordingNotices, startDeclaredProcesses, validateEngine, type EngineGrade, type PrepareScope } from '@e2e-dev/core/lib/run/provision';
-import { filterSelection, rankingNotice } from './test-filters.ts';
+import { changeBase, filterSelection, rankingNotice } from './test-filters.ts';
 
 /** Options for holding a run at steps and pauses. */
 type RunHold = {
@@ -143,6 +143,15 @@ export interface RunOptions {
    * `INVALID_CHANGED_SINCE`.
    */
   changedSince?: string | undefined;
+  /**
+   * Runs the configured `filters` on what the working tree gained since the
+   * last run with this option (`--since-last-run`), read from the
+   * `since-last-run.json` this run will overwrite: a test that has passed
+   * since runs only when a filter keeps it, and not at all when no file
+   * changed. Not with `changedSince`. A project outside a git repository is
+   * `SINCE_LAST_RUN_UNAVAILABLE`.
+   */
+  sinceLastRun?: boolean | undefined;
   targetIds?: readonly string[] | undefined;
   headed?: boolean | undefined;
   /**
@@ -339,6 +348,7 @@ export interface ListOptions
     | 'lastFailed'
     | 'shard'
     | 'changedSince'
+    | 'sinceLastRun'
     | 'passWithNoTests'
     | 'output'
     | 'env'
@@ -405,7 +415,7 @@ export interface ListResult {
  * selection failures throw the same classified error `run` records; the
  * public `list` on `e2e/runner` redacts it and drops its cause. Each
  * call imports the test files again, so a later call sees an edit. With
- * `changedSince`, the configured test filters then judge the selection,
+ * `changedSince` or `sinceLastRun`, the configured test filters then judge the selection,
  * which may call a model: a pair one left out is `filtered`, with its
  * `filter` and `reason`, and a selection they leave empty resolves.
  */
@@ -432,14 +442,13 @@ export async function listSelection(options: ListOptions, notice: (message: stri
     return loaded;
   };
   const config = await (processOutput === undefined ? loadConfig() : processOutput.withholdDuring(loadConfig));
-  const { changedSince } = runOptions;
   const collection = await collect(config, runOptions.files);
   const inputs = await selectionInputs(runOptions, config);
   const first = select(collection, config, inputs.filters, runOptions.passWithNoTests !== undefined ? { passWithNoTests: runOptions.passWithNoTests } : {});
+  // With `sinceLastRun`, `list` reads the last run's record and writes none: only a run settles a test.
+  const since = changeBase(runOptions);
   const selection =
-    changedSince === undefined
-      ? first
-      : (await filterSelection(first, { config, collection, selectionFilters: inputs.filters, changedSince, signal: new AbortController().signal, notice })).selection;
+    since === undefined ? first : (await filterSelection(first, { config, collection, selectionFilters: inputs.filters, since, signal: new AbortController().signal, notice })).selection;
   return {
     pairs: selection.pairs.map((pair) => toListedPair(config.projectRoot, pair)),
     unmatched: collection.unmatchedPositionals,
@@ -668,6 +677,9 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
   // among them, and the files it could not collect: what a rerun can still
   // carry when the report lists no row.
   let rerunCollection: RerunCollection = { testIds: new Set(), uncollectedFiles: new Set() };
+  // What `--since-last-run` measured, once the filters decided on it: the
+  // run's results then settle the record the next such run measures from.
+  let sinceLastRun: SinceLastRun | undefined;
   // What each test filter decided, once they ran, and the change they judged.
   let filterReport: readonly ReportFilter[] = [];
   let changesReport: ReportChanges | undefined;
@@ -836,6 +848,10 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     const document = buildRunReport(currentExitCode());
     const recorded = runErrors.length;
     if (written !== undefined) await writeTimingsHistory(written, document);
+    // Whether or not a test started: a run the filters left empty has still judged the change.
+    if (loaded.config !== undefined && (written !== undefined || sinceLastRun !== undefined)) {
+      await recordSinceLastRun(outputLayout(loaded.config.output).sinceLastRun, sinceLastRun, document, rerunCollection.testIds);
+    }
     const reportPath = written === undefined ? undefined : await writeCanonicalReport(written, document);
     if (written !== undefined && reportPath !== undefined) await writeWithReruns(written, document);
     const traces = written === undefined ? new Map<string, string>() : await writeTraces(written, document);
@@ -1008,13 +1024,14 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
     // they leave empty boots nothing. An interrupt records nothing: the run
     // ends interrupted, like one cut short in `prepare`.
     let relevance: ReadonlyMap<string, number> = new Map();
-    if (options.changedSince !== undefined) {
+    const since = changeBase(options);
+    if (since !== undefined) {
       try {
         const filtered = await filterSelection(selection, {
           config,
           collection,
           selectionFilters: planned.filters,
-          changedSince: options.changedSince,
+          since,
           signal: interrupted,
           notice: (message) => notice('filter', message),
           step: (name, work) => setupStep({ kind: 'filter', name }, () => debug.time('filter', work), (call) => (call.outcome === 'answered' ? undefined : call.outcome)),
@@ -1024,6 +1041,7 @@ export async function run(options: RunOptions = {}): Promise<RunOutcome> {
         relevance = filtered.relevance;
         filterReport = filtered.records;
         changesReport = filtered.changes;
+        sinceLastRun = filtered.sinceLastRun;
         const ranking = rankingNotice(selection, relevance);
         if (ranking !== undefined) notice('filter', ranking);
       } catch (cause) {
@@ -1456,6 +1474,7 @@ type SelectionRunOptions = Pick<
   | 'freshGraph'
   | 'shard'
   | 'changedSince'
+  | 'sinceLastRun'
   | 'targetIds'
   | 'passWithNoTests'
   | 'output'
@@ -1543,7 +1562,7 @@ function validateRunOptions(options: SelectionRunOptions): void {
     const total = positiveInt(options.shard.total, 'shard.total');
     boundedInt(options.shard.index, 'shard.index', 1, total!);
   }
-  validateChangedSince(options.changedSince);
+  changeBase(options);
 }
 
 /** Resolves the run's config: a supplied value, or the discovered file. */

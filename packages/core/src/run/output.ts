@@ -20,6 +20,12 @@ export interface OutputLayout {
    */
   readonly withReruns: string;
   /**
+   * `since-last-run.json`, written by a `--since-last-run` run: the working
+   * tree it ran against and the tests that have passed against it, which
+   * the next such run measures its change from.
+   */
+  readonly sinceLastRun: string;
+  /**
    * One directory per test, `results/<test>/`, holding its trace page
    * (`trace.md`) and its attempts' artifacts (`attempt-<n>/`); the report's
    * artifact paths are relative to it. The members of a serial group keep
@@ -41,6 +47,7 @@ export function outputLayout(output: string): OutputLayout {
     aiTrace: path.join(output, 'ai-trace.json'),
     timings: path.join(output, 'timings.json'),
     withReruns: path.join(output, 'report-with-reruns.json'),
+    sinceLastRun: path.join(output, 'since-last-run.json'),
     results: path.join(output, 'results'),
     sessions: path.join(output, 'sessions'),
     videos: (sessionId) => path.join(output, 'videos', sessionId),

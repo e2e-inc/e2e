@@ -129,6 +129,7 @@
     "changes": {
       "base": "main",
       "files": 3,
+      "since": "last-commit",
       "paths": ["src/app.ts"]
     },
     "filters": [

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://e2e.dev/schema/since-last-run-v1.schema.json",
+  "title": "e2e since-last-run-1",
+  "description": "The record `e2e run --since-last-run` keeps in `<output>/since-last-run.json`: every test that has passed, with the working tree it passed against. Advisory: a runner that finds any other document reads no record and runs every test.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "configDigest",
+    "settled"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "since-last-run-1"
+    },
+    "configDigest": {
+      "description": "The digest of the config whose runs settled the tests, as a report's run.project.configDigest. A run under another config reads no record.",
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "settled": {
+      "description": "The settled tests, keyed by result id: the digest of a test, a target, and an agent.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "testId",
+          "tree",
+          "tracked"
+        ],
+        "properties": {
+          "testId": {
+            "description": "The id of the test, which a later run drops the entry by once collection no longer finds it.",
+            "type": "string",
+            "minLength": 1
+          },
+          "tree": {
+            "description": "The git tree of the working tree the test last passed against, or was last judged unaffected up to: every tracked and untracked file git does not ignore, without the output and cache directories.",
+            "type": "string",
+            "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+          },
+          "tracked": {
+            "description": "The git tree of the tracked files alone in that working tree: what a test filter diffs.",
+            "type": "string",
+            "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+          }
+        }
+      }
+    }
+  }
+}

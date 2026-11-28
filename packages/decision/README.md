@@ -41,8 +41,9 @@ for setup, vision, gates, provider options, and limits.
 
 ## Test filter
 
-With `e2e run --changed-since <ref>`, `decisionFilter()` asks a decision
-model whether the change since that ref can affect each test, leaves out
+With `e2e run --changed-since <ref>` or `--since-last-run`,
+`decisionFilter()` asks a decision model whether the change can affect
+each test, leaves out
 the unlikely ones, and scores the rest so each target starts the files
 of the likeliest tests first:
 

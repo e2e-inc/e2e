@@ -684,6 +684,7 @@ npx e2e run --target web,webkit --tag smoke,billing --tag-mode all
 npx e2e run --grep checkout --grep-invert '/refund/i'
 npx e2e run --last-failed
 npx e2e run --changed-since origin/main
+npx e2e run --since-last-run
 npx e2e run --shard 2/3
 npx e2e run --reporter json --workers 4 --retries 2
 npx e2e run --repeat-each 5 --no-cache tests/checkout.e2e.ts
@@ -698,6 +699,7 @@ pnpm exec e2e run --target web,webkit --tag smoke,billing --tag-mode all
 pnpm exec e2e run --grep checkout --grep-invert '/refund/i'
 pnpm exec e2e run --last-failed
 pnpm exec e2e run --changed-since origin/main
+pnpm exec e2e run --since-last-run
 pnpm exec e2e run --shard 2/3
 pnpm exec e2e run --reporter json --workers 4 --retries 2
 pnpm exec e2e run --repeat-each 5 --no-cache tests/checkout.e2e.ts
@@ -712,6 +714,7 @@ bunx e2e run --target web,webkit --tag smoke,billing --tag-mode all
 bunx e2e run --grep checkout --grep-invert '/refund/i'
 bunx e2e run --last-failed
 bunx e2e run --changed-since origin/main
+bunx e2e run --since-last-run
 bunx e2e run --shard 2/3
 bunx e2e run --reporter json --workers 4 --retries 2
 bunx e2e run --repeat-each 5 --no-cache tests/checkout.e2e.ts
@@ -778,6 +781,7 @@ Test files, directories, or globs relative to the project root:
 | `--grep <pattern>` | Only tests whose title matches one of the regular expressions; repeatable. The title is the describe titles and the test title joined by one space (`checkout pays`), without the file or the tags. A bare pattern is case-sensitive; `'/pattern/i'` adds flags. A pattern that does not compile is a usage error, exit 2. |
 | `--grep-invert <pattern>` | Leaves out tests whose title matches one of the regular expressions; repeatable, with the text and forms of `--grep`. With both, the run keeps what `--grep` matches minus what `--grep-invert` matches. |
 | `--changed-since <ref>` | Runs the configured [test filters](/filters) on the change since the ref: every file that differs from the merge base of the ref and `HEAD`, uncommitted and untracked files included. Each target starts the files of the tests the filters score likeliest first. Without it, no filter runs. With no filters configured, a warning says every test runs. |
+| `--since-last-run` | Runs the configured [test filters](/filters) on the change since the last run with this flag, and leaves out every test that has passed since when nothing changed; [the list after these tables](#since-last-run) says how. Not with `--changed-since`. |
 | `--last-failed` | Only the tests the previous run did not pass; the list after these tables says which. |
 | `--shard <index/total>` | Runs one contiguous slice of the selected tests, such as `2/3`, cut after every other flag. Slices differ by at most one test. A serial group counts as one and is never split. Each shard brings only the setup tests its own tests need. Each skipped test is reported by one shard only. Every shard runs the same command with a different index, and a suite shards the same way on every machine. A shard with no test is `NO_TESTS` unless `--pass-with-no-tests`. The report records the shard as `run.shard`, and marks each test the cut gives another shard with `skip.otherShard`. With `--last-failed`, the cut slices the tests the last run did not pass. See [Sharding](/ci#sharding). |
 | `--pass-with-no-tests` | Exits 0 instead of `NO_TESTS` when nothing is selected. A run with nothing to run prepares no engine and starts no app or service command. |
@@ -824,6 +828,55 @@ keeps a page for every test. The value is optional and greedy:
 
 The removed `--artifacts <dir>` fails and names the `--output` to pass
 instead.
+
+<a id="since-last-run" />
+
+`--since-last-run` measures the change from the working tree each test last
+passed against, whatever ref the checkout is on:
+
+- Each run with the flag writes the working tree as git tree objects,
+  untracked files included, and `since-last-run.json` under the
+  [`output`](/reference/config#output): every test that has passed, per
+  target and agent, with the tree it passed against. The trees stay in the
+  repository's object store, unreferenced and never pushed, until `git gc`
+  prunes them: the contents of an untracked file that git does not ignore
+  are among them.
+- Without a record, with a file that is not one, or with the record of
+  another config (another `--config`, or an edit to this one), every test
+  runs.
+- A test whose tree is the working tree as it is, is left out, by a filter
+  named `since-last-run`. A run left with no test passes.
+- The configured filters judge the other tests in the record against the
+  change since their tree. `changes.files` lists every file that differs,
+  and `changes.base` and `changes.head` are trees of the tracked files
+  alone, so a diff of the two shows no contents of an untracked file. When
+  those tests passed against different trees, the filters judge the ones on
+  the tree most of them share, and the rest run. With no filters configured,
+  they all run. A filter that diffs must diff `changes.base` to
+  `changes.head`, never to `HEAD`, as `@e2e-dev/decision` does from 0.3.5.
+- Every other selected test runs without asking: one that did not pass, was
+  not reached, or is new; one whose targets passed against different trees;
+  and one whose tree git has pruned, which `git gc` does two weeks after the
+  run by default.
+- A test enters the record, or moves to this run's tree, when it passes (a
+  retry included, every `--repeat-each` repeat), skips itself, or is left
+  out by a filter. It leaves the record when it does not pass, when a
+  `beforeAll` or `afterAll` over it fails, or when collection no longer
+  finds it. A run without the flag adds nothing to the record, and takes
+  out the tests it saw fail or did not reach.
+- A test the run does not select, as under `--grep`, a positional,
+  `--target`, or `--last-failed`, keeps its tree, so a later run measures
+  from where it last passed.
+- Only files count. Files git ignores are in no tree, and neither is
+  anything under the output or the [cache](/reference/config#cache)
+  directory, so a change to an ignored `.env`, an environment variable, a
+  run flag such as `--retries`, or the deployed app runs nothing. A submodule or a nested repository counts
+  by its commit: an edit inside it counts once committed there.
+- The project must be in a git repository, and `git add` must take every
+  file: otherwise `SINCE_LAST_RUN_UNAVAILABLE`. The run leaves the index
+  and the branch as they are.
+- [`e2e list`](#e2e-list) records the working tree in git too, and writes
+  no `since-last-run.json`.
 
 `--last-failed` selects the tests the previous run did not pass. It reads them
 from the `report.json` this run overwrites, `<output>/report.json` (`--output`,
@@ -1047,7 +1100,7 @@ On a terminal, keys drive it as in vitest:
   `report.json` and the reporter files, and starts and stops the app command,
   unless it has nothing to run. To keep a dev server up across reruns, start it yourself and set
   [`reuseExisting`](/reference/config#command) on the command.
-- `--last-failed` and the test filters apply to the first run only, so a
+- `--last-failed`, `--since-last-run`, and the test filters apply to the first run only, so a
   rerun never calls a filter's model; a rerun that selects nothing passes
   empty.
 - On quit, the exit code is that of the last run that finished.
@@ -1351,7 +1404,7 @@ bunx e2e list --changed-since origin/main
 | Option | Description |
 | --- | --- |
 | `[files...]` | As for [`run`](#positional-arguments). |
-| `--config`, `--target`, `--tag`, `--tag-mode`, `--exclude-tag`, `--grep`, `--grep-invert`, `--changed-since`, `--last-failed`, `--shard`, `--pass-with-no-tests` | As for [`run`](#flags). `--last-failed` reads `report.json` under the config's [`output`](/reference/config#output). The configured [test filters](/filters) run as for `run`, and their lines go to stderr. |
+| `--config`, `--target`, `--tag`, `--tag-mode`, `--exclude-tag`, `--grep`, `--grep-invert`, `--changed-since`, `--since-last-run`, `--last-failed`, `--shard`, `--pass-with-no-tests` | As for [`run`](#flags). `--last-failed` reads `report.json` under the config's [`output`](/reference/config#output). The configured [test filters](/filters) run as for `run`, and their lines go to stderr. |
 | `--reporter <id>` | `list` or `json`. Default: `list`. |
 
 | Reporter | Writes |

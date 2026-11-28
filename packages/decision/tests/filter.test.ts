@@ -1,11 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { TestFilterCandidate } from 'e2e';
 import { APICallError, gateway } from 'ai';
 import { describe, expect, it } from 'vitest';
 import { decisionFilter } from '../src/index.ts';
-import { candidate, changedRepo, commitAll, filterContext, scriptedJudge, SECRET, withSetup, type DecideRequest } from './filter-helpers.ts';
+import { candidate, changedRepo, commitAll, filterContext, scriptedJudge, SECRET, withSetup, trackedTree, type DecideRequest } from './filter-helpers.ts';
 import { scriptedDecision } from './helpers.ts';
 
 const CART = 'tests/cart.e2e.ts';
@@ -237,6 +237,29 @@ describe('decisionFilter', () => {
     await decisionFilter({ model }).filter([ADDS], { ...context, changes: { ...context.changes, files: ['src/coupon.ts'] } });
     const state = requests[0]?.state as { diff: string };
     expect(state.diff).toBe('diff --git a/src/coupon.ts b/src/coupon.ts\nnot committed, contents not read\n');
+    expect(JSON.stringify(requests)).not.toContain(token);
+  });
+
+  it('reads the uncommitted edits to tracked files between the trees of a --since-last-run run, and no file that was untracked at either end', async () => {
+    const token = 'sk-ci-8e1f0a9c3b';
+    const repo = changedRepo({ 'src/cart.ts': 'export const total = 1;\n', 'src/old.ts': 'export const old = 1;\n', [CART]: "test('adds an item', async () => {});\n" }, {});
+    // Untracked when the last run recorded the tree, with a token, then scrubbed and committed.
+    writeFileSync(path.join(repo.root, 'src/local.ts'), `export const key = '${token}';\n`);
+    const base = trackedTree(repo);
+    writeFileSync(path.join(repo.root, 'src/local.ts'), "export const key = '';\n");
+    commitAll(repo);
+    writeFileSync(path.join(repo.root, 'src/cart.ts'), 'export const total = 2;\n');
+    rmSync(path.join(repo.root, 'src/old.ts'));
+    writeFileSync(path.join(repo.root, 'src/coupon.ts'), `export const code = '${token}';\n`);
+    const head = trackedTree(repo);
+    const { context } = filterContext(repo);
+    const { model, requests } = scriptedJudge(() => 0.9);
+    await decisionFilter({ model }).filter([ADDS], { ...context, changes: { base, head, root: repo.root, files: ['src/cart.ts', 'src/coupon.ts', 'src/local.ts', 'src/old.ts'] } });
+    const state = requests[0]?.state as { diff: string };
+    expect(state.diff).toContain('-export const total = 1;\n+export const total = 2;\n');
+    expect(state.diff).toContain('diff --git a/src/old.ts b/src/old.ts\ndeleted file mode 100644\n');
+    expect(state.diff).toContain("+export const key = '';\n");
+    expect(state.diff).toContain('diff --git a/src/coupon.ts b/src/coupon.ts\nuntracked, contents not read\n');
     expect(JSON.stringify(requests)).not.toContain(token);
   });
 

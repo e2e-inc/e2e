@@ -3,10 +3,10 @@
 import path from 'node:path';
 import type { Collection } from '../collect/collect.ts';
 import { select, type Selection, type SelectionFilters, type TestExclusion, type TestTargetPair } from '../collect/select.ts';
-import type { ResolvedRunConfig } from '../config/resolve-run.ts';
+import { SINCE_LAST_RUN_FILTER, type ResolvedRunConfig } from '../config/resolve-run.ts';
 import { describeValue } from '@e2e-dev/core/lib/config/validate';
 import { leaveWorkBehind } from '@e2e-dev/core/lib/internal/abandoned';
-import { E2EError, errorMessage } from '@e2e-dev/core/lib/internal/errors';
+import { ConfigurationError, E2EError, errorMessage } from '@e2e-dev/core/lib/internal/errors';
 import { isPlainObject } from '@e2e-dev/core/lib/internal/options';
 import { onDiskPath } from '@e2e-dev/core/lib/internal/paths';
 import { collapseText } from '@e2e-dev/core/lib/internal/text';
@@ -16,15 +16,37 @@ import { ellipsize, filterDecision, shortCommit } from '../report/format.ts';
 import { plural } from '../report/markdown-text.ts';
 import { leftOutTests } from '../report/left-out.ts';
 import type { TestFilter, TestFilterCandidate, TestFilterChanges, TestFilterContext } from '../run-types.ts';
-import { findChanges } from './changes.ts';
+import { findChanges, validateChangedSince } from './changes.ts';
+import { measureSinceLastRun, planSinceLastRun, type SinceLastRun } from './since-last-run.ts';
 import { staticOutputLedger } from '@e2e-dev/core/lib/run/secrecy';
 import { relevanceBand } from './units.ts';
+
+/** What a run measures its change from: the git ref `--changed-since` named, or with `--since-last-run` the working tree each test last passed against. */
+export type ChangeBase = { readonly kind: 'ref'; readonly ref: string } | { readonly kind: 'last-run' };
+
+/**
+ * What the options measure the change from for the test filters; undefined
+ * when they name neither, and no filter runs. A `changedSince` git cannot
+ * take as a ref is `INVALID_CHANGED_SINCE`; a `sinceLastRun` that is not a
+ * boolean, or both at once, `INVALID_CONFIG`.
+ */
+export function changeBase(options: { readonly changedSince?: unknown; readonly sinceLastRun?: unknown }): ChangeBase | undefined {
+  validateChangedSince(options.changedSince);
+  if (options.sinceLastRun !== undefined && typeof options.sinceLastRun !== 'boolean') {
+    throw new ConfigurationError('INVALID_CONFIG', `sinceLastRun must be a boolean, got ${describeValue(options.sinceLastRun)}`);
+  }
+  if (options.sinceLastRun === true && options.changedSince !== undefined) {
+    throw new ConfigurationError('INVALID_CONFIG', '--since-last-run and --changed-since each name what the change is measured from; pass one');
+  }
+  if (options.sinceLastRun === true) return { kind: 'last-run' };
+  return typeof options.changedSince === 'string' ? { kind: 'ref', ref: options.changedSince } : undefined;
+}
 
 /** What `filterSelection` judges a selection with, and where each line about what the gate and the filters decided goes. */
 export interface FilterSelectionOptions {
   readonly config: ResolvedRunConfig;
-  /** The base ref `--changed-since` named. */
-  readonly changedSince: string;
+  /** What the change is measured from. */
+  readonly since: ChangeBase;
   readonly signal: AbortSignal;
   /** One line about what the filters judge and what each decided. */
   readonly notice: (message: string) => void;
@@ -48,6 +70,8 @@ interface FilteredSelection {
   readonly records: readonly ReportFilter[];
   readonly changes: ReportChanges | undefined;
   readonly relevance: ReadonlyMap<string, number>;
+  /** What `--since-last-run` measured, for the run to settle its record with; absent with `--changed-since`. */
+  readonly sinceLastRun?: SinceLastRun | undefined;
 }
 
 /** One filter's decision: its record before the final selection counts what it left out. */
@@ -125,6 +149,12 @@ export const FILTER_TIMEOUT_MS = 300_000;
 /** What `--changed-since` says when the config has no test filter for it to run. */
 const NO_FILTERS = 'warning: --changed-since: the config has no filters, so every test runs';
 
+/** What a `--last-failed` rerun says of the filters it does not call. */
+const LAST_FAILED = '--last-failed: the tests the last run owes run without filters';
+
+/** Why `since-last-run` left a test out. */
+const UNCHANGED = 'no file changed since the test last passed';
+
 /**
  * The loaded config as `changes.files` spells it, relative to the repository
  * root: its directory resolved on disk, its own name kept, since git lists a
@@ -141,52 +171,113 @@ function repoConfigFile(configPath: string, root: string): string | undefined {
  * The second selection pass, which `run` and `list` share. `first` is the
  * selection every flag made, `--shard` included, so each shard machine hands
  * the filters its own slice and the cut never depends on what they answer.
- * Without a filter in the config, `first` stands, and so it does, with
- * `run.changes.skipped` saying why, on a `--last-failed` rerun, whose
- * tests are owed, with no test to judge (git is asked for neither), and
- * when no file changed since the merge base. Otherwise the exclusions go into a selection with the same flags,
- * which serial groups and sessions settle like any other filter; an empty
- * result is the filters' doing, or pass 1's under `passWithNoTests`, and
- * passes. Each decision's line goes to `options.notice`.
+ * `first` stands, with `run.changes.skipped` saying why, on a
+ * `--last-failed` rerun, whose tests are owed, and when the filters have no
+ * test to judge. Otherwise the exclusions go into a selection with the same
+ * flags, which serial groups and sessions settle like any other filter; an
+ * empty result is the filters' doing, or pass 1's under `passWithNoTests`,
+ * and passes. Each decision's line goes to `options.notice`.
  */
 export async function filterSelection(first: Selection, options: FilterSelectionOptions): Promise<FilteredSelection> {
-  const { config, collection, selectionFilters, signal, notice } = options;
+  if (options.since.kind === 'ref') return filterSinceRef(first, options, options.since.ref);
+  const measured = await measureSinceLastRun(options.config, options.signal);
+  return { ...(await filterSinceLastRun(first, options, measured)), sinceLastRun: measured };
+}
+
+/** `first` as it stands, for `changes.skipped`, said as `message` or `<why>, so no filter ran`. */
+function keepFirst(first: Selection, notice: FilterSelectionOptions['notice'], changes: ReportChanges & { readonly skipped: string }, message = `${changes.skipped}, so no filter ran`): FilteredSelection {
+  notice(message);
+  return { selection: first, records: [], changes, relevance: NO_RELEVANCE };
+}
+
+/**
+ * `--changed-since <ref>`: the filters judge every test `first` runs against
+ * the change since the merge base. Without a filter in the config `first`
+ * stands, and git is asked for nothing; so it does when no file changed.
+ */
+async function filterSinceRef(first: Selection, options: FilterSelectionOptions, ref: string): Promise<FilteredSelection> {
+  const { config, selectionFilters, signal, notice } = options;
   if (config.filters.length === 0) {
     if (!signal.aborted) notice(NO_FILTERS);
     return { selection: first, records: [], changes: undefined, relevance: NO_RELEVANCE };
   }
-  /** `first` stands, for `record.skipped`, said as `message` or `<why>, so no filter ran`. */
-  const skip = (record: ReportChanges & { readonly skipped: string }, message = `${record.skipped}, so no filter ran`): FilteredSelection => {
-    notice(message);
-    return { selection: first, records: [], changes: record, relevance: NO_RELEVANCE };
-  };
-  if (selectionFilters.lastFailed !== undefined) return skip({ skipped: '--last-failed' }, '--last-failed: the tests the last run owes run without filters');
+  if (selectionFilters.lastFailed !== undefined) return keepFirst(first, notice, { skipped: '--last-failed' }, LAST_FAILED);
   const candidates = filterCandidates(first);
-  if (candidates.length === 0) return skip({ skipped: 'no tests to judge' });
-  // Spelled as on disk, as `changes.root` is, so a filter can join the two.
-  const projectRoot = onDiskPath(config.projectRoot);
-  const changes = await findChanges({ cwd: projectRoot, changedSince: options.changedSince, signal });
+  if (candidates.length === 0) return keepFirst(first, notice, { skipped: 'no tests to judge' });
+  const changes = await findChanges({ cwd: onDiskPath(config.projectRoot), changedSince: ref, signal });
   const counts = { base: changes.base, files: changes.files.length };
-  if (changes.files.length === 0) return skip({ ...counts, skipped: `no files changed since ${shortCommit(changes.base)}` });
+  if (changes.files.length === 0) return keepFirst(first, notice, { ...counts, skipped: `no files changed since ${shortCommit(changes.base)}` });
   notice(`judging ${plural(changes.files.length, 'file')} changed since ${shortCommit(changes.base)}`);
-  const applied = await applyTestFilters(config.filters, candidates, {
-    projectRoot,
+  const applied = await applyTestFilters(config.filters, candidates, filterScope(options, changes));
+  return decided(options, applied, counts);
+}
+
+/**
+ * `--since-last-run`: the tests `first` runs are planned from what
+ * `measured` found (`planSinceLastRun`). One that passed against the working
+ * tree as it is, is left out by `since-last-run` itself; the configured
+ * filters judge the ones the plan hands them; every other test runs
+ * unasked. On a `--last-failed` rerun, or with no test to leave out or
+ * judge, as without a record, `first` stands. Without a filter in the
+ * config, a judged test runs.
+ */
+async function filterSinceLastRun(first: Selection, options: FilterSelectionOptions, measured: SinceLastRun): Promise<FilteredSelection> {
+  const { config, selectionFilters, signal, notice } = options;
+  if (selectionFilters.lastFailed !== undefined) return keepFirst(first, notice, { skipped: '--last-failed' }, LAST_FAILED);
+  const candidates = filterCandidates(first);
+  const { unchanged, judged, changes, owed } = await planSinceLastRun(candidates, first.pairs, measured, signal);
+  if (unchanged.length === 0 && judged.length === 0) {
+    if (measured.missing !== undefined) return keepFirst(first, notice, { skipped: measured.missing }, `--since-last-run: ${measured.missing}, so every test runs`);
+    return keepFirst(first, notice, { skipped: 'no test to leave out or judge' });
+  }
+  const unasked = owed === 0 ? '' : `; ${owed === 1 ? '1 test runs' : `${owed} tests run`} unasked`;
+  const counts = { since: 'last-run', files: changes?.files.length ?? 0 } as const;
+  const leftOut: AppliedTestFilters = {
+    excluded: new Map(unchanged.map((test) => [test.id, { filter: SINCE_LAST_RUN_FILTER, reason: UNCHANGED }])),
+    relevance: NO_RELEVANCE,
+    decisions: unchanged.length === 0 ? [] : [{ name: SINCE_LAST_RUN_FILTER, candidates: unchanged.length }],
+  };
+  if (changes === undefined) {
+    notice(`no files changed since the last run${unasked}`);
+    return decided(options, leftOut, counts);
+  }
+  const changed = `${plural(changes.files.length, 'file')} changed since the last run`;
+  if (config.filters.length === 0) {
+    notice(`${changed} and the config has no filters, so ${judged.length === 1 ? '1 test runs' : `${judged.length} tests run`}${unasked}`);
+    return decided(options, leftOut, { ...counts, skipped: 'the config has no filters' });
+  }
+  notice(`judging ${changed}${unasked}`);
+  const applied = await applyTestFilters(config.filters, judged, filterScope(options, changes));
+  return decided(options, { excluded: new Map([...leftOut.excluded, ...applied.excluded]), relevance: applied.relevance, decisions: [...leftOut.decisions, ...applied.decisions] }, counts);
+}
+
+/** What `applyTestFilters` hands each filter of `options.config` judging `changes`. */
+function filterScope(options: FilterSelectionOptions, changes: TestFilterChanges): TestFilterScope {
+  const { config, collection } = options;
+  return {
+    // Spelled as on disk, as `changes.root` is, so a filter can join the two.
+    projectRoot: onDiskPath(config.projectRoot),
     changes,
     configFile: config.configPath === undefined ? undefined : repoConfigFile(config.configPath, changes.root),
     secrets: config.allSecrets,
     collectedIds: new Set(collection.tests.map((test) => test.id)),
     timeoutMs: options.timeoutMs ?? FILTER_TIMEOUT_MS,
-    signal,
-    notice,
+    signal: options.signal,
+    notice: options.notice,
     step: options.step ?? ((_name, work) => work()),
-  });
+  };
+}
+
+/** The selection `applied` leaves, with the report's records of it, saying what each filter decided. */
+function decided(options: FilterSelectionOptions, applied: AppliedTestFilters, changes: ReportChanges): FilteredSelection {
+  const { config, collection, selectionFilters, notice } = options;
   const selection = select(collection, config, { ...selectionFilters, excluded: applied.excluded }, { passWithNoTests: true });
   const records = filterRecords(applied.decisions, selection);
   for (const record of records) {
     const summary = filterSummary(record);
     if (summary !== undefined) notice(summary);
   }
-  return { selection, records, changes: counts, relevance: applied.relevance };
+  return { selection, records, changes, relevance: applied.relevance };
 }
 
 /**

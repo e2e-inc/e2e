@@ -167,14 +167,15 @@ function filterLine(record: ReportFilter, counts: ReadonlyMap<string, number>): 
 
 /**
  * What the test filters judged (`12 files changed since abc1234`), or why
- * no filter ran. Nothing for a run without `--changed-since`.
+ * no filter ran. Nothing for a run without `--changed-since` or
+ * `--since-last-run`.
  */
 function changesLine(changes: ReportChanges | undefined): string | undefined {
   if (changes === undefined) return undefined;
-  // Checking `base` first narrows the union, so `files` and `base` are known below.
-  if (changes.base === undefined) return `**Filters** none ran: ${cell(changes.skipped)}`;
   if (changes.skipped !== undefined) return `**Filters** none ran: ${cell(changes.skipped)}`;
-  return `**Change** ${plural(changes.files, 'file')} changed since ${code(shortCommit(changes.base))}`;
+  if (changes.since === 'last-run') return `**Change** ${plural(changes.files, 'file')} changed since the last run`;
+  // Without `skipped` or `since` the change has a base; the check tells the compiler so.
+  return changes.base === undefined ? undefined : `**Change** ${plural(changes.files, 'file')} changed since ${code(shortCommit(changes.base))}`;
 }
 
 /**

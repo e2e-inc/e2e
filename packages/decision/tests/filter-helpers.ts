@@ -117,6 +117,21 @@ export function commitAll(repo: ChangedRepo): void {
   git(repo.root, 'commit', '--quiet', '-m', 'change');
 }
 
+/**
+ * The tracked files of `repo` as the working tree has them, as a tree
+ * object written through a scratch index: what a `--since-last-run` run
+ * hands a filter as `changes.base` and `changes.head`. The checkout's own
+ * index stays as it was.
+ */
+export function trackedTree(repo: ChangedRepo): string {
+  const index = path.join(mkdtempSync(path.join(os.tmpdir(), 'e2e-decision-index-')), 'index');
+  onTestFinished(() => rmSync(path.dirname(index), { recursive: true, force: true }));
+  const env = { ...process.env, GIT_INDEX_FILE: index };
+  execFileSync('git', ['read-tree', 'HEAD'], { cwd: repo.root, env });
+  execFileSync('git', ['add', '--update'], { cwd: repo.root, env });
+  return execFileSync('git', ['write-tree'], { cwd: repo.root, env, encoding: 'utf8' }).trim();
+}
+
 /** A secret every context's `redact` replaces. */
 export const SECRET = 'sk-test-4f9c2b7e1d';
 

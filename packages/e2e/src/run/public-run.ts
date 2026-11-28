@@ -18,7 +18,7 @@ import {
 } from './runner.ts';
 
 /** Options for executing a suite through the public runner API. */
-export type SuiteRunOptions = Pick<ListOptions, 'cwd' | 'config' | 'files' | 'changedSince'> & Pick<InternalRunOptions, 'interruptSignal' | 'onEvent'>;
+export type SuiteRunOptions = Pick<ListOptions, 'cwd' | 'config' | 'files' | 'changedSince' | 'sinceLastRun'> & Pick<InternalRunOptions, 'interruptSignal' | 'onEvent'>;
 
 /** The completed run's report and output paths, without live engine or configuration handles. */
 export interface RunResult {
@@ -48,7 +48,7 @@ interface OwnedRunOptions {
 export async function runSuite(options: SuiteRunOptions = {}): Promise<RunResult> {
   const outcome = await ownedRun('runner.run', options, (owned) =>
     execute({
-      ...toSelectionRunOptions({ cwd: options.cwd, config: options.config, files: options.files, changedSince: options.changedSince }),
+      ...toSelectionRunOptions({ cwd: options.cwd, config: options.config, files: options.files, changedSince: options.changedSince, sinceLastRun: options.sinceLastRun }),
       ...owned,
     }),
   );

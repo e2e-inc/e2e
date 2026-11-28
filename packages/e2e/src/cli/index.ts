@@ -222,6 +222,7 @@ function selectionOptions(command: Command): Command {
     .option('--grep <pattern>', 'only tests whose title matches the regular expression (describe titles and test title, space-joined); repeat for alternatives', parsePattern)
     .option('--grep-invert <pattern>', 'leave out tests whose title matches the regular expression; repeat for alternatives', parsePattern)
     .option('--changed-since <ref>', 'run the configured test filters on what differs from the merge base of this git ref, such as origin/main, uncommitted and untracked files included')
+    .option('--since-last-run', 'run the configured test filters on what changed since the last run with this flag, and only the tests they keep or that have not passed since; nothing changed runs nothing')
     .option('--last-failed', 'only the tests the previous run did not pass, read from <output>/report.json')
     .option('--shard <index/total>', 'one contiguous slice of the selected tests, such as 2/3; serial groups stay together', parseShard)
     .option('--pass-with-no-tests', 'exit 0 on an empty selection instead of NO_TESTS');
@@ -235,6 +236,7 @@ interface SelectionFlagValues {
   grep?: RegExp[];
   grepInvert?: RegExp[];
   changedSince?: string;
+  sinceLastRun?: boolean;
   lastFailed?: boolean;
   shard?: Shard;
   passWithNoTests?: boolean;
@@ -243,7 +245,7 @@ interface SelectionFlagValues {
 /** The shared selection flags as the runner's options. */
 function selectionRunOptions(
   options: SelectionFlagValues,
-): Pick<RunOptions, 'tags' | 'tagMode' | 'excludeTags' | 'grep' | 'grepInvert' | 'changedSince' | 'lastFailed' | 'shard' | 'passWithNoTests'> {
+): Pick<RunOptions, 'tags' | 'tagMode' | 'excludeTags' | 'grep' | 'grepInvert' | 'changedSince' | 'sinceLastRun' | 'lastFailed' | 'shard' | 'passWithNoTests'> {
   return {
     tags: options.tag,
     tagMode: options.tagMode,
@@ -251,6 +253,7 @@ function selectionRunOptions(
     grep: options.grep,
     grepInvert: options.grepInvert,
     changedSince: options.changedSince,
+    sinceLastRun: options.sinceLastRun,
     lastFailed: options.lastFailed,
     shard: options.shard,
     passWithNoTests: options.passWithNoTests,
@@ -716,6 +719,7 @@ function createProgram(version: string, telemetry: Telemetry, updateCheck: Updat
           "e2e run --grep checkout --grep-invert '/refund/i'",
           'e2e run --last-failed',
           'e2e run --changed-since origin/main',
+          'e2e run --since-last-run',
           'e2e run --shard 2/3',
           'e2e run --reporter list,junit --workers 4 --retries 2',
           'e2e run tests/signup.e2e.ts --action-timeout 5000',

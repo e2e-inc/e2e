@@ -63,6 +63,7 @@ export function planRun(base: RunOptions, filters: WatchFilters, trigger: WatchT
     freshGraph: true,
     lastFailed: false,
     changedSince: undefined,
+    sinceLastRun: undefined,
     passWithNoTests: true,
     files: filters.file === undefined ? base.files : [filters.file],
     grep: filters.title === undefined ? base.grep : [filters.title],

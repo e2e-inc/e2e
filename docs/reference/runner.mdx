@@ -66,11 +66,13 @@ process.exitCode = result.exitCode;
 | `config` | `'e2e.ci.config.ts'` | `string \| E2EConfig` | discovered `e2e.config.ts` |
 | `files` | `['tests/signup.e2e.ts:12']` | `readonly string[]` | the configured suite |
 | `changedSince` | `'origin/main'` | `string` | - |
+| `sinceLastRun` | `true` | `boolean` | - |
 | `interruptSignal` | `controller.signal` | `AbortSignal` | - |
 | `onEvent` | `(event) => {}` | `RunEventSink` | - |
 
 - `files` takes paths, globs, bare names, or `file:line`.
 - `changedSince` works as [`--changed-since`](/filters).
+- `sinceLastRun` works as [`--since-last-run`](/reference/cli#since-last-run).
 - Aborting `interruptSignal` interrupts tests and executes teardown.
 - `onEvent` receives typed progress events. Terminal progress is off. It
   must not block. A throwing or rejecting callback is disabled without
@@ -229,6 +231,7 @@ process sees an edit.
 | `lastFailed` | `true` | `boolean` | - |
 | `shard` | `{ index: 1, total: 4 }` | `{ index, total }` | - |
 | `changedSince` | `'origin/main'` | `string` | - |
+| `sinceLastRun` | `true` | `boolean` | - |
 | `passWithNoTests` | `true` | `boolean` | - |
 | `output` | `'.e2e'` | `string` | the config's `output` |
 | `env` | `{ ...process.env, CI: '1' }` | `NodeJS.ProcessEnv` | `process.env` |
@@ -242,6 +245,7 @@ process sees an edit.
   spaces, must match one `grep` pattern and no `grepInvert` pattern.
 - `lastFailed` keeps only tests the previous run did not pass, read from
   `report.json` under `output`.
+- `sinceLastRun` works as `--since-last-run`, and writes no record.
 - `changedSince` works as `--changed-since`. The [test filters](/filters)
   run in the calling process; `list` prints none of their lines, `e2e list`
   does.
@@ -288,6 +292,7 @@ a config that loads a key and then fails may quote it.
 | `NO_TESTS` | The selection is empty and `passWithNoTests` is not set. A `ConfigurationError`. When the test filters leave nothing to run, `list` resolves instead, with every pair `filtered` or `skip`. |
 | `UNKNOWN_TARGET` | A name in `targets` is not a configured target. |
 | `INVALID_CHANGED_SINCE` | `changedSince` is empty or starts with `-`, or the test filters run and it names a ref git can't measure a change from. |
+| `SINCE_LAST_RUN_UNAVAILABLE` | `sinceLastRun` is set and the project is not in a git repository, or git did not answer. |
 | The codes `run` records | The config is missing, the loader refused it, or collection failed. |
 
 #### `openHost`

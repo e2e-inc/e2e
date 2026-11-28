@@ -175,6 +175,9 @@ function resolveReporter(entry: unknown, label: string): BuiltinReporter | Repor
 
 const MAX_FILTER_NAME = 256;
 
+/** The name the report and `e2e list` give what left a test out because no file changed since it last passed (`--since-last-run`); no configured filter may take it. */
+export const SINCE_LAST_RUN_FILTER = 'since-last-run';
+
 /**
  * Resolves `filters`: a list of test filters, each checked structurally,
  * never with `instanceof`, since the config may import another copy of
@@ -205,6 +208,9 @@ function resolveTestFilters(raw: E2EConfig['filters']): readonly TestFilter[] {
     }
     if (name.length > MAX_FILTER_NAME) {
       throw new ConfigurationError('INVALID_CONFIG', `filter name ${JSON.stringify(ellipsize(name, 32))} is longer than ${MAX_FILTER_NAME} characters`);
+    }
+    if (name === SINCE_LAST_RUN_FILTER) {
+      throw new ConfigurationError('INVALID_CONFIG', `filter name ${JSON.stringify(name)} is taken: --since-last-run reports the tests it leaves out under it`);
     }
     if (names.has(name)) {
       throw new ConfigurationError('INVALID_CONFIG', `filters has two filters named ${JSON.stringify(name)}; the report tells filters apart by name`);
