@@ -56,6 +56,8 @@ export class WindowConditions {
         this.surface.failOnDialog();
         try {
           last = await read(deadline);
+          // One that opened while the read ran is this step's too.
+          this.surface.failOnDialog();
         } catch (cause) {
           if (!this.passing(cause)) throw cause;
           // What the read before it saw stays what the failure reports: this one saw nothing.
@@ -75,7 +77,7 @@ export class WindowConditions {
    */
   private passing(cause: unknown): boolean {
     if (!(cause instanceof EngineError)) return false;
-    return cause.retryable || (cause.code === 'INVALID_STATE' && this.surface.appRunning);
+    return cause.retryable || (cause.code === 'INVALID_STATE' && this.surface.appRunning && !this.surface.shownCrashed);
   }
 
   private url(call: PollCall, expected: string | RegExp, options: { readonly ignoreCase?: boolean; readonly timeout?: number } | undefined): Promise<void> {

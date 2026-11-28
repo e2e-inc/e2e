@@ -215,11 +215,22 @@ test.describe('expect(electron) and the fixture\'s waits', () => {
   });
 
   test('fails a wait on a dialog that opens under it', async ({ electron }) => {
-    await electron.activeWindow().evaluate(() => {
-      setTimeout(() => (globalThis as unknown as { confirm(message: string): boolean }).confirm('Later?'), 300);
-    });
     const started = Date.now();
-    expect(String(await failure(expect(electron).toHaveTitle('Never', { timeout: 10_000 })))).toContain('unhandled confirm dialog: Later?');
+    const waiting = failure(expect(electron).toHaveTitle('Never', { timeout: 10_000 }));
+    await electron.activeWindow().evaluate(() => {
+      setTimeout(() => (globalThis as unknown as { confirm(message: string): boolean }).confirm('Later?'), 0);
+    });
+    expect(String(await waiting)).toContain('unhandled confirm dialog: Later?');
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  test('says a crashed window\'s title cannot be read, at once', async ({ electron }) => {
+    const started = Date.now();
+    const waiting = failure(expect(electron).not.toHaveTitle('Sign In', { timeout: 10_000 }));
+    await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer());
+    // The crash ends the wait that was running, and one that starts after it.
+    expect(await waiting).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('renderer crashed') });
+    expect(await failure(expect(electron).toHaveTitle('Sign In', { timeout: 10_000 }))).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('renderer crashed') });
     expect(Date.now() - started).toBeLessThan(5000);
   });
 

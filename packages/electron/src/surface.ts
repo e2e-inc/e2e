@@ -539,10 +539,28 @@ export class ElectronSurface {
    * never another title, else the OS window's for a document with none.
    */
   async currentTitle(window: AppWindow, operation: OperationContext): Promise<string> {
-    return await withBudget(operation, 'window title', async () => {
-      const document = await window.page.title();
-      return document !== '' ? document : ((await this.app.windowTitle(window.page)) ?? '');
+    // A crashed renderer answers nothing: said at once, as a screen read says it, not waited out.
+    if (this.windowList.isCrashed(window)) throw crashed();
+    let stopWaiting: () => void = () => undefined;
+    const crash = new Promise<never>((_resolve, reject) => {
+      stopWaiting = window.page.on('crash', () => reject(crashed()));
     });
+    crash.catch(() => undefined);
+    try {
+      return await withBudget(operation, 'window title', async () => {
+        // A read the renderer's crash leaves pending would never settle: the crash ends it.
+        const document = await Promise.race([window.page.title(), crash]);
+        return document !== '' ? document : ((await this.app.windowTitle(window.page)) ?? '');
+      });
+    } finally {
+      stopWaiting();
+    }
+  }
+
+  /** Whether the shown window's renderer crashed: a wait on the window ends with that, where a closing window is waited through. */
+  get shownCrashed(): boolean {
+    const window = this.windowList.current();
+    return window !== undefined && this.windowList.isCrashed(window);
   }
 
   /** Whether the app is running: a wait on its window goes on through a window closing or loading, and ends when the app is gone. */
