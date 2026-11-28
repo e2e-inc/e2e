@@ -4,12 +4,13 @@
  * the target names, and the build `appPath` points at.
  */
 
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { obj, type EngineDoctorCheck, type EngineDoctorInfo } from '@e2e-dev/core/engine';
 import { runCommand } from './errors.ts';
-import type { ClientFactory, MobileOptions } from './options.ts';
+import type { AgentDeviceClient, ClientFactory, MobileOptions } from './options.ts';
 import { deviceSelection } from './bindings.ts';
+import { parsePlistDict } from './plist.ts';
 import { isDeviceList } from './pool.ts';
 import type { DeviceProvider } from './provider.ts';
 
@@ -35,9 +36,9 @@ export async function mobileDoctor(options: MobileOptions, createClient: ClientF
   const { device } = options;
   const devices = device === undefined ? [undefined] : typeof device === 'string' ? [device] : isDeviceList(device) ? device : undefined;
   if (devices === undefined) return [{ id: 'device', status: 'skip', message: `devices and the build come from the "${(device as DeviceProvider).name}" provider` }];
-  const build = await buildCheck(info);
   const targetApp = info.app.appPath === undefined ? info.app.bundleId : undefined;
   const client = createClient(session);
+  const build = await buildCheck(options, devices, client, info);
   const checks: EngineDoctorCheck[] = [...build];
   const reported = new Set<string>();
   for (const name of devices) {
@@ -67,15 +68,125 @@ function statusOf(status: string): EngineDoctorCheck['status'] | undefined {
   return status === 'pass' || status === 'warn' || status === 'fail' ? status : undefined;
 }
 
-/** Whether the build `appPath` names is on disk; nothing to check without one. */
-async function buildCheck(info: EngineDoctorInfo): Promise<readonly EngineDoctorCheck[]> {
+type IosTargetKind = 'simulator' | 'device' | 'unknown';
+
+/**
+ * Whether the target drives simulators or physical devices, from
+ * agent-device's inventory alone, which reports each entry's `kind`: a
+ * configured device the inventory does not list, or an inventory that cannot
+ * be read, is `unknown`, and the build check then trusts the build. With no
+ * device configured the engine drives the booted ones, or boots a simulator.
+ */
+async function classifyIosTarget(
+  devices: readonly (string | undefined)[],
+  client: AgentDeviceClient,
+  signal: AbortSignal,
+): Promise<IosTargetKind> {
+  const configured = devices.filter((name): name is string => name !== undefined);
+  let inventory: unknown;
+  try {
+    inventory = await runCommand('devices', () => client.devices.list({ platform: 'ios' }), signal);
+  } catch (cause) {
+    if (signal.aborted) throw cause;
+    return 'unknown';
+  }
+  if (!Array.isArray(inventory)) return 'unknown';
+  const entries = inventory.filter(
+    (entry): entry is { id?: unknown; name?: unknown; kind?: unknown; platform?: unknown; booted?: unknown } =>
+      typeof entry === 'object' && entry !== null,
+  );
+  // One simulator in the pool is enough: the build has to install there too.
+  const kindOf = (selected: readonly { kind?: unknown }[]): IosTargetKind => {
+    if (selected.some((entry) => entry.kind === 'simulator')) return 'simulator';
+    if (selected.length > 0 && selected.every((entry) => entry.kind === 'device')) return 'device';
+    return 'unknown';
+  };
+  if (configured.length > 0) {
+    const matched = configured.map((target) => entries.find((entry) => entry.id === target || entry.name === target));
+    return matched.every((entry) => entry !== undefined) ? kindOf(matched as { kind?: unknown }[]) : 'unknown';
+  }
+  const booted = entries.filter((entry) => entry.platform === 'ios' && entry.booted === true);
+  return booted.length === 0 ? 'simulator' : kindOf(booted);
+}
+
+/**
+ * The simulator SDK for a device platform `CFBundleSupportedPlatforms` names:
+ * an iOS simulator target also drives tvOS and visionOS simulators, each
+ * built with its own SDK.
+ */
+const SIMULATOR_SDK: Readonly<Record<string, string>> = {
+  iPhoneOS: 'iphonesimulator',
+  AppleTVOS: 'appletvsimulator',
+  XROS: 'xrsimulator',
+};
+
+/**
+ * Whether the build `appPath` names is on disk, and for an iOS `.app` bundle
+ * whether its `Info.plist` is a simulator build matching `app.bundleId`.
+ */
+async function buildCheck(
+  options: MobileOptions,
+  devices: readonly (string | undefined)[],
+  client: AgentDeviceClient,
+  info: EngineDoctorInfo,
+): Promise<readonly EngineDoctorCheck[]> {
   const { appPath } = info.app;
   if (appPath === undefined) return [];
   const resolved = path.resolve(info.projectRoot, appPath);
   try {
     await stat(resolved);
-    return [{ id: 'app-path', status: 'pass', message: resolved }];
   } catch {
     return [{ id: 'app-path', status: 'fail', message: `app.appPath ${resolved} does not exist; build the app or fix the path` }];
   }
+  if (options.platform !== 'ios' || !resolved.endsWith('.app')) {
+    return [{ id: 'app-path', status: 'pass', message: resolved }];
+  }
+
+  let plistBytes: Buffer;
+  try {
+    plistBytes = await readFile(path.join(resolved, 'Info.plist'));
+  } catch {
+    return [{ id: 'app-path', status: 'pass', message: resolved }];
+  }
+  const plist = parsePlistDict(plistBytes);
+  if (plist === undefined) return [{ id: 'app-path', status: 'pass', message: resolved }];
+
+  const rawPlatforms = plist.CFBundleSupportedPlatforms;
+  const platforms = Array.isArray(rawPlatforms) ? rawPlatforms.filter((entry): entry is string => typeof entry === 'string') : undefined;
+  // iPhoneSimulator, AppleTVSimulator, XRSimulator: any simulator platform is a simulator build.
+  if (platforms !== undefined && !platforms.some((platform) => platform.endsWith('Simulator'))) {
+    const targetKind = await classifyIosTarget(devices, client, info.signal);
+    if (targetKind === 'simulator') {
+      const sdk = platforms.map((platform) => SIMULATOR_SDK[platform]).find((entry) => entry !== undefined) ?? 'iphonesimulator';
+      const detail = platforms.length > 0
+        ? `is a device build (${platforms.join(', ')})`
+        : 'is not a simulator build (CFBundleSupportedPlatforms names no simulator)';
+      return [{
+        id: 'app-path',
+        status: 'fail',
+        message: `app.appPath ${resolved} ${detail}; build for the simulator (-sdk ${sdk}) or point app.appPath at a Debug-${sdk} build`,
+      }];
+    }
+  }
+
+  const bundleId = typeof plist.CFBundleIdentifier === 'string' && plist.CFBundleIdentifier.length > 0
+    ? plist.CFBundleIdentifier
+    : undefined;
+  const displayName = typeof plist.CFBundleDisplayName === 'string' && plist.CFBundleDisplayName.length > 0
+    ? plist.CFBundleDisplayName
+    : undefined;
+  const bundleName = typeof plist.CFBundleName === 'string' && plist.CFBundleName.length > 0
+    ? plist.CFBundleName
+    : undefined;
+  const appIdentifiers = [bundleId, displayName, bundleName].filter((id): id is string => id !== undefined);
+  if (info.app.bundleId !== undefined && appIdentifiers.length > 0 && !appIdentifiers.includes(info.app.bundleId)) {
+    const reported = bundleId !== undefined ? `CFBundleIdentifier ${bundleId}` : `bundle name ${displayName ?? bundleName}`;
+    return [{
+      id: 'app-path',
+      status: 'fail',
+      message: `app.appPath ${resolved} has ${reported}, but app.bundleId is ${info.app.bundleId}`,
+    }];
+  }
+
+  return [{ id: 'app-path', status: 'pass', message: resolved }];
 }
