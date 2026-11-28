@@ -27,3 +27,6 @@ libc = "0.2"
 
 [build-dependencies]
 napi-build = "2"
+
+# The workspace lints are for the util crates; this crate keeps the rustc and clippy defaults it was written to.
+[lints]
