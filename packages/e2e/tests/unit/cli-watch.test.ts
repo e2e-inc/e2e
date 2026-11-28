@@ -621,6 +621,16 @@ describe('watchSession', () => {
     expect(runs[2]!.grep).toEqual([/checkout/]);
     expect(written.join('')).toContain(' RERUN  current pattern (title: checkout) x3');
 
+    // A pattern with space at an end keeps its slashes, so reading the prompt back trimmed does not drop the space.
+    textMock.mockResolvedValueOnce('/refund /');
+    stdin.write('t');
+    await settle();
+    expect(runs[3]!.grep).toEqual([/refund /]);
+    textMock.mockResolvedValueOnce('');
+    stdin.write('t');
+    await settle();
+    expect(textMock.mock.calls[3]![0]).toMatchObject({ initialValue: '/refund /' });
+
     stdin.write('\x03');
     await expect(session).resolves.toBe(0);
   });

@@ -20,10 +20,12 @@ export function compileTitlePattern(value: string): RegExp {
 }
 
 /**
- * The text `compileTitlePattern` reads back as `pattern`: `/pattern/flags`
- * when it has flags, else the bare source. A source never starts with an
- * unescaped `/`, so the bare form is never read as the slashed one.
+ * The text `compileTitlePattern` reads back as `pattern`: the bare source
+ * when it has no flags and no space at either end, else `/pattern/flags`,
+ * since a prompt answer is read trimmed and the slashes keep that space. A
+ * source never starts with an unescaped `/`, so the bare form is never read
+ * as the slashed one.
  */
 export function titlePatternText(pattern: RegExp): string {
-  return pattern.flags === '' ? pattern.source : String(pattern);
+  return pattern.flags === '' && pattern.source.trim() === pattern.source ? pattern.source : String(pattern);
 }
