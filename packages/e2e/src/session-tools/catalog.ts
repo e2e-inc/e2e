@@ -185,7 +185,7 @@ async function saveScreenshot(
 function fullObserveTool(context: Pick<StepExecutorContext, 'observe'>, screen: Pick<ScreenPresenter, 'initial'>): ToolSet[string] {
   return {
     description:
-      'Look at the whole current screen: every node with its id, role, name, and state. Action results report only what changed since the last screen; call this to list everything, or after waiting for something in progress.',
+      'Look at the whole current screen: every node with its id, role, name, and state. Action results report only what changed since the last screen; call this to list everything, including any subtree an action result folded to one line, or after waiting for something in progress.',
     inputSchema: z.object({}).strict(),
     execute: async () => screen.initial(await context.observe()),
   };

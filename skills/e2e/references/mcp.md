@@ -84,7 +84,10 @@ Everything a session does is a catalog tool run through
   node on the newest screen reads like its node.
 - The grammar verbs (`tap`, `type`, `press`, `select`, `check`, `scroll`,
   `drag`, `upload`, `navigate`, `back`, ...): each reports what changed and
-  the `Test line:` that repeats it, or `No test line:` and why.
+  the `Test line:` that repeats it, or `No test line:` and why. A whole
+  screen folds a large subtree that matches an earlier listing to one line,
+  `(12 nodes inside, same as revision b1)`; `observe` shows the folded
+  subtree in full.
 - `type_secret`: fills a configured secret by name; its test line names
   `credentials.user(name)` or `secrets.get(name)`, never the value.
 - `locate`: tries one semantic locator and returns how many nodes match and

@@ -1,7 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SemanticNode } from '@e2e-dev/core/lib/engine/surface';
 import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
+import { createFakeEngine, FAKE_APP } from '../helpers/fake-engine.ts';
+import type { ScriptedNode } from '../helpers/scripted-scene.ts';
+import { resolveConfig } from '../../src/config/resolve-run.ts';
+import { SessionHost } from '../../src/mcp/session.ts';
 import { describeLocate, locateQuery } from '../../src/session-tools/catalog.ts';
+import type { McpToolResult } from '../../src/session-tools/tools.ts';
 
 function node(role: string, name: string, extra: Partial<SemanticNode> = {}): SemanticNode {
   return { ref: { id: 'l1', revision: 'l1' }, role, name, ...extra };
@@ -85,5 +93,139 @@ describe('describeLocate', () => {
     expect(text).not.toContain('sk-live-SUPERSECRET-0000');
     expect(text).toContain('- textbox "API key" value "<secret:apiKey>"');
     expect(text).toContain('- status "Saved key" text "Saved <secret:apiKey>"');
+  });
+});
+
+describe('session screen presenter', () => {
+  let dir: string;
+  let host: SessionHost | undefined;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'e2e-mcp-session-fold-'));
+  });
+
+  afterEach(async () => {
+    await host?.closeAll('test done');
+    host = undefined;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** The text of a tool result's text items. */
+  const textOf = (result: McpToolResult): string =>
+    result.content.map((item) => (item.type === 'text' ? item.text : '')).join('\n');
+
+  /**
+   * Opens a session on the orders page: a sidebar of 12 links beside a
+   * main that changes wholesale when one order opens. Each call builds
+   * a fresh page, since opening an order mutates the main. An observe
+   * before the tap lets the tap's screen fold the sidebar to one line.
+   */
+  async function openOrdersSession(): Promise<{ sessionHost: SessionHost; id: string; opened: string }> {
+    const sidebar: ScriptedNode = {
+      id: 'sidebar',
+      role: 'navigation',
+      name: 'Sidebar',
+      children: Array.from({ length: 12 }, (_, i) => ({ id: `item-${String(i + 1)}`, role: 'link', name: `Item ${String(i + 1)}` })),
+    };
+    const details: ScriptedNode[] = [
+      { id: 'detail-heading', role: 'heading', name: 'Order 42' },
+      { id: 'detail-total', role: 'text', name: 'Total $12' },
+      { id: 'detail-placed', role: 'text', name: 'Placed yesterday' },
+      { id: 'detail-refund', role: 'button', name: 'Refund' },
+      { id: 'detail-ship', role: 'button', name: 'Ship' },
+      { id: 'detail-print', role: 'button', name: 'Print' },
+      { id: 'detail-archive', role: 'button', name: 'Archive' },
+      { id: 'detail-note', role: 'text', name: 'Ships in 2 days' },
+      { id: 'detail-history', role: 'link', name: 'Order history' },
+      { id: 'detail-back', role: 'link', name: 'Back to orders' },
+    ];
+    const main: ScriptedNode = {
+      id: 'main',
+      role: 'main',
+      name: 'Order list',
+      children: [
+        { id: 'list-heading', role: 'heading', name: 'Orders' },
+        {
+          id: 'order-1',
+          role: 'button',
+          name: 'Order 1',
+          on: () => {
+            main.name = 'Order details';
+            main.children = details;
+          },
+        },
+        { id: 'order-2', role: 'button', name: 'Order 2' },
+      ],
+    };
+    const fake = createFakeEngine({ scene: () => [sidebar, main] });
+    const sessionHost = new SessionHost({
+      locateConfig: (requested) => path.join(dir, requested ?? 'e2e.config.ts'),
+      loadConfig: async (configPath) => ({
+        ...resolveConfig(
+          {
+            targets: [{ name: 'kiosk', platform: 'kiosk', engine: fake.engine, app: FAKE_APP }],
+            credentials: { admin: { username: 'admin', password: 'kiosk-pw' } },
+          } as never,
+          { projectRoot: dir, env: {}, configPath },
+        ),
+        configPath,
+      }),
+      loadEngineConfig: async () => {
+        throw new Error('this test opens no engine session');
+      },
+      env: {},
+      headed: false,
+      log: () => undefined,
+    });
+    host = sessionHost;
+    const opened = await sessionHost.open({});
+    const sessionMatch = /^Session (\S+) open/.exec(opened);
+    if (sessionMatch === null) throw new Error('open text names no session');
+    return { sessionHost, id: sessionMatch[1]!, opened };
+  }
+
+  it('folds a large unchanged subtree in an action result from a session it opened', { timeout: 60_000 }, async () => {
+    const { sessionHost, id, opened } = await openOrdersSession();
+    // The opening names the first screen without listing it, so nothing is
+    // on fold record yet: a fold can only name a revision that listed the
+    // subtree in full, and the opening did not.
+    expect(opened).toMatch(/Screen: revision b\d+, .*not listed\./);
+    expect(opened).not.toContain('link "Item 1"');
+    expect(opened).not.toContain('same as revision');
+    const observed = textOf(await sessionHost.call(id, 'observe', {}, { signal: new AbortController().signal }));
+    const revisionMatch = /Current screen \(revision (b\d+)/.exec(observed);
+    if (revisionMatch === null) throw new Error('observe shows no screen');
+    const firstRevision = revisionMatch[1]!;
+    // Observe lists the sidebar whole: no fold line yet.
+    expect(observed).toContain('link "Item 1"');
+    expect(observed).not.toContain('same as revision');
+    const tapped = await sessionHost.call(id, 'tap', { target: 'order-1' }, { signal: new AbortController().signal });
+    const text = textOf(tapped);
+    expect(text).toContain('Tapped #order-1.');
+    // The session's own presenter folds: a plain presenter would list the
+    // sidebar in full here instead.
+    expect(text).toContain(`(12 nodes inside, same as revision ${firstRevision})`);
+    expect(text).not.toContain('link "Item 1"');
+    expect(text).toContain('heading "Order 42"');
+    await sessionHost.close('done', id);
+  });
+
+  it('lists the sidebar in full after a large change when no observe listed it first', { timeout: 60_000 }, async () => {
+    // The same orders page as the fold test above, but the tap comes
+    // straight after the opening, which only named the first screen.
+    // Nothing has listed the sidebar in full, so the tap's whole screen
+    // lists it whole: a fold here would name a revision the model was
+    // only told about, never shown.
+    const { sessionHost, id, opened } = await openOrdersSession();
+    expect(opened).toMatch(/Screen: revision b\d+, .*not listed\./);
+    expect(opened).not.toContain('link "Item 1"');
+    const tapped = await sessionHost.call(id, 'tap', { target: 'order-1' }, { signal: new AbortController().signal });
+    const text = textOf(tapped);
+    expect(text).toContain('Tapped #order-1.');
+    expect(text).not.toContain('same as revision');
+    expect(text).toContain('link "Item 1"');
+    expect(text).toContain('link "Item 12"');
+    expect(text).toContain('heading "Order 42"');
+    await sessionHost.close('done', id);
   });
 });

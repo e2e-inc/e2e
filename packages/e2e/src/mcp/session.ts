@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import { loadAiSdkIfInstalled } from '@e2e-dev/core/lib/agent/ai-sdk';
 import { openInteractiveStep, type InteractiveStep } from '../agent/interactive-step.ts';
-import { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
+import type { ScreenPresenter } from '@e2e-dev/core/lib/agent/screen-update';
 import type { ResolvedConfig, ResolvedTarget } from '@e2e-dev/core/lib/config/resolve';
 import { launchesPinnedApp } from '@e2e-dev/core/lib/config/targets';
 import { classifyError, ConfigurationError, errorMessage, InfrastructureError, serializeError, type SerializedError } from '@e2e-dev/core/lib/internal/errors';
@@ -33,6 +33,7 @@ import type { ResolvedRunConfig } from '../config/resolve-run.ts';
 import type { StandaloneAttempt } from '@e2e-dev/core/lib/run/standalone-attempt';
 import { selectStandaloneTest, testLocation } from '../run/standalone-test.ts';
 import { createSessionCatalog, isGrammarVerb, type SessionCatalog } from '../session-tools/catalog.ts';
+import { createSessionScreenPresenter } from '../session-tools/screen.ts';
 import { sessionFills, sessionSecretLines, sessionSecretParams } from '../session-tools/secrets.ts';
 import { appLines } from './app-lines.ts';
 import { SESSION_BOUNDS } from '../session-tools/bounds.ts';
@@ -516,7 +517,7 @@ export class SessionHost {
         ...(params === undefined ? {} : { params }),
         timeout: ttlMs,
       });
-      const screen = new ScreenPresenter();
+      const screen = createSessionScreenPresenter();
       const recorder = this.recorder(id, config, attempt);
       const catalog = createSessionCatalog({
         context: step.context,
@@ -702,7 +703,7 @@ export class SessionHost {
       lines.push(`- ${toolSignature('run_code', runCode)}: JavaScript with loops, variables, and return values. Use it for most of the work: one call that reads, computes, acts, and asserts, in place of many single actions. A read's value shows in the result unless the code returns or logs. Its API:`, ...runCodeApi({ attempt: () => live.attempt, engineFixtures: Object.keys(live.target.engine?.fixtures ?? {}) }).map((line) => `  ${line}`));
     }
     lines.push(
-      'Node ids ("n42") come from the newest observation; an older id works only when exactly one node on the newest screen reads like its node. Every action prints the test line that repeats it. Call close_session when you are done.',
+      'Node ids ("n42") come from the newest observation; an older id works only when exactly one node on the newest screen reads like its node. Every action prints the test line that repeats it. When most of the screen changed, an action result sends the whole screen instead, with large subtrees that match an earlier listing folded to one line each, naming how many nodes each holds and the revision it matches; the ids inside a folded subtree stay valid, and observe shows the whole tree again. Call close_session when you are done.',
       READ_WRITING_GUIDE,
     );
     return `${lines.join('\n')}\n\n${screen}`;
