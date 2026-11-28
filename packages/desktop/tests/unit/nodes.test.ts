@@ -73,6 +73,7 @@ describe('projectSnapshot', () => {
             // Named by the description alone: a level only when it reads as one and nothing else.
             { role: 'heading', name: 'heading level 4', description: 'heading level 4' },
             { role: 'heading', name: 'Battery level 2', description: 'Battery level 2' },
+            { role: 'heading', name: 'Charge', description: 'Battery level 2 of 5' },
           ],
         },
       },
@@ -84,6 +85,7 @@ describe('projectSnapshot', () => {
       ['Plain', undefined],
       ['heading level 4', 4],
       ['Battery level 2', undefined],
+      ['Charge', undefined],
     ]);
     const heading = (level: number) =>
       resolveExpression(
