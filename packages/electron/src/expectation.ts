@@ -121,7 +121,10 @@ export class WindowConditions {
       toHaveTitle: (expected, options) => {
         const pattern = toTextPattern(expected, { exact: true });
         return this.poll(call('toHaveTitle'), `title ${describePattern(pattern)}`, async (deadline) => {
-          const title = await this.surface.currentTitle(this.surface.shownWindow(), this.context.operation(deadline.remaining()));
+          const window = this.surface.shownWindow();
+          const title = await this.surface.currentTitle(window, this.context.operation(deadline.remaining()));
+          // Another window became the active one while this one answered: its title is not the one asked about.
+          if (this.surface.shownWindow() !== window) return { matches: undefined, observed: 'nothing: the active window changed' };
           return { matches: matchesText(title, pattern), observed: `title ${JSON.stringify(title)}` };
         }, timeoutOf('toHaveTitle', options));
       },

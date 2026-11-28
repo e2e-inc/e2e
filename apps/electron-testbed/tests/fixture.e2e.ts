@@ -193,6 +193,27 @@ test.describe('expect(electron) and the fixture\'s waits', () => {
     await expect(electron).toHaveTitle('Inspector');
   });
 
+  test('reads the title of the window that is active when the read answers', async ({ electron }) => {
+    await electron.evaluate(({ BrowserWindow }) => {
+      void new BrowserWindow({ show: false, title: 'Secondary' }).loadURL('data:text/html,<title>Secondary</title>');
+    });
+    const secondary = await electron.window({ title: 'Secondary' });
+    // The first window's title takes 800 ms to read, and is the one asked for.
+    await electron.activeWindow().evaluate(() => {
+      Object.defineProperty((globalThis as unknown as { document: object }).document, 'title', {
+        get: () => {
+          const until = Date.now() + 800;
+          while (Date.now() < until);
+          return 'Late Primary';
+        },
+      });
+    });
+    const waiting = failure(expect(electron).toHaveTitle('Late Primary', { timeout: 3000 }));
+    await secondary.activate();
+    // The read of the first window answers after the other became active: it is not the active window's title.
+    expect(await waiting).toMatchObject({ code: 'ASSERTION_FAILED', message: expect.stringContaining('observed: title "Secondary"') });
+  });
+
   test('fails on a dialog nothing answered, as any step does', async ({ electron }) => {
     await electron.activeWindow().evaluate(() => {
       setTimeout(() => (globalThis as unknown as { confirm(message: string): boolean }).confirm('Sure?'), 0);
