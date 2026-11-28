@@ -2106,7 +2106,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       throw new ConfigurationError('POLICY_DENIED', 'a secure field on screen has no bounds to mask, so the screenshot is withheld');
     }
     const data = await this.rawScreenshot(operation.signal, {}, budget);
-    const masked = await redactSecure(data, secure, this.knownViewport);
+    const masked = await raceAbort(() => budget.read(() => redactSecure(data, secure, this.knownViewport)), operation.signal, 'mask screenshot');
     if (masked === undefined) {
       throw new EngineError('ENGINE_FAILURE', 'the screenshot could not be read to mask the secure fields on screen; screenshot withheld', {
         retryable: false,
@@ -2138,7 +2138,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       if (cause instanceof EngineError && cause.code === 'OPERATION_TIMEOUT') throw cause;
       return undefined;
     }
-    const redacted = await redactSecure(raw, secure, viewport);
+    const redacted = await raceAbort(() => budget.read(() => redactSecure(raw, secure, viewport)), operation.signal, 'mask observation screenshot');
     if (redacted === undefined) return undefined;
     const size = readPngSize(redacted.data);
     if (size === undefined) return undefined;
