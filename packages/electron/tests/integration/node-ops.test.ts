@@ -221,6 +221,11 @@ describe('queryAll', () => {
       <div id="below" style="margin-top:5000px;width:10px;height:10px"></div>
       <span id="boxless" style="display:none">N</span>`);
     expect(await run(await element('#styled'), 'readStyle', ['color', 'font-weight'])).toEqual({ color: 'rgb(255, 0, 0)', 'font-weight': '700' });
+    // Any property the test names, and the class attribute as written; none is the empty list.
+    expect(await run(await element('#fixed'), 'readStyle', ['position'])).toEqual({ position: 'fixed' });
+    expect(await run(await element('#styled'), 'className')).toBe('');
+    await window.inPage(() => document.querySelector('#styled')!.setAttribute('class', ' lead  active '));
+    expect(await run(await element('#styled'), 'className')).toBe(' lead  active ');
     expect(await run(await element('#half'), 'viewportIntersection')).toEqual({ intersects: true, ratio: 0.5 });
     expect(await run(await element('#scrolled-out'), 'viewportIntersection')).toEqual({ intersects: false, ratio: 0 });
     // A fixed box is the window's to clip, whatever scroller it sits in.

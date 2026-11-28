@@ -59,8 +59,10 @@ test('signs in', async ({ app, screen }) => {
 - **Windows.** The agent sees them as tabs. The `electron` fixture has
   `launch` (per-test arguments and environment), `userDataDir`, `evaluate`
   (main process), `windows`, `activeWindow`, `waitForWindow`, `window`,
-  `waitForDownload`, `onDialog`, `locator` (CSS), `keyboard`, and `mouse`. A
-  window has `evaluate` (its page) and `reload`.
+  `waitForDownload`, `onDialog`, `locator` (CSS), `keyboard`, `mouse`,
+  `waitForURL`, and `waitForFunction`, and `expect(electron)` asserts the
+  window's URL, title, and an element's class and computed style. A window
+  has `evaluate` (its page) and `reload`.
 - **Video.** The shown window's screencast, encoded to one `.webm` by ffmpeg,
   which the engine downloads on the first recording when the machine has none.
 - **Secrets.** Password fields report no value, and screenshots paint them

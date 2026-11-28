@@ -100,6 +100,7 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
 | `onDialog(handler)` | Answers the app's [`alert()` and `confirm()` dialogs](#handle-alert-and-confirm-dialogs) |
 | `locator(selector)` | Queries the current window by CSS selector |
 | `keyboard`, `mouse` | [Keyboard and pointer input](#keyboard-and-mouse) for the active window |
+| `waitForURL(url, { timeout }?)`, `waitForFunction(fn, arg?, { timeout }?)` | [Wait for the active window](#wait-and-assert-on-the-window) |
 
 ## Launch with per-test arguments
 
@@ -194,6 +195,37 @@ as text, and `arg` and the result are plain JSON.
 const window = electron.activeWindow();
 const theme = await window.evaluate((key) => localStorage.getItem(key), 'theme');
 await window.reload();
+```
+
+## Wait and assert on the window
+
+`expect(electron)` asserts on the active window and retries until the
+assertion timeout, as [`expect(browser)`](/reference/expect) does on the web:
+
+```ts
+await expect(electron).toHaveURL(/\/settings$/);
+await expect(electron).toHaveTitle('Settings');
+await expect(electron).toHaveClass(screen.getByRole('row', 'Draft'), /selected/);
+await expect(electron).toHaveCSS(screen.getByRole('row', 'Draft'), 'opacity', '0.4');
+await expect(electron).not.toHaveTitle('Sign in');
+```
+
+- `toHaveURL` and `waitForURL` take a URL or a `RegExp`. A string is compared
+  as a URL and resolves against the window's current one, so `'settings.html'`
+  matches a sibling file. A glob such as `'**/settings'` isn't one: use a
+  `RegExp`.
+- `toHaveClass` and `toHaveCSS` take the locator first. A string is the whole
+  class list, or the computed value as `getComputedStyle` reports it, such as
+  `'rgb(255, 0, 0)'`.
+- Every matcher takes `{ timeout }`.
+
+`electron.waitForURL()` waits the same way without asserting, and
+`electron.waitForFunction()` runs a function in the window's page until it
+returns something truthy, then returns that value:
+
+```ts
+await electron.waitForURL(/\/workspace\/[^/]+\/debug$/);
+const count = await electron.waitForFunction(() => document.querySelectorAll('li').length);
 ```
 
 ## Keyboard and mouse

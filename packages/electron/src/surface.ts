@@ -449,18 +449,18 @@ export class ElectronSurface {
   }
 
   /** `window.evaluate()`: runs test code in the window's page, with the app's own globals. */
-  async evaluateInWindow<R, A>(window: AppWindow, fn: (arg: A) => R | Promise<R>, arg: A, operation: OperationContext): Promise<R> {
+  async evaluateInWindow<R, A>(window: AppWindow, fn: (arg: A) => R | Promise<R>, arg: A, operation: OperationContext, caller = 'window.evaluate'): Promise<R> {
     this.failOnDialog();
-    if (window.page.isClosed()) throw new TestError('ACTION_FAILED', 'window.evaluate: the window has closed');
-    checkJsonArgument(arg, 'window.evaluate');
+    if (window.page.isClosed()) throw new TestError('ACTION_FAILED', `${caller}: the window has closed`);
+    checkJsonArgument(arg, caller);
     // Its message is the test's, never read for a pattern.
-    const run = window.page.evaluateInPage(functionSource(fn, 'window.evaluate'), arg).catch((cause: unknown) => {
-      throw cause instanceof EvaluateError ? new TestError('EVALUATE_FAILED', `window.evaluate: ${cause.message}`, { cause }) : cause;
+    const run = window.page.evaluateInPage(functionSource(fn, caller), arg).catch((cause: unknown) => {
+      throw cause instanceof EvaluateError ? new TestError('EVALUATE_FAILED', `${caller}: ${cause.message}`, { cause }) : cause;
     });
     // A cancelled step never awaits it.
     run.catch(() => undefined);
     // Not input: a timeout is the function's, and nothing the engine sent may have committed.
-    return (await withBudget(operation, 'window.evaluate', () => run)) as R;
+    return (await withBudget(operation, caller, () => run)) as R;
   }
 
   /** `window.reload()`: the window's document loaded again. */
@@ -516,6 +516,23 @@ export class ElectronSurface {
     return (await this.app.windowTitle(window.page)) ?? '';
   }
 
+  /**
+   * The title `expect(electron).toHaveTitle` polls: the document's, read
+   * within the operation so a read the deadline cuts off is a timeout and
+   * never another title, else the OS window's for a document with none.
+   */
+  async currentTitle(window: AppWindow, operation: OperationContext): Promise<string> {
+    return await withBudget(operation, 'window title', async () => {
+      const document = await window.page.title();
+      return document !== '' ? document : ((await this.app.windowTitle(window.page)) ?? '');
+    });
+  }
+
+  /** Whether the app is running: a wait on its window goes on through a window closing or loading, and ends when the app is gone. */
+  get appRunning(): boolean {
+    return this.app.running;
+  }
+
   /** `electron.onDialog()`: answers the app's dialogs from now on, until what it returns is called. */
   onDialog(handler: DialogHandler): () => void {
     return this.dialogs.add(handler);
@@ -538,6 +555,19 @@ export class ElectronSurface {
     const requested = validateComputedStyleProperties(properties);
     const { window, backendNodeId } = this.windowList.bind(ref);
     return await withBudget(operation, 'read computed style', () => this.devtools.callOn(window.page, backendNodeId, 'readStyle', requested));
+  }
+
+  /**
+   * `expect(electron).toHaveClass` and `toHaveCSS`: the class attribute, or
+   * one computed style, of a node the test names. Any CSS property: the test
+   * is trusted with what it reads, as with `window.evaluate`.
+   */
+  async readElement(ref: NodeRef, what: 'class' | { readonly css: string }, operation: OperationContext): Promise<string> {
+    const { window, backendNodeId } = this.windowList.bind(ref);
+    return await withBudget(operation, 'read element', async () => {
+      if (what === 'class') return await this.devtools.callOn(window.page, backendNodeId, 'className');
+      return (await this.devtools.callOn(window.page, backendNodeId, 'readStyle', [what.css]))[what.css] ?? '';
+    });
   }
 
   async viewportIntersection(ref: NodeRef, operation: OperationContext): Promise<ViewportIntersection> {

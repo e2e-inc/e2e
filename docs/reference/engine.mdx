@@ -2491,6 +2491,7 @@ The factory runs once per attempt with an `EngineFixtureContext`:
 | `attachArtifact(kind, relativePath)` | Registers a file the current step produced. |
 | `attachViewport(viewport)` | Records the viewport the current step established. |
 | `locator(expression)` | Mints a public locator from a raw expression. |
+| `expression(locator)` | The expression of a locator this session made. `INVALID_LOCATOR` for any other value. |
 | `screen(scope)` | Mints a screen scope. |
 | [`expectable(target, factory)`](#expectations) | Makes `expect(fixture)` return matchers. |
 
@@ -2548,6 +2549,12 @@ export interface EngineFixtureContext {
   attachViewport(viewport: { width: number; height: number; scale: number }): void;
   /** Mints a public locator from a raw expression (a platform selector, say). */
   locator(expression: LocatorExpression): Locator;
+  /**
+   * The expression of a locator this session made, from `locator`, `screen`,
+   * or a `screen` query: for a fixture that reads of the matched node what
+   * no locator read gives. Throws `INVALID_LOCATOR` for anything else.
+   */
+  expression(locator: Locator): LocatorExpression;
   /** Mints a screen scope whose every query is wrapped by `scope` (a nested document, say). */
   screen(scope: (expression: LocatorExpression) => LocatorExpression): Screen;
   /**

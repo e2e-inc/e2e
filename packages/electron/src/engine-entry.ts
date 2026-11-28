@@ -11,4 +11,4 @@ export type { ElectronEngine } from './engine.ts';
 export { electron as default } from './engine.ts';
 export type { ElectronOptions } from './options.ts';
 export type { Dialog, DialogHandler } from './dialogs.ts';
-export type { Electron, ElectronFixtures, ElectronKeyboard, ElectronLaunchOptions, ElectronMainModule, ElectronMouse, ElectronWindow, WindowMatcher } from './fixtures.ts';
+export type { Electron, ElectronExpectation, ElectronFixtures, ElectronKeyboard, ElectronLaunchOptions, ElectronMainModule, ElectronMouse, ElectronWindow, WindowMatcher } from './fixtures.ts';

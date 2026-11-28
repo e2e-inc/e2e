@@ -4,8 +4,9 @@
  * `electron.<method>` step bounded by the action timeout.
  */
 
-import { ConfigurationError, isSecret, stepTimeout, TestError, type EngineFixtureContext, type FixtureOperation } from '@e2e-dev/core/engine';
-import type { Electron, ElectronMainModule, ElectronWindow } from './fixtures.ts';
+import { ConfigurationError, isSecret, stepTimeout, TestError, type EngineFixtureContext, type Expectable, type FixtureOperation } from '@e2e-dev/core/engine';
+import { EXPECTATION_OPERATIONS, WindowConditions } from './expectation.ts';
+import type { Electron, ElectronExpectation, ElectronMainModule, ElectronWindow } from './fixtures.ts';
 import { typeKeys } from './actions.ts';
 import { hasKey, type MouseButton } from './cdp/input.ts';
 import { unsupported } from './errors.ts';
@@ -54,7 +55,13 @@ export function createElectronFixture(surface: ElectronSurface, context: EngineF
     if (!hasKey(name)) throw unsupported(`the keyboard has no key ${JSON.stringify(name)}: name a key such as "Shift" or "Enter", or a character of a US keyboard`);
     await surface.input(`keyboard.${direction}`, (window, budget) => budget.send(() => window.page.keyboard[direction](name)), context.operation());
   };
-  const electron: Electron = {
+  const conditions = new WindowConditions(surface, context);
+  const electron: Omit<Electron, keyof Expectable<ElectronExpectation>> = {
+    waitForURL: (url, options) => conditions.waitForURL(url, options),
+    async waitForFunction<R, A>(fn: (arg: A) => R | Promise<R>, arg?: A, options?: { readonly timeout?: number }): Promise<R> {
+      if (holdsSecret(arg)) throw new ConfigurationError('POLICY_DENIED', 'electron.waitForFunction cannot take a secret as its argument');
+      return await conditions.waitForFunction(fn, arg as A, options);
+    },
     get userDataDir() {
       return surface.dataDirectory();
     },
@@ -138,7 +145,9 @@ export function createElectronFixture(surface: ElectronSurface, context: EngineF
     },
   };
   const input: FixtureOperation = { kind: 'resource' };
-  return context.fixture('electron', electron, {
+  return context.fixture('electron', context.expectable(electron, () => context.fixture('expect', conditions.expectation(), EXPECTATION_OPERATIONS)), {
+    waitForURL: { kind: 'resource', timeout: false, verifies: true, label: (url) => String(url) },
+    waitForFunction: { kind: 'resource', timeout: false, verifies: true },
     launch: { kind: 'resource', timeout: false },
     keyboard: {
       press: { ...input, label: (key) => String(key) },
