@@ -2307,6 +2307,32 @@ describe('DesktopSurface: sweeping what killed workers left', () => {
     }
   });
 
+  it('keeps the record of a left app whose processes the sweep ran out of time for, and starts', async () => {
+    const dead = await deadPid();
+    const fake = fakeDriver();
+    const leaked = standIn();
+    const late = standIn();
+    fake.carriers.set(leaked, 'token-slow');
+    const left = leftDirectory(String(dead), { token: 'token-slow' });
+    const list = fake.processesCarrying.bind(fake);
+    let looks = 0;
+    fake.processesCarrying = async (carried: string) => {
+      looks += 1;
+      if (looks === 2) {
+        // The second look comes back after the sweep's time ran out, with a process it has to kill.
+        await new Promise((resolve) => setTimeout(resolve, 2_100));
+        fake.carriers.set(late, 'token-slow');
+      }
+      return list(carried);
+    };
+    try {
+      await initialized(fake);
+      expect(existsSync(path.join(left, 'app.json'))).toBe(true);
+    } finally {
+      rmSync(left, { recursive: true, force: true });
+    }
+  });
+
   it('quits a process the left app started as the sweep listed the processes', async () => {
     const dead = await deadPid();
     const fake = fakeDriver();

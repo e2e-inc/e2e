@@ -143,7 +143,10 @@ export async function sweepStateDirectories(driver: DesktopDriver): Promise<void
       (await stat(path.join(directory, APP_FILE)).then((info) => Date.now() - info.mtimeMs < LAUNCH_SETTLE_MS, () => false));
     const token = typeof launched.token === 'string' && launched.token !== '' ? launched.token : undefined;
     const settled =
-      known && !settling && (await killedCarriers(owned, token, (carried) => driver.processesCarrying(carried), Date.now() + 2_000, AbortSignal.timeout(5_000))) === 'gone';
+      known &&
+      !settling &&
+      // A sweep that runs out of its time is one whose processes may still run: the record stays, and the run goes on.
+      (await killedCarriers(owned, token, (carried) => driver.processesCarrying(carried), Date.now() + 2_000, AbortSignal.timeout(5_000)).catch(() => 'running' as const)) === 'gone';
     await (settled ? rm(directory, { recursive: true, force: true }) : keepOnlyRecord(directory)).catch(() => undefined);
   }
 }
