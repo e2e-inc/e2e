@@ -27,7 +27,17 @@ pub(super) fn to_uint8(x: f64) -> u8 {
 }
 
 /// `Math.cbrt` as V8 computes it: FreeBSD's `s_cbrt.c` (V8's `base::ieee754::cbrt`). The platform `cbrt` and the
-/// `libm` crate's correctly rounded one can differ from it in the last bit.
+/// `libm` crate's correctly rounded one can differ from it in the last bit. Ported from that file, whose notice
+/// follows (and is in the package NOTICE):
+///
+/// Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+///
+/// Developed at SunPro, a Sun Microsystems, Inc. business.
+/// Permission to use, copy, modify, and distribute this
+/// software is freely granted, provided that this notice
+/// is preserved.
+///
+/// Optimized by Bruce D. Evans.
 pub(super) fn cbrt(x: f64) -> f64 {
     const B1: u32 = 715_094_163;
     const B2: u32 = 696_219_795;
