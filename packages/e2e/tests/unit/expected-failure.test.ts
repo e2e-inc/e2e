@@ -81,6 +81,12 @@ describe('settleExpectedFailure', () => {
     expect(Buffer.byteLength(settle({ status: 'passed', secondaryErrors: [] }, 'x'.repeat(9000)).expectedFailure!.reason)).toBe(8192);
   });
 
+  it('redacts a reason the control-character strip would otherwise reassemble', () => {
+    const redact = (text: string): string => text.split('hunter2').join('[REDACTED]');
+    const covered = settle({ status: 'failed', error: failure('test'), secondaryErrors: [] }, 'token hunter\u001b[31m2 leaks', redact);
+    expect(covered.expectedFailure?.reason).toBe('token [REDACTED] leaks');
+  });
+
   it('keeps a \\r\\n line break in the reason and replaces a lone carriage return', () => {
     expect(settle({ status: 'failed', error: failure('test'), secondaryErrors: [] }, 'known\r\ngap\rhere').expectedFailure?.reason).toBe('known\r\ngap\uFFFDhere');
   });

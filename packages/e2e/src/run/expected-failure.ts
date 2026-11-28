@@ -64,7 +64,7 @@ function isProductFailure(error: SerializedError): boolean {
  */
 export function settleExpectedFailure(record: MarkableAttempt, mark: string | undefined, { serialize, redact }: ExpectedFailureSerializer): void {
   if (mark === undefined || record.status === 'skipped' || record.skip !== undefined) return;
-  const reason = truncateUtf8(sanitizeRecordedText(redact(mark)), MAX_REASON_BYTES);
+  const reason = truncateUtf8(redact(sanitizeRecordedText(redact(mark))), MAX_REASON_BYTES);
   if (record.status === 'passed') {
     record.status = 'failed';
     record.error = serialize(

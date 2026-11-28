@@ -151,6 +151,18 @@ describe('serializeError', () => {
     expect(colored.message).toBe('Unauthenticated request');
   });
 
+  it('redacts a value the control-character strip would otherwise reassemble', () => {
+    const secret = 'SECRET-value-9381';
+    const redact = (text: string): string => text.split(secret).join('<secret:api-key>');
+    // A page can put an ANSI escape through the middle of a value; stripping it joins the halves back together.
+    const split = 'SECRET-\u001b[31mvalue-9381';
+    const error = new TestError('ASSERTION_FAILED', `the page showed ${split}`, { details: { observed: split } });
+    const serialized = serializeError(error, { redact });
+    expect(serialized.message).toBe('the page showed <secret:api-key>');
+    expect(serialized.details).toEqual({ observed: '<secret:api-key>' });
+    expect(JSON.stringify(serialized)).not.toContain(secret);
+  });
+
   it('keeps carriage returns in the message, the stack, and the details', () => {
     const error = new TestError('ASSERTION_FAILED', 'line one\r\nline two', { details: { observed: 'a\r\nb' } });
     error.stack = 'TestError: line one\r\nline two\r\n    at test (tests/a.e2e.ts:1:1)';

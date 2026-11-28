@@ -443,7 +443,7 @@ export function serializeError(
   const serialized: SerializedError = {
     category: error.category,
     code: error.code,
-    message: truncateUtf8(sanitizeRecordedText(redact(error.message)), MAX_MESSAGE_BYTES),
+    message: truncateUtf8(redact(sanitizeRecordedText(redact(error.message))), MAX_MESSAGE_BYTES),
     retryable: error.retryable,
   };
   if (extras.phase !== undefined) serialized.phase = extras.phase;
@@ -454,7 +454,7 @@ export function serializeError(
     if (details !== undefined) serialized.details = details;
   }
   const stack = (error.cause instanceof Error ? error.cause.stack : undefined) ?? error.stack;
-  if (stack !== undefined) serialized.stack = truncateUtf8(sanitizeRecordedText(redact(stack)), 65536);
+  if (stack !== undefined) serialized.stack = truncateUtf8(redact(sanitizeRecordedText(redact(stack))), 65536);
   const source = sourceLocation(stack, extras.projectRoot);
   if (source !== undefined) serialized.source = source;
   return serialized;
@@ -510,7 +510,7 @@ export function redactSerializedError(error: SerializedError, redact: (text: str
 
 /** Details as the report carries them: text redacted, sanitized, and bounded, empty text dropped, nothing when nothing is left. */
 function boundedDetails(details: ErrorDetails, redact: (text: string) => string): ErrorDetails | undefined {
-  const bounded = mapDetailText(details, (text) => truncateUtf8(sanitizeRecordedText(redact(text)), MAX_DETAIL_BYTES));
+  const bounded = mapDetailText(details, (text) => truncateUtf8(redact(sanitizeRecordedText(redact(text))), MAX_DETAIL_BYTES));
   return Object.keys(bounded).length === 0 ? undefined : bounded;
 }
 

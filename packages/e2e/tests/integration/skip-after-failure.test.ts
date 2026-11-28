@@ -167,6 +167,7 @@ it('redacts and bounds static and runtime skip reasons before reporters see them
     test('long static', { skip: 'é'.repeat(9000) }, () => {});
     test('long runtime', () => test.skip(true, 'é'.repeat(9000)));
     test('failed skip', () => { expect.soft(1).toBe(2); test.skip(true, 'blocked ${token}'); });
+    test('split skip', () => test.skip(true, 'blocked ${token.slice(0, 12)}\\u001b[31m${token.slice(12)}'));
   `, `secrets: { key: '${token}' }, reporters: ['json', 'markdown', 'junit'],`);
   expect(exitCode).toBe(1);
   expect(report.run.results[2]?.skip?.reason).toBeDefined();
@@ -182,6 +183,7 @@ it('redacts and bounds static and runtime skip reasons before reporters see them
   }
   expect(report.run.results[0]?.skip?.reason).toBe('blocked <secret:key>');
   expect(report.run.results[1]?.skip?.reason).toBe('blocked <secret:key>');
+  expect(report.run.results[5]?.skip?.reason).toBe('blocked <secret:key>');
   expect(output).not.toContain(token);
   for (const file of ['report.json', 'summary.md', 'junit.xml']) {
     expect(readFileSync(path.join(project.dir, '.e2e', file), 'utf8')).not.toContain(token);
