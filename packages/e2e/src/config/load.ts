@@ -7,7 +7,7 @@ import { onBun } from '../internal/runtime.ts';
 import { withConfigSecretReferences } from '@e2e-dev/core/lib/secrets';
 import type { E2EConfig } from '../run-types.ts';
 import { explainModuleError } from './diagnose.ts';
-import { freshModuleURL, registerLoader, runInLoad } from './esm-hooks.ts';
+import { importFreshModule, nextFreshLoadSequence, registerLoader } from './esm-hooks.ts';
 import { CONFIG_NAMES, JS_CONFIG_NAMES, TS_CONFIG_NAMES } from './names.ts';
 
 /** Spellings a config author might reach for that the loader does not read. */
@@ -131,16 +131,16 @@ export interface FreshLoad {
   readonly module: Promise<unknown>;
 }
 
-/** Process-unique sequence that keeps every fresh import's URL distinct. */
-let imports = 0;
+/** How many fresh imports this copy of e2e made on Bun, where no loader counts them for every copy. */
+let bunImports = 0;
 
 function importFresh(absolutePath: string, cacheKey: string, graph: boolean | string): FreshLoad {
-  imports += 1;
   registerLoader();
-  const key = `${cacheKey}-${imports}`;
+  // An older copy of e2e in the process numbers its own loads `<cacheKey>-<n>`; the prefix keeps this copy's keys apart from them.
+  const key = onBun ? `${cacheKey}-${++bunImports}` : `fresh-${cacheKey}-${nextFreshLoadSequence()}`;
   const graphName = graph === true ? key : graph === false ? undefined : graph;
   if (onBun) return { key: undefined, module: import('./bun-loader.ts').then((loader) => loader.importFreshOnBun(absolutePath, graphName)) };
-  return { key, module: runInLoad(key, () => import(freshModuleURL(absolutePath, key, graphName))) };
+  return { key, module: importFreshModule(absolutePath, key, graphName) };
 }
 
 /** Loads and returns the raw default export of a config module. */

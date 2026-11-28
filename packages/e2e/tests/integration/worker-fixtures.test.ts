@@ -1,13 +1,430 @@
 /** Worker-scoped fixtures and the suite hooks that receive them, on an engine that isolates each attempt and on one whose state outlives it. */
 
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import type { Report1Document } from '../../src/report/build.ts';
 import { createFakeEngine } from '../helpers/fake-engine.ts';
 import { engineConfig } from '../helpers/fixture-config.ts';
 import { hookLog, LOG_MODULE } from '../helpers/hook-log.ts';
 import { assertValidReport } from '../helpers/report-schema.ts';
-import { resultByTitle, runProject } from '../helpers/run-project.ts';
+import { createProject, resultByTitle, runProject, workerFakeConfigSource } from '../helpers/run-project.ts';
+
+function runFixtureCLI(cwd: string, env: NodeJS.ProcessEnv = {}) {
+  const cli = fileURLToPath(new URL('../../dist/cli/bin.js', import.meta.url));
+  const result = spawnSync(process.execPath, [cli, 'run'], {
+    cwd,
+    env: { ...process.env, ...env, CI: '', E2E_TELEMETRY_DISABLED: '1', NO_COLOR: '1' },
+    encoding: 'utf8',
+    timeout: 20_000,
+  });
+  expect(result.error).toBeUndefined();
+  expect(result.status, result.stdout + result.stderr).toBe(0);
+  return JSON.parse(readFileSync(path.join(cwd, '.e2e/report.json'), 'utf8')) as Report1Document;
+}
 
 describe('worker fixtures', () => {
+  it('keeps a forwarded import separate from an explicit user freshness query', () => {
+    const imports = [
+      ['../support.mjs?variant=base', '?variant=base'],
+      ['../forward.mjs?e2e=blue', '?variant=base'],
+      ['../support.mjs?variant=base&e2e=blue', '?variant=base&e2e=blue'],
+    ];
+    const tests = Object.fromEntries(imports.map(([specifier, search], index) => [
+      `tests/${index}.e2e.ts`,
+      `import { expect } from 'e2e';
+import { test } from ${JSON.stringify(specifier)};
+test('gets the fixture for its import', ({ value }) => {
+  expect(new URL(value).search).toBe(${JSON.stringify(search)});
+});
+`,
+    ]));
+    const project = createProject({
+      ...tests,
+      'e2e.config.ts': workerFakeConfigSource(1),
+      'forward.mjs': "export { test } from './support.mjs?variant=base';",
+      'support.mjs': `import { test as base } from 'e2e';
+import { appendFileSync } from 'node:fs';
+export const test = base.extend({
+  value: [async ({}, use) => {
+    appendFileSync('setups.txt', new URL(import.meta.url).search + '\\n');
+    await use(import.meta.url);
+  }, { scope: 'worker' }],
+});
+test.beforeEach(() => {});
+`,
+    });
+    try {
+      runFixtureCLI(project.dir);
+      expect(readFileSync(path.join(project.dir, 'setups.txt'), 'utf8')).toBe('?variant=base\n?variant=base&e2e=blue\n');
+    } finally {
+      project.cleanup();
+    }
+  }, 30_000);
+
+  it.each([
+    { loader: 'current', setup: '' },
+    { loader: 'without the original URL lookup', setup: "Reflect.deleteProperty(globalThis, Symbol.for('e2e.original-module-url.v1'));" },
+  ])('reuses a fixed-port fixture declared in the test file on retry with a loader $loader', ({ setup }) => {
+    const project = createProject({
+      'e2e.config.ts': workerFakeConfigSource(1, 'retries: 1,') + '\n' + setup,
+      'tests/retry.e2e.ts': `import { test as base, expect } from 'e2e';
+import { createServer } from 'node:net';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+const test = base.extend<{}, { port: number }>({
+  port: [async ({}, use) => {
+    const portFile = 'fixture-port.txt';
+    const port = existsSync(portFile) ? Number(readFileSync(portFile, 'utf8')) : 0;
+    const server = createServer();
+    await new Promise<void>((resolve, reject) => server.once('error', reject).listen(port, '127.0.0.1', resolve));
+    const boundPort = server.address().port;
+    writeFileSync(portFile, String(boundPort));
+    appendFileSync('events.txt', 'setup\\n');
+    try {
+      await use(boundPort);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      appendFileSync('events.txt', 'teardown\\n');
+    }
+  }, { scope: 'worker' }],
+});
+test('retries after the first attempt fails', ({ port }) => {
+  expect(port).toBeGreaterThan(0);
+  if (existsSync('first-attempt.txt')) return;
+  writeFileSync('first-attempt.txt', '');
+  throw new Error('intentional first-attempt failure');
+});
+`,
+    });
+    try {
+      const report = runFixtureCLI(project.dir);
+      assertValidReport(report);
+      expect(report.run.results[0]).toMatchObject({
+        status: 'flaky',
+        attempts: [{ status: 'failed', error: { message: 'intentional first-attempt failure' } }, { status: 'passed' }],
+      });
+      expect(readFileSync(path.join(project.dir, 'events.txt'), 'utf8')).toBe('setup\nteardown\n');
+    } finally {
+      project.cleanup();
+    }
+  }, 30_000);
+
+  it.each([
+    ['before', false],
+    ['after', false],
+    ['before', true],
+    ['after', true],
+  ] as const)('tracks instrumented retries with a resolver registered %s and changing fragments set to %s', (order, changes) => {
+    const config = workerFakeConfigSource(1, 'retries: 1,');
+    const project = createProject({
+      'e2e.config.ts': order === 'after' ? `import './instrument.mjs';\n${config}` : config,
+      'instrument.mjs': `
+import { existsSync } from 'node:fs';
+import { registerHooks } from 'node:module';
+registerHooks({ resolve(specifier, context, next) {
+  const result = next(specifier, context);
+  if (result.url.startsWith('file:') && new URL(result.url).pathname.endsWith('/retry.e2e.ts')) {
+    const fragment = ${changes} && existsSync('retried') ? '#second' : '#first';
+    return { ...result, url: result.url + fragment };
+  }
+  return result;
+} });
+`,
+      'tests/retry.e2e.ts': `
+import { test as base, expect } from 'e2e';
+import { appendFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+const fragment = new URL(import.meta.url).hash;
+const test = base.extend<{}, { value: string }>({
+  value: [async ({}, use) => {
+    const lock = 'worker' + fragment;
+    appendFileSync('events.txt', 'setup ' + fragment + '\\n');
+    writeFileSync(lock, '', { flag: 'wx' });
+    try {
+      await use(fragment);
+    } finally {
+      rmSync(lock);
+      appendFileSync('events.txt', 'teardown ' + fragment + '\\n');
+    }
+  }, { scope: 'worker' }],
+});
+test('retries with the resolved fragment', ({ value }) => {
+  expect(value).toBe(fragment);
+  if (existsSync('retried')) return;
+  writeFileSync('retried', '');
+  throw new Error('intentional first-attempt failure');
+});
+`,
+    });
+    try {
+      const env = order === 'before'
+        ? { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=./instrument.mjs`.trim() }
+        : {};
+      const report = runFixtureCLI(project.dir, env);
+      expect(report.run.results[0]).toMatchObject({
+        status: 'flaky',
+        attempts: [{ status: 'failed', error: { message: 'intentional first-attempt failure' } }, { status: 'passed' }],
+      });
+      const events = readFileSync(path.join(project.dir, 'events.txt'), 'utf8').trim().split('\n');
+      const expected = ['setup #first', 'teardown #first'];
+      if (changes) expected.push('setup #second', 'teardown #second');
+      expect(events.toSorted()).toEqual(expected.toSorted());
+    } finally {
+      project.cleanup();
+    }
+  }, 30_000);
+
+  it.each([
+    ['answers for the test file itself', `
+    const url = new URL(specifier);
+    const resolved = pathToFileURL(realpathSync(fileURLToPath(url)));
+    resolved.search = url.search;
+    return { url: resolved.href, shortCircuit: true };`],
+    ['adds to the query of the test file', `
+    const result = next(specifier, context);
+    return { ...result, url: result.url + '&instrumented=1' };`],
+    ['appends a literal ? query to the test file', `
+    const result = next(specifier, context);
+    return { ...result, url: result.url + '?instrumented=1' };`],
+    ['percent-encodes the loader parameter name', `
+    const result = next(specifier, context);
+    return { ...result, url: result.url.replace(/([?&])e2e=/, '$1%652e=') };`],
+  ])('reuses a worker fixture on retry when a resolver registered after the loader %s', (_case, answer) => {
+    const project = createProject({
+      'e2e.config.ts': `import './instrument.mjs';\n${workerFakeConfigSource(1, 'retries: 1,')}`,
+      'instrument.mjs': `
+import { realpathSync } from 'node:fs';
+import { registerHooks } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+registerHooks({ resolve(specifier, context, next) {
+  if (specifier.startsWith('file:') && new URL(specifier).pathname.endsWith('/retry.e2e.ts')) {${answer}
+  }
+  return next(specifier, context);
+} });
+`,
+      'tests/retry.e2e.ts': `
+import { test as base, expect } from 'e2e';
+import { appendFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+const test = base.extend<{}, { value: number }>({
+  value: [async ({}, use) => {
+    appendFileSync('events.txt', 'setup\\n');
+    writeFileSync('worker.lock', '', { flag: 'wx' });
+    try {
+      await use(1);
+    } finally {
+      rmSync('worker.lock');
+      appendFileSync('events.txt', 'teardown\\n');
+    }
+  }, { scope: 'worker' }],
+});
+test('retries with the same worker fixture', ({ value }) => {
+  expect(value).toBe(1);
+  if (existsSync('retried')) return;
+  writeFileSync('retried', '');
+  throw new Error('intentional first-attempt failure');
+});
+`,
+    });
+    try {
+      const report = runFixtureCLI(project.dir);
+      expect(report.run.results[0]).toMatchObject({
+        status: 'flaky',
+        attempts: [{ status: 'failed', error: { message: 'intentional first-attempt failure' } }, { status: 'passed' }],
+      });
+      expect(readFileSync(path.join(project.dir, 'events.txt'), 'utf8')).toBe('setup\nteardown\n');
+    } finally {
+      project.cleanup();
+    }
+  }, 30_000);
+
+  it.each([
+    // The parameter lands before the fragment, in the middle of the URL the loader returned.
+    ['sets a query parameter', "const url = new URL(result.url);\n  url.searchParams.set('instrumented', '1');\n  return { ...result, url: url.href };", ['?variant=one#one', '?variant=two#one']],
+    // The text lands after the loader's, and starts the query of an import that has none.
+    ['appends to the URL', "return { ...result, url: result.url + (result.url.includes('?') ? '&' : '?') + 'instrumented=1' };", ['', '?variant=two']],
+    // A naive `?` append lands right after the loader's parameter, which must keep its `?` separator when stripped.
+    ['appends a literal ? query to the URL', "return { ...result, url: result.url + '?instrumented=1' };", ['?variant=one&keep=1', '?variant=two&keep=1']],
+  ] as const)('reuses each helper import on retry when a resolver registered after the loader %s', (_case, rewrite, [first, second]) => {
+    const project = createProject({
+      'e2e.config.ts': `import './instrument.mjs';\n${workerFakeConfigSource(1, 'retries: 1,')}`,
+      'instrument.mjs': `
+import { registerHooks } from 'node:module';
+registerHooks({ resolve(specifier, context, next) {
+  const result = next(specifier, context);
+  if (!result.url.startsWith('file:') || !new URL(result.url).pathname.endsWith('/support.ts')) return result;
+  ${rewrite}
+} });
+`,
+      'tests/support.ts': `
+import { test as base } from 'e2e';
+import { appendFileSync, rmSync, writeFileSync } from 'node:fs';
+const variant = new URL(import.meta.url).searchParams.get('variant') ?? 'none';
+export const test = base.extend<{}, { value: string }>({
+  value: [async ({}, use) => {
+    appendFileSync('events.txt', 'setup ' + variant + '\\n');
+    writeFileSync('worker-' + variant, '', { flag: 'wx' });
+    try {
+      await use(variant);
+    } finally {
+      rmSync('worker-' + variant);
+      appendFileSync('events.txt', 'teardown ' + variant + '\\n');
+    }
+  }, { scope: 'worker' }],
+});
+test.beforeEach(() => {});
+`,
+      'tests/retry.e2e.ts': `
+import { expect } from 'e2e';
+import { existsSync, writeFileSync } from 'node:fs';
+import { test as one } from './support.ts${first}';
+import { test as two } from './support.ts${second}';
+
+for (const [index, test] of [one, two].entries()) {
+  test('retries import ' + index, ({ value }) => {
+    const marker = 'retried-' + value;
+    if (existsSync(marker)) return;
+    writeFileSync(marker, '');
+    throw new Error('intentional first-attempt failure');
+  });
+}
+`,
+    });
+    try {
+      const report = runFixtureCLI(project.dir);
+      expect(report.run.results.map((test) => test.attempts.map((attempt) => attempt.status))).toEqual([
+        ['failed', 'passed'],
+        ['failed', 'passed'],
+      ]);
+      const variants = [first, second].map((suffix) => new URL(`file:///support.ts${suffix}`).searchParams.get('variant') ?? 'none');
+      const events = readFileSync(path.join(project.dir, 'events.txt'), 'utf8').trim().split('\n');
+      expect(events.toSorted()).toEqual(variants.flatMap((variant) => [`setup ${variant}`, `teardown ${variant}`]).toSorted());
+    } finally {
+      project.cleanup();
+    }
+  }, 30_000);
+
+  it.each(['before', 'after'])('reuses each user-fragment helper on retry with a resolver registered %s the loader', (order) => {
+    const config = workerFakeConfigSource(1, 'retries: 1,');
+    const project = createProject({
+      'e2e.config.ts': order === 'after' ? `import './instrument.mjs';\n${config}` : config,
+      'instrument.mjs': `
+import { registerHooks } from 'node:module';
+registerHooks({ resolve(specifier, context, next) {
+  const result = next(specifier, context);
+  if (result.url.startsWith('file:') && new URL(result.url).pathname.endsWith('/support.ts')) {
+    return { ...result, url: result.url + '#instrumented' };
+  }
+  return result;
+} });
+`,
+      'tests/support.ts': `
+import { test as base } from 'e2e';
+import { appendFileSync, rmSync, writeFileSync } from 'node:fs';
+const fragment = new URL(import.meta.url).hash;
+export const test = base.extend<{}, { value: string }>({
+  value: [async ({}, use) => {
+    const lock = 'worker' + fragment;
+    appendFileSync('events.txt', 'setup ' + fragment + '\\n');
+    writeFileSync(lock, '', { flag: 'wx' });
+    try {
+      await use(fragment);
+    } finally {
+      rmSync(lock);
+      appendFileSync('events.txt', 'teardown ' + fragment + '\\n');
+    }
+  }, { scope: 'worker' }],
+});
+test.beforeEach(() => {});
+`,
+      'tests/retry.e2e.ts': `
+import { expect } from 'e2e';
+import { existsSync, writeFileSync } from 'node:fs';
+import { test as one } from './support.ts?variant=app#one';
+import { test as inner } from './support.ts?variant=app#one#inner';
+
+for (const [test, expected] of [[one, '#one#instrumented'], [inner, '#one#inner#instrumented']] as const) {
+  test('retries ' + expected, ({ value }) => {
+    expect(value).toBe(expected);
+    const marker = 'retried' + expected;
+    if (existsSync(marker)) return;
+    writeFileSync(marker, '');
+    throw new Error('intentional first-attempt failure');
+  });
+}
+`,
+    });
+    try {
+      const env = order === 'before'
+        ? { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=./instrument.mjs`.trim() }
+        : {};
+      const report = runFixtureCLI(project.dir, env);
+      expect(report.run.results.map((test) => test.attempts.map((attempt) => attempt.status))).toEqual([
+        ['failed', 'passed'],
+        ['failed', 'passed'],
+      ]);
+      const events = readFileSync(path.join(project.dir, 'events.txt'), 'utf8').trim().split('\n');
+      expect(events.toSorted()).toEqual([
+        'setup #one#inner#instrumented',
+        'setup #one#instrumented',
+        'teardown #one#inner#instrumented',
+        'teardown #one#instrumented',
+      ]);
+    } finally {
+      project.cleanup();
+    }
+  }, 30_000);
+
+  it('separates user import URLs and reuses the fixture when the loader reloads the same URL', () => {
+    const imports = [
+      '?a=1&b=2#one',
+      '?b=2&a=1#one',
+      '?a=1&b=2#two',
+      '?e2e=user-a&e2e-graph=user-a',
+      '?e2e=user-b&e2e-graph=user-a',
+      '?e2e=user-a&e2e-graph=user-b',
+      '?a=a%20b',
+      '?a=a+b',
+      '?a=1&b=2#one',
+    ];
+    const tests = Object.fromEntries(imports.map((suffix, index) => {
+      const { search, hash } = new URL(suffix, 'file:///support.ts');
+      return [`tests/${index}.e2e.ts`, `
+import { expect } from 'e2e';
+import { test } from './support.ts${suffix}';
+test(${JSON.stringify('uses fixture for ' + suffix)}, ({ fixtureURL }) => {
+  const url = new URL(fixtureURL);
+  expect(url.search.split('&').slice(0, ${search.split('&').length}).join('&')).toBe(${JSON.stringify(search)});
+  expect(url.hash).toBe(${JSON.stringify(hash)});
+});
+`];
+    }));
+    const log = hookLog('worker-fixture-urls');
+    const project = createProject({
+      ...tests,
+      'e2e.config.ts': workerFakeConfigSource(1),
+      'tests/log.ts': LOG_MODULE,
+      'tests/support.ts': `import { test as base } from 'e2e';
+import { log } from './log.ts';
+export const test = base.extend<{}, { fixtureURL: string }>({
+  fixtureURL: [async ({}, use) => {
+    log('setup');
+    await use(import.meta.url);
+    log('teardown');
+  }, { scope: 'worker' }],
+});
+test.beforeEach(() => {});
+`,
+    });
+    try {
+      runFixtureCLI(project.dir);
+      const instances = new Set(imports).size;
+      expect(log.lines()).toEqual([...Array<string>(instances).fill('setup'), ...Array<string>(instances).fill('teardown')]);
+    } finally {
+      project.cleanup();
+    }
+  }, 30_000);
+
   it(
     'sets a worker fixture up once per worker, shares it with the suite hooks, and tears it down after the last test',
     async () => {

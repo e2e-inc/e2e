@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { load, resolve } from '../../src/config/esm-hooks.ts';
+import { importFreshModule, load, resolve } from '../../src/config/esm-hooks.ts';
 
 type Resolution = { url: string; format?: string | null | undefined };
 
@@ -86,6 +86,22 @@ beforeAll(() => {
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
+
+/**
+ * Starts the fresh graph `graph` the way the runner does, and returns the
+ * URL each project file has in it: `importFreshModule` evaluates an entry
+ * under the graph, and `resolveFrom` then stands in for Node.js, as it does
+ * in the rest of this file, resolving each file from that entry.
+ */
+async function freshGraph(graph: string): Promise<(relative: string) => string> {
+  const file = path.join(project, 'graph-entry.mjs');
+  writeFileSync(file, '');
+  await importFreshModule(file, graph, graph);
+  const entry = new URL(pathToFileURL(file));
+  entry.searchParams.set('e2e', graph);
+  entry.searchParams.set('e2e-graph', graph);
+  return (relative) => resolveFrom(entry.href, url(relative)).resolution.url;
+}
 
 describe('resolve', () => {
   it.each([
@@ -224,7 +240,11 @@ describe('resolve', () => {
 });
 
 describe('fresh module graphs', () => {
-  const fromGraph = (relative: string): string => `${url(relative)}?e2e=module-3&e2e-graph=module-3`;
+  let fromGraph: (relative: string) => string;
+
+  beforeAll(async () => {
+    fromGraph = await freshGraph('module-3');
+  });
 
   it.each([
     ['a relative import', './e2e.config.ts', 'e2e.config.ts'],
@@ -240,12 +260,19 @@ describe('fresh module graphs', () => {
   });
 
   it.each([
-    ['a package by name', fromGraph('e2e.config.ts'), '@e2e-dev/web', { '@e2e-dev/web': 'file:///app/packages/web/dist/index.js' }],
-    ['a file under node_modules', `${url('node_modules/dep/index.ts')}?e2e-graph=module-3`, './helper.ts', {}],
-    ['an importer outside any graph', `${url('e2e.config.ts')}?e2e=module-1`, './lib/helper.ts', {}],
-    ['a builtin', fromGraph('e2e.config.ts'), 'node:path', {}],
+    ['a package by name', (): string => fromGraph('e2e.config.ts'), '@e2e-dev/web', { '@e2e-dev/web': 'file:///app/packages/web/dist/index.js' }],
+    ['a file under node_modules, and what it imports', (): string => fromGraph('node_modules/dep/index.ts'), './helper.ts', {}],
+    ['an importer outside any graph', (): string => `${url('e2e.config.ts')}?e2e=module-1`, './lib/helper.ts', {}],
+    ['a builtin', (): string => fromGraph('e2e.config.ts'), 'node:path', {}],
   ])('leaves %s alone', (_case, parentURL, specifier, exports) => {
-    expect(resolveFrom(parentURL, specifier, { exports }).resolution.url).not.toContain('e2e-graph');
+    expect(parentURL()).toMatch(/^file:/);
+    expect(resolveFrom(parentURL(), specifier, { exports }).resolution.url).not.toContain('e2e-graph');
+  });
+
+  it('leaves an importer with a user-written graph query outside any fresh graph', () => {
+    for (const query of ['?e2e-graph=user', '??e2e-graph=module-3']) {
+      expect(resolveFrom(`${url('e2e.config.ts')}${query}`, './lib/helper.ts').resolution.url).toBe(url('lib/helper.ts'));
+    }
   });
 
   it('leaves a require() out of fresh graphs, which CommonJS cannot load twice', () => {
@@ -280,9 +307,10 @@ describe('fresh module graphs', () => {
     expect(warnings.find((message) => message.includes('broken'))).toContain('@tsconfig/not-installed/tsconfig.json');
   });
 
-  it('reads tsconfig.json afresh for a new graph and once for every other load', () => {
+  it('reads tsconfig.json afresh for a new graph and once for every other load', async () => {
     write({ 'graph/tsconfig.json': JSON.stringify({ compilerOptions: { paths: { '@x': ['./a.ts'] } } }), 'graph/a.ts': '', 'graph/b.ts': '', 'graph/main.ts': '' });
-    const parent = (graph: string | undefined): string => `${url('graph/main.ts')}${graph === undefined ? '' : `?e2e-graph=${graph}`}`;
+    const graphs = { 'g-1': await freshGraph('g-1'), 'g-2': await freshGraph('g-2') };
+    const parent = (graph: keyof typeof graphs | undefined): string => (graph === undefined ? url('graph/main.ts') : graphs[graph]('graph/main.ts'));
     expect(resolveFrom(parent(undefined), '@x').asked).toEqual([url('graph/a.ts')]);
     expect(resolveFrom(parent('g-1'), '@x').asked).toEqual([url('graph/a.ts')]);
     write({ 'graph/tsconfig.json': JSON.stringify({ compilerOptions: { paths: { '@x': ['./b.ts'] } } }) });
