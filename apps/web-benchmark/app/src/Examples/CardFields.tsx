@@ -64,7 +64,9 @@ const FRAME_SCRIPT = `
       var month = Number(d.slice(0, 2));
       var year = Number(d.slice(2));
       if (month < 1 || month > 12) return { valid: false, complete: true, message: "Your card's expiration month is invalid." };
-      if (year * 100 + month < 2612) return { valid: false, complete: true, message: "Your card's expiration date is in the past." };
+      // A card is valid through its expiry month, read against the browser's clock as real card forms do.
+      var now = new Date();
+      if (year * 100 + month < (now.getFullYear() % 100) * 100 + now.getMonth() + 1) return { valid: false, complete: true, message: "Your card's expiration date is in the past." };
       return { valid: true, complete: true, message: "" };
     }
     return d.length === 3

@@ -52,6 +52,15 @@ test.describe('card fields', () => {
     await expect(frame.getByRole('alert')).toHaveText("Your card's expiration date is in the past.");
   });
 
+  test('a card is still valid in its expiry month', async ({ browser }) => {
+    const now = new Date();
+    const month = `${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getFullYear() % 100).padStart(2, '0')}`;
+    const frame = browser.frameLocator('iframe[title="Secure expiration date input"]');
+    await frame.getByLabel('Expiration (MM / YY)').fill(month);
+    await expect(frame.getByLabel('Expiration (MM / YY)')).toHaveAttribute('aria-invalid', 'false');
+    await expect(frame.getByRole('alert')).toHaveText('');
+  });
+
   test('the page cannot read inside the sandboxed frames', async ({ browser }) => {
     const readable = await browser.evaluate(() =>
       [...document.querySelectorAll('iframe')].map((frame) => {
