@@ -63,7 +63,9 @@ export async function captureAppScreenshot(engine: LocatorEngine, artifactsDir: 
   const file = path.join(artifactsDir, relative);
   let kept = false;
   try {
-    if (!cutScreenshotFile(file, viewport.width, clip, `${API} with a clip`)) throw clipOutsideViewport(API, clip, viewport);
+    if (!cutScreenshotFile(file, viewport.width, clip, `${API} with a clip`)) {
+      throw new TestError('INVALID_ARGUMENT', `${API} clip ${describeClip(clip)} covers less than one pixel of the screenshot; give it a larger width and height`);
+    }
     kept = true;
     return relative;
   } finally {

@@ -132,7 +132,10 @@ describe('captureAppScreenshot', () => {
   it('keeps no file when the cut finds nothing of the clip in the screenshot', async () => {
     // Inside the viewport, and less than one pixel of the screenshot once rounded.
     const { engine, asked } = engineWith(screenImage(1, { x: 0, y: 0, width: 0, height: 0 }));
-    await expect(captureAppScreenshot(engine, artifactsDir, { label: 'edge', region: { fullPage: false, clip: { x: 10, y: 10, width: 0.2, height: 0.2 } } })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await expect(captureAppScreenshot(engine, artifactsDir, { label: 'edge', region: { fullPage: false, clip: { x: 10, y: 10, width: 0.2, height: 0.2 } } })).rejects.toMatchObject({
+      code: 'INVALID_ARGUMENT',
+      message: expect.stringContaining('covers less than one pixel of the screenshot'),
+    });
     expect(asked).toHaveLength(1);
     expect(existsSync(path.join(artifactsDir, 'screenshots', '001-edge.png'))).toBe(false);
   });
