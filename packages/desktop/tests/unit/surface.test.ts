@@ -2089,6 +2089,12 @@ describe('DesktopSurface: pixels', () => {
     await startAttempt(surface);
     await expect(surface.screenshot('deep', operation())).rejects.toMatchObject({ code: 'POLICY_DENIED', message: expect.stringMatching(/deeper than desktop\(\{ maxDepth \}\) reads \(24 levels\)/) });
     expect((await surface.observe(operation(), { pixels: true })).maskedRegionCount).toBe(0);
+    // A read that stopped at the elements a snapshot takes is cut the same way every time, as one at the depth limit.
+    const full = { ...window, data: { ...window.data, truncated: true } };
+    const capped = await launched({ screenshot: [capture(window)], snapshot: [window, full] }, { observe: false });
+    const withheld = await capped.surface.observe(operation(), { pixels: true });
+    expect(withheld.pixels).toBeUndefined();
+    expect(withheld.maskedRegionCount).toBe(0);
   });
 
   it('reports a capture that failed as no screenshot, not as masking it could not prove', async () => {

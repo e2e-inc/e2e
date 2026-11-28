@@ -105,6 +105,8 @@ export interface ProjectedScreen {
   readonly truncated: boolean;
   /** The read was cut short by its deadline, a stall, or the node budget (`complete: false`, `truncated`), which the next read may not be; a tree cut only at its depth limit is cut the same way every time. */
   readonly cutShort: boolean;
+  /** The read stopped at the elements a snapshot reads (`truncated`): cut the same way every time, as at the depth limit. */
+  readonly nodeLimit: boolean;
   /** The deadline stopped the read: the caller's time ran out before the window was read whole. */
   readonly timedOut: boolean;
   /** The app did not answer for the window itself (`root_unread`). */
@@ -404,6 +406,7 @@ export function projectSnapshot(
     secureRects: unmaskable ? undefined : secureRects,
     truncated: raw.complete === false || raw.truncated === true || hasTruncatedSubtree(raw.tree),
     cutShort: raw.complete === false || raw.truncated === true,
+    nodeLimit: raw.truncated === true,
     timedOut: raw.timed_out === true,
     rootUnread: raw.root_unread === true,
     ...(raw.window === undefined ? {} : { windowId: raw.window.id }),

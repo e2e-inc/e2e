@@ -1421,10 +1421,14 @@ export class DesktopSurface {
     if (secure === undefined) throw unmasked('a secure field on screen has no bounds to mask');
     // A snapshot cut short can leave out a secure field, which would then go unmasked.
     if (screen.truncated) {
-      // One that ran out of time and saw no secure field may read whole next time: a capture that failed, not a refusal.
-      if (screen.cutShort && secure.length === 0) throw new EngineError('ENGINE_FAILURE', 'the window was read only in part, as the read ran out of time, so it cannot be shown to hold no secure field', { retryable: false });
+      // One cut by its deadline or a stall that saw no secure field may read whole next time: a capture that failed, not a
+      // refusal. One cut at the depth limit or the elements a read takes is cut the same way every time.
+      const passing = screen.cutShort && !screen.nodeLimit;
+      if (passing && secure.length === 0) {
+        throw new EngineError('ENGINE_FAILURE', 'the window was read only in part, as the read ran out of time or the app did not answer, so it cannot be shown to hold no secure field', { retryable: false });
+      }
       throw unmasked(
-        screen.cutShort
+        passing
           ? 'the snapshot did not read the whole window, so a secure field may be missing from it'
           : `the window is deeper than desktop({ maxDepth }) reads (${this.options.maxDepth} levels), or holds more than the ${MAX_SNAPSHOT_NODES} elements a snapshot reads, so a secure field may be missing from the read`,
       );
@@ -1445,7 +1449,7 @@ export class DesktopSurface {
       });
       if (after === undefined || after.windowId !== windowId || after.truncated || !sameRects(after.secureRects, secure) || after.viewport.width !== screen.viewport.width || after.viewport.height !== screen.viewport.height) {
         // Only a secure field, seen in either read or possibly below the depth a read stops at, makes this a matter of masking; a read that ran out of time is tried again.
-        if (secure.length > 0 || (after !== undefined && ((after.truncated && !after.cutShort) || after.secureRects?.length !== 0))) throw unmasked('the window changed while it was captured, so its secure fields cannot be placed');
+        if (secure.length > 0 || (after !== undefined && ((after.truncated && (!after.cutShort || after.nodeLimit)) || after.secureRects?.length !== 0))) throw unmasked('the window changed while it was captured, so its secure fields cannot be placed');
         throw new EngineError('ENGINE_FAILURE', 'the window closed or changed size while it was captured', { retryable: false });
       }
       const scale = typeof shot.scale_factor === 'number' && shot.scale_factor > 0 ? shot.scale_factor : 1;
