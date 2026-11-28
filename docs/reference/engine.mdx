@@ -339,7 +339,7 @@ export interface Engine {
    * no value reaches the config digest.
    */
   readonly secrets?: readonly Secret[];
-  /** Steering hooks: open, back, resize, restart, reset. */
+  /** Steering hooks: open, openLink, back, resize, switchTab, closeTab, restart, reset. */
   readonly session?: EngineSession;
   /**
    * Runs once per target in the runner, after collection and before workers,
