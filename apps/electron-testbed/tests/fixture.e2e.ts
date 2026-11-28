@@ -207,7 +207,7 @@ test.describe('expect(electron) and the fixture\'s waits', () => {
       app.removeAllListeners('window-all-closed');
       BrowserWindow.getAllWindows()[0]?.close();
       setTimeout(() => {
-        new BrowserWindow({ show: false });
+        void new BrowserWindow({ show: false });
         void (globalThis as unknown as { testbedOpen(page: string): Promise<void> }).testbedOpen('controls.html');
       }, 300);
     });
