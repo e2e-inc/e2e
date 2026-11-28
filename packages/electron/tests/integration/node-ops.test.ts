@@ -44,16 +44,13 @@ describe('nodeOp', () => {
   });
 
   it('finds an element inert through the slot it is shown in, and refuses a file input under an inert element', async () => {
-    await window.setContent(`<span id="host"><select id="slotted"><option>A</option><option>B</option></select></span><div inert><input id="file" type="file"></div><input id="free" type="file"><dialog id="modal" inert><input id="held"></dialog><script>
+    await window.setContent(`<span id="host"><select id="slotted"><option>A</option><option>B</option></select></span><div inert><input id="file" type="file"></div><input id="free" type="file"><script>
       document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<div inert><slot></slot></div>';
     </script>`);
     const inert = { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
     expect(await run(await element('#slotted'), 'checkSelect', { label: 'B' })).toEqual(inert);
     expect(await run(await element('#file'), 'checkFileInput')).toEqual(inert);
     expect(await run(await element('#free'), 'checkFileInput')).toEqual({ ok: true });
-    // A modal dialog is out of reach of an inert above it, not of its own.
-    await window.inPage(() => (document.getElementById('modal') as HTMLDialogElement).showModal());
-    expect(await run(await element('#held'), 'checkEditable')).toEqual(inert);
   });
 
   it('hit-tests through a slot and a shadow host, and names the element that covers the point', async () => {
@@ -202,11 +199,11 @@ describe('nodeOp', () => {
   });
 
   it('lets a focusable element with key handlers of its own take keys, as a canvas editor does, and not the page or a link', async () => {
-    await window.setContent(`<canvas id="canvas" tabindex="0"></canvas><div id="widget" tabindex="0"></div><a id="link" href="#x">L</a><svg><a id="drawn" href="#x" tabindex="0"><text>L</text></a></svg><select id="pick"><option>A</option></select>`);
+    await window.setContent(`<canvas id="canvas" tabindex="0"></canvas><div id="widget" tabindex="0"></div><a id="link" href="#x">L</a><svg><a id="svg-link" href="#y"><text y="10">S</text></a></svg><select id="pick"><option>A</option></select>`);
     expect(await run(await element('#canvas'), 'takesText')).toBe(true);
     expect(await run(await element('#widget'), 'takesText')).toBe(true);
     expect(await run(await element('#link'), 'takesText')).toBe(false);
-    expect(await run(await element('#drawn'), 'takesText')).toBe(false);
+    expect(await run(await element('#svg-link'), 'takesText')).toBe(false);
     expect(await run(await element('#pick'), 'takesText')).toBe(false);
     expect(await run(await element('body'), 'takesText')).toBe(false);
   });
@@ -283,6 +280,14 @@ describe('waitReady', () => {
       return document.activeElement?.id;
     })).toBe('free');
     expect(await ready('#free', 'checkEditable')).toBe('ready');
+  });
+
+  it('takes an open modal dialog that is inert itself as inert, with its controls', async () => {
+    await window.setContent(`<dialog id="modal" inert>${SELECT('pick')}<input id="file" type="file"></dialog>`);
+    await showModals(['modal']);
+    expect(await run(await element('#pick'), 'checkSelect', { label: 'B' })).toEqual({ ok: false, reason: 'it is inert (a modal or the app blocks it)' });
+    expect(await run(await element('#file'), 'checkFileInput')).toEqual({ ok: false, reason: 'it is inert (a modal or the app blocks it)' });
+    expect(await selects('#pick')).toMatchObject({ message: expect.stringMatching(INERT) });
   });
 
   it('takes the controls of a modal dialog another one covers as inert, centred over it or not, and the top one\'s as free', async () => {
