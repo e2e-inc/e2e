@@ -138,9 +138,10 @@ model calls:
 1. **Check the starting screen** to make sure the app is on the same route.
 2. **Replay each recorded action**, matching controls by role, name, test
    ID, and surrounding context. e2e waits for controls to appear and stops
-   if a match is ambiguous. A tap, hover, or drag at a recorded point waits
-   for a control that is late or still hidden, and a drag stops if one of
-   the source's same-named look-alikes disappears meanwhile.
+   if a match is ambiguous. A tap, hover, or drag at a point recorded inside
+   a control waits for that control while it is late or still hidden. A drag
+   whose source the recorded point has to pick out of same-named controls
+   stops if one of them disappears meanwhile.
 3. **Check the end state** (final route plus the controls that appeared,
    disappeared, or changed state).
 4. **Finish with zero model calls**, or hand off to the live agent with a
