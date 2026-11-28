@@ -518,9 +518,11 @@ mod tests {
 
     #[test]
     fn keeps_the_cancel_of_a_live_run_however_many_runs_start_after_it() {
-        let live = TypingRun::start(Some(2_000_000));
-        cancel_input(2_000_000);
-        let _later = TypingRun::start(Some(2_000_000 + super::STALE_IDS * 2));
+        // Ids below every other test's: the later run drops the marks far behind it, and a test running beside this one
+        // may hold a cancel whose run has not started yet.
+        let live = TypingRun::start(Some(100));
+        cancel_input(100);
+        let _later = TypingRun::start(Some(100 + super::STALE_IDS * 2));
         assert!(live.cancelled());
     }
 
