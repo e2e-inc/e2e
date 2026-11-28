@@ -5,10 +5,11 @@
 
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { BrowserLease, BrowserProvider, BrowserReleaseContext, BrowserRequest } from '@e2e-dev/web';
+import { releaseEach, type BrowserLease, type BrowserProvider, type BrowserReleaseContext, type BrowserRequest } from '@e2e-dev/web';
 import { ConfigurationError, rejectUnknownKeys, type ProviderRecordContext, type ProviderRecording } from 'e2e/engine';
 import { revylCredentials } from '../credentials.ts';
 import { DEFAULT_API_URL, RevylWebClient, type WebViewport } from './client.ts';
+import { forget, prune, remember, remembered } from './ledger.ts';
 
 const APP_URL = 'https://app.revyl.ai';
 const RECORDING_FILE = 'recording.mp4';
@@ -30,7 +31,7 @@ export interface RevylBrowsersOptions {
    * goes to the target's `app.url` as on any browser.
    */
   readonly url: string;
-  /** CSS viewport each session opens with, Revyl's default when absent. The browser keeps it for the session. */
+  /** CSS viewport each session opens with, 1280 by 800 (Revyl's default) when absent. The browser keeps it for the session. */
   readonly viewport?: WebViewport | undefined;
   /** Seconds without activity before Revyl ends a session the run left open; 600 when absent. */
   readonly idleTimeoutSeconds?: number | undefined;
@@ -45,6 +46,9 @@ export interface RevylBrowsersOptions {
  * `cdpEndpoint` is a single-use URL that expires about a minute after the
  * session is ready, so a dropped connection is not reattached and fails the
  * attempt. An attempt that records video gets the session's own recording.
+ * When the run ends, `sweep` stops the sessions of workers that died before
+ * they could, and Revyl ends any session the run itself left after
+ * `idleTimeoutSeconds`.
  * `REVYL_API_KEY` comes from the run's environment, and
  * `REVYL_API_URL` when set.
  */
@@ -77,6 +81,8 @@ export function revylBrowsers(options: RevylBrowsersOptions): BrowserProvider {
       const client = new RevylWebClient(credentials);
       const buildId = await client.registerUrlBuild(app, options.url, request.signal);
       const sessionId = randomUUID();
+      // Recorded before Revyl hears of the session, so a worker that dies from here on leaves it to the sweep.
+      await remember(request.runId, request.targetName, sessionId);
       let cdpEndpoint: string;
       try {
         const workflowRunId = await client.startSession({ sessionId, appId: app, buildId, viewport, idleTimeoutSeconds }, request.signal);
@@ -85,8 +91,11 @@ export function revylBrowsers(options: RevylBrowsersOptions): BrowserProvider {
       } catch (cause) {
         // The session id was ours from the start, so a start that failed at any point leaves nothing running.
         const outcome = await client.stopSession(sessionId, AbortSignal.timeout(10_000)).then(
-          () => 'stopped',
-          (stop: unknown) => `stopping it failed, so Revyl ends it after ${idleTimeoutSeconds} s idle: ${stop instanceof Error ? stop.message : String(stop)}`,
+          async () => {
+            await forget(request.runId, request.targetName, sessionId);
+            return 'stopped';
+          },
+          (stop: unknown) => `stopping it failed, so the run's sweep or Revyl's ${idleTimeoutSeconds} s idle timeout ends it: ${stop instanceof Error ? stop.message : String(stop)}`,
         );
         throw new Error(`Revyl web session ${sessionId} did not start (${outcome})`, { cause });
       }
@@ -96,6 +105,25 @@ export function revylBrowsers(options: RevylBrowsersOptions): BrowserProvider {
     },
     async release(lease: BrowserLease, context: BrowserReleaseContext): Promise<void> {
       await new RevylWebClient(revylCredentials(context.env)).stopSession(lease.id, context.signal);
+      await forget(context.runId, context.targetName, lease.id);
+    },
+    async sweep(context: BrowserReleaseContext): Promise<readonly string[]> {
+      const open = await remembered(context.runId, context.targetName);
+      if (open.length === 0) {
+        await prune(context.runId, context.targetName);
+        return [];
+      }
+      const client = new RevylWebClient(revylCredentials(context.env));
+      const { released, failed } = await releaseEach(open, (id) => client.stopSession(id, context.signal));
+      const unstopped = new Set(failed.map(({ id }) => id));
+      // A marker goes only once Revyl confirmed the stop; the marker of a failed stop stays.
+      await Promise.all(open.filter((id) => !unstopped.has(id)).map((id) => forget(context.runId, context.targetName, id)));
+      await prune(context.runId, context.targetName);
+      if (failed.length > 0) {
+        const notStopped = failed.map(({ id, reason }) => `${id} (${reason})`).join(', ');
+        throw new Error(`stopped ${released.length === 0 ? 'none' : released.join(', ')}; could not stop ${notStopped}, so Revyl ends each after ${idleTimeoutSeconds} s idle`);
+      }
+      return released;
     },
     /**
      * Revyl records every web session from its start. Stopping the recording

@@ -197,6 +197,9 @@ const INPUT_ROLES = new Set(['textfield', 'combobox', 'slider', 'incrementor', '
 /** Roles the driver reads text into `value`, which the contract calls `text`. */
 const TEXT_ROLES = new Set(['statictext', 'heading']);
 
+/** Roles the driver names by the text inside them when they have no name of their own. */
+const CONTENT_ROLES = new Set(['row', 'cell', 'treeitem', 'option', 'listitem']);
+
 const STATE_NAMES = ['focused', 'disabled', 'secure', 'expanded', 'selected', 'hidden', 'pressed'] as const;
 
 /**
@@ -206,6 +209,45 @@ const STATE_NAMES = ['focused', 'disabled', 'secure', 'expanded', 'selected', 'h
  */
 function label(value: string | undefined): string | undefined {
   return value === undefined || value.trim() === '' ? undefined : value;
+}
+
+/** What a text node shows: its value, which the app may name otherwise (a `5` named `Words`). */
+function shownText(node: RawNode): string | undefined {
+  return label(node.value ?? node.name);
+}
+
+/** A control collapsed to no width or height draws nothing. Only a leaf: a container with no box can still hold drawn children, listed or cut off at the depth limit. */
+function collapsed(node: RawNode): boolean {
+  return node.bounds !== undefined && (node.bounds.width <= 0 || node.bounds.height <= 0) && (node.children ?? []).length === 0 && (node.children_count ?? 0) === 0;
+}
+
+/** Whether a node, and so everything inside it, is off screen by its own account, whatever its ancestors are. */
+function concealed(node: RawNode): boolean {
+  return node.states?.includes('offscreen') === true || node.states?.includes('hidden') === true || collapsed(node);
+}
+
+/**
+ * What a row or a cell shows: every text inside it in reading order, joined
+ * by spaces, as the driver joins the names of those texts into its name. The
+ * two differ when a text inside has a name of its own, and then the name is
+ * not text the row shows. A heading with no text of its own gives the text
+ * inside it. A row on screen shows only the text inside it that is on screen
+ * too, so text scrolled out of it is no visible match through the row; a row
+ * that is itself hidden (`hidden`) keeps all of it, which is what a query
+ * finds it by to scroll to. `undefined` with no text to show.
+ */
+function contentText(node: RawNode, hidden: boolean): string | undefined {
+  const texts: string[] = [];
+  const collect = (parent: RawNode): void => {
+    for (const child of parent.children ?? []) {
+      if (!hidden && concealed(child)) continue;
+      const shown = TEXT_ROLES.has(child.role) ? shownText(child) : undefined;
+      if (shown === undefined) collect(child);
+      else texts.push(shown.trim());
+    }
+  };
+  collect(node);
+  return label(texts.join(' '));
 }
 
 /** A node the driver reports but nothing reads: a wrapper with no name, value, id, ref, or text of its own. */
@@ -277,10 +319,10 @@ export function projectSnapshot(
     const states: Record<string, boolean> = {};
     for (const state of STATE_NAMES) if (rawStates.has(state)) states[state] = true;
     if (rawStates.has('offscreen') || minimized || hiddenAbove !== false) states.hidden = true;
-    // A control collapsed to no width or height draws nothing, and the driver will not act on it. Only a leaf: a container with no box can still hold drawn children, listed or cut off at the depth limit.
-    const collapsed = id !== ROOT_ID && node.bounds !== undefined && (node.bounds.width <= 0 || node.bounds.height <= 0) && (node.children ?? []).length === 0 && (node.children_count ?? 0) === 0;
-    if (collapsed) states.hidden = true;
-    const scrolledOut = (rawStates.has('offscreen') || hiddenAbove === 'scrolled') && !minimized && hiddenAbove !== 'other' && !collapsed;
+    // A collapsed control draws nothing, and the driver will not act on it.
+    const drawsNothing = id !== ROOT_ID && collapsed(node);
+    if (drawsNothing) states.hidden = true;
+    const scrolledOut = (rawStates.has('offscreen') || hiddenAbove === 'scrolled') && !minimized && hiddenAbove !== 'other' && !drawsNothing;
     // A mixed checkbox is neither checked nor unchecked: no state, so check() and uncheck() always reach the control.
     if (CHECKABLE_ROLES.has(node.role) && !rawStates.has('indeterminate')) states.checked = rawStates.has('checked') || node.value === '1';
     else if (rawStates.has('checked')) states.checked = true;
@@ -294,7 +336,7 @@ export function projectSnapshot(
     const isText = TEXT_ROLES.has(node.role);
     const name = label(node.name ?? (isText ? node.value : undefined));
     // A control shows its name (a button's title) as its text, as on a device; an input's name is a label, not what it holds.
-    const text = isText ? label(node.value ?? node.name) : INPUT_ROLES.has(node.role) ? undefined : name;
+    const text = isText ? shownText(node) : INPUT_ROLES.has(node.role) ? undefined : ((CONTENT_ROLES.has(node.role) ? contentText(node, states.hidden === true) : undefined) ?? name);
     // A checkbox's value is its state ("0", "1"), already in `checked`; a secure field's is never reported.
     // A snapshot may leave out the value of an empty text field; it is the empty string, as inputValue() reads it, so getByDisplayValue('') finds the field.
     const value = secure || isText || CHECKABLE_ROLES.has(node.role) ? undefined : node.role === 'textfield' ? (node.value ?? '') : node.value;
