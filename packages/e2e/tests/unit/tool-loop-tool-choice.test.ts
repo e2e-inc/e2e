@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { isForcedToolCallSkipped, isForcedToolChoiceRejected } from '@e2e-dev/core/lib/agent/model/tool-choice';
 import { defineTool } from '@e2e-dev/core/lib/agent/tool';
@@ -244,6 +244,119 @@ describe('tool loop downgraded tool choice', () => {
     await fixtures.agent.act('second');
 
     expect(loopCalls.map((call) => call.toolChoice)).toEqual(['required', 'required']);
+  });
+});
+
+describe('AI SDK warning filtering', () => {
+  const globalWarnings = globalThis as {
+    AI_SDK_LOG_WARNINGS?: boolean | ((options: { warnings: readonly unknown[]; provider?: string; model?: string }) => void);
+  };
+  let savedLogger: typeof globalWarnings.AI_SDK_LOG_WARNINGS;
+
+  beforeAll(() => {
+    savedLogger = globalWarnings.AI_SDK_LOG_WARNINGS;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (savedLogger === undefined) {
+      delete globalWarnings.AI_SDK_LOG_WARNINGS;
+    } else {
+      globalWarnings.AI_SDK_LOG_WARNINGS = savedLogger;
+    }
+  });
+
+  it('suppresses process.emitWarning for downgraded toolChoice while passing other warnings through', async () => {
+    delete globalWarnings.AI_SDK_LOG_WARNINGS;
+    const emitWarning = vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
+
+    const model = installFakeLoopModel(({ turn }) =>
+      turn === 1
+        ? {
+            toolCalls: [{ toolName: 'peek', input: {} }],
+            warnings: [DOWNGRADE, { type: 'unsupported', feature: 'temperature' }],
+          }
+        : [conclude],
+    );
+    const { fixtures } = runtime({ agents: { default: { tools: { peek }, model } } });
+
+    await fixtures.agent.act('look around');
+
+    const messages = emitWarning.mock.calls.map(([warning]) => String(warning));
+    expect(messages.some((message) => message.includes('toolChoice'))).toBe(false);
+    expect(messages.some((message) => message.includes('temperature'))).toBe(true);
+    expect(globalWarnings.AI_SDK_LOG_WARNINGS).toBeUndefined();
+  });
+
+  it('suppresses process.emitWarning completely when only a downgraded toolChoice warning is returned', async () => {
+    delete globalWarnings.AI_SDK_LOG_WARNINGS;
+    const emitWarning = vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
+
+    const model = installFakeLoopModel(downgradingForcedChoice(() => [conclude]));
+    const { fixtures } = runtime({ agents: { default: { model } } });
+
+    await fixtures.agent.act('look around');
+
+    expect(emitWarning).not.toHaveBeenCalled();
+    expect(globalWarnings.AI_SDK_LOG_WARNINGS).toBeUndefined();
+  });
+
+  it('chains to a user-provided AI_SDK_LOG_WARNINGS logger without clobbering it', async () => {
+    const seen: unknown[] = [];
+    const customLogger = vi.fn((options: { warnings: readonly unknown[] }) => {
+      seen.push(...options.warnings);
+    });
+    globalWarnings.AI_SDK_LOG_WARNINGS = customLogger;
+
+    const model = installFakeLoopModel(({ turn }) =>
+      turn === 1
+        ? {
+            toolCalls: [{ toolName: 'peek', input: {} }],
+            warnings: [DOWNGRADE, { type: 'unsupported', feature: 'temperature' }],
+          }
+        : [conclude],
+    );
+    const { fixtures } = runtime({ agents: { default: { tools: { peek }, model } } });
+
+    await fixtures.agent.act('look around');
+
+    expect(customLogger).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([{ type: 'unsupported', feature: 'temperature' }]);
+    expect(globalWarnings.AI_SDK_LOG_WARNINGS).toBe(customLogger);
+  });
+
+  it('preserves AI_SDK_LOG_WARNINGS = false when explicitly disabled', async () => {
+    globalWarnings.AI_SDK_LOG_WARNINGS = false;
+    const emitWarning = vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
+
+    const model = installFakeLoopModel(({ turn }) =>
+      turn === 1
+        ? {
+            toolCalls: [{ toolName: 'peek', input: {} }],
+            warnings: [DOWNGRADE, { type: 'unsupported', feature: 'temperature' }],
+          }
+        : [conclude],
+    );
+    const { fixtures } = runtime({ agents: { default: { tools: { peek }, model } } });
+
+    await fixtures.agent.act('look around');
+
+    expect(emitWarning).not.toHaveBeenCalled();
+    expect(globalWarnings.AI_SDK_LOG_WARNINGS).toBe(false);
+  });
+
+  it('keeps filtering active across concurrent steps until all finish', async () => {
+    delete globalWarnings.AI_SDK_LOG_WARNINGS;
+    const emitWarning = vi.spyOn(process, 'emitWarning').mockImplementation(() => {});
+
+    const modelA = installFakeLoopModel(downgradingForcedChoice(() => [conclude]));
+    const first = runtime({ agents: { default: { model: modelA } } });
+    const second = runtime({ agents: { default: { model: modelA } } });
+
+    await Promise.all([first.fixtures.agent.act('first'), second.fixtures.agent.act('second')]);
+
+    expect(emitWarning).not.toHaveBeenCalled();
+    expect(globalWarnings.AI_SDK_LOG_WARNINGS).toBeUndefined();
   });
 });
 

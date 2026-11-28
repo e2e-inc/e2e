@@ -26,6 +26,7 @@ import {
   isForcedToolCallSkipped,
   isForcedToolChoiceDowngraded,
   isForcedToolChoiceRejected,
+  withFilteredToolChoiceWarnings,
 } from './model/tool-choice.ts';
 import { missingCredentialError, withMissingCredentialNamed } from './model/missing-credential.ts';
 import { withStallGuard } from './model/stall.ts';
@@ -371,20 +372,22 @@ class LoopRun {
       // change between a refused request and its retry.
       const loop = this.buildLoop(tools);
       try {
-        const result = await loop.generate({
-          prompt,
-          abortSignal: this.context.signal,
-          // The whole loop, retries included, ends with the step's clock; the
-          // judgment adapter bounds its calls the same way.
-          timeout: Math.max(1, this.context.budgets.remainingMs()),
-          onStepStart: tracker.onStepStart,
-          onStepEnd: (step) => {
-            this.lastStep = step;
-            this.recordTurn(step);
-            tracker.onStepEnd(step);
-            this.noticeToolChoiceDowngrade(step);
-          },
-        });
+        const result = await withFilteredToolChoiceWarnings(() =>
+          loop.generate({
+            prompt,
+            abortSignal: this.context.signal,
+            // The whole loop, retries included, ends with the step's clock; the
+            // judgment adapter bounds its calls the same way.
+            timeout: Math.max(1, this.context.budgets.remainingMs()),
+            onStepStart: tracker.onStepStart,
+            onStepEnd: (step) => {
+              this.lastStep = step;
+              this.recordTurn(step);
+              tracker.onStepEnd(step);
+              this.noticeToolChoiceDowngrade(step);
+            },
+          }),
+        );
         if (result.finishReason === 'content-filter' && !this.conclusion.concluded()) {
           throw modelRefusalError({ provider: this.model.provider, id: this.model.modelId }, result.rawFinishReason);
         }

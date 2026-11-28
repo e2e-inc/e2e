@@ -14,6 +14,8 @@
  * answer with tool calls can still succeed, where a 5xx needs only time.
  */
 
+import { realmSlot } from '../../internal/realm-slot.ts';
+
 const FORCED_CHOICE_PATTERNS: readonly RegExp[] = [
   /tool_choice.*not supported/i, // Anthropic
   /does not support (?:this |the )?tool_choice/i, // DeepSeek V4 in thinking mode (its default)
@@ -98,4 +100,117 @@ function describesRejection(error: unknown): boolean {
   return [record.message, record.responseBody].some(
     (text) => typeof text === 'string' && FORCED_CHOICE_PATTERNS.some((pattern) => pattern.test(text)),
   );
+}
+
+interface SdkWarning {
+  readonly type: string;
+  readonly feature?: string;
+  readonly details?: string;
+  readonly setting?: string;
+  readonly message?: string;
+}
+
+interface SdkWarningOptions {
+  readonly warnings: readonly SdkWarning[];
+  readonly provider?: string;
+  readonly model?: string;
+}
+
+type SdkWarningLogger = (options: SdkWarningOptions) => void;
+type SdkWarningsGlobal = false | SdkWarningLogger | undefined;
+
+interface WarningFilterState {
+  depth: number;
+  active: boolean;
+  previous: SdkWarningsGlobal;
+  readonly wrapper: SdkWarningLogger;
+}
+
+const warningFilterSlot = realmSlot<WarningFilterState>('e2e.ai-sdk-warning-filter.v1');
+
+function formatSdkWarning(warning: SdkWarning, provider?: string, model?: string): string {
+  const prefix = `AI SDK Warning${provider != null && model != null ? ` (${provider} / ${model})` : ''}:`;
+  switch (warning.type) {
+    case 'unsupported': {
+      const base = `${prefix} The feature "${String(warning.feature)}" is not supported.`;
+      return warning.details ? `${base} ${warning.details}` : base;
+    }
+    case 'compatibility': {
+      const base = `${prefix} The feature "${String(warning.feature)}" is used in a compatibility mode.`;
+      return warning.details ? `${base} ${warning.details}` : base;
+    }
+    case 'deprecated':
+      return `${prefix} Deprecated: "${String(warning.setting)}". ${String(warning.message ?? '')}`;
+    case 'other':
+      return `${prefix} ${String(warning.message ?? '')}`;
+    default:
+      return `${prefix} ${JSON.stringify(warning, null, 2)}`;
+  }
+}
+
+function getWarningFilterState(): WarningFilterState {
+  let state = warningFilterSlot.get(globalThis);
+  if (state !== undefined) return state;
+  const created: WarningFilterState = {
+    depth: 0,
+    active: false,
+    previous: undefined,
+    wrapper: (options) => {
+      const remaining = options.warnings.filter((warning) => !isForcedToolChoiceDowngraded(warning));
+      if (remaining.length === 0) return;
+      if (typeof created.previous === 'function') {
+        created.previous({ ...options, warnings: remaining });
+        return;
+      }
+      for (const warning of remaining) {
+        const message = formatSdkWarning(warning, options.provider, options.model);
+        const type = warning.type === 'deprecated' ? 'DeprecationWarning' : 'Warning';
+        if (typeof process !== 'undefined' && typeof process.emitWarning === 'function') {
+          process.emitWarning(message, { type });
+        } else {
+          console.warn(message);
+        }
+      }
+    },
+  };
+  warningFilterSlot.set(globalThis, created);
+  return created;
+}
+
+/**
+ * Suppresses the AI SDK's `unsupported` / `toolChoice` warning while `fn` runs,
+ * since `ToolLoop` already handles that downgrade and records a step note.
+ * Other warnings pass through to any user-configured `AI_SDK_LOG_WARNINGS`
+ * logger or `process.emitWarning`.
+ */
+export async function withFilteredToolChoiceWarnings<T>(fn: () => Promise<T>): Promise<T> {
+  const globalWarnings = globalThis as { AI_SDK_LOG_WARNINGS?: SdkWarningsGlobal };
+  const state = getWarningFilterState();
+  if (state.depth === 0) {
+    const current = globalWarnings.AI_SDK_LOG_WARNINGS;
+    if (current === false) {
+      state.active = false;
+    } else {
+      state.previous = current;
+      state.active = true;
+      globalWarnings.AI_SDK_LOG_WARNINGS = state.wrapper;
+    }
+  }
+  state.depth += 1;
+  try {
+    return await fn();
+  } finally {
+    state.depth -= 1;
+    if (state.depth === 0 && state.active) {
+      if (globalWarnings.AI_SDK_LOG_WARNINGS === state.wrapper) {
+        if (state.previous === undefined) {
+          delete globalWarnings.AI_SDK_LOG_WARNINGS;
+        } else {
+          globalWarnings.AI_SDK_LOG_WARNINGS = state.previous;
+        }
+      }
+      state.previous = undefined;
+      state.active = false;
+    }
+  }
 }
