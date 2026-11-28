@@ -1212,7 +1212,8 @@ accessible name, up to 1,000 characters; text has none, since `textContent`
 reads it), `identifier`
 (the developer's accessibility identifier, also its test id), `description`
 (left out when it is the accessible name, which `label` reads, as an AppKit
-field's description often is), `placeholder`, and `hint` (its help text), each
+field's description often is; a heading that reports no level keeps it, since
+the engine reads the level from it), `placeholder`, and `hint` (its help text), each
 when the app reports it. On a
 password field, `getAttribute` throws `POLICY_DENIED`, as it does on every
 engine.

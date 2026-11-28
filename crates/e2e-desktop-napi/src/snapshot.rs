@@ -18,7 +18,7 @@ const MAX_NODES: usize = 8_000;
 pub(crate) const MAX_CHILDREN: usize = MAX_NODES;
 
 /// Every attribute one request reads of a node.
-const ATTRIBUTES: [&str; 18] = [
+const ATTRIBUTES: [&str; 19] = [
     "AXRole",
     "AXSubrole",
     "AXTitle",
@@ -37,6 +37,7 @@ const ATTRIBUTES: [&str; 18] = [
     "AXVerticalScrollBar",
     "AXHorizontalScrollBar",
     "AXHeadingLevel",
+    "AXDisclosing",
 ];
 
 #[derive(Serialize)]
@@ -209,6 +210,8 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
     let vertical_bar = matches!(take(15), Some(Value::Element(_)));
     let horizontal_bar = matches!(take(16), Some(Value::Element(_)));
     let heading_level = level_of(take(17));
+    // An outline row says it is expanded with AXDisclosing, not AXExpanded.
+    let expanded = expanded.or_else(|| take(18).and_then(|value| value.boolean()));
     let role = roles::role(&ax_role, subrole.as_deref());
     Ok(Read {
         role,
@@ -627,7 +630,10 @@ impl Walk {
             .or_else(|| read.description.clone())
             .or_else(|| if roles::text(role) { label(text_value.clone()) } else { None })
             .or_else(|| if roles::takes_text(role) { read.placeholder.clone() } else { None });
-        let description = read.description.clone().filter(|description| Some(description) != name.as_ref());
+        // A heading with no AXHeadingLevel keeps a description that is also its name: the engine reads its level from it
+        // (`heading level 2`).
+        let level_in_description = role == "heading" && read.heading_level.is_none();
+        let description = read.description.clone().filter(|description| level_in_description || Some(description) != name.as_ref());
 
         let mut states = Vec::new();
         // The app's focused element is the one source: a table's cells report the table's focus as their own.
@@ -832,8 +838,9 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         Err(ax::AX_API_DISABLED) => return Err(Failure::refused(codes::PERM_DENIED, "this process has no Accessibility permission")),
         Err(_) => {}
     }
+    // The window is level 0: `max_depth` counts the levels a read goes down from it, so 1 reads its children.
     let tree = walk
-        .node(&window, 1, true, window_bounds)
+        .node(&window, 0, true, window_bounds)
         .ok_or_else(|| Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {} could not be read", request.window)));
     // Accessibility permission taken away during the walk answers every read with an error the walk takes for an
     // element's own answer, and leaves it out: the tree would read as complete, and empty where it was not read.

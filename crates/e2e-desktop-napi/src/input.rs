@@ -16,8 +16,16 @@ use std::time::Duration;
 /// How far behind the newest run a leftover cancel mark is dropped.
 const STALE_IDS: u32 = 4096;
 
-/// The typing runs by the id their caller gave (from `next_input_id`), each marked once it is cancelled.
-static TYPING: Mutex<Option<HashMap<u32, bool>>> = Mutex::new(None);
+/// The typing runs by the id their caller gave (from `next_input_id`), each marked once it is cancelled, and the marks
+/// of cancels whose run has not started or has ended.
+static TYPING: Mutex<Option<HashMap<u32, Mark>>> = Mutex::new(None);
+
+/// One id's entry: whether its run is cancelled, and whether the run is live (started and not yet ended).
+#[derive(Clone, Copy, Default)]
+struct Mark {
+    cancelled: bool,
+    live: bool,
+}
 
 /// The last input id handed out: one counter for the process, which every Node worker thread that loads the addon shares,
 /// as it shares the registry below.
@@ -35,7 +43,7 @@ pub fn next_input_id() -> u32 {
 
 /// Marks the input run `id` cancelled: it sends nothing more. A cancel that comes before the run starts holds too.
 pub fn cancel_input(id: u32) {
-    TYPING.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert_with(HashMap::new).insert(id, true);
+    TYPING.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert_with(HashMap::new).entry(id).or_default().cancelled = true;
 }
 
 /// One input run (an action, or the text it types), registered while it lives so `cancel_input` can reach it.
@@ -46,16 +54,19 @@ impl TypingRun {
         if let Some(id) = id {
             let mut guard = TYPING.lock().unwrap_or_else(PoisonError::into_inner);
             let runs = guard.get_or_insert_with(HashMap::new);
-            // A cancel that came after its run ended left a mark; ids only grow, so marks far behind this one go. A newer id
-            // stays whatever order the runs start in: its cancel may have come before it started.
-            runs.retain(|other, _| *other >= id || id - *other < STALE_IDS);
-            runs.entry(id).or_insert(false);
+            // A cancel that came after its run ended left a mark; ids only grow, so marks far behind this one go. A live run
+            // stays however far behind, and a newer id stays whatever order the runs start in: its cancel may have come
+            // before it started.
+            runs.retain(|other, mark| mark.live || *other >= id || id - *other < STALE_IDS);
+            runs.entry(id).or_default().live = true;
         }
         TypingRun(id)
     }
 
     pub fn cancelled(&self) -> bool {
-        self.0.is_some_and(|id| TYPING.lock().unwrap_or_else(PoisonError::into_inner).as_ref().and_then(|runs| runs.get(&id).copied()).unwrap_or(false))
+        self.0.is_some_and(|id| {
+            TYPING.lock().unwrap_or_else(PoisonError::into_inner).as_ref().and_then(|runs| runs.get(&id).map(|mark| mark.cancelled)).unwrap_or(false)
+        })
     }
 }
 
@@ -503,6 +514,14 @@ mod tests {
         let cancelled = TypingRun::start(Some(1_000_021));
         assert!(!older.cancelled());
         assert!(cancelled.cancelled());
+    }
+
+    #[test]
+    fn keeps_the_cancel_of_a_live_run_however_many_runs_start_after_it() {
+        let live = TypingRun::start(Some(2_000_000));
+        cancel_input(2_000_000);
+        let _later = TypingRun::start(Some(2_000_000 + super::STALE_IDS * 2));
+        assert!(live.cancelled());
     }
 
     #[test]

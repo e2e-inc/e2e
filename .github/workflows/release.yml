@@ -90,7 +90,8 @@ jobs:
           name: desktop-native
           path: packages/desktop/desktop.darwin-*.node
           if-no-files-found: error
-          retention-days: 1
+          # "Re-run failed jobs" runs release or nightly again without this job, so the artifact must outlive a day.
+          retention-days: 7
 
   release:
     needs: native

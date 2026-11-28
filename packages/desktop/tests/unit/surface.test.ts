@@ -1074,8 +1074,8 @@ describe('DesktopSurface: acting', () => {
     const top = every((await stuck.surface.observe(operation(), undefined)).root).find((node) => node.name === 'Top');
     await expect(stuck.surface.perform(top!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/not on screen/) });
     expect(stuck.fake.of('act')).toEqual([]);
-    // A scroll action: the driver scrolls it into view and answers once it shows, then it is pressed. A look-alike
-    // that the scroll moved is not looked for again by its place, which changed.
+    // A scroll action: the click goes to the driver alone, which waits for a disabled control first, then scrolls it into
+    // view and presses it once it shows. A look-alike that the scroll moved is not looked for again by its place.
     const twins = screen('w-mine', {
       name: 'Form',
       bounds: { x: 0, y: 0, width: 200, height: 200 },
@@ -1087,15 +1087,16 @@ describe('DesktopSurface: acting', () => {
     const scrolls = await launched({ snapshot: [twins] }, { observe: false });
     const second = every((await scrolls.surface.observe(operation(), undefined)).root).filter((node) => node.name === 'Delete')[1];
     await scrolls.surface.perform(second!.ref, { kind: 'tap' }, operation());
-    expect(scrolls.fake.of('act').map((call) => call.args[0] as { ref: string; action: string })).toEqual([
-      expect.objectContaining({ ref: '@s:e2', action: 'scrollTo' }),
-      expect.objectContaining({ ref: '@s:e2', action: 'click' }),
-    ]);
-    // The scroll changed the app: a click that then fails, even as a stale ref, is never retried as if nothing happened.
-    const moved = await launched({ snapshot: [twins], act: [ok({}), failure('STALE_REF', 'not_delivered')] }, { observe: false });
+    expect(scrolls.fake.of('act').map((call) => call.args[0] as { ref: string; action: string })).toEqual([expect.objectContaining({ ref: '@s:e2', action: 'click' })]);
+    // The driver counts a failure after its scroll as delivered: the click is never retried as if nothing happened.
+    const moved = await launched({ snapshot: [twins], act: [failure('STALE_REF', 'delivered_unverified')] }, { observe: false });
     const stale = every((await moved.surface.observe(operation(), undefined)).root).filter((node) => node.name === 'Delete')[1];
-    // The message names the click once.
-    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false, message: expect.stringMatching(/^click: (?!click).* \(an earlier command of this step changed the app\)$/) });
+    await expect(moved.surface.perform(stale!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', retryable: false });
+    // One that stays disabled is refused before the driver scrolls: nothing moved, and nothing was sent.
+    const disabled = await launched({ snapshot: [twins], act: [failure('ACTION_FAILED', 'not_delivered', 'the control is disabled')] }, { observe: false });
+    const off = every((await disabled.surface.observe(operation(), undefined)).root).filter((node) => node.name === 'Delete')[1];
+    await expect(disabled.surface.perform(off!.ref, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
+    expect(disabled.fake.acted()).toEqual(['click']);
     // A secondary tap goes to the driver alone, which checks the context menu live before it scrolls: the observed
     // actions may come from a read that stalled.
     const plain = await launched({ snapshot: [twins] }, { observe: false });
@@ -1125,7 +1126,7 @@ describe('DesktopSurface: acting', () => {
     const nested = await launched({ snapshot: [inRow] }, { observe: false });
     const remove = every((await nested.surface.observe(operation(), undefined)).root).find((node) => node.name === 'Remove');
     await nested.surface.perform(remove!.ref, { kind: 'tap' }, operation());
-    expect(nested.fake.of('act').map((call) => (call.args[0] as { action: string }).action)).toEqual(['scrollTo', 'click']);
+    expect(nested.fake.of('act').map((call) => (call.args[0] as { action: string }).action)).toEqual(['click']);
     // Hidden for another reason than a scroll: no scroll shows a minimized window's control or one with no size, so
     // each is refused at once, though both offer ScrollTo.
     const minimized = await launched(
@@ -1406,7 +1407,8 @@ describe('DesktopSurface: keys', () => {
   it("refuses a key the driver could not send to the app's key window, and says nothing was sent", async () => {
     const unconfirmed = failure('ACTION_FAILED', 'not_delivered', 'the window is not the key window', { cause: 'exact_window_focus_unconfirmed' });
     const { surface, fake, byTestId } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], press: [unconfirmed] });
-    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Tab' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/key window.*nothing was sent/) });
+    // A locator's press focused the control first, so its refusal may have committed; the window's press focused nothing.
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Tab' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/key window.*nothing was sent/) });
     await expect(surface.pressKey('Enter', operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
     expect(fake.of('press').map((call) => (call.args[0] as { combo: string; windowId: string }).combo)).toEqual(['tab', 'return']);
   });
@@ -1468,9 +1470,10 @@ describe('DesktopSurface: keys', () => {
     expect(last(fake, 'press')).toMatchObject({ combo: 'return', windowId: 'w-mine' });
   });
 
-  it('refuses the key when the driver finds the control lost focus, as when focusing it opened a dialog', async () => {
+  it('refuses the key when the driver finds the control lost focus, as when focusing it opened a dialog, as possibly committed', async () => {
     const { surface, byTestId } = await launched({ snapshot: [renamed('macos/sign-in-form', 'w-8321', 'w-mine')], press: [failure('ACTION_FAILED', 'not_delivered', 'the control lost keyboard focus before the key was sent, so nothing was sent')] });
-    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/lost keyboard focus/) });
+    // No key went, but the focus did, and whatever it opened stays open: a retry would focus the control again.
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/lost keyboard focus/) });
   });
 
   it('presses a key into one of two look-alike fields by its own element, whatever box it has once focused', async () => {
@@ -1679,6 +1682,11 @@ describe('DesktopSurface: points', () => {
     const keyless = await launched({ listWindows: [unnamed] }, { observe: false, options: { physicalInput: true } });
     await expect(keyless.surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE' });
     expect(keyless.fake.of('pointer')).toHaveLength(0);
+    // A hover presses nothing: a sheet that opened as the window came forward is left to the driver, which refuses the
+    // move only when a window is on top at the point.
+    const hovered = await launched({ listWindows: [at(false), at(false), at(true)] }, { observe: false, options: { physicalInput: true } });
+    await hovered.surface.performAt({ x: 10, y: 290 }, { kind: 'hover' }, operation());
+    expect(hovered.fake.of('pointer').at(-1)?.args).toEqual([110, 390, 'hover']);
   });
 
   it('refuses a tap at an observed point when the sheet on its window opened, closed, or changed after the observation', async () => {
@@ -1700,6 +1708,20 @@ describe('DesktopSurface: points', () => {
     await same.surface.observe(operation(), undefined);
     await same.surface.performAt({ x: 10, y: 50 }, { kind: 'tap' }, operation());
     expect(same.fake.pointerOptions.at(-1)?.target).toEqual({ pid: same.fake.pid, windowId: 'w-8032', sheet: true, sheetId: 's-1' });
+  });
+
+  it('keeps the observed sheet for a later point after a hover at a node measured in a newer read', async () => {
+    const row = screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'group', name: 'Row', bounds: { x: 10, y: 10, width: 100, height: 50 } }] });
+    let sheet = false;
+    const list = windows(() => [{ id: 'w-mine', is_focused: true, ...(sheet ? { sheet_focused: true, sheet_id: 's-1' } : {}), bounds: { x: 0, y: 0, width: 200, height: 200 } }]);
+    const { surface, fake } = await launched({ snapshot: [row], listWindows: [list] }, { observe: false, options: { physicalInput: true } });
+    const every = (node: SemanticNode): SemanticNode[] => [node, ...(node.children ?? []).flatMap(every)];
+    const group = every((await surface.observe(operation(), undefined)).root).find((node) => node.role === 'group' && node.name === 'Row');
+    sheet = true;
+    // The hover reads the window again, with the sheet: the point it takes is its own, not the observation's.
+    await surface.perform(group!.ref, { kind: 'hover' }, operation());
+    await expect(surface.performAt({ x: 150, y: 150 }, { kind: 'tap' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/sheet opened/) });
+    expect(fake.of('pointer').map((call) => call.args[2])).toEqual(['hover']);
   });
 
   it('taps, double-taps, secondary-taps, and hovers a point in the window where it is now, with no observation first', async () => {
