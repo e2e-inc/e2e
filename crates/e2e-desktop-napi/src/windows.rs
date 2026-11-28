@@ -264,20 +264,17 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
             system,
         });
     }
-    for window in &server {
-        // A window accessibility does not list counts only while it is on screen: AppKit keeps hidden helper windows.
-        if window.layer != 0 || listed.contains(&window.id) || !window.onscreen {
-            continue;
-        }
-        // A SwiftUI alert's sheet names a window id of its own that is not the window server's: the server's window is
-        // the sheet with its shadow, centered on it.
-        if window.bounds.is_some_and(|bounds| sheets.iter().any(|&sheet| shadows(bounds, sheet))) {
-            continue;
-        }
-        // A window the window server lists with no size is a placeholder, not something on screen.
-        if window.bounds.is_none_or(|bounds| bounds.width < 1.0 || bounds.height < 1.0) {
-            continue;
-        }
+    // A window accessibility does not list counts only while it is on screen: AppKit keeps hidden helper windows. A
+    // window the window server lists with no size is a placeholder, not something on screen.
+    let unlisted: Vec<(&ServerWindow, Rect)> = server
+        .iter()
+        .filter(|window| window.layer == 0 && !listed.contains(&window.id) && window.onscreen)
+        .filter_map(|window| window.bounds.filter(|bounds| bounds.width >= 1.0 && bounds.height >= 1.0).map(|bounds| (window, bounds)))
+        .collect();
+    // A SwiftUI alert's sheet names a window id of its own that is not the window server's: the server's window is the
+    // sheet with its shadow, centered on it. Only the one such window is taken for the sheet; two leave both listed.
+    let shadowed = sheet_shadows(&unlisted.iter().map(|&(_, bounds)| bounds).collect::<Vec<_>>(), &sheets);
+    for (_, (window, bounds)) in unlisted.into_iter().enumerate().filter(|(index, _)| !shadowed.contains(index)) {
         out.push(WindowInfo {
             id: window.id.to_string(),
             title: window.title.clone(),
@@ -289,7 +286,7 @@ pub fn list(pid: i32) -> Outcome<Vec<WindowInfo>> {
             accessible: false,
             minimized: false,
             pid,
-            bounds: window.bounds,
+            bounds: Some(bounds),
             system: false,
         });
     }
@@ -317,6 +314,18 @@ pub(crate) fn window_sheets(window: &Element) -> Result<Vec<Element>, ax::AXErro
         }
     }
     Ok(sheets)
+}
+
+/// The indexes of the windows that are a sheet's shadow: for each sheet, the one window that `shadows` it, and none when
+/// several do.
+fn sheet_shadows(windows: &[Rect], sheets: &[(f64, f64, f64, f64)]) -> Vec<usize> {
+    sheets
+        .iter()
+        .filter_map(|&sheet| match windows.iter().enumerate().filter(|&(_, &window)| shadows(window, sheet)).collect::<Vec<_>>()[..] {
+            [(index, _)] => Some(index),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Whether a window server window is the sheet `sheet` (x, y, width, height) with its shadow around it: it holds the
@@ -388,7 +397,7 @@ pub fn open_menus(pid: i32) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{Rect, complete, may_be_window, shadows, system_dialog};
+    use super::{Rect, complete, may_be_window, shadows, sheet_shadows, system_dialog};
     use crate::ax;
 
     #[test]
@@ -399,6 +408,17 @@ mod tests {
         // A window of the same size elsewhere, or one centered on it that is smaller, is another.
         assert!(!shadows(Rect { x: 100.0, y: 391.0, width: 410.0, height: 246.0 }, sheet));
         assert!(!shadows(Rect { x: 880.0, y: 494.0, width: 200.0, height: 40.0 }, sheet));
+    }
+
+    #[test]
+    fn takes_a_server_window_for_a_sheet_only_when_it_is_the_one_around_it() {
+        let sheet = (850.0, 466.0, 260.0, 96.0);
+        let shadow = Rect { x: 775.0, y: 391.0, width: 410.0, height: 246.0 };
+        let elsewhere = Rect { x: 100.0, y: 391.0, width: 410.0, height: 246.0 };
+        assert_eq!(sheet_shadows(&[elsewhere, shadow], &[sheet]), vec![1]);
+        // Another window centered behind the sheet: either could be the sheet's, so both stay listed.
+        let behind = Rect { x: 680.0, y: 316.0, width: 600.0, height: 396.0 };
+        assert_eq!(sheet_shadows(&[shadow, behind], &[sheet]), Vec::<usize>::new());
     }
 
     #[test]
