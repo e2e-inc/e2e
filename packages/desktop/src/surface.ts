@@ -39,7 +39,7 @@ import {
 } from '@e2e-dev/core/engine';
 import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
 import { toCombo } from './keys.ts';
-import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
+import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, LAUNCH_POLL_MS, OWNER_FILE, sleep, STATE_PREFIX, sweepStateDirectories } from './launch-ownership.ts';
 import { launchArgumentList } from './launch-arguments.ts';
 import { handOffClause, type WindowsRead } from './launch-report.ts';
 import { LAUNCH_READY_MS, QUIT, windowReadable } from './launch-wait.ts';
@@ -488,7 +488,18 @@ export class DesktopSurface {
    * on, rather than the focused one, until it closes or the app quits.
    */
   async activateWindow(id: string, operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<void> {
-    const windows = await this.ownWindows(operation);
+    const until = Date.now() + operation.timeoutMs;
+    let windows: readonly RawWindow[];
+    for (;;) {
+      try {
+        windows = await this.ownWindows({ ...operation, timeoutMs: Math.max(1, until - Date.now()) });
+        break;
+      } catch (cause) {
+        // An app busy with a window it just opened may not answer its list in time: read again, within the budget.
+        if (!(cause instanceof EngineError && cause.retryable) || Date.now() + LAUNCH_POLL_MS >= until) throw cause;
+        await sleep(LAUNCH_POLL_MS, operation.signal);
+      }
+    }
     if (!windows.some((window) => window.id === id)) throw notActionable('the window has closed; desktop.windows() lists the open ones');
     this.chosenWindow = id;
     // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
