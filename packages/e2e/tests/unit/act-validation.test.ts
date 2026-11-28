@@ -1,9 +1,31 @@
 import { describe, expect, it } from 'vitest';
 
-import { redactParams, validateActOptions, validateParams } from '@e2e-dev/core/lib/agent/act-validation';
+import { redactParams, validateActOptions, validateInstruction, validateParams } from '@e2e-dev/core/lib/agent/act-validation';
 import { templateParams } from '@e2e-dev/core/lib/cache/template';
 import { unique } from '@e2e-dev/core/lib/params';
 import { ConfigurationError } from '@e2e-dev/core/lib/internal/errors';
+import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
+
+describe('validateInstruction', () => {
+  const ledger = new SecretLedger([['probe', 'hunter-secret-abcde'], ['accent', 'synthetic-cafe\u0301-777'], ['pin', 'pw1234']]);
+  const redact = (text: string) => ledger.redact(text);
+
+  it.each([
+    ['a secret followed by a combining mark NFC composes into it', 'shows hunter-secret-abcde\u0301 now', 'shows <secret:probe>\u0301 now'],
+    ['a secret written decomposed', 'look for synthetic-cafe\u0301-777', 'look for <secret:accent>'],
+    ['text with no secret', 'the cafe\u0301 heading', 'the caf\u00e9 heading'],
+  ])('redacts %s, then normalizes to NFC', (_label, instruction, expected) => {
+    expect(validateInstruction(instruction, 'agent.act', redact)).toBe(expected);
+  });
+
+  it('bounds the instruction as written, not the longer marker that replaces a secret', () => {
+    const instruction = `${'x'.repeat(8_186)}pw1234`;
+    expect(validateInstruction(instruction, 'agent.act', redact)).toBe(`${'x'.repeat(8_186)}<secret:pin>`);
+    expect(() => validateInstruction(`${instruction}x`, 'agent.act', redact)).toThrow(
+      expect.objectContaining({ code: 'INVALID_ARGUMENT', message: 'agent.act instruction is 8193 bytes; the maximum is 8192' }),
+    );
+  });
+});
 
 describe('validateActOptions', () => {
   it('accepts the options bag and an absent one', () => {

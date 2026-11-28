@@ -458,6 +458,36 @@ describe('agent.act verdict mapping', () => {
     }
   }, 120_000);
 
+  it('redacts a secret, and a provider key set mid-test, before NFC composes it with the mark after it', async () => {
+    const instructions: string[] = [];
+    const executor: StepExecutor = {
+      name: 'recording-executor',
+      async runStep(context: StepExecutorContext) {
+        instructions.push(context.step.instruction);
+        return { status: 'passed' as const, summary: 'recorded the instruction' };
+      },
+    };
+    const { outcome, project } = await runProject(
+      { 'tests/tail.e2e.ts': TAIL_SECRET_SUITE },
+      {
+        appUrl: app.url,
+        config: { tests: 'tests/**/*.e2e.ts', agents: { default: { executor } }, secrets: { tail: 'synthetic-probe-tail' } },
+      },
+    );
+    try {
+      const result = resultByTitle(outcome, 'executor reads a secret before a combining mark');
+      expect(result.status).toBe('passed');
+      expect(instructions).toEqual(['look for <secret:tail>\u0301', 'see <secret:OPENAI_API_KEY>\u0301']);
+      expect(result.attempts.at(-1)!.steps.map((step) => step.label)).toContain('look for <secret:tail>\u0301');
+      const report = readFileSync(path.join(project.dir, '.e2e', 'report.json'), 'utf8');
+      for (const value of ['synthetic-probe-tail', 'synthetic-probe-tail\u0301'.normalize('NFC'), 'sk-proj-synthetic-act-key-0123456789abcdefghijklmnl']) {
+        expect(report).not.toContain(value);
+      }
+    } finally {
+      project.cleanup();
+    }
+  }, 120_000);
+
   it('rejects a verdict outside the closed grammar', async () => {
     const executor: StepExecutor = {
       name: 'rogue-executor',
@@ -582,6 +612,22 @@ test('executor fills a declared secret', async ({ app, agent, screen }) => {
   // Secure fields refuse value reads by design; visibility is the most a
   // deterministic assertion may observe. The executor verified the fill.
   await expect(screen.getByLabel('Password')).toBeVisible();
+});
+`;
+
+const TAIL_SECRET_SUITE = `import { test } from 'e2e';
+
+test('executor reads a secret before a combining mark', async ({ app, agent }) => {
+  await app.open();
+  await agent.act('look for synthetic-probe-tail\\u0301');
+  const previousKey = process.env['OPENAI_API_KEY'];
+  try {
+    process.env['OPENAI_API_KEY'] = 'sk-proj-synthetic-act-key-0123456789abcdefghijklmnl';
+    await agent.act('see sk-proj-synthetic-act-key-0123456789abcdefghijklmnl\\u0301');
+  } finally {
+    if (previousKey === undefined) delete process.env['OPENAI_API_KEY'];
+    else process.env['OPENAI_API_KEY'] = previousKey;
+  }
 });
 `;
 

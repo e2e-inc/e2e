@@ -214,6 +214,28 @@ describe('e2e explore', () => {
     expect(written.run.explore).toEqual(record);
   }, 120_000);
 
+  it('keeps planning a long run whose record outgrows the 8 KiB cap on a test instruction', async () => {
+    const summary = `Walked the counter and the menu. ${'Every control answered as its label says. '.repeat(40)}`;
+    const planBytes: number[] = [];
+    const model = installExploreModel({
+      plan: (call) => {
+        planBytes.push(new TextEncoder().encode(call.instruction).byteLength);
+        return planBytes.length <= 5
+          ? { decision: 'step', title: `Area ${planBytes.length}`, instruction: 'Look around the home page' }
+          : { decision: 'finish', summary: 'Every area held up.' };
+      },
+      loop: () => [{ toolName: 'complete_step', input: { status: 'passed', summary } }],
+    });
+    const outcome = await runExplore(project, app, model, { maxSteps: 6 });
+
+    expect(outcome.report.run.errors).toEqual([]);
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.report.run.explore).toMatchObject({ ended: 'finished', summary: 'Every area held up.' });
+    expect(outcome.report.run.explore!.steps).toHaveLength(5);
+    // The planner's last prompts carried more than `agent.extract` takes from a test.
+    expect(Math.max(...planBytes)).toBeGreaterThan(8_192);
+  }, 120_000);
+
   it('plans from the change since --changed-since in every call\'s context, defaulting the goal to it, and records the change', async () => {
     const changed = createProject({ 'README.md': 'app\n', '.gitignore': '.e2e/\n' });
     try {

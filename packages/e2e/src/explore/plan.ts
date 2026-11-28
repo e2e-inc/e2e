@@ -2,11 +2,14 @@
  * The planner: between exploration steps, one structured model call decides
  * the next charter or finishes the run. It runs as an `agent.extract` step,
  * so it reads the current screen and the ledger of prior steps the same way
- * every judgment does, under the same budgets and repair loop.
+ * every judgment does, under the same budgets and repair loop. The prompt is
+ * the runner's own, so it skips the byte cap on a test's instruction: the
+ * record of a long run grows past it.
  */
 
 import { z } from 'zod';
 import type { ReportExploreStep } from '../report/build.ts';
+import { extractForRunner } from '@e2e-dev/core/lib/agent/index';
 import type { Agent } from '@e2e-dev/core/lib/types';
 import { MAX_TITLE_CHARS, type ExploreState } from './state.ts';
 
@@ -106,10 +109,14 @@ export interface PlanRequest {
   readonly timeoutMs: number;
 }
 
-/** Asks the model for the next charter or the closing assessment. */
+/**
+ * Asks the model for the next charter or the closing assessment. `agent` is
+ * the test's fixture itself, since a wrapper of it would put the planner
+ * prompt back under the byte cap.
+ */
 export async function planNext(agent: Agent, state: ExploreState, request: PlanRequest): Promise<PlanDecision> {
   const schema = request.change?.skippable === true ? SKIPPABLE_PLAN_SCHEMA : PLAN_SCHEMA;
-  return repairPlan(await agent.extract(planInstruction(state, request), { schema, timeout: request.timeoutMs }));
+  return repairPlan(await extractForRunner(agent, planInstruction(state, request), { schema, timeout: request.timeoutMs }));
 }
 
 /**

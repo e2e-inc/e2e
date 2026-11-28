@@ -85,7 +85,7 @@ export async function runActStep(
   options: ActOptions | undefined,
   extraArguments = 0,
 ): Promise<ActResult> {
-  const normalized = validateInstruction(instruction, 'agent.act');
+  const normalized = validateInstruction(instruction, 'agent.act', runtime.redact);
   validateActOptions(options, extraArguments);
   const { projected, secrets, templates } = validateParams(options?.params, 'agent.act');
   return dispatchAgentStep(runtime, {
@@ -112,14 +112,14 @@ export async function runActStep(
  * single-judgment tier remains the default-path implementation. `screenshot`
  * is harness evidence taken after the verdict, so it is honored here as on
  * the default path; `vision` is what the executor's model sees, so it reaches
- * only an executor that declares `vision: true`.
+ * only an executor that declares `vision: true`. `assertion` is the NFC
+ * instruction `agent.assert` has already validated.
  */
 export async function runAssertStep(
   runtime: AgentContext,
   assertion: string,
   options: AssertOptions | undefined,
 ): Promise<void> {
-  const normalized = validateInstruction(assertion, 'agent.assert');
   // Assertions may scroll, but their secrets are never fillable.
   const { projected, templates } = validateParams(options?.params, 'agent.assert');
   const agent = runtime.select(options?.agent);
@@ -133,7 +133,7 @@ export async function runAssertStep(
   await dispatchAgentStep(runtime, {
     api: 'agent.assert',
     kind: 'assert',
-    instruction: normalized,
+    instruction: assertion,
     params: projected,
     secrets: new Map(),
     templates,

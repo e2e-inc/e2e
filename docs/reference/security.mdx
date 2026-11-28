@@ -250,9 +250,10 @@ The runner replaces every registered secret value with `<secret:name>` in:
 
 It also redacts a value passed as a plain string instead of a
 `secrets.get()` handle: test and `describe` titles, step labels (an
-`app.open` URL, a locator's text), a `fill`, an `agent.act` or `agent.assert`
-instruction, the strings in `agent.act` params, `agentContext`, the built-in
-agent's `system`, and an `e2e explore` goal.
+`app.open` URL, a locator's text), a `fill`, an `agent.act`, `agent.assert`,
+`agent.waitFor` or `agent.extract` instruction, the strings in `agent.act`
+params, `agentContext`, the built-in agent's `system`, and an `e2e explore`
+goal.
 
 | Rule | Detail |
 | --- | --- |
@@ -321,7 +322,8 @@ Redaction matches strings. These pass through:
 - a value encoded as a whole, such as a hash, or base64 outside a text
   [download](#downloads) and a test filter's `redact`,
 - a value in another Unicode normalization form, such as decomposed accents
-  where the secret has composed ones,
+  where the secret has composed ones, except in an agent instruction, which
+  is matched again once normalized to NFC,
 - text that drops the whitespace inside the value. Text that widens it passes
   through too, except on the observed screen, where a field whose collapsed
   form holds the value stays collapsed and masked,
