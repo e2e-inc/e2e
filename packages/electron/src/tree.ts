@@ -200,9 +200,16 @@ class TreeProjector {
       const hides = (facts: DomFacts): boolean => facts.attributes['aria-hidden']?.toLowerCase() === 'true' || facts.attributes['inert'] !== undefined;
       const hiding = new Set<number>();
       for (const [backend, facts] of this.snapshot.elements()) if (hides(facts)) hiding.add(backend);
+      /** Whether the element hides itself or sits under one that does; a page that hides nothing is not walked. */
+      const hidden = (backend: number, index: number): boolean => {
+        if (hiding.size === 0) return false;
+        if (hiding.has(backend)) return true;
+        for (const ancestor of this.snapshot.ancestors(index)) if (hiding.has(ancestor)) return true;
+        return false;
+      };
       for (const [backend, facts] of this.snapshot.elements()) {
         // Elements only: their text runs fold into them, so a locator answers with the element that holds the text.
-        const offTree = !facts.nodeName.startsWith('#') && facts.bounds !== undefined && (hiding.has(backend) || [...this.snapshot.ancestors(facts.index)].some((ancestor) => hiding.has(ancestor)));
+        const offTree = !facts.nodeName.startsWith('#') && facts.bounds !== undefined && hidden(backend, facts.index);
         if (facts.attributes[this.testIdAttribute] !== undefined || offTree) wanted.add(backend);
       }
     }
