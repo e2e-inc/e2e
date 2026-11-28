@@ -1566,6 +1566,8 @@ async function afterChange(label: string, run: () => Promise<unknown>): Promise<
   try {
     await run();
   } catch (cause) {
+    // A cancelled step is cancelled, whatever it sent: the run is stopping, and nothing retries it.
+    if (cause instanceof EngineError && cause.code === 'CANCELLED') throw cause;
     // Only the driver's own failure is unnamed: an engine error already says which command it is.
     const message = cause instanceof DriverFailure ? `${label}: ${cause.message}` : (cause as Error).message;
     throw new EngineError('ACTION_MAY_HAVE_COMMITTED', `${message} (an earlier command of this step changed the app)`, { retryable: false, cause });

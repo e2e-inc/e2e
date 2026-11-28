@@ -1680,6 +1680,13 @@ describe('DesktopSurface: typing', () => {
     expect(fake.of('cancelInput').map((entry) => entry.args)).toEqual([[inputId]]);
   });
 
+  it('reports a locator press cancelled after its focus moved as cancelled', async () => {
+    const { surface, byTestId } = await launched({ snapshot: [renamed('macos/sign-in-form', 'w-8321', 'w-mine')], press: [{ ok: true, data: {}, sleepMs: 2_000 }] });
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 100);
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, { ...operation(), signal: controller.signal })).rejects.toMatchObject({ code: 'CANCELLED' });
+  });
+
   it('replaces the focused field as a keyboard does, select all and delete, and never by an accessibility clear', async () => {
     const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')] });
     await surface.typeText('ada', { replace: true }, operation());
