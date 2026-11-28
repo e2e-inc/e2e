@@ -472,11 +472,12 @@ export class DesktopSurface {
 
   /**
    * The windows of the app the engine launched, for the `desktop` fixture; none while it is not running. A locked screen
-   * lists none of a running app's, which is no proof that they closed: it is a retryable `NODE_STALE`.
+   * lists none of a running app's, or only ones accessibility cannot read, which may leave some out: no proof that a
+   * window closed, so it is a retryable `NODE_STALE`.
    */
   async windows(operation: Pick<OperationContext, 'signal' | 'timeoutMs'>): Promise<readonly OpenWindow[]> {
     const windows = await this.ownWindows(operation);
-    if (windows.length === 0 && this.pid !== undefined) this.unlessLocked();
+    if (this.pid !== undefined && windows.every((window) => window.accessible === false)) this.unlessLocked();
     const active = this.activeWindow(windows)?.id;
     return windows.map((window) => ({ id: window.id, title: window.title ?? '', active: window.id === active, readable: window.system !== true && window.accessible !== false }));
   }

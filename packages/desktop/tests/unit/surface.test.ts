@@ -927,6 +927,14 @@ describe('desktop fixture: windows', () => {
     expect(await controls.isClosed()).toBe(false);
   });
 
+  it('reads no window as closed while the screen is locked and lists only windows accessibility cannot read', async () => {
+    const { surface, fake } = await launched({ listWindows: [(driver) => windows(() => (driver.locked === true ? [{ ...mine, accessible: false }] : [mine, panel]))(driver)] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const controls = (await desktop.windows())[1]!;
+    fake.locked = true;
+    await expect(controls.isClosed()).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
+  });
+
   it('closes a window through its handle, and leaves one that already closed alone', async () => {
     const { surface, fake } = await launched({ listWindows: [windows(() => [mine, panel])], closeWindow: [ok({}), failure('WINDOW_NOT_FOUND', 'not_delivered', 'the app has no window')] });
     const desktop = createDesktopFixture(surface, fixtureContext());
