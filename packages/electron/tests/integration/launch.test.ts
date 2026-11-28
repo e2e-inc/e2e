@@ -5,7 +5,7 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { Transformer } from '@napi-rs/image';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -356,6 +356,29 @@ describe('an app with no inspector', () => {
     expect(await launched.app.evaluate(() => 1, undefined).then(() => undefined, (error: unknown) => error)).toMatchObject({ message: expect.stringMatching(/opened no inspector/) });
     await launched.windows.require().page.evaluate(() => document.querySelector('a')?.click());
     await expect.poll(() => (existsSync(path.join(data, 'Downloads')) ? readdirSync(path.join(data, 'Downloads')) : [])).toContain('saved.txt');
+  });
+
+  it.skipIf(process.platform === 'win32')('takes its own directory from the window the launch ends on, when the splash it waited for closes during setup', async () => {
+    const launched = appWith(`app.on('window-all-closed', () => {}); app.whenReady().then(() => {
+      const splash = new BrowserWindow({ show: false });
+      splash.webContents.once('did-finish-load', () => setTimeout(() => {
+        splash.destroy();
+        new BrowserWindow({ show: false }).loadFile(require('node:path').join(__dirname, 'bundle', 'ui', 'index.html'));
+      }, 150));
+      splash.loadFile(require('node:path').join(__dirname, 'bundle', 'splash', 'index.html'));
+    });`);
+    for (const part of ['splash', 'ui']) {
+      mkdirSync(path.join(launched.directory, 'bundle', part), { recursive: true });
+      writeFileSync(path.join(launched.directory, 'bundle', part, 'index.html'), `<title>${part}</title>`);
+    }
+    // A packaged app's binary: no app path on the command line, and no inspector to report one.
+    const wrapper = path.join(launched.directory, 'packaged');
+    writeFileSync(wrapper, `#!/bin/sh\nshift\nexec "${electronBinary()}" "${launched.directory}" "$@"\n`, { mode: 0o755 });
+    const attempt = { appLog: (entry: { readonly text: string }) => void launched.logs.push(entry.text), navigation: () => undefined, environment: () => undefined } as unknown as EngineAttemptContext;
+    const setup: LaunchSetup = { executable: wrapper, projectRoot: launched.directory, app: {}, env: process.env, userDataDir: path.join(launched.directory, 'data'), attempt };
+    await launched.app.launch(setup, { signal: new AbortController().signal, timeoutMs: 20_000, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext);
+    expect(await launched.windows.require().page.title()).toBe('ui');
+    expect(launched.app.appDirectory).toBe(realpathSync(path.join(launched.directory, 'bundle', 'ui')));
   });
 });
 
