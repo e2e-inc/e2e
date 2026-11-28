@@ -44,12 +44,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Builds the packages once and packs the three an example installs, so every
+  # @e2e-dev/util's addon for every platform, which `pack` puts in its
+  # platform packages, so each example installs the build for its runner.
+  util-native:
+    if: ${{ github.repository == 'e2e-inc/e2e' }}
+    uses: ./.github/workflows/util-native.yml
+
+  # Builds the packages once and packs the ones an example installs, so every
   # job below installs the same main build. Only this repository runs it:
   # GitHub turns a fork's schedules off, but a fork's owner can still
   # dispatch the workflow, and it would spend their runners and model key.
   # Every example job needs this one, so on a fork they all skip with it.
   pack:
+    needs: util-native
     if: ${{ github.repository == 'e2e-inc/e2e' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -88,8 +95,20 @@ jobs:
           pnpm run build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: util-native-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/util-native
+      - name: Place the util addon
+        run: node scripts/native/place-native.ts util "$RUNNER_TEMP/util-native"
       - name: Pack
         run: |
+          pnpm --filter @e2e-dev/util pack --out "$RUNNER_TEMP/packed/util.tgz"
+          for dir in packages/util/npm/*/; do
+            platform="$(basename "$dir")"
+            pnpm --dir "$dir" pack --out "$RUNNER_TEMP/packed/util-$platform.tgz"
+          done
           pnpm --filter @e2e-dev/core pack --out "$RUNNER_TEMP/packed/core.tgz"
           pnpm --filter e2e pack --out "$RUNNER_TEMP/packed/e2e.tgz"
           pnpm --filter @e2e-dev/web pack --out "$RUNNER_TEMP/packed/web.tgz"

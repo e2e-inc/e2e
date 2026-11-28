@@ -502,12 +502,9 @@ importers:
 
   packages/core:
     dependencies:
-      '@napi-rs/image':
-        specifier: 1.16.0
-        version: 1.16.0
-      pixelmatch:
-        specifier: 8.0.0
-        version: 8.0.0
+      '@e2e-dev/util':
+        specifier: workspace:*
+        version: link:../util
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -894,9 +891,9 @@ importers:
 
   packages/mobile:
     dependencies:
-      '@napi-rs/image':
-        specifier: 1.16.0
-        version: 1.16.0
+      '@e2e-dev/util':
+        specifier: workspace:*
+        version: link:../util
       agent-device:
         specifier: 0.21.44
         version: 0.21.44(ai@7.0.183(zod@4.6.7))
@@ -907,6 +904,9 @@ importers:
       '@e2e-dev/core':
         specifier: workspace:*
         version: link:../core
+      '@napi-rs/image':
+        specifier: 1.16.0
+        version: 1.16.0
       '@types/node':
         specifier: 26.6.11
         version: 26.6.11
@@ -1032,6 +1032,68 @@ importers:
       vitest:
         specifier: 5.1.2
         version: 5.1.2(@types/node@26.6.11)(vite@8.3.8(@types/node@26.6.11)(esbuild@0.28.2)(jiti@1.21.7)(terser@5.51.2)(tsx@4.23.14)(yaml@2.9.0))
+
+  packages/util:
+    devDependencies:
+      '@napi-rs/image':
+        specifier: 1.16.0
+        version: 1.16.0
+      '@types/node':
+        specifier: 26.6.11
+        version: 26.6.11
+      pixelmatch:
+        specifier: 8.0.0
+        version: 8.0.0
+      playwright-core:
+        specifier: 1.65.1
+        version: 1.65.1
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.1.2
+        version: 5.1.2(@types/node@26.6.11)(vite@8.3.8(@types/node@26.6.11)(esbuild@0.28.2)(jiti@1.21.7)(terser@5.51.2)(tsx@4.23.14)(yaml@2.9.1))
+    optionalDependencies:
+      '@e2e-dev/util-darwin-arm64':
+        specifier: workspace:*
+        version: link:npm/darwin-arm64
+      '@e2e-dev/util-darwin-x64':
+        specifier: workspace:*
+        version: link:npm/darwin-x64
+      '@e2e-dev/util-linux-arm64-gnu':
+        specifier: workspace:*
+        version: link:npm/linux-arm64-gnu
+      '@e2e-dev/util-linux-arm64-musl':
+        specifier: workspace:*
+        version: link:npm/linux-arm64-musl
+      '@e2e-dev/util-linux-x64-gnu':
+        specifier: workspace:*
+        version: link:npm/linux-x64-gnu
+      '@e2e-dev/util-linux-x64-musl':
+        specifier: workspace:*
+        version: link:npm/linux-x64-musl
+      '@e2e-dev/util-win32-arm64-msvc':
+        specifier: workspace:*
+        version: link:npm/win32-arm64-msvc
+      '@e2e-dev/util-win32-x64-msvc':
+        specifier: workspace:*
+        version: link:npm/win32-x64-msvc
+
+  packages/util/npm/darwin-arm64: {}
+
+  packages/util/npm/darwin-x64: {}
+
+  packages/util/npm/linux-arm64-gnu: {}
+
+  packages/util/npm/linux-arm64-musl: {}
+
+  packages/util/npm/linux-x64-gnu: {}
+
+  packages/util/npm/linux-x64-musl: {}
+
+  packages/util/npm/win32-arm64-msvc: {}
+
+  packages/util/npm/win32-x64-msvc: {}
 
   packages/web:
     dependencies:

@@ -1,0 +1,67 @@
+{
+  "name": "@e2e-dev/util",
+  "version": "0.0.1",
+  "description": "Native utilities for e2e: PNG decoding and encoding, resampling, masking, and screenshot comparison off the JavaScript thread",
+  "keywords": [
+    "e2e",
+    "png",
+    "image",
+    "napi"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e2e-inc/e2e.git",
+    "directory": "packages/util"
+  },
+  "bugs": {
+    "url": "https://github.com/e2e-inc/e2e/issues"
+  },
+  "homepage": "https://github.com/e2e-inc/e2e/tree/main/packages/util#readme",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public",
+    "tag": "latest"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc --project tsconfig.build.json && node ../../scripts/stamp-dist.ts",
+    "build:native": "node ../../scripts/native/build-native.ts util",
+    "licenses:native": "node ../../scripts/native/native-licenses.ts util",
+    "prepublishOnly": "node ../../scripts/check-dist.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "bench": "node bench/run.ts"
+  },
+  "optionalDependencies": {
+    "@e2e-dev/util-darwin-arm64": "workspace:*",
+    "@e2e-dev/util-darwin-x64": "workspace:*",
+    "@e2e-dev/util-linux-arm64-gnu": "workspace:*",
+    "@e2e-dev/util-linux-arm64-musl": "workspace:*",
+    "@e2e-dev/util-linux-x64-gnu": "workspace:*",
+    "@e2e-dev/util-linux-x64-musl": "workspace:*",
+    "@e2e-dev/util-win32-arm64-msvc": "workspace:*",
+    "@e2e-dev/util-win32-x64-msvc": "workspace:*"
+  },
+  "devDependencies": {
+    "@napi-rs/image": "1.16.0",
+    "@types/node": "26.6.11",
+    "pixelmatch": "8.0.0",
+    "playwright-core": "1.65.1",
+    "typescript": "7.0.2",
+    "vitest": "5.1.2"
+  },
+  "engines": {
+    "node": "^22.22.3 || >=24.8.0"
+  }
+}

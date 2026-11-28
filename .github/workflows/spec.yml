@@ -81,6 +81,15 @@ jobs:
       - name: MCP Registry entry matches the runner
         if: ${{ inputs.agent-device-version == '' }}
         run: pnpm mcp-server:check
+      # @e2e-dev/util's crates on Linux, which the macOS `native` job does not reach; it checks the whole workspace.
+      # rustup installs the toolchain rust-toolchain.toml pins on first use. The notices of the crates the addon links,
+      # committed in each platform package, must match Cargo.lock.
+      - name: Rust crates of @e2e-dev/util (clippy, tests, notices)
+        if: ${{ inputs.agent-device-version == '' }}
+        run: |
+          cargo clippy -p e2e-util -p e2e-util-napi --all-targets --locked -- -D warnings
+          cargo test -p e2e-util -p e2e-util-napi --locked
+          node scripts/native/native-licenses.ts util --check
       # The registry rejects an invalid entry only at publish, from a release
       # tag that can no longer change.
       - uses: ./.github/actions/mcp-publisher
@@ -165,7 +174,9 @@ jobs:
       - uses: ./.github/actions/workspace-install
         with:
           agent-device-version: ${{ inputs.agent-device-version }}
-      - run: pnpm --filter @e2e-dev/core run build && pnpm --filter e2e run build
+      - run: pnpm --filter @e2e-dev/util run build:native && pnpm --filter @e2e-dev/util run build && pnpm --filter @e2e-dev/core run build && pnpm --filter e2e run build
+      - name: The image addon on Bun ${{ matrix.bun }}
+        run: bun packages/util/tests/runtime-smoke.mjs
       - name: The CLI on Bun ${{ matrix.bun }}
         run: pnpm --filter e2e exec vitest run tests/integration/bun-runtime.test.ts
         env:
@@ -237,7 +248,7 @@ jobs:
       - name: Load the addon through the engine
         env:
           REQUIRE_DESKTOP_NATIVE: '1'
-        run: pnpm --filter @e2e-dev/core run build && pnpm --filter @e2e-dev/desktop exec vitest run tests/unit/driver.test.ts
+        run: pnpm --filter @e2e-dev/util run build && pnpm --filter @e2e-dev/core run build && pnpm --filter @e2e-dev/desktop exec vitest run tests/unit/driver.test.ts
 
   # The Electron engine on its testbed app. Electron has no headless mode, so
   # the app runs under a virtual display.
@@ -257,8 +268,10 @@ jobs:
       # Electron needs the system packages Chromium does.
       - name: Install Chromium's system packages
         uses: ./.github/actions/chromium
+      # Core reads and writes screenshots through @e2e-dev/util's addon, built here from the checkout.
+      - uses: ./.github/actions/rust-toolchain
       - name: Build
-        run: pnpm --filter @e2e-dev/core --filter e2e --filter @e2e-dev/electron run build
+        run: pnpm --filter @e2e-dev/util run build:native && pnpm --filter @e2e-dev/util --filter @e2e-dev/core --filter e2e --filter @e2e-dev/electron run build
       # The engine's own launches and page-side code on real Electron windows.
       - name: Electron integration tests
         run: xvfb-run --auto-servernum pnpm --filter @e2e-dev/electron run test:integration
@@ -282,8 +295,10 @@ jobs:
       - uses: ./.github/actions/workspace-install
         with:
           agent-device-version: ${{ inputs.agent-device-version }}
+      # Core reads and writes screenshots through @e2e-dev/util's addon, built here from the checkout.
+      - uses: ./.github/actions/rust-toolchain
       - name: Build
-        run: pnpm --filter @e2e-dev/core --filter e2e --filter @e2e-dev/electron run build
+        run: pnpm --filter @e2e-dev/util run build:native && pnpm --filter @e2e-dev/util --filter @e2e-dev/core --filter e2e --filter @e2e-dev/electron run build
       - name: Electron unit tests
         run: pnpm --filter @e2e-dev/electron test
       - name: Electron integration tests
@@ -293,11 +308,20 @@ jobs:
         if: ${{ !cancelled() }}
         run: pnpm --filter @e2e-dev/electron-testbed test
 
+  # @e2e-dev/util's addon built, checked, and loaded on each of the eight
+  # platforms its platform packages ship, the way the release builds it.
+  # Not on a compatibility run: the addon does not involve agent-device, and
+  # nightly-agent-device.yml also calls examples.yml, whose own call would
+  # upload the same `util-native-*` artifact names into the same run.
+  util-native:
+    if: ${{ inputs.agent-device-version == '' }}
+    uses: ./.github/workflows/util-native.yml
+
   # The one check the ruleset requires from this workflow. A skipped job
   # passes (the change cannot reach it); a failed or cancelled one fails it.
   gate:
     name: spec gate
-    needs: [check, test, bun, install, native, electron, electron-windows]
+    needs: [check, test, bun, install, native, electron, electron-windows, util-native]
     if: ${{ always() }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5

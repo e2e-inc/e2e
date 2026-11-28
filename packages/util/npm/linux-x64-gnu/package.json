@@ -1,0 +1,46 @@
+{
+  "name": "@e2e-dev/util-linux-x64-gnu",
+  "version": "0.0.1",
+  "description": "The Linux x64 (glibc) native addon of @e2e-dev/util, which npm installs with it",
+  "keywords": [
+    "e2e",
+    "png",
+    "napi"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/e2e-inc/e2e.git",
+    "directory": "packages/util/npm/linux-x64-gnu"
+  },
+  "bugs": {
+    "url": "https://github.com/e2e-inc/e2e/issues"
+  },
+  "homepage": "https://github.com/e2e-inc/e2e/tree/main/packages/util#readme",
+  "engines": {
+    "node": "^22.22.3 || >=24.8.0"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public",
+    "tag": "latest"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "main": "util.linux-x64-gnu.node",
+  "files": [
+    "util.linux-x64-gnu.node",
+    "NOTICE",
+    "THIRD_PARTY_LICENSES.md"
+  ],
+  "scripts": {
+    "prepublishOnly": "node ../../../../scripts/native/check-native.ts util"
+  }
+}

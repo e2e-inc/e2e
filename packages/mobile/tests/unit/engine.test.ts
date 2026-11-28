@@ -17,6 +17,7 @@ import { describeEngine } from '@e2e-dev/core/engine';
 import type { Device } from '../../src/device.ts';
 import type { RawNode } from '../../src/nodes.ts';
 import { buildEngine, mobile } from '../../src/engine.ts';
+import { maskPng } from '../../src/png.ts';
 import { ORIGIN_UNKNOWN_BOUNDS, ORIGIN_WARNING } from '../../src/errors.ts';
 import { AgentDeviceSurface } from '../../src/surface.ts';
 import { swipeWithin } from '../../src/support.ts';
@@ -27,6 +28,8 @@ import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 // The harness's project root, `/project`, is not on disk: a build under it
 // counts as present, so `installApp` reaches the fake client.
+vi.mock('../../src/png.ts', { spy: true });
+
 vi.mock('node:fs', async (original) => {
   const fs = await original<typeof import('node:fs')>();
   return { ...fs, existsSync: (file: import('node:fs').PathLike) => String(file).startsWith('/project/') || fs.existsSync(file) };
@@ -2209,6 +2212,29 @@ describe('session hooks, viewport swipe, location, artifacts', () => {
       expect(existsSync(file)).toBe(false);
       expect(existsSync(path.dirname(file))).toBe(false);
     }
+  });
+
+  it('keeps no screenshot when the operation is cancelled while its secure fields are masked', async () => {
+    const h = harness();
+    const image = { width: 130, height: 282, channels: 3 as const, pixels: new Uint8Array(130 * 282 * 3).fill(200) };
+    h.fake.respond('capture.screenshot', (args) => {
+      const file = (args as { path: string }).path;
+      writeFileSync(file, encodePng(image));
+      return { path: file };
+    });
+    await openAttempt(h);
+    const controller = new AbortController();
+    const mask = vi.mocked(maskPng);
+    mask.mockClear();
+    // Masking runs on the addon's pool; the operation is cancelled before it answers.
+    mask.mockImplementationOnce(async (bytes) => {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      controller.abort();
+      return bytes;
+    });
+    await expect(h.engine.artifacts!.screenshot('cancelled', operation(controller.signal))).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(mask).toHaveBeenCalledOnce();
+    expect(existsSync(path.join(artifactsDir, 'screenshots', '001-cancelled.png'))).toBe(false);
   });
 
   it('removes temporary screenshots after a capture failure', async () => {

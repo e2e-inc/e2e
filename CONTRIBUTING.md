@@ -169,7 +169,10 @@ Install dependencies from the root:
 pnpm install
 ```
 
-Build first; nearly everything downstream consumes `dist`:
+Build first; nearly everything downstream consumes `dist`. The build starts
+with `@e2e-dev/util`'s Rust addon, so install
+[rustup](https://rustup.rs) first; it installs the toolchain that
+`rust-toolchain.toml` pins on the first build:
 
 ```sh
 pnpm build
@@ -280,7 +283,8 @@ npm has no org-wide setting for this; every package is connected one by one.
 The `release` job must stay on a GitHub-hosted runner: npm rejects OIDC
 tokens from self-hosted runners, Blacksmith included.
 
-When adding a new public package:
+When adding a new public package, platform packages of a native addon
+included (`@e2e-dev/util-<platform>` and the like):
 
 1. Publish the first version by hand from a maintainer machine. Trusted
    publishers live in package settings on npmjs, so the package has to exist
@@ -321,7 +325,8 @@ with `--tag nightly`. A canary is the hand-run form, published from a
 maintainer's machine:
 
 ```sh
-GITHUB_TOKEN=<token> pnpm run canary
+gh run download <run id> --pattern 'util-native-*' --dir <directory>
+UTIL_NATIVE_DIR=<directory> GITHUB_TOKEN=<token> pnpm run canary
 pnpm run canary:publish
 git checkout -- packages .changeset
 ```
@@ -329,7 +334,11 @@ git checkout -- packages .changeset
 The first script writes a changeset that bumps every public package, versions
 them as `<next version>-canary-<datetime>`, and builds, the desktop engine's
 native driver for both Mac architectures included: run it on a Mac with
-[rustup](https://rustup.rs) installed. The second publishes
+[rustup](https://rustup.rs) installed. A Mac cannot build `@e2e-dev/util`'s
+addon for Linux and Windows, so the script takes all eight builds from a CI
+run instead: the `util-native-*` artifacts of the `spec` run on the commit
+you are cutting, which `gh run download` fetches (they are kept three days).
+It puts them in the platform packages (`pnpm run place:util-native`). The second publishes
 with `--tag canary`; it is a separate step because npm's two-factor prompt
 (a hardware key, for instance) has to be answered at the terminal. Bumping all
 of them together is what keeps the engines installable: their peer ranges are

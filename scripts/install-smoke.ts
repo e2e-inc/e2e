@@ -8,6 +8,9 @@
  * project only through `e2e`'s dependency and the engines' peer, as it does
  * for a user, and the install must hold one copy of it: two would split the
  * error classes and the engine registry between the runner and the engines.
+ * `@e2e-dev/util`, which core depends on, is packed with its platform
+ * package for this machine, carrying the addon `pnpm run build` built here,
+ * and the installed project loads it through core and round-trips a PNG.
  * A second project installs `@e2e-dev/core` and the engines without `e2e`,
  * as a program that drives a browser or device with core alone does, and
  * imports each engine's main entry there.
@@ -24,9 +27,10 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { addonFile, findAddon, hostPlatform } from './native/addons.ts';
 import { REPO_ROOT } from './public-packages.ts';
 
 const pnpmVersion = process.argv[2];
@@ -35,8 +39,16 @@ if (pnpmVersion === undefined) {
   process.exit(2);
 }
 
-/** The packages a new user installs: the runner and its engines, and the core both build on. */
-const PACKAGES = ['core', 'e2e', 'web', 'mobile', 'desktop', 'desktop/npm/darwin-arm64', 'desktop/npm/darwin-x64'] as const;
+const util = findAddon('util');
+const utilPlatforms = Object.values(util.targets);
+const host = hostPlatform();
+if (!utilPlatforms.includes(host)) throw new Error(`@e2e-dev/util ships no addon for ${host}`);
+
+/**
+ * The packages a new user installs: the runner and its engines, the core both build on, and core's addon with this
+ * machine's platform package.
+ */
+const PACKAGES = ['util', `util/npm/${host}`, 'core', 'e2e', 'web', 'mobile', 'desktop', 'desktop/npm/darwin-arm64', 'desktop/npm/darwin-x64'] as const;
 
 const root = mkdtempSync(join(tmpdir(), 'e2e-install-smoke-'));
 const tarballs = join(root, 'tarballs');
@@ -64,19 +76,30 @@ const mobileManifest = JSON.parse(readFileSync(join(REPO_ROOT, 'packages/mobile/
 const problems: string[] = [];
 let workspaceYaml: string | undefined;
 try {
+  // The platform package carries no addon in a checkout: a copy of it gets the one `pnpm run build` placed beside the
+  // loader, so a release build already placed in the package stays as it is.
+  const addon = addonFile(util, host);
+  const built = join(util.packageDir, addon);
+  if (!existsSync(built)) throw new Error(`${built} is missing; run pnpm run build first`);
+  const hostPackage = join(root, `util-${host}`);
+  cpSync(join(util.packageDir, 'npm', host), hostPackage, { recursive: true });
+  copyFileSync(built, join(hostPackage, addon));
   for (const name of PACKAGES) {
-    const packed = run(join(REPO_ROOT, 'packages', name), 'pnpm', ['pack', '--pack-destination', tarballs]);
+    const dir = name === `util/npm/${host}` ? hostPackage : join(REPO_ROOT, 'packages', name);
+    const packed = run(dir, 'pnpm', ['pack', '--pack-destination', tarballs]);
     if (packed.status !== 0) throw new Error(`pnpm pack failed in packages/${name}:\n${packed.output}`);
   }
   const files = readdirSync(tarballs);
   // The version follows the prefix, so `e2e-dev-desktop-` never takes `e2e-dev-desktop-darwin-arm64-`.
   const tarball = (prefix: string): string => `file:${join(tarballs, files.find((file) => file.startsWith(prefix) && /^[\d.]/.test(file.slice(prefix.length)))!)}`;
-  // `e2e` names its exact `@e2e-dev/core`, which the registry has not published yet: the override serves the tarball.
+  // `e2e` names its exact `@e2e-dev/core`, core its exact `@e2e-dev/util`, and util its platform packages, which the
+  // registry has not published yet: the overrides serve the tarballs, this machine's util platform package among them.
   // So are the desktop engine's platform packages, which carry no driver when packed off a release. Off the Mac they
   // match, an install from the registry skips them by `os` and `cpu`; a skipped `file:` override breaks pnpm 11's
   // frozen reinstall instead (ENOTDIR), so there the override drops them.
   const platformPackage = (name: string, arch: string): string => (process.platform === 'darwin' && process.arch === arch ? JSON.stringify(tarball(`e2e-dev-${name}-`)) : '"-"');
-  workspaceYaml = `overrides:\n  '@e2e-dev/core': ${JSON.stringify(tarball('e2e-dev-core-'))}\n  '@e2e-dev/desktop-darwin-arm64': ${platformPackage('desktop-darwin-arm64', 'arm64')}\n  '@e2e-dev/desktop-darwin-x64': ${platformPackage('desktop-darwin-x64', 'x64')}\n${driverVersion ? `  agent-device: ${JSON.stringify(driverVersion)}\n` : ''}`;
+  const utilOverrides = utilPlatforms.map((platform) => `  '@e2e-dev/util-${platform}': ${platform === host ? JSON.stringify(tarball(`e2e-dev-util-${platform}-`)) : '"-"'}\n`).join('');
+  workspaceYaml = `overrides:\n  '@e2e-dev/core': ${JSON.stringify(tarball('e2e-dev-core-'))}\n  '@e2e-dev/util': ${JSON.stringify(tarball('e2e-dev-util-'))}\n${utilOverrides}  '@e2e-dev/desktop-darwin-arm64': ${platformPackage('desktop-darwin-arm64', 'arm64')}\n  '@e2e-dev/desktop-darwin-x64': ${platformPackage('desktop-darwin-x64', 'x64')}\n${driverVersion ? `  agent-device: ${JSON.stringify(driverVersion)}\n` : ''}`;
   writeFileSync(join(project, 'pnpm-workspace.yaml'), workspaceYaml);
   writeFileSync(
     join(project, 'package.json'),
@@ -137,6 +160,16 @@ export async function checkFixture(device: Device) {
 }
 `);
 
+  // Core's addon, reached the way core reaches it: through e2e, then core, since pnpm links neither at the top.
+  writeFileSync(join(project, 'util-addon.mjs'), `
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+const core = createRequire(createRequire(import.meta.url).resolve('e2e')).resolve('@e2e-dev/core');
+const util = await import(pathToFileURL(createRequire(core).resolve('@e2e-dev/util')).href);
+const back = await util.decodePng(await util.NativeImage.fromRgba(new Uint8Array(16).fill(200), 2, 2).encode());
+if (back.width !== 2 || back.pixels()[0] !== 200) throw new Error('the installed addon changed a PNG round trip');
+`);
+
   // pnpm links `@e2e-dev/core` only inside the engines' own folders, so a
   // declaration that names a core type has no path this project can import (TS2883).
   writeFileSync(join(project, 'engines.config.ts'), `
@@ -160,6 +193,7 @@ export default {
     ['mobile tool types', ['exec', 'tsc', '--noEmit', '--strict', '--types', 'node,json-schema', '--module', 'NodeNext', '--target', 'ES2024', 'mobile-types.ts']],
     ['config declaration', ['exec', 'tsc', '--declaration', '--emitDeclarationOnly', '--outDir', 'types', '--strict', '--skipLibCheck', '--types', 'node', '--module', 'ESNext', '--moduleResolution', 'Bundler', '--target', 'ES2024', 'engines.config.ts']],
     ['e2e run', ['exec', 'e2e', 'run', '--workers', '1']],
+    [`@e2e-dev/util-${host} loads`, ['exec', 'node', 'util-addon.mjs']],
   ] as const) {
     const { status, output } = pnpm(args);
     process.stdout.write(`$ ${step}: exit ${status}\n`);
@@ -232,5 +266,5 @@ if (problems.length > 0) {
   process.stderr.write(`${problems.join('\n\n')}\n`);
   process.exitCode = 1;
 } else {
-  process.stdout.write(`install smoke: pnpm ${pnpmVersion} installs ${PACKAGES.join(', ')} with no build scripts, typechecks a mobile tool, emits a config's declaration, runs a TypeScript test, and loads the engines' main entries without e2e\n`);
+  process.stdout.write(`install smoke: pnpm ${pnpmVersion} installs ${PACKAGES.join(', ')} with no build scripts, typechecks a mobile tool, emits a config's declaration, runs a TypeScript test, loads core's addon, and loads the engines' main entries without e2e\n`);
 }

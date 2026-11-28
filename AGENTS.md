@@ -107,6 +107,29 @@ the way a user would.
     are the whole public surface: the flows, stores, and fetch behind them
     are module-private, not a library for other products. `tests/live/` holds hand-run
     checks that need a stored login and are never part of `pnpm test`.
+- `crates/e2e-util` and `crates/e2e-util-napi` - a logic crate with no
+  binding dependency, tested with `cargo test` alone, and its Node binding,
+  which only converts types, schedules work off the JavaScript thread, and
+  maps errors. `pnpm --filter @e2e-dev/util build:native` (the `util` entry
+  in `scripts/native/addons.ts`) builds `packages/util/util.<platform>.node`.
+- `packages/util` - `@e2e-dev/util`, the loader and TypeScript API over
+  `e2e-util-napi`: PNG decode and encode, box resampling, crop, box
+  painting, and a bit-exact port of pixelmatch 8, every pixel call a
+  Promise run on a native pool, a decoded image kept native as
+  `NativeImage`. The addon loads on the first call. `@e2e-dev/core`'s
+  `internal/image.ts` and `@e2e-dev/mobile`'s masking use it; its
+  `tests/` hold it to the JavaScript it replaced, byte for byte, and
+  `bench/` times both. A release ships the addon for eight platforms in
+  `@e2e-dev/util-<platform>` (`packages/util/npm/<platform>`: macOS arm64
+  and x64, Linux x64 and arm64 with glibc or musl, Windows x64 and arm64),
+  optional dependencies with `os`, `cpu`, and `libc` set, in a changesets
+  `fixed` group with `@e2e-dev/util`. `.github/workflows/util-native.yml`
+  builds each on a runner of its platform (glibc in a manylinux_2_28
+  container, so 2.28 is the floor, as for Node 22 and 24; musl in Alpine;
+  Windows on GitHub-hosted runners), checks it
+  with `scripts/native/check-build.ts`, and loads it there; `spec.yml`,
+  `release.yml`, and `examples.yml` call it. After a dependency change, run
+  `pnpm --filter @e2e-dev/util licenses:native`, which CI checks.
 - `packages/web` — the published `@e2e-dev/web` package: the
   browser engine, built with the public `defineEngine`, contributing the
   `browser` fixture and `expect(browser)`. `@e2e-dev/web/engine` (and
@@ -487,7 +510,9 @@ the way a user would.
 
 ## Commands
 
-Build first — nearly everything downstream consumes `dist`.
+Build first — nearly everything downstream consumes `dist`. The build starts
+with `@e2e-dev/util`'s Rust addon, so it needs `rustup`, which installs the
+toolchain `rust-toolchain.toml` pins.
 
 ```bash
 pnpm check          # lint -> check:dead-code -> typecheck -> docs:check-errors -> check:peer-ranges -> check:changeset-bumps -> check:examples -> check:benchmark-coverage -> check:install-scripts -> plugins:check -> mcp-server:check -> docs:check (full gate)
@@ -499,7 +524,8 @@ pnpm test:web-benchmark   # builds, then runs the real CLI against the benchmark
 Focused work:
 
 ```bash
-pnpm --filter @e2e-dev/core run build && pnpm --filter e2e run build
+pnpm --filter @e2e-dev/util run build:native && pnpm --filter @e2e-dev/util run build
+pnpm --filter @e2e-dev/core run build && pnpm --filter e2e run build   # core compiles against util's dist
 pnpm --filter e2e run test:unit                       # unit only; needs @e2e-dev/core built
 pnpm --filter e2e exec vitest run tests/unit/scheduler.test.ts
 pnpm --filter e2e exec vitest run -t 'name fragment'
@@ -960,7 +986,9 @@ trees, on both platforms, without a device.
   through the engine's loader test, and a load of the x64 build in the
   official darwin-x64 Node under Rosetta; rustup, when the image has none,
   comes from the rustup-init release and SHA-256 that
-  `.github/actions/rust-toolchain` pins), which
+  `.github/actions/rust-toolchain` pins), and `util-native`
+  (`util-native.yml`: `@e2e-dev/util`'s addon built, checked, and loaded on
+  each of its eight platforms), which
   `spec gate` needs; `benchmark.yml` runs the
   web benchmark's two suites; `mobile.yml` runs the mobile benchmark's on an
   iOS simulator and an Android emulator (KVM on x64 Linux); `docs.yml`
@@ -985,9 +1013,11 @@ trees, on both platforms, without a device.
   pins actions by SHA; keep new actions SHA-pinned. Every job runs on
   Blacksmith, like the e2e-inc repos. Linux jobs use
   `blacksmith-4vcpu-ubuntu-2404` and macOS jobs `blacksmith-6vcpu-macos-26`;
-  keep new jobs on those labels. The one exception is the `release` job:
+  keep new jobs on those labels. The exceptions: the `release` job, since
   npm Trusted Publishing rejects OIDC tokens from self-hosted runners, and
-  Blacksmith counts as one, so it stays on `ubuntu-latest`.
+  Blacksmith counts as one, so it stays on `ubuntu-latest`; and Windows jobs, on
+  GitHub-hosted `windows-latest` and `windows-11-arm`. Arm64 Linux jobs add
+  `-arm` to a label.
 - Commits follow Conventional Commits; PRs are squash-merged with the number in
   the subject.
 - PR titles and bodies follow the `writing-pr` skill
@@ -1040,7 +1070,9 @@ trees, on both platforms, without a device.
   `## Verified`. The examples commit no lockfile and gate no pull request, so
   nothing else catches one left on an old version.
 - Canaries are hand-run, never from CI: `pnpm run canary` with `GITHUB_TOKEN`
-  set versions and builds every public package as a changesets snapshot, and
+  set, and `UTIL_NATIVE_DIR` naming the `util-native-*` artifacts of a CI run
+  (a Mac cannot build all eight; CONTRIBUTING.md has the download), versions
+  and builds every public package as a changesets snapshot, and
   `pnpm run canary:publish` publishes them to the `canary` dist-tag, then runs
   `scripts/restore-peer-ranges.ts`. Publishing
   is its own step because npm's two-factor prompt is interactive. Never publish

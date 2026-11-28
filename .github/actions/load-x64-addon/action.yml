@@ -1,7 +1,8 @@
-name: Load the x64 desktop addon
+name: Load an x64 addon
 description: >-
-  Loads the desktop driver's x64 build in an x86_64 Node under Rosetta on an
-  arm64 Mac, and fails unless it loads and answers status().
+  Loads a native addon's x64 build in an x86_64 Node under Rosetta on an
+  arm64 Mac, and fails unless it loads and answers: the desktop driver's
+  status(), or the probe script given.
 
 # No Intel Mac runner is in use, so Rosetta stands in for one: it runs the
 # official darwin-x64 Node of the version setup-node installed, checked
@@ -11,6 +12,12 @@ inputs:
   addon:
     description: Path of the x64 addon, relative to the workspace.
     required: true
+  probe:
+    description: >-
+      A script, relative to the workspace, that the x86_64 Node runs with the
+      addon's path as its argument and that exits non-zero when the addon
+      does not work. Without one, the desktop driver's status() is checked.
+    default: ''
 
 runs:
   using: composite
@@ -44,8 +51,14 @@ runs:
       env:
         NODE_X64: ${{ steps.node.outputs.path }}
         ADDON: ${{ inputs.addon }}
+        PROBE: ${{ inputs.probe }}
       run: |
         set -euo pipefail
+        if [ -n "$PROBE" ]; then
+          arch -x86_64 "$NODE_X64" -e "if (process.arch !== 'x64') throw new Error('Node runs as ' + process.arch + ', not x64')"
+          arch -x86_64 "$NODE_X64" "$GITHUB_WORKSPACE/$PROBE" "$GITHUB_WORKSPACE/$ADDON"
+          exit 0
+        fi
         arch -x86_64 "$NODE_X64" -e "
           if (process.arch !== 'x64') throw new Error('Node runs as ' + process.arch + ', not x64');
           const status = require(require('node:path').resolve(process.argv[1])).status();

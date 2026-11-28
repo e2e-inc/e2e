@@ -92,8 +92,16 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # @e2e-dev/util's addon for its eight platforms, each built and loaded on a
+  # runner of that platform, which the publishing jobs put in
+  # `@e2e-dev/util-<platform>`. Like `native`, every run waits for it.
+  util-native:
+    needs: nightly-due
+    if: ${{ needs.nightly-due.outputs.skip != 'true' }}
+    uses: ./.github/workflows/util-native.yml
+
   release:
-    needs: native
+    needs: [native, util-native]
     if: ${{ github.event_name == 'push' }}
     # GitHub-hosted, not Blacksmith: npm Trusted Publishing rejects OIDC
     # tokens from self-hosted runners, and Blacksmith registers as one.
@@ -123,8 +131,8 @@ jobs:
       - name: Peer ranges
         run: pnpm run check:peer-ranges
 
-      # The driver goes into the platform packages, stamped with their
-      # versions; on a run that only opens the release PR it is unused.
+      # The native builds go into the platform packages, stamped with their
+      # versions; on a run that only opens the release PR they are unused.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: desktop-native
@@ -132,6 +140,13 @@ jobs:
           path: ${{ runner.temp }}/desktop-native
       - name: Place the desktop driver
         run: node scripts/native/place-native.ts desktop "$RUNNER_TEMP/desktop-native"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: util-native-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/util-native
+      - name: Place the util addon
+        run: node scripts/native/place-native.ts util "$RUNNER_TEMP/util-native"
 
       # Opens or updates a release PR while changesets are pending; publishes
       # once that PR is merged and no changesets remain.
@@ -185,7 +200,7 @@ jobs:
   # workflow file. Nothing is committed; the version bump and the pinned peer
   # ranges stay in the job's checkout.
   nightly:
-    needs: [nightly-due, native]
+    needs: [nightly-due, native, util-native]
     if: ${{ github.event_name != 'push' && needs.nightly-due.outputs.skip != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -237,6 +252,13 @@ jobs:
       # After the version step, so the stamp names the snapshot version.
       - name: Place the desktop driver
         run: node scripts/native/place-native.ts desktop "$RUNNER_TEMP/desktop-native"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: util-native-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/util-native
+      - name: Place the util addon
+        run: node scripts/native/place-native.ts util "$RUNNER_TEMP/util-native"
 
       - name: Publish to the nightly tag
         run: pnpm exec changeset publish --tag nightly --no-git-tag

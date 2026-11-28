@@ -27,6 +27,7 @@ import { Deadline } from '@e2e-dev/core/lib/internal/time';
 import { LocatorEngine } from '@e2e-dev/core/lib/locator/engine';
 import { createScreen } from '@e2e-dev/core/lib/locator/screen';
 import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
+import type { ScreenshotContext } from '@e2e-dev/core/lib/run/screenshots';
 import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
 import type { Screen } from '@e2e-dev/core/lib/types';
 
@@ -55,6 +56,10 @@ export interface ScreenOverOptions {
   readonly tapModifiers?: boolean;
   /** Action and assertion timeout in milliseconds. */
   readonly timeoutMs: number;
+  /** The attempt's signal; default one that never aborts. */
+  readonly signal?: AbortSignal;
+  /** Where `toHaveScreenshot` keeps screenshots; without it the matcher refuses, as outside a test. */
+  readonly screenshots?: ScreenshotContext;
 }
 
 /** A screen and the recorder of its steps over the engine `options` describe. */
@@ -90,7 +95,7 @@ export function screenOver(options: ScreenOverOptions): { screen: Screen; steps:
     ...(options.tapModifiers === undefined ? {} : { tapModifiers: options.tapModifiers }),
   });
   const steps = new StepRecorder('attempt');
-  const signal = new AbortController().signal;
+  const signal = options.signal ?? new AbortController().signal;
   const screen = createScreen({
     engine: new LocatorEngine({
       session: createEngineSession({ engine, targetName: 'fake' }),
@@ -101,6 +106,7 @@ export function screenOver(options: ScreenOverOptions): { screen: Screen; steps:
       assertionTimeout: options.timeoutMs,
     }),
     steps,
+    ...(options.screenshots === undefined ? {} : { screenshots: options.screenshots }),
     secrets: { resolve: async () => 'plaintext' },
     artifacts: { dir: options.artifactsDir ?? '', register: (_kind, relativePath) => {
         options.registered?.(relativePath);

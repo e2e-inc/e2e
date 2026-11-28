@@ -33,6 +33,21 @@ const ADDONS: Readonly<Record<string, AddonSpec>> = {
     file: 'desktop',
     targets: { 'aarch64-apple-darwin': 'darwin-arm64', 'x86_64-apple-darwin': 'darwin-x64' },
   },
+  util: {
+    crate: 'e2e-util-napi',
+    package: 'util',
+    file: 'util',
+    targets: {
+      'aarch64-apple-darwin': 'darwin-arm64',
+      'x86_64-apple-darwin': 'darwin-x64',
+      'x86_64-unknown-linux-gnu': 'linux-x64-gnu',
+      'x86_64-unknown-linux-musl': 'linux-x64-musl',
+      'aarch64-unknown-linux-gnu': 'linux-arm64-gnu',
+      'aarch64-unknown-linux-musl': 'linux-arm64-musl',
+      'x86_64-pc-windows-msvc': 'win32-x64-msvc',
+      'aarch64-pc-windows-msvc': 'win32-arm64-msvc',
+    },
+  },
 };
 
 /** An addon with its paths resolved against the repository root. */
@@ -65,6 +80,17 @@ export function addonFile(addon: Addon, platform: string): string {
 /** The directory of the platform package that ships the addon for one platform. */
 export function platformPackageDir(addon: Addon, platform: string): string {
   return path.join(ROOT, 'packages', addon.package, 'npm', platform);
+}
+
+/** NAPI-RS's name for this machine's platform, the one an addon's loader asks for: `darwin-arm64`, `linux-x64-gnu`. */
+export function hostPlatform(): string {
+  const { platform: os, arch } = process;
+  if (os === 'linux') {
+    const glibc = (process.report.getReport() as { header?: { glibcVersionRuntime?: string } }).header?.glibcVersionRuntime;
+    return `linux-${arch}-${glibc === undefined ? 'musl' : 'gnu'}`;
+  }
+  if (os === 'win32') return `win32-${arch}-msvc`;
+  return `${os}-${arch}`;
 }
 
 /**
