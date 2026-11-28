@@ -1139,6 +1139,12 @@ describe('desktop fixture: windows', () => {
     expect(last(fake, 'snapshot')).toMatchObject({ windowId: 'w-mine' });
   });
 
+  it('takes a window by its title from a read that answers within the whole timeout', async () => {
+    const { surface } = await launched({ listWindows: [windows(() => [mine]), windows(() => [mine]), windows(() => [mine, panel], 900)] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    expect(await (await desktop.window({ title: 'Controls' }, { timeout: 1_000 })).title()).toBe('Controls');
+  });
+
   it('names the open windows when none gets the title in time, and refuses a matcher with no title', async () => {
     const { surface } = await launched({ listWindows: [windows(() => [mine])] });
     const desktop = createDesktopFixture(surface, fixtureContext());

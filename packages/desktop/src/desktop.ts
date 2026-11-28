@@ -196,6 +196,8 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
           operation,
           operation.timeoutMs,
           (windows) => `no window has the title ${String(title instanceof RegExp ? title : JSON.stringify(title))}; open: ${windows.map((window) => JSON.stringify(window.title)).join(', ') || 'none'}`,
+          // The lookup owns its deadline (no outer step timer, below), so it reads to the end of the timeout asked for.
+          { margin: false },
         ),
       );
     },
@@ -216,7 +218,7 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
   return context.fixture('desktop', desktop, {
     windows: { kind: 'resource' },
     waitForWindow: { kind: 'resource', timeout: false },
-    window: { kind: 'resource', timeout: (_which, options) => options?.timeout, label: (which) => String(which?.title) },
+    window: { kind: 'resource', timeout: false, label: (which) => String(which?.title) },
     keyboard: { press: { kind: 'resource', label: (key) => key }, type: { kind: 'resource', label: (text) => (typeof text === 'string' ? `${text.length} chars` : '') } },
     closeApp: { kind: 'resource' },
   });
