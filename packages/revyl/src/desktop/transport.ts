@@ -11,6 +11,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import type { EngineTransport, TransportConnection, TransportContext } from 'e2e/engine';
 import { revylCredentials } from '../credentials.ts';
 import { forget, prune, remember, remembered, runs } from '../ledger.ts';
@@ -183,7 +184,7 @@ async function setUp(client: RevylComputerClient, id: string, dir: string, packa
   const signal = context.signal;
   const build = context.app?.appPath === undefined ? undefined : await archive(path.resolve(context.cwd, context.app.appPath), signal);
   const relative = (file: string): string => path.posix.relative('/Users/computer/workspace', file);
-  const present = await shell(client, id, 'mkdir -p "$DIR" "$ROOT/apps" && if [ -n "$APP_SHA" ] && [ -d "$ROOT/apps/$APP_SHA" ]; then echo present; fi', { ROOT, DIR: dir, APP_SHA: build?.sha ?? '' }, signal);
+  const present = await shell(client, id, 'mkdir -p "$DIR" && if [ -n "$APP_SHA" ]; then if [ -d "$ROOT/apps/$APP_SHA" ]; then echo present; else rm -rf "$ROOT/apps/$APP_SHA.parts" && mkdir -p "$ROOT/apps/$APP_SHA.parts"; fi; fi', { ROOT, DIR: dir, APP_SHA: build?.sha ?? '' }, signal);
   for (const name of SCRIPTS) {
     await client.writeFile(id, relative(`${dir}/${name}${EXTENSION}`), await readFile(new URL(`./remote/${name}${EXTENSION}`, import.meta.url)), signal);
   }
@@ -208,7 +209,7 @@ if [ ! -f "$DIR/installed" ]; then
 fi
 if [ -n "$APP_SHA" ] && [ ! -d "$ROOT/apps/$APP_SHA" ]; then
   rm -rf "$ROOT/apps/$APP_SHA.tmp" && mkdir -p "$ROOT/apps/$APP_SHA.tmp"
-  cat "$ROOT/apps/$APP_SHA.parts"/* | tar -xzf - -C "$ROOT/apps/$APP_SHA.tmp"
+  cat "$ROOT/apps/$APP_SHA.parts"/* | gunzip | tar -xf - -C "$ROOT/apps/$APP_SHA.tmp"
   rm -rf "$ROOT/apps/$APP_SHA.parts" && mv "$ROOT/apps/$APP_SHA.tmp" "$ROOT/apps/$APP_SHA"
 fi
 if ! sudo -n true 2>/dev/null; then
@@ -253,9 +254,13 @@ async function shell(client: RevylComputerClient, id: string, line: string, env:
   return result.stdout.toString('utf8');
 }
 
-/** The app bundle as a gzipped tar, and its hash, which names it on the Mac so a computer keeps one copy per build. */
+/**
+ * The app bundle as a gzipped tar, and the hash of the tar, which names it on
+ * the Mac so a computer keeps one copy per build. The hash is of the tar
+ * itself, since gzip stamps each archive with the time it was made.
+ */
 async function archive(bundle: string, signal: AbortSignal): Promise<{ readonly bundle: string; readonly data: Buffer; readonly sha: string }> {
-  const child = spawn('tar', ['-czf', '-', '-C', path.dirname(bundle), path.basename(bundle)], { signal, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn('tar', ['-cf', '-', '-C', path.dirname(bundle), path.basename(bundle)], { signal, stdio: ['ignore', 'pipe', 'pipe'] });
   const chunks: Buffer[] = [];
   let stderr = '';
   child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -267,6 +272,6 @@ async function archive(bundle: string, signal: AbortSignal): Promise<{ readonly 
     child.once('close', resolve);
   });
   if (code !== 0) throw new Error(`archiving ${bundle} for the Revyl computer failed: ${stderr.trim()}`);
-  const data = Buffer.concat(chunks);
-  return { bundle, data, sha: createHash('sha256').update(data).digest('hex').slice(0, 32) };
+  const tar = Buffer.concat(chunks);
+  return { bundle, data: gzipSync(tar), sha: createHash('sha256').update(tar).digest('hex').slice(0, 32) };
 }

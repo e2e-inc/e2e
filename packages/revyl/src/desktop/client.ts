@@ -118,7 +118,9 @@ export class RevylComputerClient {
   /** Writes a file of at most 64 KiB, its path relative to the computer's workspace. */
   async writeFile(id: string, file: string, data: Buffer, signal: AbortSignal): Promise<void> {
     const execution = await this.#operation(id, { kind: 'file_write', path_b64: base64(file), data: data.toString('base64') }, 60_000, signal);
-    if (execution.outcome !== 'succeeded') throw new Error(`writing ${file} on Revyl computer ${id} ended ${String(execution.outcome)}`);
+    if (execution.outcome !== 'succeeded') {
+      throw new Error(`writing ${file} on Revyl computer ${id} ended ${String(execution.outcome)}${typeof execution.error_code === 'string' ? ` (${execution.error_code})` : ''}`);
+    }
   }
 
   /**

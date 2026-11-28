@@ -6,12 +6,12 @@
  * Mac run only on a real computer, in the integration guide's proof.
  */
 
-import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { TransportConnection, TransportContext } from 'e2e/engine';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { revylDesktop, type RevylDesktopOptions } from '../../src/desktop.ts';
 import { frame, FrameReader, type Message } from '../../src/desktop/remote/frames.ts';
 import type { ExchangeAnswer, ExchangeRequest } from '../../src/desktop/remote/wire.ts';
@@ -146,6 +146,21 @@ describe('the Revyl computer transport', () => {
     expect(paths().at(-1)).toBe(`POST /api/v1/computer-runs/${String(created.computer_session_id)}/stop`);
     expect(markers()).toEqual([]);
     expect(exchanges()[0]!.open).toEqual([{ id: expect.any(String), env: { E2E_REVYL_COMPUTER: created.computer_session_id } }]);
+  });
+
+  it("uploads the target's app build in 64 KiB pieces, and hands its path on the Mac to the server", async () => {
+    const project = mkdtempSync(path.join(tmpdir(), 'revyl-desktop-'));
+    onTestFinished(() => rmSync(project, { recursive: true, force: true }));
+    mkdirSync(path.join(project, 'build', 'My.app', 'Contents'), { recursive: true });
+    writeFileSync(path.join(project, 'build', 'My.app', 'Contents', 'payload'), randomBytes(150_000));
+    const connection = await transport().open(context({ cwd: project, app: { appPath: 'build/My.app' } }));
+    await connection.close(1000);
+
+    const parts = ran.filter((command) => command.file?.includes('.parts/')).map((command) => path.basename(command.file!));
+    expect(parts).toEqual(['000000', '000001', '000002']);
+    const sha = ran.find((command) => command.env?.PACKAGES !== undefined)!.env!.APP_SHA!;
+    expect(sha).toMatch(/^[0-9a-f]{32}$/);
+    expect(exchanges()[0]!.open![0]!.env.E2E_REVYL_APP).toBe(`/Users/computer/workspace/.e2e-revyl/apps/${sha}/My.app`);
   });
 
   it('uses a persistent computer that runs as it is, and leaves it running', async () => {
