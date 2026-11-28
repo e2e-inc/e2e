@@ -12,8 +12,11 @@ name: util native
 # packages (scripts/native/place-native.ts); and by examples.yml, whose
 # examples install those packages.
 #
-# The glibc builds run on Ubuntu 22.04, so they need glibc 2.35 or later; the
-# musl builds run in an Alpine container on a runner of their architecture.
+# The glibc builds run in a digest-pinned manylinux_2_28 container
+# (AlmaLinux 8, glibc 2.28; `manylinux` in the matrix names the image) and are
+# loaded there, so they need glibc 2.28 or later, the oldest that Node 22's
+# and 24's own Linux builds run on. The musl builds run in an Alpine
+# container. Both run on a runner of their architecture.
 # The Windows builds run on GitHub-hosted runners, the arm64 one on its own.
 on:
   workflow_call:
@@ -37,8 +40,8 @@ jobs:
           - { platform: darwin-arm64, target: aarch64-apple-darwin, runner: blacksmith-6vcpu-macos-26 }
           # No Intel Mac runner is in use: an arm64 Mac cross-builds it and loads it under Rosetta.
           - { platform: darwin-x64, target: x86_64-apple-darwin, runner: blacksmith-6vcpu-macos-26, rosetta: true }
-          - { platform: linux-x64-gnu, target: x86_64-unknown-linux-gnu, runner: blacksmith-4vcpu-ubuntu-2204 }
-          - { platform: linux-arm64-gnu, target: aarch64-unknown-linux-gnu, runner: blacksmith-4vcpu-ubuntu-2204-arm }
+          - { platform: linux-x64-gnu, target: x86_64-unknown-linux-gnu, runner: blacksmith-4vcpu-ubuntu-2404, manylinux: quay.io/pypa/manylinux_2_28_x86_64@sha256:138aa47510791068def4919c447e639cbcf5b40ccd70950015782bfda3f0503f }
+          - { platform: linux-arm64-gnu, target: aarch64-unknown-linux-gnu, runner: blacksmith-4vcpu-ubuntu-2404-arm, manylinux: quay.io/pypa/manylinux_2_28_aarch64@sha256:e54f92a88be36c7a085264875afa7d21251f20dd9dccc9e2fbddaa554f45ba82 }
           - { platform: linux-x64-musl, target: x86_64-unknown-linux-musl, runner: blacksmith-4vcpu-ubuntu-2404, alpine: true }
           - { platform: linux-arm64-musl, target: aarch64-unknown-linux-musl, runner: blacksmith-4vcpu-ubuntu-2404-arm, alpine: true }
           - { platform: win32-x64-msvc, target: x86_64-pc-windows-msvc, runner: windows-latest }
@@ -49,22 +52,30 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # build-native.ts is TypeScript run directly, which needs a Node newer than a runner image may ship.
-      - if: ${{ !matrix.alpine }}
+      - if: ${{ !matrix.alpine && !matrix.manylinux }}
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
-      - if: ${{ !matrix.alpine }}
+      - if: ${{ !matrix.alpine && !matrix.manylinux }}
         uses: ./.github/actions/rust-toolchain
       - name: Build
-        if: ${{ !matrix.alpine }}
+        if: ${{ !matrix.alpine && !matrix.manylinux }}
         run: |
           node scripts/native/build-native.ts util --target "${{ matrix.target }}"
           node scripts/native/check-build.ts util "${{ matrix.target }}"
       - name: Build in Alpine
         if: ${{ matrix.alpine }}
         run: docker run --rm -v "$PWD:/work" -w /work "$ALPINE_NODE" sh .github/scripts/build-musl.sh util "${{ matrix.target }}"
+      - name: Build and load in manylinux
+        if: ${{ matrix.manylinux }}
+        env:
+          IMAGE: ${{ matrix.manylinux }}
+        run: >-
+          docker run --rm -v "$PWD:/work" -w /work "$IMAGE"
+          sh .github/scripts/build-glibc.sh util "${{ matrix.target }}"
+          scripts/native/probe-util.ts "packages/util/util.${{ matrix.platform }}.node"
       - name: Load the addon
-        if: ${{ !matrix.alpine && !matrix.rosetta }}
+        if: ${{ !matrix.alpine && !matrix.manylinux && !matrix.rosetta }}
         run: node scripts/native/probe-util.ts "packages/util/util.${{ matrix.platform }}.node"
       - name: Load the addon in Alpine
         if: ${{ matrix.alpine }}

@@ -14,8 +14,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { addonFile, findAddon, scriptArgs } from './addons.ts';
 
-/** The newest glibc a `-gnu` build may need: Ubuntu 22.04's, which builds them, so 22.04 and later load them. */
-const GLIBC_FLOOR: readonly [number, number] = [2, 35];
+/**
+ * The newest glibc a `-gnu` build may need: 2.28, the oldest that Node 22's and 24's own Linux builds run on. The
+ * builds run in a manylinux_2_28 container, whose glibc is 2.28 (`.github/scripts/build-glibc.sh`).
+ */
+const GLIBC_FLOOR: readonly [number, number] = [2, 28];
 
 const [name, target] = scriptArgs();
 const addon = findAddon(name);
@@ -42,7 +45,7 @@ if (expected === 'elf') {
     const versions = [...text.matchAll(/GLIBC_(\d+)\.(\d+)/g)].map((match) => [Number(match[1]), Number(match[2])] as const);
     const newest = versions.reduce<readonly [number, number] | undefined>((max, version) => (max === undefined || compare(version, max) > 0 ? version : max), undefined);
     if (newest !== undefined && compare(newest, GLIBC_FLOOR) > 0) {
-      throw new Error(`${file} needs glibc ${newest.join('.')}, newer than ${GLIBC_FLOOR.join('.')}: build it on Ubuntu 22.04`);
+      throw new Error(`${file} needs glibc ${newest.join('.')}, newer than ${GLIBC_FLOOR.join('.')}: build it with .github/scripts/build-glibc.sh`);
     }
     process.stdout.write(`newest glibc symbol version: ${newest?.join('.') ?? 'none'}\n`);
   }

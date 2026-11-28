@@ -32,8 +32,8 @@ e2e depends on this package. You do not need to install it yourself.
 | --- | --- |
 | macOS, Apple silicon | `@e2e-dev/util-darwin-arm64` |
 | macOS, Intel | `@e2e-dev/util-darwin-x64` |
-| Linux x64, glibc 2.35 or later | `@e2e-dev/util-linux-x64-gnu` |
-| Linux arm64, glibc 2.35 or later | `@e2e-dev/util-linux-arm64-gnu` |
+| Linux x64, glibc 2.28 or later | `@e2e-dev/util-linux-x64-gnu` |
+| Linux arm64, glibc 2.28 or later | `@e2e-dev/util-linux-arm64-gnu` |
 | Linux x64, musl (Alpine) | `@e2e-dev/util-linux-x64-musl` |
 | Linux arm64, musl (Alpine) | `@e2e-dev/util-linux-arm64-musl` |
 | Windows x64 | `@e2e-dev/util-win32-x64-msvc` |

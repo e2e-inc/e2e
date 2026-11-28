@@ -124,8 +124,9 @@ the way a user would.
   and x64, Linux x64 and arm64 with glibc or musl, Windows x64 and arm64),
   optional dependencies with `os`, `cpu`, and `libc` set, in a changesets
   `fixed` group with `@e2e-dev/util`. `.github/workflows/util-native.yml`
-  builds each on a runner of its platform (glibc on Ubuntu 22.04, so 2.35 is
-  the floor; musl in Alpine; Windows on GitHub-hosted runners), checks it
+  builds each on a runner of its platform (glibc in a manylinux_2_28
+  container, so 2.28 is the floor, as for Node 22 and 24; musl in Alpine;
+  Windows on GitHub-hosted runners), checks it
   with `scripts/native/check-build.ts`, and loads it there; `spec.yml`,
   `release.yml`, and `examples.yml` call it. After a dependency change, run
   `pnpm --filter @e2e-dev/util licenses:native`, which CI checks.
@@ -1014,10 +1015,9 @@ trees, on both platforms, without a device.
   `blacksmith-4vcpu-ubuntu-2404` and macOS jobs `blacksmith-6vcpu-macos-26`;
   keep new jobs on those labels. The exceptions: the `release` job, since
   npm Trusted Publishing rejects OIDC tokens from self-hosted runners, and
-  Blacksmith counts as one, so it stays on `ubuntu-latest`; Windows jobs, on
-  GitHub-hosted `windows-latest` and `windows-11-arm`; and `util-native.yml`'s glibc builds, on
-  `blacksmith-4vcpu-ubuntu-2204` and its `-arm` twin, so the addon needs
-  glibc 2.35, not 2.39 (arm64 Linux jobs add `-arm` to a label).
+  Blacksmith counts as one, so it stays on `ubuntu-latest`; and Windows jobs, on
+  GitHub-hosted `windows-latest` and `windows-11-arm`. Arm64 Linux jobs add
+  `-arm` to a label.
 - Commits follow Conventional Commits; PRs are squash-merged with the number in
   the subject.
 - PR titles and bodies follow the `writing-pr` skill
