@@ -1,44 +1,14 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
-import { fileURLToPath } from 'node:url';
 import { AgentError, type ExecutorActions, type ExecutorModelCall, type StepExecutorContext } from 'e2e';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { defineTool, registerProviderKey } from 'e2e/agent';
+import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { acp } from '../src/index.ts';
 import type { AcpOptions } from '../src/types.ts';
-
-const AGENT = fileURLToPath(new URL('./fixtures/scripted-agent.ts', import.meta.url));
-const cleanups: (() => void)[] = [];
-
-/** Waits on the scripted agent: a child process, which a busy machine can start or answer seconds late. */
-function eventually<T>(check: () => T): Promise<T> {
-  return vi.waitFor(check, { timeout: 15_000 });
-}
-afterEach(() => {
-  for (const cleanup of cleanups.splice(0).toReversed()) cleanup();
-});
-
-/** A scripted agent: one list of moves per prompt turn, and the log it writes. */
-function scripted(turns: unknown[][] | Record<string, unknown[]>, extra: Partial<AcpOptions> = {}) {
-  const directory = mkdtempSync(join(tmpdir(), 'e2e-acp-test-'));
-  cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
-  const logFile = join(directory, 'agent.jsonl');
-  const executor = acp({
-    command: process.execPath,
-    args: [AGENT],
-    ...extra,
-    env: { ACP_SCRIPT: JSON.stringify(turns), ACP_LOG: logFile, ...extra.env },
-  });
-  const log = (): Record<string, unknown>[] => {
-    try {
-      return readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
-    } catch {
-      return [];
-    }
-  };
-  return { executor, log };
-}
+import { AGENT, attemptOf, cleanups, eventually, scripted } from './scripted.ts';
 
 /** A step context with recorded actions and an attempt the test ends. */
 function context(options: { kind?: 'act' | 'assert'; attempt?: ReturnType<typeof attemptOf>; verbs?: (keyof ExecutorActions)[] } = {}) {
@@ -83,12 +53,6 @@ function context(options: { kind?: 'act' | 'assert'; attempt?: ReturnType<typeof
     },
   } as unknown as StepExecutorContext;
   return { ctx, tap, type, hover, usage, transcripts, end: attempt.end, abortStep: (reason: unknown) => stepController.abort(reason) };
-}
-
-function attemptOf() {
-  const controller = new AbortController();
-  const attempt = { testId: 't', attemptId: 'a', index: 0, signal: controller.signal, memory: new Map<string, unknown>() };
-  return { attempt, end: () => controller.abort() };
 }
 
 const pass = { call: 'complete_step', args: { status: 'passed', summary: 'added' } };
@@ -546,6 +510,53 @@ describe('acp', () => {
     // A screenshot reaches the agent as an MCP image.
     const shot = entries.find((entry) => entry['call'] === 'screenshot')?.['result'] as { content: { type: string; mimeType?: string }[] };
     expect(shot.content).toContainEqual(expect.objectContaining({ type: 'image', mimeType: 'image/png' }));
+  });
+
+  it('offers the tools of an extension beside its own and follows its guidance', async () => {
+    const reported: unknown[] = [];
+    const report = defineTool(
+      { description: 'Report a defect.', inputSchema: z.object({ title: z.string() }), execute: async (input: unknown) => (reported.push(input), { recorded: 1 }) } as never,
+      { mutates: false },
+    );
+    const { executor, log } = scripted([[{ call: 'report_finding', args: { title: 'Total is $0.00' } }, pass]], { system: 'Use short titles.' });
+    const step = context();
+    cleanups.push(step.end);
+    const extended = executor.extend!({ system: 'Hunt for bugs.', tools: { report_finding: report } });
+    await expect(extended.runStep(step.ctx)).resolves.toMatchObject({ status: 'passed' });
+    expect(reported).toEqual([{ title: 'Total is $0.00' }]);
+    const entries = log();
+    const session = entries.find((entry) => 'session' in entry)?.['session'] as { tools: string[]; readOnly: string[] };
+    expect(session.tools).toContain('report_finding');
+    expect(session.readOnly).toContain('report_finding');
+    const prompt = String(entries.find((entry) => 'prompt' in entry)?.['prompt']);
+    expect(prompt.indexOf('Use short titles.')).toBeGreaterThan(-1);
+    expect(prompt.indexOf('Hunt for bugs.')).toBeGreaterThan(prompt.indexOf('Use short titles.'));
+    expect(JSON.stringify(entries.find((entry) => entry['call'] === 'report_finding'))).toContain('{\\"recorded\\":1}');
+    // The executor it came from is unchanged.
+    expect(executor.name).toBe(extended.name);
+  });
+
+  it('refuses an extension tool under the name of one of the step tools', async () => {
+    const tool = defineTool({ description: 'Mine', inputSchema: z.object({}), execute: async () => 'done' }, { mutates: false });
+    for (const name of ['tap', 'complete_step']) {
+      const { executor } = scripted([[pass]]);
+      const step = context();
+      cleanups.push(step.end);
+      await expect(executor.extend!({ tools: { [name]: tool } }).runStep(step.ctx)).rejects.toMatchObject({ code: 'INVALID_CONFIG', message: expect.stringContaining(name) });
+    }
+  });
+
+  it('redacts what an extension tool throws before the agent reads it', async () => {
+    const key = 'sk-extension-7c41d9e0b2a6f385';
+    registerProviderKey('extension.test-key', key);
+    const failing = defineTool({ description: 'Fails', inputSchema: z.object({}), execute: async () => Promise.reject(new Error(`fetch ?token=${key} failed`)) }, { mutates: false });
+    const { executor, log } = scripted([[{ call: 'seed', args: {} }, pass]]);
+    const step = context();
+    cleanups.push(step.end);
+    await executor.extend!({ tools: { seed: failing } }).runStep(step.ctx);
+    const result = JSON.stringify(log().find((entry) => entry['call'] === 'seed'));
+    expect(result).toContain('seed failed: fetch ?token=<secret:');
+    expect(result).not.toContain(key);
   });
 
   it('launches the agent from the project directory and opens the session in an empty one', async () => {

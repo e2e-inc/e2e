@@ -112,9 +112,10 @@ instructions or `screen.*` actions, and `expected` is the assertion.
 
 ## When it does not fit
 
-The agents entry's `tools` and `system` carry over to the explorer; a
-hand-rolled `StepExecutor` under `executor` is replaced by the built-in agent
-for the run, with a notice on stderr, and needs a `model` on the entry (or the
-executor's) or explore fails before it starts. Findings are the model's claims
+The agents entry's `tools` and `system` carry over to the explorer. An
+`@e2e-dev/acp` executor (`claudeCode()`, `codex()`) explores itself and needs
+no model; a hand-rolled `StepExecutor` without `extend` is replaced by the
+built-in agent for the run, with a notice on stderr, and needs a `model` on
+the entry (or the executor's) or explore fails before it starts. Findings are the model's claims
 plus evidence, not verified reproductions: read `actual` against the
 screenshot before filing a bug.

@@ -23,7 +23,8 @@ test('invite a teammate', async ({ agent }) => {
 The built-in agent needs a configured model. Without one, the first
 acquisition of the `agent` fixture records one run-level `MODEL_UNAVAILABLE`
 and stops the run (exit 2). [Custom executors](/executors) can run `act` and
-`assert` without a model; `waitFor` and `extract` still need one.
+`assert` without a model; `waitFor` and `extract` still need one unless
+the executor [answers them itself](/executors#what-the-executor-handles).
 
 ## Reference
 

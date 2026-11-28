@@ -235,10 +235,10 @@ rotating refresh token works there only for a limited time.
 
 ## Use your coding agent
 
-`@e2e-dev/acp` runs `agent.act` and `agent.assert` on Claude Code or Codex
-over the [Agent Client Protocol](https://agentclientprotocol.com). The
-agent signs in with its own login or API key, so e2e needs no model
-provider.
+`@e2e-dev/acp` runs every agent step and [`e2e explore`](/explore) on
+Claude Code or Codex over the
+[Agent Client Protocol](https://agentclientprotocol.com). The agent signs in
+with its own login or API key, so e2e needs no model provider.
 
 The agent gets `complete_step` and the built-in agent's action tools for
 the verbs the target's engine supports. The runner records every action, so
@@ -385,8 +385,10 @@ does.
     turn counts as one model call against `maxModelCalls`, with its tokens
     and cost when the agent reports them. `maxSteps` and the step timeout
     bound the turn.
-  - `waitFor` and `extract` use the built-in judgments, so they need the
-    agents entry's `model`.
+  - `waitFor` and `extract` run on the agents entry's `judge` or `model`
+    when it has one. Otherwise the agent answers them in a second session
+    per test that has no tools. There, `vision` needs an agent that takes
+    images in a prompt.
   - An agents entry with an `executor` takes no `tools`, so the agent gets no
     project tools from `defineTool`.
   </Accordion>

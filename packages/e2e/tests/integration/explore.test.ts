@@ -11,7 +11,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { defineTool } from '@e2e-dev/core/lib/agent/public';
-import type { StepExecutor } from '@e2e-dev/core/lib/agent/executor';
+import type { ExecutorExtension, StepExecutor } from '@e2e-dev/core/lib/agent/executor';
+import { createProjectTools } from '@e2e-dev/core/lib/agent/default-agent';
 import { explore, type ExploreOptions, type ExploreOutcome } from '../../src/explore/index.ts';
 import { FINDING_TOOL_NAME } from '../../src/explore/executor.ts';
 import { defineService, type RunEvent } from '../../src/index.ts';
@@ -589,6 +590,59 @@ describe('e2e explore', () => {
     expect(outcome.report.run.results[0]!.attempts[0]!.error?.code).toBe('AUTOMATION_UNSUPPORTED');
     expect(notices).toEqual(['agents.default is a custom executor ("house-brain"); explore runs the built-in agent instead, with the model that executor brought']);
   }, 120_000);
+
+  it('explores on a custom executor that takes an extension and answers the planner, with no model configured', async () => {
+    const questions: string[] = [];
+    const extensions: ExecutorExtension[] = [];
+    const steps: string[] = [];
+    const brain = (extension: ExecutorExtension | undefined): StepExecutor => ({
+      name: 'house-brain',
+      runStep: async (context) => {
+        steps.push(context.step.instruction);
+        const report = createProjectTools(context, extension?.tools ?? {})[FINDING_TOOL_NAME]!;
+        await report.execute!(COUNTER_FINDING as never, { toolCallId: 'call-1', messages: [] } as never);
+        return { status: 'passed', summary: 'Looked at the counter' };
+      },
+      answer: async (question) => {
+        questions.push(question.prompt);
+        const plan = questions.length === 1 ? { decision: 'step', title: 'Counter', instruction: 'Look at the counter', summary: '' } : { decision: 'finish', title: '', instruction: '', summary: 'One defect.' };
+        return { text: JSON.stringify(extracted(plan)), modelId: 'house-1' };
+      },
+      extend: (added) => {
+        extensions.push(added);
+        return brain(added);
+      },
+    });
+    const notices: string[] = [];
+    const outcome = await explore({
+      cwd: project.dir,
+      rawConfig: { targets: [{ name: 'web', engine: web(), app: { url: app.url } }] as never, agents: { default: { executor: brain(undefined) } } },
+      goal: 'Explore the home page and find bugs',
+      maxSteps: 2,
+      timeoutMs: 180_000,
+      notice: (message) => notices.push(message),
+    });
+    expect(notices).toEqual([]);
+    expect(steps).toEqual(['Look at the counter']);
+    expect(extensions).toHaveLength(1);
+    expect(extensions[0]!.system).toContain('Exploration mode');
+    expect(Object.keys(extensions[0]!.tools ?? {})).toEqual([FINDING_TOOL_NAME]);
+    // The planner's grammar travels in the question, since no provider enforces it.
+    expect(questions[0]).toContain('Response schema (JSON Schema):');
+    expect(outcome.report.run.explore).toMatchObject({ ended: 'finished', findings: [{ title: COUNTER_FINDING.title, step: 1 }] });
+    expect(outcome.report.run.explore!.steps.map((step) => step.title)).toEqual(['Counter']);
+    assertValidReport(outcome.report);
+  }, 120_000);
+
+  it('rejects a custom executor that takes an extension but answers no question, when no model plans for it', async () => {
+    const custom: StepExecutor = { name: 'mute-brain', runStep: async () => ({ status: 'passed', summary: 'never runs' }), extend: () => custom };
+    await expect(
+      explore({ cwd: project.dir, rawConfig: { targets: [{ name: 'web', engine: web(), app: { url: app.url } }] as never, agents: { default: { executor: custom } } } }),
+    ).rejects.toMatchObject({
+      code: 'MODEL_UNAVAILABLE',
+      message: expect.stringContaining('explore plans each step with a model, which the executor "mute-brain" does not answer for, and agents.default has none'),
+    });
+  }, 60_000);
 
   it('lets the explorer sign in with a configured credential through type_secret, never seeing the password', async () => {
     const planPrompts: string[] = [];

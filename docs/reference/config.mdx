@@ -1671,7 +1671,8 @@ secret, and `CI` switches the defaults below.
 The built-in agent checks for a missing model once per run, when the `agent`
 fixture is first acquired, and stops the run with exit 2. A custom
 [executor](#executor) can implement `act` and `assert` without a model.
-`waitFor` and `extract` still require one.
+`waitFor` and `extract` still require one, unless the executor
+[answers judgments itself](/executors#what-the-executor-handles).
 
 ### CI
 

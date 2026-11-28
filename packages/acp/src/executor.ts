@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { AgentError, type JsonValue, type StepExecutor, type StepExecutorContext, type StepVerdict } from 'e2e';
+import { AgentError, type ExecutorExtension, type JsonValue, type StepExecutor, type StepExecutorContext, type StepVerdict } from 'e2e';
 import { BASE_RULES, redactSecrets, redactStepText, registerProviderKeys, VERDICT_RULES } from 'e2e/agent';
 import { ConfigurationError } from 'e2e/engine';
 import { claudeCodeLaunch, codexLaunch, registerSavedCodexLogin } from './presets.ts';
-import type { Usage } from '@agentclientprotocol/sdk/unstable';
-import { startSession, type AcpSession, type AgentLaunch, type TurnReport } from './session.ts';
-import { activeStep, missingTools, openingScreen, stepTools, verdictOf, type ActiveStep, type StepSlot } from './tools.ts';
+import { holdSession, type HeldSession } from './held.ts';
+import type { AcpSession, AgentLaunch, TurnReport } from './session.ts';
+import { activeStep, missingTools, openingScreen, stepTools, verdictOf, type ActiveStep, type ExtraTools, type StepSlot } from './tools.ts';
 import type { ServedTool } from './mcp.ts';
 import type { AcpAgentOptions, AcpOptions } from './types.ts';
+import { createAnswer } from './judgment.ts';
+import { message, turnUsage, untilAborted } from './turns.ts';
 
 /** What the session is, before the built-in agent's rules for the same tools. */
 const SESSION_RULES = `This conversation drives a real application for an end-to-end test, one step per message: an action to perform, or an assertion to judge, with the current screen.
@@ -19,20 +21,21 @@ const RULES = `${SESSION_RULES}\n\n${BASE_RULES}\n\n${VERDICT_RULES}`;
 /** How long a step waits for the turn of a step the runner gave up on to stop. */
 const LAST_TURN_GRACE_MS = 5_000;
 
+/** What an attempt keeps for its steps. */
 interface Held {
-  readonly session: Promise<AcpSession>;
+  readonly agent: HeldSession;
   readonly slot: StepSlot;
   /** The tools the session lists, fixed for the attempt. */
   readonly tools: readonly ServedTool[];
-  introduced: boolean;
   /** The turn in flight, settled or not: one the runner gave up on may still be running. */
   turn: Promise<unknown> | undefined;
 }
 
 /**
- * Runs `agent.act` and `agent.assert` on any agent that speaks ACP on stdio:
- * one agent session per test attempt, started by its first agent step and
- * closed when the attempt ends. `claudeCode()` and `codex()` start those
+ * Runs agent steps on any agent that speaks ACP on stdio: one agent session
+ * per test attempt for `agent.act` and `agent.assert`, started by its first
+ * agent step and closed when the attempt ends, and one more for
+ * `agent.waitFor` and `agent.extract` (`judgment.ts`). `claudeCode()` and `codex()` start those
  * agents with the step tools as their only tools.
  */
 export function acp(options: AcpOptions): StepExecutor {
@@ -50,27 +53,38 @@ export function acp(options: AcpOptions): StepExecutor {
     mode: options.mode,
     sessionMeta: options.sessionMeta,
   };
-  return executor(options.name ?? 'acp', options, async () => launch);
+  return executor(options.name ?? 'acp', options, { launch: async () => launch, registerLogin: NO_LOGIN, extra: {} });
 }
 
 /** Claude Code through Zed's adapter (`@agentclientprotocol/claude-agent-acp`), signed in with your `claude` login. */
 export function claudeCode(options: AcpAgentOptions = {}): StepExecutor {
-  return executor(options.name ?? 'claude-code', options, claudeCodeLaunch(options));
+  return executor(options.name ?? 'claude-code', options, { launch: claudeCodeLaunch(options), registerLogin: NO_LOGIN, extra: {} });
 }
 
 /** Codex through its adapter (`@agentclientprotocol/codex-acp`), signed in with your `codex` login, or with `OPENAI_API_KEY` when Codex has none. */
 export function codex(options: AcpAgentOptions = {}): StepExecutor {
-  return executor(options.name ?? 'codex', options, codexLaunch(options), () => registerSavedCodexLogin(options.env));
+  return executor(options.name ?? 'codex', options, { launch: codexLaunch(options), registerLogin: () => registerSavedCodexLogin(options.env), extra: {} });
 }
 
-/**
- * `registerLogin` has the run redact the login the agent keeps on disk. It
- * runs once when the executor is built, for a login saved before the run,
- * then for each step once the agent is up, since the agent renews a login
- * between turns, and again once the turn is over, before anything the
- * agent said in it is returned.
- */
-function executor(name: string, options: AcpAgentOptions, launch: () => Promise<AgentLaunch>, registerLogin: () => void = () => undefined): StepExecutor {
+/** How one executor starts its agent, and what it adds to the agent's session. */
+interface Agent {
+  readonly launch: () => Promise<AgentLaunch>;
+  /**
+   * Has the run redact the login the agent keeps on disk. It runs once when
+   * the executor is built, for a login saved before the run, then for each
+   * step once the agent is up, since the agent renews a login between turns,
+   * and again once the turn is over, before anything the agent said in it is
+   * returned.
+   */
+  readonly registerLogin: () => void;
+  /** The tools an extension offers beside the step tools. */
+  readonly extra: ExtraTools;
+}
+
+const NO_LOGIN = (): void => undefined;
+
+function executor(name: string, options: AcpAgentOptions, agent: Agent): StepExecutor {
+  const { launch, registerLogin, extra } = agent;
   // A key only the agent's own `env` holds, known before the first step's text is built.
   registerProviderKeys(options.env ?? {});
   // A login the agent saved before this run, known before its first start: that start's stderr or the first step's text may quote it.
@@ -82,15 +96,15 @@ function executor(name: string, options: AcpAgentOptions, launch: () => Promise<
     version: '1',
     cache: 'inherit',
     async runStep(ctx) {
-      // Once the agent has started, or failed to: signing in is when it writes a login. Before any of the step's text is built.
-      const { held, session } = await ready(ctx, launch, memoryKey).finally(registerLogin);
+      // The login the agent's start wrote is registered by now, before any of the step's text is built.
+      const { held, session } = await ready(ctx, agent, memoryKey);
       ctx.signal.throwIfAborted();
-      const active = activeStep(ctx);
+      const active = activeStep(ctx, extra);
       // With the step's own redactor, and only now: `system` is the config's text, which core never saw, and a key the agent's start or its saved login made known may be in step text core built before it knew the key.
-      const text = redactStepText(ctx, await untilAborted(stepMessage(active, held.tools, held.introduced ? undefined : [RULES, options.system, ctx.agentContext]), ctx.signal));
+      const text = redactStepText(ctx, await untilAborted(stepMessage(active, held.tools, held.agent.introduced ? undefined : [RULES, options.system, ctx.agentContext]), ctx.signal));
       // A step that ended while its screen was read sends no prompt, which no cancel would reach.
       ctx.signal.throwIfAborted();
-      held.introduced = true;
+      held.agent.introduced = true;
       held.slot.active = active;
       const cancel = () => session.cancel();
       ctx.signal.addEventListener('abort', cancel, { once: true });
@@ -101,8 +115,7 @@ function executor(name: string, options: AcpAgentOptions, launch: () => Promise<
         report = await untilAborted(turn, ctx.signal);
       } catch (error) {
         ctx.signal.throwIfAborted();
-        session.close();
-        ctx.attempt.memory.delete(memoryKey);
+        held.agent.close();
         throw new AgentError('MODEL_PROVIDER_FAILED', `The ACP agent session failed: ${message(error)}`, { cause: error });
       } finally {
         if (held.slot.active === active) held.slot.active = undefined;
@@ -110,119 +123,58 @@ function executor(name: string, options: AcpAgentOptions, launch: () => Promise<
         registerLogin();
       }
       ctx.attachTranscript(transcript(text, active, report));
-      if (!ctx.signal.aborted) recordTurn(ctx, session, report);
+      if (!ctx.signal.aborted) ctx.budgets.recordModelCall(turnUsage(session, report));
       if (active.halted !== undefined) throw active.halted;
       ctx.signal.throwIfAborted();
       if (active.denied !== undefined) {
         // The conversation holds what the tool read: the next step starts a fresh agent.
-        session.close();
-        ctx.attempt.memory.delete(memoryKey);
+        held.agent.close();
         return ownToolUsed(active.denied);
       }
       return verdictOf(active) ?? noConclusion(report);
     },
+    answer: createAnswer(launch, registerLogin),
+    extend: (extension: ExecutorExtension) =>
+      executor(name, withSystem(options, extension.system), { ...agent, extra: { ...extra, ...extension.tools } }),
   };
 }
 
 /** The attempt's session once the turn of the step before it stopped, or a fresh one when that turn's end closed it. */
-async function ready(ctx: StepExecutorContext, launch: () => Promise<AgentLaunch>, memoryKey: string): Promise<{ held: Held; session: AcpSession }> {
-  const held = hold(ctx, launch, memoryKey);
-  let session: AcpSession;
-  try {
-    session = await untilAborted(held.session, ctx.signal);
-  } catch (error) {
-    // The next step starts a fresh agent rather than wait on this one.
-    ctx.attempt.memory.delete(memoryKey);
-    ctx.signal.throwIfAborted();
-    if (error instanceof ConfigurationError) throw error;
-    throw new AgentError('MODEL_PROVIDER_FAILED', `The ACP agent did not start: ${message(error)}`, { cause: error });
-  }
+async function ready(ctx: StepExecutorContext, agent: Agent, memoryKey: string): Promise<{ held: Held; session: AcpSession }> {
+  const held = hold(ctx, agent, memoryKey);
+  const session = await held.agent.started(ctx.signal);
   if (!(await settled(held.turn, LAST_TURN_GRACE_MS, ctx.signal))) {
-    session.close();
-    ctx.attempt.memory.delete(memoryKey);
+    held.agent.close();
     throw new AgentError('MODEL_PROVIDER_FAILED', 'The ACP agent did not stop the turn of a step that already ended');
   }
-  // A tool of the agent's own that ran as that turn stopped closed the session and dropped it from the attempt.
-  if (ctx.attempt.memory.get(memoryKey) !== held) return ready(ctx, launch, memoryKey);
+  // A tool of the agent's own that ran as that turn stopped closed the session.
+  if (held.agent.closed) return ready(ctx, agent, memoryKey);
   return { held, session };
 }
 
-/** Counts one prompt turn as one model call, with what the agent reported of it. */
-function recordTurn(ctx: StepExecutorContext, session: AcpSession, report: TurnReport): void {
-  const usage = report.usage;
-  ctx.budgets.recordModelCall({
-    startedAt: report.startedAt,
-    durationMs: report.durationMs,
-    ...(session.agentName === undefined ? {} : { provider: session.agentName }),
-    ...(session.modelId === undefined ? {} : { modelId: session.modelId }),
-    ...(usage === undefined
-      ? {}
-      : {
-          inputTokens: inputTokens(usage),
-          outputTokens: usage.outputTokens,
-          ...(usage.cachedReadTokens == null ? {} : { cacheReadTokens: usage.cachedReadTokens }),
-          ...(usage.cachedWriteTokens == null ? {} : { cacheWriteTokens: usage.cachedWriteTokens }),
-        }),
-    ...(report.costUsd === undefined ? {} : { estimatedCostUsd: report.costUsd }),
-  });
-}
-
-/** The attempt's session, started on its first step and closed when the attempt ends. */
-function hold(ctx: StepExecutorContext, launch: () => Promise<AgentLaunch>, memoryKey: string): Held {
-  const existing = ctx.attempt.memory.get(memoryKey) as Held | undefined;
-  if (existing !== undefined) return existing;
-  let session: AcpSession | undefined;
-  let closed = false;
-  const slot: StepSlot = { active: undefined, halt: () => session?.cancel() };
-  const tools = stepTools(slot, ctx);
-  const ownTool = (title: string) => {
-    if (slot.active === undefined) {
-      // Run in the tail of a step that already ended: no step to fail, so no later step gets this conversation.
-      session?.close();
-      if (ctx.attempt.memory.get(memoryKey) === held) ctx.attempt.memory.delete(memoryKey);
-      return;
-    }
-    slot.active.denied ??= title;
-    session?.cancel();
-  };
-  const held: Held = {
-    slot,
+/** The attempt's session, started on its first step, and again after a step that closed it. */
+function hold(ctx: StepExecutorContext, agent: Agent, memoryKey: string): Held {
+  const { memory } = ctx.attempt;
+  const existing = memory.get(memoryKey) as Held | undefined;
+  if (existing !== undefined && !existing.agent.closed) return existing;
+  const slot: StepSlot = { active: undefined, halt: () => session.cancel() };
+  const tools = stepTools(slot, ctx, agent.extra);
+  const session = holdSession({
+    launch: agent.launch,
+    registerLogin: agent.registerLogin,
     tools,
-    introduced: false,
-    turn: undefined,
-    session: launch()
-      // The first step's end stops a startup still in progress; an open session lives until the attempt ends.
-      .then((how) => startSession(how, tools, AbortSignal.any([ctx.attempt.signal, ctx.signal]), ownTool))
-      .then((started) => {
-        session = started;
-        if (closed) started.close();
-        return started;
-      }),
-  };
-  held.session.catch(() => undefined);
-  ctx.attempt.memory.set(memoryKey, held);
-  ctx.attempt.signal.addEventListener(
-    'abort',
-    () => {
-      closed = true;
-      session?.close();
-      // Serial members share one memory, each with its own attempt: the next one starts its own session.
-      if (ctx.attempt.memory.get(memoryKey) === held) ctx.attempt.memory.delete(memoryKey);
+    attempt: ctx.attempt,
+    signal: ctx.signal,
+    ownTool: (title) => {
+      // Run in the tail of a step that already ended: no step to fail, so no later step gets this conversation.
+      if (slot.active === undefined) return session.close();
+      slot.active.denied ??= title;
+      session.cancel();
     },
-    { once: true },
-  );
-  return held;
-}
-
-/** Waits for `promise`, or rejects when the step ends first. */
-function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(signal.reason);
-  let onAbort: (() => void) | undefined;
-  const aborted = new Promise<never>((_, reject) => {
-    onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
   });
-  return Promise.race([promise, aborted]).finally(() => signal.removeEventListener('abort', onAbort!));
+  const held: Held = { agent: session, slot, tools, turn: undefined };
+  memory.set(memoryKey, held);
+  return held;
 }
 
 /** The message for one step: the rules on the first, then the step, what already ran, and the screen. */
@@ -265,18 +217,6 @@ function plainParams(params: Readonly<Record<string, JsonValue>> | undefined): R
 /** A secret in the params, as the runner projects it: `{ kind: 'secret', name, purpose }`. */
 function isSecretPlaceholder(value: JsonValue): boolean {
   return typeof value === 'object' && value !== null && !Array.isArray(value) && (value as Record<string, JsonValue>)['kind'] === 'secret';
-}
-
-/**
- * The turn's input tokens with the cached ones included, as e2e counts them.
- * ACP leaves open whether an agent's `inputTokens` include them: the Claude
- * adapter's do not (its total adds the cache on top), Codex's do (its total
- * is input and output alone).
- */
-function inputTokens(usage: Usage): number {
-  const cached = (usage.cachedReadTokens ?? 0) + (usage.cachedWriteTokens ?? 0);
-  const cacheApart = cached > 0 && usage.totalTokens >= usage.inputTokens + usage.outputTokens + cached;
-  return cacheApart ? usage.inputTokens + cached : usage.inputTokens;
 }
 
 /** Whether `promise` settles within `ms`; rejects with the step's reason if the step ends first. */
@@ -324,6 +264,8 @@ function transcript(prompt: string, active: ActiveStep, report: TurnReport): str
   ].join('\n');
 }
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/** The options with `added` after the executor's own `system`. */
+function withSystem(options: AcpAgentOptions, added: string | undefined): AcpAgentOptions {
+  const system = [options.system, added].filter((part): part is string => part !== undefined && part.trim() !== '').join('\n\n');
+  return system === '' ? options : { ...options, system };
 }

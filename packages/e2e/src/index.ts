@@ -17,13 +17,17 @@ export type * from '@e2e-dev/core/lib/types';
 export type * from './run-types.ts';
 export type {
   ExecutorActions,
+  ExecutorAnswer,
   ExecutorAttempt,
   ExecutorBudgets,
+  ExecutorExtension,
+  ExecutorImage,
   ExecutorModelCall,
   ExecutorNode,
   ExecutorObservation,
   ExecutorObserveOptions,
   ExecutorPixels,
+  ExecutorQuestion,
   ExecutorReadOptions,
   ExecutorReadResult,
   ExecutorStep,
