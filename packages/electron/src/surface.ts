@@ -547,11 +547,12 @@ export class ElectronSurface {
     });
     crash.catch(() => undefined);
     try {
-      return await withBudget(operation, 'window title', async () => {
-        // A read the renderer's crash leaves pending would never settle: the crash ends it.
-        const document = await Promise.race([window.page.title(), crash]);
+      const read = async (): Promise<string> => {
+        const document = await window.page.title();
         return document !== '' ? document : ((await this.app.windowTitle(window.page)) ?? '');
-      });
+      };
+      // A read the renderer's crash leaves pending would never settle: the crash ends it, the fallback too.
+      return await withBudget(operation, 'window title', () => Promise.race([read(), crash]));
     } finally {
       stopWaiting();
     }

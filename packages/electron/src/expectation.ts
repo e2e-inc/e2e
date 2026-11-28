@@ -56,13 +56,13 @@ export class WindowConditions {
         this.surface.failOnDialog();
         try {
           last = await read(deadline);
-          // One that opened while the read ran is this step's too.
-          this.surface.failOnDialog();
         } catch (cause) {
           if (!this.passing(cause)) throw cause;
           // What the read before it saw stays what the failure reports: this one saw nothing.
           last = { matches: undefined, observed: last?.observed ?? 'nothing: the window was loading or closing' };
         }
+        // One that opened while the read ran is this step's too. Outside the catch: it is no read to wait through.
+        this.surface.failOnDialog();
         return last.matches;
       },
       onTimeout: (cause) =>
