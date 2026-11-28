@@ -4,6 +4,9 @@ app/.next/
 app/next-env.d.ts
 .e2e/results/
 # .e2e/cache/ is not ignored: recordings committed there replay in CI (AGENTS.md, "Committed recordings").
+# Its writers' working files are: a lock, a pending pair record, a temporary file a crash left.
+.e2e/cache/.*
+.e2e/cache/*.tmp
 .e2e/sessions/
 .e2e/report.json
 .e2e/ai-trace.json

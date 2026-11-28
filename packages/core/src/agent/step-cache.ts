@@ -19,7 +19,7 @@ import { sameRoute } from '../cache/route.ts';
 import { keyContextChanges, type CacheAgentIdentity } from '../cache/identity.ts';
 import { recordedProvenance, TraceRecorder } from '../cache/recorder.ts';
 import { expandTrace, templateParams, templatesCollide, templateTrace, type ParamTemplate } from '../cache/template.ts';
-import { targetLabel, type ActionTrace, type DerivedReason, type RecordedModel, type TraceEntry, type TraceTargetDescriptor } from '../cache/trace.ts';
+import { targetLabel, type ActionTrace, type DerivedReason, type RecordedModel, type TraceEntry, type TraceProvenance, type TraceTargetDescriptor } from '../cache/trace.ts';
 import { readTraceEntry } from '../cache/trace-read.ts';
 import { sleep } from '../internal/time.ts';
 import type { StepCacheInfo } from '../run/steps.ts';
@@ -313,7 +313,7 @@ export class StepTraceSession {
     const why = changes.length === 0 ? "the runner, the engine, the app, or the agent's context changed after it was recorded" : `${changes.join(', ')} changed after it was recorded`;
     throw new AgentError(
       'REPLAY_STALE',
-      `the recording of this step no longer replays: the store holds it under another cache key (${previous.keyHash}.json), since ${why}, and cache.strict hands no step to the agent; ${strict.advice}`,
+      `the recording of this step no longer replays: ${previous.file} holds it under another cache key (${previous.keyHash.slice(0, 12)}), since ${why}, and cache.strict hands no step to the agent; ${strict.advice}`,
     );
   }
 
@@ -367,6 +367,7 @@ export class StepTraceSession {
             keyHash: this.keyHash,
             stepIndex: this.options.stepIndex,
             recordedFor: recordedProvenance(this.claim.step, this.options.redact),
+            settledProvenance: this.settledProvenance(),
           });
         } else {
           const staged = await this.stage(recorder, verdictSummary, recordedBy);
@@ -386,8 +387,9 @@ export class StepTraceSession {
    */
   private async readEntry(): Promise<EntryRead> {
     let read: Awaited<ReturnType<AgentCacheContext['store']['read']>>;
+    const step = recordedProvenance(this.claim.step, this.options.redact);
     try {
-      read = await this.cache.store.read(this.keyHash);
+      read = await this.cache.store.read(this.keyHash, step);
     } catch {
       return { status: 'miss', reason: 'invalid-entry', unavailable: true };
     }
@@ -395,6 +397,10 @@ export class StepTraceSession {
     if (read.status === 'invalid') return { status: 'miss', reason: 'invalid-entry' };
     const entry = readTraceEntry(read.entry);
     if (entry === undefined) return { status: 'miss', reason: 'invalid-entry' };
+    // The key is the store's to keep, the step is the entry's own record of what it was recorded for:
+    // an entry filed under this step's key that names another step (keys swapped in a hand-merged
+    // lock file, say) never replays for this one.
+    if (!recordedForStep(entry.payload.recordedFor, step)) return { status: 'miss', reason: 'invalid-entry' };
     // The stored recording has a slot for each `unique()` value; this call's
     // values fill it. A slot this call cannot fill is an entry recorded for
     // another shape, which the key should have kept apart.
@@ -658,8 +664,25 @@ export class StepTraceSession {
     }
     const templated = templateTrace(trace, this.options.templates);
     if (templated === undefined) return 'skipped';
-    this.cache.staged.push({ kind: 'write', keyHash: this.keyHash, trace: templated, stepIndex: this.options.stepIndex });
+    this.cache.staged.push({
+      kind: 'write',
+      keyHash: this.keyHash,
+      trace: templated,
+      stepIndex: this.options.stepIndex,
+      settledProvenance: this.settledProvenance(),
+    });
     return 'staged';
+  }
+
+  /**
+   * The step's provenance as settlement redacts it again. It holds the step
+   * and the redactor only, not this session: a staged entry lives until the
+   * attempt settles, and the session holds the step's screens.
+   */
+  private settledProvenance(): () => TraceProvenance {
+    const { step } = this.claim;
+    const { redact } = this.options;
+    return () => recordedProvenance(step, redact);
   }
 
   /**
@@ -669,7 +692,7 @@ export class StepTraceSession {
    */
   private async evict(): Promise<void> {
     if (this.cache.store.delete === undefined) return;
-    const deleted = await this.cache.store.delete(this.keyHash).then(() => true, () => false);
+    const deleted = await this.cache.store.delete(this.keyHash, recordedProvenance(this.claim.step, this.options.redact)).then(() => true, () => false);
     if (deleted) this.cache.staged.push({ kind: 'decided', outcome: 'evicted', keyHash: this.keyHash, stepIndex: this.options.stepIndex });
   }
 
@@ -818,4 +841,20 @@ export function recordedVerdictOf(summary: string): string {
   if (!summary.startsWith(REPLAY_NOTICE_START)) return summary;
   const at = summary.indexOf(RECORDED_VERDICT_SEPARATOR);
   return at === -1 ? summary : summary.slice(at + RECORDED_VERDICT_SEPARATOR.length);
+}
+
+/**
+ * Whether an entry's provenance, when it keeps one, names the step: the
+ * same instruction, params, occurrence, agent, and target. An entry that
+ * keeps none (a custom store's older entry) is not held to it.
+ */
+function recordedForStep(recordedFor: TraceProvenance | undefined, step: TraceProvenance): boolean {
+  if (recordedFor === undefined) return true;
+  return (
+    recordedFor.instructionDigest === step.instructionDigest &&
+    recordedFor.targetId === step.targetId &&
+    (recordedFor.paramsDigest === undefined || recordedFor.paramsDigest === step.paramsDigest) &&
+    (recordedFor.callIndex === undefined || recordedFor.callIndex === step.callIndex) &&
+    (recordedFor.agent === undefined || recordedFor.agent === step.agent)
+  );
 }

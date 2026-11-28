@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/control-inventory.e2e.ts::control%20inventory::a%20long%20press%20and%20a%20double%20click%20are%20chosen%20over%20a%20plain%20tap",
+  "entries": [
+    {
+      "key": "414d83190b19ded32b8cdf7449ed9ea3cd15323fec81434e6da539abd1c90423",
+      "target": "web",
+      "digest": "e32d3fd9b893d3cc92a1e95073453a63ff5406f55cc6c73112d4b743405abd21",
+      "createdAt": "2026-10-04T08:29:03.565Z",
+      "instructionDigest": "9fe8b7fcfeb1bd36e8d003d5c7e5feb16042211ec61970b63314a6c7bac345b0",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Long-pressed Hold me; Hold state reads “long-pressed.” Double-clicked Double-click me; Double-click state reads “double-clicked.”",
+      "endWaitMs": 12000
+    }
+  ]
+}

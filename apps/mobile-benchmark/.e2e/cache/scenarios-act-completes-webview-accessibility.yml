@@ -1,0 +1,49 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-webview-accessibility.lock.json
+
+test: act completes WebView Accessibility
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: read the coupon code inside the web view, enter it in the web form, accept the terms, and apply it"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - runtimeValue: whole-node
+          - tap: { role: checkbox, name: I accept the terms, testId: terms, selector: id=terms }
+          - tap: { role: button, name: Apply coupon, testId: apply, selector: id=apply, within: Checkout coupon }
+        expect:
+          shows:
+            - { role: text, name: Coupon applied, testId: success-message }
+            - { role: textbox, name: TA-BENCH-50, testId: coupon-input, placeholder: Coupon code, value: TA-BENCH-50 }
+          gone:
+            - { role: text, name: Apply the coupon shown inside the web page (accept the terms first) }
+            - { role: textbox, testId: coupon-input, placeholder: Coupon code }
+      ios-simulator:
+        at: dev.e2e.benchmark / WebView Accessibility
+        do:
+          - type: TA-BENCH-50
+            into: { role: textbox, name: Coupon code }
+          - check: { role: switch, name: I accept the terms }
+          - tap: { role: button, name: Apply coupon }
+        expect:
+          shows:
+            - { role: textbox, name: Coupon code, value: TA-BENCH-50 }
+            - { role: switch, name: I accept the terms, value: "1", states: [ checked ] }
+            - { role: other, name: "Vertical scroll bar, 2 pages", value: 0% }
+            - { role: other, name: Coupon applied }
+            - { role: text, name: Coupon applied, testId: success-message }
+            - { role: other, name: "Vertical scroll bar, 2 pages", testId: coupon-webview }
+            - { role: web-view, name: "Vertical scroll bar, 2 pages" }
+          gone:
+            - { role: text, name: Apply the coupon shown inside the web page (accept the terms first) }
+            - { role: textbox, name: Coupon code }
+            - { role: switch, name: I accept the terms, value: "0" }
+            - { role: other, name: "Vertical scroll bar, 1 page", value: 0% }
+            - { role: other, name: Apply the coupon shown inside the web page (accept the terms first) }
+            - { role: other, name: "Vertical scroll bar, 1 page", testId: coupon-webview }
+            - { role: web-view, name: "Vertical scroll bar, 1 page" }

@@ -1,0 +1,62 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Infinite%20Scroll%20List",
+  "entries": [
+    {
+      "key": "781e4367b42ad0ada60347c98bf6fe7f7428189559e7bde4182f3880ad96cacf",
+      "target": "android-emulator",
+      "digest": "e8961bb5b99e5e4ed99a5eab16b151535d1d74a8590730f04f35aa5246bed887",
+      "createdAt": "2026-10-09T08:18:53.783Z",
+      "instructionDigest": "240960ef8daa93f30d3183a42cf877c23681993025141766e480102a3eca2d75",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Scrolled the paginated list until Item 137 appeared and tapped it. The screen confirms success with “Found item 137.”",
+      "endWaitMs": 12000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "faa16d90a90a8e9500916153b844edf04464b063d1ca3645464522d47d79c224",
+      "target": "ios-simulator",
+      "digest": "bf2ca15fb12f0ed253a3ae9639ea074f5fbeffc912eb79935211bcff9af02d52",
+      "createdAt": "2026-10-30T17:01:24.722Z",
+      "instructionDigest": "240960ef8daa93f30d3183a42cf877c23681993025141766e480102a3eca2d75",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "recordedBy": {
+        "provider": "gateway",
+        "model": "openai/gpt-6-luna-fast"
+      },
+      "summary": "The screen shows “Found item 137,” confirming the list item was tapped and the scenario completed.",
+      "endWaitMs": 11000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

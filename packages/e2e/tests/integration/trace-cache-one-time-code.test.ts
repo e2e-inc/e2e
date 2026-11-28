@@ -157,7 +157,7 @@ describe('trace cache: a one-time code typed one digit per box', () => {
   it('records every box as a gap and never types the last run\'s code', async () => {
     const first = await runExisting(project, options());
     expect(first.exitCode).toBe(0);
-    const entries = readEntries(project);
+    const entries = (await readEntries(project));
     expect(entries).toHaveLength(1);
     const { actions } = entries[0]!.entry.payload;
     // A lone digit is no word of the sentence that shows the code; only the field's
@@ -214,7 +214,7 @@ describe('trace cache: a one-time code typed into each focused box', () => {
   it('records every focused digit as a gap on a screen that listed a one-time-code field', async () => {
     const first = await runExisting(marked, options());
     expect(first.exitCode).toBe(0);
-    const entries = readEntries(marked);
+    const entries = (await readEntries(marked));
     expect(entries).toHaveLength(1);
     const { actions } = entries[0]!.entry.payload;
     // Each tap names its box and replays; each digit typed after it is this run's data.
@@ -282,7 +282,7 @@ describe('trace cache: a code typed across boxes that declare no purpose', () =>
     const first = await runExisting(project, options(executor));
     expect(first.exitCode).toBe(0);
     // No piece is a word of "Your code is ...": the pieces typed in a row join into it.
-    expect(readEntries(project)[0]!.entry.payload.actions).toEqual([gap]);
+    expect((await readEntries(project))[0]!.entry.payload.actions).toEqual([gap]);
 
     const second = await runExisting(project, options(executor));
     expect(second.exitCode).toBe(0);
@@ -295,7 +295,7 @@ describe('trace cache: a code typed across boxes that declare no purpose', () =>
     const project = projectFor(suiteOn('/one-time-code-plain'));
     const first = await runExisting(project, options(focusedCodeExecutor));
     expect(first.exitCode).toBe(0);
-    const { actions } = readEntries(project)[0]!.entry.payload;
+    const { actions } = (await readEntries(project))[0]!.entry.payload;
     expect(actions).toEqual([expect.objectContaining({ name: 'tap' }), gap]);
 
     const second = await runExisting(project, options(focusedCodeExecutor));
@@ -311,7 +311,7 @@ describe('trace cache: a code typed across boxes that declare no purpose', () =>
     const project = projectFor(suiteOn('/one-time-code-plain?label=1&code=482613'));
     const first = await runExisting(project, options(codeExecutor));
     expect(first.exitCode).toBe(0);
-    expect(readEntries(project)[0]!.entry.payload.actions).toEqual([gap]);
+    expect((await readEntries(project))[0]!.entry.payload.actions).toEqual([gap]);
 
     const second = await runExisting(project, options(codeExecutor));
     expect(second.exitCode).toBe(0);
@@ -323,7 +323,7 @@ describe('trace cache: a code typed across boxes that declare no purpose', () =>
     const project = projectFor(suiteOn('/one-time-code-plain?parts=2&code=482913'));
     const first = await runExisting(project, options(enterBetweenExecutor));
     expect(first.exitCode).toBe(0);
-    const { actions } = readEntries(project)[0]!.entry.payload;
+    const { actions } = (await readEntries(project))[0]!.entry.payload;
     expect(actions.map((action) => ('value' in action ? `${action.name} ${action.value}` : action.name))).toEqual(['type 482', 'pressKey', 'type 913']);
   }, 240_000);
 
@@ -331,7 +331,7 @@ describe('trace cache: a code typed across boxes that declare no purpose', () =>
     const project = projectFor(suiteOn('/one-time-code-plain?code=482913', 'type the code 482913 into the code boxes'));
     const first = await runExisting(project, options(codeExecutor));
     expect(first.exitCode).toBe(0);
-    const { actions } = readEntries(project)[0]!.entry.payload;
+    const { actions } = (await readEntries(project))[0]!.entry.payload;
     expect(actions.map((action) => ('value' in action ? action.value : action.name))).toEqual(['4', '8', '2', '9', '1', '3']);
 
     const second = await runExisting(project, options(codeExecutor));

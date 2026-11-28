@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20gift-card-purchase",
+  "entries": [
+    {
+      "key": "325c3192f76978208e795a9a2afbd9f7a89cd4bcb63640b8fc09c4742e995fe8",
+      "target": "web",
+      "digest": "5d08ef4725cad94450cf172a8de8c47cbdfe8b25349131a14a3d9081f34a2ec7",
+      "createdAt": "2026-10-04T08:34:05.073Z",
+      "instructionDigest": "58b82e08250d41e942c183d1c49b7e031fb5754f62c785c3f064c404c6b44851",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Selected a $25 gift card, entered friend@example.com, and completed the purchase. The page confirms the gift card was sent and says a $25.00 gift card is on its way.",
+      "endWaitMs": 12000
+    }
+  ]
+}

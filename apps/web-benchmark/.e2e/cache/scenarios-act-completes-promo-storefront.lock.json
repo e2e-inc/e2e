@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20promo-storefront",
+  "entries": [
+    {
+      "key": "c93dae1578622d1d299212edb5b458e987185f9e83792d2cabc2a35dc2674fb8",
+      "target": "web",
+      "digest": "ca50d90048579cdcb778e6fee00ceaf6d3bb48c6024bd7f0f5b3f162fb508bbc",
+      "createdAt": "2026-10-06T13:56:40.741Z",
+      "instructionDigest": "1bf3aabb828b9b084d447df3a78d1fa700b5b28b8d5847dcc5ffcb9b0ce3bd45",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "The current screen shows Wireless Headphones with an “Order confirmed” success message, so the recorded purchase took effect.",
+      "endWaitMs": 26000
+    }
+  ]
+}

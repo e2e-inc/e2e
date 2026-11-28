@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/control-inventory.e2e.ts::control%20inventory::back%20returns%20from%20the%20details%20view%20to%20the%20inventory",
+  "entries": [
+    {
+      "key": "d2a64638fa64821ffadb8a50d092e13ee89722c9ce06b9ae34628d827a9f37df",
+      "target": "web",
+      "digest": "895aaf1295de17d591b450f5b4e04f62e1052855eeaa255c21d53a37e3e9d118",
+      "createdAt": "2026-10-04T08:29:27.731Z",
+      "instructionDigest": "b654f62f1b06969b737e6bc5900524da39b012965a0d82aef45fce7af099ba6c",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Opened Details, then used browser history to return to /e/control-inventory. The Navigation state now reads “back on the inventory.”",
+      "endWaitMs": 13000
+    }
+  ]
+}

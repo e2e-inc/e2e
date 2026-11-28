@@ -1,0 +1,58 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Error%20Recovery",
+  "entries": [
+    {
+      "key": "be480e468e8e1ce9d711a913a342576d12f268717ddaf2b3b757bc52552aa633",
+      "target": "android-emulator",
+      "digest": "b7e3dc9644fca1841f478a8b29c05c1df0e04eaaec583e00bb2e41ed5d1a7bf2",
+      "createdAt": "2026-10-09T06:59:00.440Z",
+      "instructionDigest": "e8369dfb1ec63a3fa2636f3e1803fa229587d469fcb7abdafcfbbb046625544c",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Retried the failed draft load; the draft list loaded. Deleted the “Untitled draft — ‘Quarterly numbers…’” and confirmed deletion; the screen shows “Draft deleted.”",
+      "endWaitMs": 12000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "4c9b8d6da6cd0c38a5341e8bd7412e7618aafaec97ec4e020944d5ef2a0fb2b2",
+      "target": "ios-simulator",
+      "digest": "7aefb1786a5f84b12754f7e74713c35dc50b6d9438c6eb326db0533d01f1c695",
+      "createdAt": "2026-10-15T16:04:01.372Z",
+      "instructionDigest": "e8369dfb1ec63a3fa2636f3e1803fa229587d469fcb7abdafcfbbb046625544c",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Retried the failed draft load, waited for the draft list to appear, then deleted the untitled draft and confirmed. The screen shows “Draft deleted.”",
+      "endWaitMs": 14000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

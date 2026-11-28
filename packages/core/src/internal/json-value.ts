@@ -15,6 +15,9 @@ export interface JsonValueRules {
   readonly maxDepth?: number;
 }
 
+/** Deepest a step's params nest (spec 02): the validation `agent.act` runs, and the replay cache's reader. */
+export const MAX_PARAMS_DEPTH = 32;
+
 /** Validates that a value is JSON-safe, throwing a labeled TestError otherwise. */
 export function validateJsonValue(value: unknown, label: string, rules: JsonValueRules = {}): void {
   if (value === undefined) return;

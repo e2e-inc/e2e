@@ -65,11 +65,14 @@ Full reference: docs/reference/cli.mdx.
 
 ## The replay cache
 
-Entries live under `.e2e/cache/` by default, one file per key. `e2e cache
-ls` lists them, `stats` sums them, `clear` deletes them; with a custom
-`cache.store` these file-store commands refuse (exit 2). `--no-cache` turns the cache
-off for one run; `--strict-cache` fails a step whose committed recording no
-longer replays (`REPLAY_STALE`) instead of calling the model.
+Each test's recordings live under `.e2e/cache/` by default, in one YAML file
+named for the test (`<test>.yml`: each step's `act`, then per target `do`
+and `expect`) beside a generated `<test>.lock.json` with the keys. Review the
+`.yml`; never edit the lock. Older `<key>.json` entries are not read. `e2e
+cache ls` lists the recordings, `stats` sums them, `clear` deletes them; with
+a custom `cache.store` these file-store commands refuse (exit 2). `--no-cache`
+turns the cache off for one run; `--strict-cache` fails a step whose committed
+recording no longer replays (`REPLAY_STALE`) instead of calling the model.
 
 Full reference: docs/cache.mdx.
 

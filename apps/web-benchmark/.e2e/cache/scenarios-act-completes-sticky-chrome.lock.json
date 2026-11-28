@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20sticky-chrome",
+  "entries": [
+    {
+      "key": "f2ab7c5f57dbb07bf0abece6fd5d4671e48b75b67a8ef4e05dc589b9f83df6dd",
+      "target": "web",
+      "digest": "4faae4f7586ce25c5ce810befa6c34967f957c3e474527dc2ce3dcfa4afc378c",
+      "createdAt": "2026-10-04T08:31:18.423Z",
+      "instructionDigest": "507883318a8655d47afe9f680ee91cde1ae64055fbef530129cc289101a30c23",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Scrolled until the Accept terms button was clear above the sticky footer, clicked it once, and verified the “Terms accepted” confirmation.",
+      "endWaitMs": 12000
+    }
+  ]
+}

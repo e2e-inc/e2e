@@ -1,0 +1,39 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-virtualized-table.lock.json
+
+test: act completes virtualized-table
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: scroll the windowed table until the Golden Row (row 4322) is rendered, then claim it"
+    targets:
+      web:
+        at: /e/virtualized-table
+        do:
+          - scroll: down
+            until: Row 4322
+            on: { testId: table-viewport }
+            spans: 0.3083
+          - tap: { role: button, name: Claim, testId: claim-button }
+        expect:
+          shows:
+            - { text: Golden Row claimed, testId: success-message }
+            - { text: Row 4306 }
+            - { text: Row 4307 }
+            - { text: Row 4308 }
+            - { text: Row 4309 }
+            - { text: Row 4310 }
+            - { text: Row 4311 }
+            - { text: Row 4312 }
+          gone:
+            - { text: Row 1 }
+            - { text: Row 2 }
+            - { text: Row 3 }
+            - { text: Row 4 }
+            - { text: Row 5 }
+            - { text: Row 6 }
+            - { text: Row 7 }
+            - { text: Row 8 }

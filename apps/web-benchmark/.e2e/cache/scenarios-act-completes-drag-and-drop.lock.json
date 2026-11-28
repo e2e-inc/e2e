@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20drag-and-drop",
+  "entries": [
+    {
+      "key": "877837d0e2e667a1fd7572198f4d21118ce02703794a701f6fe93744d9e395ea",
+      "target": "web",
+      "digest": "ad13ca73296f01be42c4579cd4f42fa55174e0f0054d3056d9e66c4d0f0be947",
+      "createdAt": "2026-10-04T08:31:43.811Z",
+      "instructionDigest": "24ea40459eba1c0e7841d174c9d6b29255cc71346083add2a38c39491aff758c",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Dragged Banana and then Cherry into the dropzone, leaving Apple alone. The page displays “Items dropped in the right order.”",
+      "endWaitMs": 12000
+    }
+  ]
+}

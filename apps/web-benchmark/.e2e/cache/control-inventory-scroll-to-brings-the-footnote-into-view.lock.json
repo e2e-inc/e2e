@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/control-inventory.e2e.ts::control%20inventory::scroll_to%20brings%20the%20footnote%20into%20view",
+  "entries": [
+    {
+      "key": "4c6e069d9f354e6876a2fbe8a2edf3efc95013dca6fd5b64682b742cbd8bde77",
+      "target": "web",
+      "digest": "4b9d332ced34aec6666b363d1fd480cb563ed37d47a4507c342ff117b68bfd78",
+      "createdAt": "2026-10-04T08:29:31.075Z",
+      "instructionDigest": "60d7d1c1109f3844ed7b5cd3f6f351e1b297af10aa7e4371ed45de087cce0df3",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Scrolled the page until the Footnote paragraph was in view; the Footnote state now reads “in view”.",
+      "endWaitMs": 12000
+    }
+  ]
+}

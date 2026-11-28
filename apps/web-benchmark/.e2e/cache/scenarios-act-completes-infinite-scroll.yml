@@ -1,0 +1,30 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-infinite-scroll.lock.json
+
+test: act completes infinite-scroll
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: scroll the feed until the Golden Ticket loads, then claim it"
+    targets:
+      web:
+        at: /e/infinite-scroll
+        do:
+          - scroll: down
+            until: Golden Ticket
+            on: { testId: feed }
+            spans: 0.3083
+          - tap: { role: button, name: Claim, testId: claim-button }
+        expect:
+          shows:
+            - { text: Golden Ticket claimed, testId: success-message }
+            - { text: Item 41 }
+            - { text: Feed entry 41 of 200 }
+            - { text: Item 42 }
+            - { text: Feed entry 42 of 200 }
+            - { text: Item 43 }
+            - { text: Feed entry 43 of 200 }
+            - { text: Item 44 }

@@ -1,0 +1,51 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-sticky-chrome-target.lock.json
+
+test: act completes Sticky Chrome Target
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: scroll down to the Accept terms button under the sticky footer, accept the terms, then tap Continue in the footer"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - scroll: down
+            until: Accept terms
+          - tap: { role: group, name: Accept terms, testId: accept-terms, selector: id=accept-terms, within: Deterministic agreement paragraph 8 of 14. Nothing in this section is actionabl… }
+          - tap: { role: group, name: Continue, testId: continue-button, selector: id=continue-button }
+        expect:
+          shows:
+            - { role: text, name: Terms accepted, testId: success-message }
+          gone:
+            - { role: text, name: "Read the agreement, tap Accept terms at the bottom, then Continue." }
+            - { role: text, name: Section 1 }
+            - { role: text, name: Deterministic agreement paragraph 1 of 14. Nothing in this section is actionable; it only adds scroll distance between the top of the screen and the accept button. }
+            - { role: text, name: Section 2 }
+            - { role: text, name: Deterministic agreement paragraph 2 of 14. Nothing in this section is actionable; it only adds scroll distance between the top of the screen and the accept button. }
+            - { role: text, name: Section 3 }
+            - { role: text, name: Deterministic agreement paragraph 3 of 14. Nothing in this section is actionable; it only adds scroll distance between the top of the screen and the accept button. }
+            - { role: text, name: Section 4 }
+      ios-simulator:
+        at: dev.e2e.benchmark / Sticky Chrome Target
+        do:
+          - scroll: down
+            until: Accept terms
+          - tap: { role: other, name: Accept terms, testId: accept-terms, selector: id=accept-terms }
+          - scroll: down
+          - tap: { role: other, name: Continue, testId: continue-button, selector: id=continue-button }
+        expect:
+          shows:
+            - { role: text, name: Terms accepted, testId: success-message }
+          gone:
+            - { role: other, name: "Vertical scroll bar, 3 pages", value: 0% }
+            - { role: other, name: "Horizontal scroll bar, 1 page", value: 0% }
+            - { role: other, name: Continue, testId: continue-button }
+            - { role: text, name: "Read the agreement, tap Accept terms at the bottom, then Continue." }
+            - { role: text, name: Section 1 }
+            - { role: text, name: Deterministic agreement paragraph 1 of 14. Nothing in this section is actionable; it only adds scroll distance between the top of the screen and the accept button. }
+            - { role: text, name: Section 2 }
+            - { role: text, name: Deterministic agreement paragraph 2 of 14. Nothing in this section is actionable; it only adds scroll distance between the top of the screen and the accept button. }

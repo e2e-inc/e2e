@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20infinite-scroll",
+  "entries": [
+    {
+      "key": "ddc615c1f8fec05c095c44dcac3614808c52a55c24f3ebf41c6e507d1abe140e",
+      "target": "web",
+      "digest": "d94ed8736074cff5f067d74d852ffe60932846dda07422216c182047a2ba59a2",
+      "createdAt": "2026-10-04T08:29:16.739Z",
+      "instructionDigest": "5693e0682199f2201375a207ac10bd69b22c26925bbf8fd87e06a9f6d1abeca9",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Scrolled the feed until the Golden Ticket appeared and clicked Claim. The page now shows “Golden Ticket claimed.”",
+      "endWaitMs": 12000
+    }
+  ]
+}

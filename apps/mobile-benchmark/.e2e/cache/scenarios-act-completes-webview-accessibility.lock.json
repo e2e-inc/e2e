@@ -1,0 +1,58 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20WebView%20Accessibility",
+  "entries": [
+    {
+      "key": "f1e5741e33d85e38f0c7c883c04eca28c63045d028f353a812a2e83783a291ce",
+      "target": "android-emulator",
+      "digest": "b7411d6d2f96bf043ab6f6324c3733bdf1561ea3ae6af8749a2523ef1cd0d14f",
+      "createdAt": "2026-10-09T06:58:23.025Z",
+      "instructionDigest": "60e9576a643a70f4d33968ccc19d845112ca2ed50212584e9e7aadc34707e5c8",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Read coupon code TA-BENCH-50, entered it, accepted the terms, and applied it. The web view displays “Coupon applied.”",
+      "endWaitMs": 14000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "ccabb55841076f013cc3014d25e96722580d13ec6b696e6161ff64d113e9be1f",
+      "target": "ios-simulator",
+      "digest": "330fa84dd55414e6ce85315a3b542bc0ff4c20c91a779657026448085b9908e2",
+      "createdAt": "2026-10-09T07:04:43.228Z",
+      "instructionDigest": "60e9576a643a70f4d33968ccc19d845112ca2ed50212584e9e7aadc34707e5c8",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Read coupon code TA-BENCH-50, entered it, accepted the terms, and applied it. The web view now displays “Coupon applied.”",
+      "endWaitMs": 13000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

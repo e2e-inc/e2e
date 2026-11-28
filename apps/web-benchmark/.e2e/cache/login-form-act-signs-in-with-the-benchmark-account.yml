@@ -1,0 +1,35 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: login-form-act-signs-in-with-the-benchmark-account.lock.json
+
+test: act signs in with the benchmark account
+file: tests-agent/login-form.e2e.ts
+
+steps:
+  - act: log in with the given credentials
+    params:
+      email: tester@tester.army
+      password:
+        kind: secret
+        name: benchmark.password
+        purpose: password
+    targets:
+      web:
+        at: /e/login-form
+        do:
+          - type: tester@tester.army
+            into: { role: textbox, name: Email, testId: email-input, placeholder: Email }
+          - secret: benchmark.password
+            into: { role: textbox, name: Password, testId: password-input, placeholder: Password, inputPurpose: password }
+          - tap: { role: button, name: Log in, testId: login-button }
+        expect:
+          shows:
+            - { text: Logged in successfully, testId: success-message }
+            - { role: button, name: Log out, testId: logout-button }
+          gone:
+            - { text: Use tester@tester.army / <secret:benchmark.password> }
+            - { role: textbox, name: Email, testId: email-input, placeholder: Email }
+            - { role: textbox, name: Password, testId: password-input, placeholder: Password, inputPurpose: password }
+            - { role: button, name: Log in, testId: login-button }

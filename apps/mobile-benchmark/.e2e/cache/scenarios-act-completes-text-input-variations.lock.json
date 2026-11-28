@@ -1,0 +1,62 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Text%20Input%20Variations",
+  "entries": [
+    {
+      "key": "b0f2667c3389282144384dd4387d5d6fd3047839e79a2861ae42f7e65aa75085",
+      "target": "android-emulator",
+      "digest": "f0c6d01caab0b00362164dc6b898e4153e3c98169444103ba1b3639a66575835",
+      "createdAt": "2026-10-09T06:52:40.428Z",
+      "instructionDigest": "fbc47cae1853b33f40b2f33da5fd5f41dfc811c660e7aecb291ad1d964757d21",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Entered username \"testuser\", a 4-digit PIN, and notes exceeding 10 characters, then submitted. The screen confirms “Form submitted.”",
+      "endWaitMs": 12000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "6d77b84d705dbf552d862188b0c6d7f49c27d8b7c9b59f6a470c54f8960a10b1",
+      "target": "ios-simulator",
+      "digest": "d91dde6297823dbb7807262b78bc3fe3b320f59bd75f63ebdc3afdc1236bce2a",
+      "createdAt": "2026-10-30T17:02:47.170Z",
+      "instructionDigest": "fbc47cae1853b33f40b2f33da5fd5f41dfc811c660e7aecb291ad1d964757d21",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "recordedBy": {
+        "provider": "gateway",
+        "model": "openai/gpt-6-luna-fast"
+      },
+      "summary": "Entered notes (43 characters) with the existing username and 4-digit PIN, then submitted. The screen shows “Form submitted.”",
+      "endWaitMs": 13000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20rich-text-editor",
+  "entries": [
+    {
+      "key": "8fd84a0f9335c6c96be5d82a9cda46146389f138c2fd46037ffbf64f4ef6e2eb",
+      "target": "web",
+      "digest": "77208cc247c48ef0f5a5dc94fa87898c65c92442414aa94a2f0d8b0ddde8796d",
+      "createdAt": "2026-10-04T08:33:45.030Z",
+      "instructionDigest": "e37ad9ac878deebe5c840d23fded9589f67228d8229a059b855347ab5e49ab96",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Entered “release approved,” selected only “approved” and applied bold formatting, then checked the document. The page confirmed “Document approved.”",
+      "endWaitMs": 12000
+    }
+  ]
+}

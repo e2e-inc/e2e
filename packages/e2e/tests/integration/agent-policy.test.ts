@@ -474,8 +474,9 @@ test('reveals the output', async ({ app, agent, screen }) => {
       expect(replay?.cache).toMatchObject({ mode: 'self-finalized', replayedActions: 1 });
       const cacheDir = path.join(project.dir, '.e2e', 'cache');
       const entries = readdirSync(cacheDir).map((file) => readFileSync(path.join(cacheDir, file), 'utf8'));
-      expect(entries).toHaveLength(1);
-      expect(entries[0]).toContain('<secret:multiline>');
+      // One test's recording: its YAML file and its lock, both scanned below.
+      expect(entries).toHaveLength(2);
+      expect(entries.join('\n')).toContain('<secret:multiline>');
       const written = [...seen, ...entries, readFileSync(path.join(project.dir, '.e2e', 'report.json'), 'utf8'), JSON.stringify(recorded), JSON.stringify(replayed)];
       expect(seen.join('\n')).toContain('<secret:probe>');
       for (const fragment of [probe, multiline, collapsed, lead.slice(0, 12), tail.slice(0, 8)]) {

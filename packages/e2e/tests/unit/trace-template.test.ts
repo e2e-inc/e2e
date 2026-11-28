@@ -28,7 +28,7 @@ function trace(name: string): ActionTrace {
       { name: 'navigate', summary: 'navigate to "/companies/create"', url: '/companies/create' },
       { name: 'type', summary: `type "${name}" into textbox "Name"`, target: { role: 'textbox', name: 'Name' }, value: name },
       { name: 'typeSecret', summary: 'fill secret "admin" into textbox "Password"', target: { role: 'textbox', name: 'Password' }, secret: 'admin' },
-      { name: 'tap', summary: `tap option "${name}" in row "${name}"`, target: { role: 'option', name, within: name } },
+      { name: 'tap', summary: `tap option "${name}" in "${name}"`, target: { role: 'option', name, within: name } },
       { name: 'press', summary: 'press "Enter" on textbox "Name"', target: { role: 'textbox', name: 'Name' }, key: 'Enter' },
     ],
     executor: { name: 'test' },

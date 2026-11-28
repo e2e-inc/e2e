@@ -5,7 +5,7 @@
  */
 
 import { ConfigurationError, TestError } from '../internal/errors.ts';
-import { validateJsonValue } from '../internal/json-value.ts';
+import { MAX_PARAMS_DEPTH, validateJsonValue } from '../internal/json-value.ts';
 import { paramPointer, type ParamTemplate } from '../cache/template.ts';
 import { isSecret } from '../secrets.ts';
 import { isUnique } from '../params.ts';
@@ -20,7 +20,6 @@ const MAX_INSTRUCTION_BYTES = 8_192;
 
 /** Spec 02: canonical non-secret parameters are capped at 64 KiB, 32 levels. */
 export const MAX_PARAMS_BYTES = 65_536;
-const MAX_PARAMS_DEPTH = 32;
 
 /** Normalizes and bounds the instruction per spec 02. */
 export function validateInstruction(instruction: string, api: string): string {

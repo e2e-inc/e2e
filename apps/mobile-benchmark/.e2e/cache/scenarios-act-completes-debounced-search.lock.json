@@ -1,0 +1,58 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Debounced%20Search",
+  "entries": [
+    {
+      "key": "5eff18f221aea74f513d1a35e0d22e6217704e0d5fe3574778155e7d750a9948",
+      "target": "android-emulator",
+      "digest": "91f001c94f3f834e923117a14cd5a9726c41a533da3d569fde26bf0a344a5a14",
+      "createdAt": "2026-10-09T06:55:26.759Z",
+      "instructionDigest": "c212f90679a61041258d6d57a10468462a17a4c9c398605f324169c734daa7f5",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Searched for “Benchmark Target,” waited for the result to load, and selected the exact matching result once. The screen confirms “Selected Benchmark Target.”",
+      "endWaitMs": 12000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "7df0802b8a1fd00e85fc85537606ea1ed445e1175357020711139c55c755d169",
+      "target": "ios-simulator",
+      "digest": "7dd5d2da2baa255192347028ce644b0d5c41363da9928ef18168e00089a94248",
+      "createdAt": "2026-10-09T07:20:27.371Z",
+      "instructionDigest": "c212f90679a61041258d6d57a10468462a17a4c9c398605f324169c734daa7f5",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Searched for “Benchmark Target,” waited for the exact result to load, and selected it once. The screen confirms “Selected Benchmark Target.”",
+      "endWaitMs": 13000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

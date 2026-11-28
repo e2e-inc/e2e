@@ -1,0 +1,62 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Sticky%20Chrome%20Target",
+  "entries": [
+    {
+      "key": "d823e86a70e480e47e0706526de86df9c679a7e4cb8d69ce679bb2632be623f1",
+      "target": "android-emulator",
+      "digest": "c816ed782483321e25a6f80f7baff4cf651566d35798b7957623671286767866",
+      "createdAt": "2026-10-09T08:20:26.465Z",
+      "instructionDigest": "c8995bcdba36d775696cf386be302127a69622849b54e095755e2dc908af89bd",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Scrolled to and tapped Accept terms, which changed to “Terms accepted ✓”. Tapped Continue; the screen now shows the “Terms accepted” success message.",
+      "endWaitMs": 12000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "54cafd3addc2fab4dbdf705595e188cbbfb89c56012342ed59d7a7b4dcbb635f",
+      "target": "ios-simulator",
+      "digest": "03eba84dc00058b2d53c4ca39ea8e0dce6a9ae74f49c43ad7d14ef77f95a67a2",
+      "createdAt": "2026-10-30T17:04:45.297Z",
+      "instructionDigest": "c8995bcdba36d775696cf386be302127a69622849b54e095755e2dc908af89bd",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "recordedBy": {
+        "provider": "gateway",
+        "model": "openai/gpt-6-luna-fast"
+      },
+      "summary": "Accept terms was already selected on the current screen. Tapped Continue in the sticky footer, and the screen now confirms “Terms accepted.”",
+      "endWaitMs": 13000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

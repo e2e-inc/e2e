@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/unique-cache.e2e.ts::act%20adds%20an%20address%20with%20a%20run-unique%20label",
+  "entries": [
+    {
+      "key": "9f03ade8aca3d33c07e2bfb7dfe9cb373a9f919055868e769346c10d0c69282d",
+      "target": "web",
+      "digest": "f188774962e523cf13cea3ff5faa91269732de512e00a56e03567d8d96f492d1",
+      "createdAt": "2026-10-04T08:28:57.166Z",
+      "instructionDigest": "7e6f99066c5bc180c1e5188150277917670b918eb0a9646ac967ef798648b455",
+      "paramsDigest": "49ed432ec36207f5728e4da6da98006ed0d126739d72fdcdb919e032bfd6a511",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Added address labelled “Cabin mutk7a4i” with line “7 Pine Way, Bend”; the new address appears in the list and an “Address saved” confirmation is shown.",
+      "endWaitMs": 13000
+    }
+  ]
+}

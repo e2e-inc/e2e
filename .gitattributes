@@ -1,3 +1,6 @@
 * text=auto eol=lf
 *.bat -text
 OFL.txt -text
+
+# The replay cache's lock files are generated: a diff folds them, and review reads the .yml beside each.
+**/.e2e/cache/*.lock.json linguist-generated=true

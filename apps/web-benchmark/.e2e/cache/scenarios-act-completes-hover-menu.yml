@@ -1,0 +1,26 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-hover-menu.lock.json
+
+test: act completes hover-menu
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: find Redeem voucher under the Account menu and redeem the voucher"
+    targets:
+      web:
+        at: /e/hover-menu
+        do:
+          - hover: { text: Account, testId: menu-account }
+          - hover: { text: Billing › }
+          - tap: { text: Redeem voucher }
+        expect:
+          shows:
+            - { text: Voucher redeemed, testId: success-message }
+          gone:
+            - { text: "Using hover only, find Redeem voucher under Account." }
+            - { text: Products, testId: menu-products }
+            - { text: Settings, testId: menu-settings }
+            - { text: Account, testId: menu-account }

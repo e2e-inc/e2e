@@ -1,0 +1,39 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-permission-prompt.lock.json
+
+test: act completes Permission Prompt
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: request microphone access and allow it in the system dialog"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - tap: { role: group, name: Enable microphone, testId: request-permission, selector: id=request-permission, within: Voice notes }
+          - tap: { role: button, name: While using the app, testId: com.android.permissioncontroller:id/permission_allow_foreground_only_button, selector: id=com.android.permissioncontroller:id/permission_allow_foreground_only_button }
+        expect:
+          shows:
+            - { role: text, name: Microphone enabled, testId: success-message }
+          gone:
+            - { role: text, name: Voice notes }
+            - { role: text, name: Recording voice notes requires microphone access. Allow the permission when the system asks. }
+            - { role: text, name: Enable microphone }
+            - { role: group, name: Enable microphone, testId: request-permission }
+      ios-simulator:
+        at: dev.e2e.benchmark / Permission Prompt
+        do:
+          - tap: { role: other, name: Enable microphone, testId: request-permission, selector: id=request-permission }
+          - tap: { role: button, name: Allow }
+        expect:
+          shows:
+            - { role: other, name: Microphone enabled }
+            - { role: text, name: Microphone enabled, testId: success-message }
+          gone:
+            - { role: text, name: Voice notes }
+            - { role: text, name: Recording voice notes requires microphone access. Allow the permission when the system asks. }
+            - { role: other, name: Enable microphone, testId: request-permission }
+            - { role: other, name: Voice notes }

@@ -1,0 +1,58 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Login%20Form",
+  "entries": [
+    {
+      "key": "5e4707ace3e9b4c2f3c6369c65e05e4fd7d597831d893c541e09845ed1e0d2a9",
+      "target": "android-emulator",
+      "digest": "3f01c1bacf474c794cfe0661a7efcbfb983d83dff2c643a38d9fc6e6103baa22",
+      "createdAt": "2026-10-09T06:51:48.588Z",
+      "instructionDigest": "faf898a5790a0ed0790b7cf57f66838eaa92ae4cb5975ac34563020bbe5cc9a3",
+      "paramsDigest": "7c4620c298b4003cb825c790cc548f7357fad575798b56d1bf1966e88babd7b9",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Logged in with tester@tester.army and the provided password. The screen shows “Logged in successfully” and a Log out control.",
+      "endWaitMs": 12000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "688a148d704ae364e07e871685ee5cc1e425f5f592d9c90fcddb96ab4163ae50",
+      "target": "ios-simulator",
+      "digest": "1eaf9092a57b9b544bf7d30e66f61194ee785c18177764c3f54837d200990960",
+      "createdAt": "2026-10-15T15:49:37.909Z",
+      "instructionDigest": "faf898a5790a0ed0790b7cf57f66838eaa92ae4cb5975ac34563020bbe5cc9a3",
+      "paramsDigest": "7c4620c298b4003cb825c790cc548f7357fad575798b56d1bf1966e88babd7b9",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Entered tester@tester.army and the provided password, submitted the login form, dismissed the system password-save prompt, and verified the screen shows “Logged in successfully” with a Log out control.",
+      "endWaitMs": 14000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

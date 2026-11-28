@@ -1,0 +1,36 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Apple%20Pay",
+  "entries": [
+    {
+      "key": "82c7cc7405281990e05ac47cd6a5326e142cc809c2fb258e537eab1bb190e56b",
+      "target": "ios-simulator",
+      "digest": "c1bbf53c4d987bc76c8c5b96a94512b813f889b4075eb7e4a83880c88222caec",
+      "createdAt": "2026-10-30T17:05:16.786Z",
+      "instructionDigest": "94f39431cf1ce1c380678b2d8ee27fb1e2a33fe296495a90c007ad4dc3f2ae45",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "recordedBy": {
+        "provider": "gateway",
+        "model": "openai/gpt-6-luna-fast"
+      },
+      "summary": "The Apple Pay payment completed successfully; the screen shows “Payment complete: $8.99.”",
+      "endWaitMs": 11000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

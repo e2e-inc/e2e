@@ -1,0 +1,50 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-infinite-scroll-list.lock.json
+
+test: act completes Infinite Scroll List
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: scroll the paginated list until Item 137 appears, then tap it"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - scroll: down
+            until: Item 137
+            on: { role: group, testId: benchmark-list, selector: id=benchmark-list }
+            spans: 0.8821
+          - tap: { role: group, name: Item 137, testId: item-137, selector: id=item-137 }
+        expect:
+          shows:
+            - { role: text, name: Found item 137, testId: success-message }
+          gone:
+            - { role: text, name: Scroll down and tap Item 137 to complete }
+            - { role: text, name: Item 1 }
+            - { role: text, name: Item 2 }
+            - { role: text, name: Item 3 }
+            - { role: text, name: Item 4 }
+            - { role: text, name: Item 5 }
+            - { role: text, name: Item 6 }
+            - { role: text, name: Item 7 }
+      ios-simulator:
+        at: dev.e2e.benchmark / Infinite Scroll List
+        do:
+          - scroll: down
+            until: Item 137
+          - tap: { role: other, name: Item 137, testId: item-137, selector: id=item-137 }
+        expect:
+          shows:
+            - { role: text, name: Found item 137, testId: success-message }
+          gone:
+            - { role: other, name: Item 1, testId: item-1 }
+            - { role: other, name: Item 2, testId: item-2 }
+            - { role: other, name: Item 3, testId: item-3 }
+            - { role: other, name: Item 4, testId: item-4 }
+            - { role: other, name: Item 5, testId: item-5 }
+            - { role: other, name: Item 6, testId: item-6 }
+            - { role: other, name: Item 7, testId: item-7 }
+            - { role: other, name: Item 8, testId: item-8 }

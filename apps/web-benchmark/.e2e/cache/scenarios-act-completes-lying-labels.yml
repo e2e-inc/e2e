@@ -1,0 +1,28 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-lying-labels.lock.json
+
+test: act completes lying-labels
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: send the payment; the visible text on the controls is the truth, the accessible names are not"
+    targets:
+      web:
+        at: /e/lying-labels
+        do:
+          - tap: { role: button, name: Cancel order, text: Pay now }
+          - runtimeValue: minted-token
+          - tap: { role: button, name: Discard draft, text: Submit payment }
+        expect:
+          shows:
+            - { text: Payment sent, testId: success-message }
+          gone:
+            - { text: Click the button that visibly says Pay now. }
+            - { text: Do not press this button }
+            - { text: Pay now safely }
+            - { role: button, name: Confirm payment, text: Contact support }
+            - { role: button, name: Cancel order, text: Pay now }
+            - { role: button, name: Pay now, text: Cancel order }

@@ -1,0 +1,41 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-error-recovery.lock.json
+
+test: act completes Error Recovery
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: retry the failed load, then delete the draft and confirm"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - tap: { role: group, name: Retry, testId: retry-button, selector: id=retry-button, within: "Network error: could not load drafts" }
+          - tap: { role: group, name: Delete draft, testId: delete-draft, selector: id=delete-draft, within: Drafts }
+          - tap: { role: group, name: Delete, testId: confirm-delete, selector: id=confirm-delete, within: Delete this draft? }
+        expect:
+          shows:
+            - { role: text, name: Draft deleted, testId: success-message }
+          gone:
+            - { role: text, name: Loading drafts… }
+            - { role: group, testId: loading-indicator }
+      ios-simulator:
+        at: dev.e2e.benchmark / Error Recovery
+        do:
+          - tap: { role: other, name: Retry, testId: retry-button, selector: id=retry-button }
+          - tap: { role: other, name: Delete draft, testId: delete-draft, selector: id=delete-draft }
+          - tap: { role: other, name: Delete, testId: confirm-delete, selector: id=confirm-delete }
+        expect:
+          shows:
+            - { role: navigation, testId: Error Recovery }
+            - { role: text, name: Draft deleted, testId: success-message }
+          gone:
+            - { role: status, name: In progress, value: "1" }
+            - { role: text, name: Loading drafts… }
+            - { role: other, name: Benchmark Examples }
+            - { role: navigation, name: Benchmark Examples, testId: Error Recovery }
+            - { role: other, name: Loading drafts… }
+            - { role: other, name: In progress }

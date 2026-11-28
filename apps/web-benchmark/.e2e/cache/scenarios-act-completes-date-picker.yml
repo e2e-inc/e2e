@@ -1,0 +1,27 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-date-picker.lock.json
+
+test: act completes date-picker
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: book an appointment for the exact date the page requires, navigating the calendar to it"
+    targets:
+      web:
+        at: /e/date-picker
+        do:
+          - tap: { role: textbox, name: Select date, testId: date-input, placeholder: Select date }
+          - tap: { role: button, name: ›, testId: next-month-button }
+          - tap: { role: button, name: ›, testId: next-month-button }
+          - tap: { role: button, name: ›, testId: next-month-button }
+          - tap: { role: button, name: "17", testId: day-button-17 }
+          - tap: { role: button, name: Confirm booking, testId: confirm-button }
+        expect:
+          shows:
+            - { text: "Appointment booked for September 17, 2026", testId: success-message }
+          gone:
+            - { role: textbox, name: Select date, testId: date-input, placeholder: Select date }
+            - { role: button, name: Confirm booking, testId: confirm-button }

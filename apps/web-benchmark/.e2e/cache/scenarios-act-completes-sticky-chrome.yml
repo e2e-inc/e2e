@@ -1,0 +1,20 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-sticky-chrome.lock.json
+
+test: act completes sticky-chrome
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: scroll down to the accept button and accept the terms"
+    targets:
+      web:
+        at: /e/sticky-chrome
+        do:
+          - scrollTo: { role: button, name: Accept terms, testId: accept-button }
+          - tap: { role: button, name: Accept terms, testId: accept-button }
+        expect:
+          shows:
+            - { text: Terms accepted, testId: success-message }

@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/control-inventory.e2e.ts::control%20inventory::upload%20attaches%20the%20named%20project%20files",
+  "entries": [
+    {
+      "key": "5e8767c8a91f29efad8ef0db0f28a2dcc434bef3a18e95faa2e3cb5b166a982e",
+      "target": "web",
+      "digest": "d9b7ba129afefed0bb32912c317fffff8b9dda1fcde7b695cb5b2e32cb6ae093",
+      "createdAt": "2026-10-04T08:29:22.846Z",
+      "instructionDigest": "6eb8c4cb34d6623811808727d85db0d55946be5724f0cdc01b3c633db3d6f44d",
+      "paramsDigest": "38fc51716f1b76431a49c2fd70d8a6d11405fa9b9451a1d96cb9e357e70321ce",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Attached both fixtures/attachment.txt and fixtures/second.txt to the Attachments input. The state now shows “attachment.txt, second.txt” and the control indicates 2 files.",
+      "endWaitMs": 13000
+    }
+  ]
+}

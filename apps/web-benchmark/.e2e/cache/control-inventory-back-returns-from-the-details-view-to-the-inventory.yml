@@ -1,0 +1,22 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: control-inventory-back-returns-from-the-details-view-to-the-inventory.lock.json
+
+test: control inventory › back returns from the details view to the inventory
+file: tests-agent/control-inventory.e2e.ts
+
+steps:
+  - act: open the details, then return to the inventory through the browser history
+    targets:
+      web:
+        at: /e/control-inventory
+        do:
+          - tap: { role: button, name: Open details, within: Navigation }
+          - back
+        expect:
+          shows:
+            - { role: status, name: Navigation state, text: back on the inventory }
+          gone:
+            - { role: status, name: Navigation state, text: not opened }

@@ -44,6 +44,13 @@ export type StagedTrace = {
   readonly keyHash: string;
   /** Index of the step in the attempt's step timeline. */
   readonly stepIndex: number;
+  /**
+   * The step's provenance redacted again when the attempt settles. A secret
+   * the run learns after the step (a provider credential a later fill
+   * resolves) can be in the instruction, params, or test id the entry shows,
+   * and is masked in what is written; absent, the provenance staged stands.
+   */
+  readonly settledProvenance?: () => TraceProvenance;
 } & (
   | { readonly kind: 'write'; readonly trace: ActionTrace }
   | { readonly kind: 'keep'; readonly recordedFor: TraceProvenance }
@@ -121,19 +128,33 @@ export type CacheWrite = 'saved' | 'kept' | 'unconfirmed' | 'evicted' | 'no-chan
  * gap whatever its rule, which only names the hand-off in the report.
  */
 async function holdsSameFlow(store: CacheStore, keyHash: string, trace: ActionTrace): Promise<boolean> {
-  const existing = await store.read(keyHash);
+  const existing = await store.read(keyHash, trace.recordedFor);
   return existing.status === 'hit' && flowOf(existing.entry.payload) === flowOf(trace);
 }
 
-/** The part of a trace that decides what a replay does, as canonical JSON. */
+/**
+ * The part of a trace that decides what a replay does, as canonical JSON.
+ * Each action's prose summary is left out too, but for a gap's, which names
+ * its tool: the file store keeps none and writes it again from the action
+ * when it reads one (`summarizeRecordedAction`), so a stored action and a
+ * live one can name the same action in other words. So
+ * are the instruction and params the provenance shows a reviewer, which the
+ * digests beside them already pin.
+ */
 function flowOf(trace: ActionTrace): string {
-  const { summary: _summary, endWaitMs: _endWaitMs, keyedBy: _keyedBy, recordedBy: _recordedBy, actions, ...flow } = trace;
+  const { summary: _summary, endWaitMs: _endWaitMs, keyedBy: _keyedBy, recordedBy: _recordedBy, actions, recordedFor, ...flow } = trace;
+  const { instruction: _instruction, params: _params, ...step } = recordedFor ?? {};
   return canonicalJson({
     ...flow,
+    ...(recordedFor === undefined ? {} : { recordedFor: step }),
     actions: actions.map((action) => {
-      if (action.name !== 'tool') return action;
-      const { derived: _derived, ...gap } = action;
-      return gap;
+      // A project-tool gap's summary is where its tool's name lives.
+      if (action.name === 'tool') {
+        const { derived: _derived, ...gap } = action;
+        return gap;
+      }
+      const { summary: _actionSummary, ...rest } = action;
+      return rest;
     }),
   });
 }
@@ -147,7 +168,7 @@ function flowOf(trace: ActionTrace): string {
  * (`rekeyed.ts`).
  */
 async function completeProvenance(store: CacheStore, keyHash: string, recordedFor: TraceProvenance): Promise<void> {
-  const existing = await store.read(keyHash);
+  const existing = await store.read(keyHash, recordedFor);
   if (existing.status !== 'hit') return;
   const stored = existing.entry.payload.recordedFor;
   const complete = stored?.callIndex !== undefined && stored.identityDigest === recordedFor.identityDigest;
@@ -209,6 +230,8 @@ export interface SurvivedFailure {
 export async function settleStagedTraces(context: AgentCacheContext, settlement: AttemptSettlement | undefined): Promise<ReadonlyMap<number, CacheWrite>> {
   const outcomes = new Map<number, CacheWrite>();
   const staged = context.staged.splice(0);
+  /** The confirmed new recordings, written together once every entry is settled. */
+  const writes: { readonly stepIndex: number; readonly keyHash: string; readonly payload: ActionTrace }[] = [];
   for (const entry of staged) {
     if (entry.kind === 'decided') {
       outcomes.set(entry.stepIndex, entry.outcome);
@@ -222,27 +245,53 @@ export async function settleStagedTraces(context: AgentCacheContext, settlement:
         // A kept entry existed for certain, so deleting it is an eviction; a
         // new recording's delete only clears what an earlier run may have left.
         const deletes = (failure?.implicates ?? settlement.implicatesUnconfirmed) && context.store.delete !== undefined;
-        const deleted = deletes && await context.store.delete!(entry.keyHash).then(() => true, () => false);
+        const step = entry.kind === 'keep' ? entry.recordedFor : entry.trace.recordedFor;
+        const deleted = deletes && await context.store.delete!(entry.keyHash, step).then(() => true, () => false);
         outcomes.set(entry.stepIndex, entry.kind === 'keep' && deleted ? 'evicted' : 'unconfirmed');
         continue;
       }
+      const settled = entry.settledProvenance?.();
       if (entry.kind === 'keep') {
         outcomes.set(entry.stepIndex, 'kept');
-        await completeProvenance(context.store, entry.keyHash, entry.recordedFor);
+        await completeProvenance(context.store, entry.keyHash, settled ?? entry.recordedFor);
         continue;
       }
-      if (await holdsSameFlow(context.store, entry.keyHash, entry.trace)) {
+      const trace = settled === undefined ? entry.trace : { ...entry.trace, recordedFor: settled };
+      if (await holdsSameFlow(context.store, entry.keyHash, trace)) {
         outcomes.set(entry.stepIndex, 'kept');
         continue;
       }
-      const written = await context.store.write(entry.keyHash, entry.trace);
-      outcomes.set(entry.stepIndex, written === undefined ? 'not-written' : 'saved');
+      // Its outcome takes its place among the steps' now, and its answer once the writes are done.
+      outcomes.set(entry.stepIndex, 'not-written');
+      writes.push({ stepIndex: entry.stepIndex, keyHash: entry.keyHash, payload: trace });
     } catch {
       // The cache is disposable; a failed flush is a slower next run only.
       if (entry.kind === 'write' && confirmed) outcomes.set(entry.stepIndex, 'not-written');
     }
   }
+  for (const [index, written] of (await writeRecordings(context.store, writes)).entries()) {
+    outcomes.set(writes[index]!.stepIndex, written === undefined ? 'not-written' : 'saved');
+  }
   return outcomes;
+}
+
+/**
+ * Writes the settled recordings: the file store all of a test's at once,
+ * as one rewrite of its pair, and any other store one at a time. Each
+ * write's answer, undefined for one not written.
+ */
+async function writeRecordings(store: CacheStore, writes: readonly { readonly keyHash: string; readonly payload: ActionTrace }[]): Promise<readonly ({ bytes: number } | undefined)[]> {
+  if (store instanceof FileCacheStore) return store.writeAll(writes).catch(() => writes.map(() => undefined));
+  const answers: ({ bytes: number } | undefined)[] = [];
+  for (const { keyHash, payload } of writes) {
+    // A store's write may throw before it returns a promise; that write is not written, and the rest still go.
+    try {
+      answers.push(await store.write(keyHash, payload));
+    } catch {
+      answers.push(undefined);
+    }
+  }
+  return answers;
 }
 
 /**
@@ -259,7 +308,7 @@ export function createAgentCacheContext(options: {
   readonly testId: string;
   readonly target: CacheTargetIdentity;
   readonly attemptIndex: number;
-  /** The file store's listing under `cache.strict`, shared by the attempts of one worker and target (`storedRecordingsFor`). */
+  /** Where `cache.strict` looks for a step's recording under another key (`storedRecordingsFor`): the test's pair, read on each miss. */
   readonly recordings?: StoredRecordings | undefined;
 }): AgentCacheContext | undefined {
   if (options.cache.mode === 'off') return undefined;
@@ -316,6 +365,8 @@ export function createAgentCacheContext(options: {
           paramsDigest: signature.paramsDigest,
           callIndex,
           agent: agent.name,
+          instruction,
+          ...(params === undefined ? {} : { params }),
         },
       };
     },

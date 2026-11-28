@@ -37,12 +37,12 @@ import {
 
 const FLOWS_FILE = 'tests/flows.e2e.ts';
 
-/** The counter flow's entry file: its bytes and modification time, to prove a replay left it alone. */
-function counterEntryFile(project: FixtureProject): { bytes: string; mtimeMs: number } {
-  const counter = readEntries(project).filter(({ entry }) => entry.payload.recordedFor?.testId.endsWith(`::${encodeURIComponent('increments the counter')}`));
+/** The counter flow's recording files: their bytes and modification times, to prove a replay left them alone. */
+async function counterEntryFile(project: FixtureProject): Promise<{ bytes: string; mtimeMs: number }[]> {
+  const counter = (await readEntries(project)).filter(({ entry }) => entry.payload.recordedFor?.testId.endsWith(`::${encodeURIComponent('increments the counter')}`));
   expect(counter).toHaveLength(1);
   const { file } = counter[0]!;
-  return { bytes: readFileSync(file, 'utf8'), mtimeMs: statSync(file).mtimeMs };
+  return [file, file.replace(/\.yml$/u, '.lock.json')].map((recording) => ({ bytes: readFileSync(recording, 'utf8'), mtimeMs: statSync(recording).mtimeMs }));
 }
 
 /** One entry per act step every flow makes. */
@@ -56,7 +56,7 @@ describe('trace cache: every flow records on the first run and replays without a
   /** The archive entry as the first run wrote it; the second run opens the record under another id. */
   let recordedArchive: TraceEntry | undefined;
   /** The counter entry's bytes and modification time as the first run wrote them. */
-  let recordedCounter: { bytes: string; mtimeMs: number } | undefined;
+  let recordedCounter: { bytes: string; mtimeMs: number }[] | undefined;
   let replayed: RunOutcome;
 
   beforeAll(async () => {
@@ -64,8 +64,8 @@ describe('trace cache: every flow records on the first run and replays without a
     project = createProject({ [FLOWS_FILE]: flowsSuite(FLOWS, 'record') });
     recorded = await runExisting(project, { appUrl: app.url, config: cacheConfig(flowsModel()) });
     recordedModelCalls = loopCalls.length;
-    [recordedArchive] = entriesFor(project, 'archives a record');
-    recordedCounter = counterEntryFile(project);
+    [recordedArchive] = (await entriesFor(project, 'archives a record'));
+    recordedCounter = (await counterEntryFile(project));
     writeFileSync(path.join(project.dir, FLOWS_FILE), flowsSuite(FLOWS, 'replay'), 'utf8');
     // The twins form moves every node, and the offers reverse, under the URL the recording saw.
     app.setVariant('b');
@@ -84,7 +84,7 @@ describe('trace cache: every flow records on the first run and replays without a
     assertValidReport(replayed.report);
   });
 
-  it('misses every step on the first run and writes one entry per act step', () => {
+  it('misses every step on the first run and writes one entry per act step', async () => {
     expect(recordedModelCalls).toBeGreaterThan(0);
     for (const flow of FLOWS) {
       const steps = actSteps(recorded, flow.title);
@@ -93,28 +93,28 @@ describe('trace cache: every flow records on the first run and replays without a
         expect(step.cache, flow.title).toMatchObject({ mode: 'missed', reason: 'no-entry', replayedActions: 0 });
         expect(step.metrics?.modelCalls, flow.title).toBeGreaterThan(0);
       }
-      expect(entriesFor(project, flow.title), flow.title).toHaveLength(flow.actions.length);
+      expect((await entriesFor(project, flow.title)), flow.title).toHaveLength(flow.actions.length);
     }
-    expect(readEntries(project)).toHaveLength(ENTRY_COUNT);
-    expect(readEntries(project).map(({ entry }) => entry.schemaVersion)).toEqual(Array.from({ length: ENTRY_COUNT }, () => 'trace-1'));
+    expect((await readEntries(project))).toHaveLength(ENTRY_COUNT);
+    expect((await readEntries(project)).map(({ entry }) => entry.schemaVersion)).toEqual(Array.from({ length: ENTRY_COUNT }, () => 'trace-1'));
   });
 
-  it('replays every step on the second run with zero model calls across the whole run', () => {
+  it('replays every step on the second run with zero model calls across the whole run', async () => {
     expect(loopCalls).toHaveLength(0);
     for (const flow of FLOWS) {
       const steps = actSteps(replayed, flow.title);
       expect(steps.map((step) => step.cache?.totalActions), flow.title).toEqual(flow.actions);
       for (const [index, step] of steps.entries()) expectReplayed(step, flow.actions[index]!);
     }
-    expect(readEntries(project)).toHaveLength(ENTRY_COUNT);
+    expect((await readEntries(project))).toHaveLength(ENTRY_COUNT);
   });
 
-  it('never rewrites an entry the cache replayed whole: the file keeps its bytes and its modification time', () => {
-    expect(counterEntryFile(project)).toEqual(recordedCounter);
+  it('never rewrites an entry the cache replayed whole: the file keeps its bytes and its modification time', async () => {
+    expect((await counterEntryFile(project))).toEqual(recordedCounter);
   });
 
-  it('keeps a unique() value as a slot in the typed text, the percent-encoded path, and the anchors', () => {
-    const [entry] = entriesFor(project, 'creates a company');
+  it('keeps a unique() value as a slot in the typed text, the percent-encoded path, and the anchors', async () => {
+    const [entry] = (await entriesFor(project, 'creates a company'));
     const { payload } = entry!;
     expect(payload.actions.map((action) => action.name)).toEqual(['type', 'tap']);
     expect(payload.actions[0]).toMatchObject({ name: 'type', value: '{{param:/name}}' });
@@ -124,16 +124,16 @@ describe('trace cache: every flow records on the first run and replays without a
     expect(JSON.stringify(entry)).not.toMatch(/E2E \d+ Company/u);
   });
 
-  it('spells a unique() value in a query string the way the form submission did', () => {
-    const [entry] = entriesFor(project, 'searches');
+  it('spells a unique() value in a query string the way the form submission did', async () => {
+    const [entry] = (await entriesFor(project, 'searches'));
     const { payload } = entry!;
     expect(payload.endPath).toBe('/search?q={{param:/q|form}}');
     expect(payload.endAnchors).toContainEqual({ role: 'heading', name: 'Results for {{param:/q}}' });
     expect(JSON.stringify(entry)).not.toMatch(/E2E[ +]\d+[ +]widget/u);
   });
 
-  it('records no anchor made of a result count, a millisecond timing, or a bare badge number', () => {
-    const [entry] = entriesFor(project, 'searches');
+  it('records no anchor made of a result count, a millisecond timing, or a bare badge number', async () => {
+    const [entry] = (await entriesFor(project, 'searches'));
     const anchors = entry!.payload.endAnchors ?? [];
     expect(anchors).toContainEqual({ role: 'status', name: 'Search state', text: 'done' });
     for (const anchor of anchors) {
@@ -146,15 +146,15 @@ describe('trace cache: every flow records on the first run and replays without a
     }
   });
 
-  it('records the start path with the minted id the recording run opened; a replay under another id leaves the entry as recorded', () => {
+  it('records the start path with the minted id the recording run opened; a replay under another id leaves the entry as recorded', async () => {
     expect(recordedArchive!.payload.startPath).toBe('/records/1a2b3c4d5e6f');
     expect(recordedArchive!.payload.endAnchors).toContainEqual({ role: 'status', name: 'Record state', text: 'archived' });
-    const [afterReplay] = entriesFor(project, 'archives a record');
+    const [afterReplay] = (await entriesFor(project, 'archives a record'));
     expect(afterReplay!.payload).toEqual(recordedArchive!.payload);
   });
 
-  it('records a placeholder-named field, unnamed twins by their place in their group, and same-named buttons by position', () => {
-    const [entry] = entriesFor(project, 'fills the twins form');
+  it('records a placeholder-named field, unnamed twins by their place in their group, and same-named buttons by position', async () => {
+    const [entry] = (await entriesFor(project, 'fills the twins form'));
     const targets = entry!.payload.actions.map((action) => ('target' in action ? action.target : undefined));
     expect(targets[0]).toMatchObject({ role: 'textbox', name: 'Nickname', placeholder: 'Nickname' });
     expect(targets[2]).toMatchObject({ role: 'textbox', within: 'Codenames', position: { index: 0, of: 2 } });
@@ -166,13 +166,13 @@ describe('trace cache: every flow records on the first run and replays without a
     expect(targets[4]).toMatchObject({ role: 'button', name: 'Add', position: { index: 1, of: 3 } });
   });
 
-  it('records a repeated control by the row it sits in', () => {
-    const [entry] = entriesFor(project, 'reserves offer B');
+  it('records a repeated control by the row it sits in', async () => {
+    const [entry] = (await entriesFor(project, 'reserves offer B'));
     expect(entry!.payload.actions[0]).toMatchObject({ name: 'tap', target: { role: 'button', name: 'Reserve now', within: 'Offer B' } });
   });
 
-  it('keeps the two entries of the mixed test apart and re-stages both after the replay', () => {
-    const entries = entriesFor(project, 'mixes deterministic and agent steps');
+  it('keeps the two entries of the mixed test apart and re-stages both after the replay', async () => {
+    const entries = (await entriesFor(project, 'mixes deterministic and agent steps'));
     const anchors = entries.map((entry) => entry.payload.endAnchors?.find((anchor) => anchor.name === 'Counter')?.text).toSorted();
     expect(anchors).toEqual(['1', '3']);
   });
@@ -232,30 +232,30 @@ describe('trace cache: a changed screen hands the step to the agent, which re-re
     expectPassed(replayed);
   });
 
-  it('replays the typing, hands off at the renamed button, and tells the model what already ran', () => {
+  it('replays the typing, hands off at the renamed button, and tells the model what already ran', async () => {
     const step = onlyActStep(replayed, 'creates a company');
     expect(step.cache).toMatchObject({ mode: 'agent-concluded', reason: 'target-not-found', replayedActions: 1, totalActions: 2 });
     expect(step.metrics?.modelCalls).toBeGreaterThan(0);
     const notice = handedOffNotice(loopCalls);
     expect(notice).toMatch(/target-not-found/u);
     expect(notice).toMatch(/\b1 of 2\b/u);
-    const [entry] = entriesFor(project, 'creates a company');
+    const [entry] = (await entriesFor(project, 'creates a company'));
     expect(entry!.payload.actions).toHaveLength(2);
     expect(entry!.payload.actions[1]).toMatchObject({ name: 'tap', target: { name: 'Save' } });
   });
 
-  it('misses with wrong-context on another route and records the new screen', () => {
+  it('misses with wrong-context on another route and records the new screen', async () => {
     const step = onlyActStep(replayed, 'archives a record');
     expectMissed(step, 'wrong-context', 1);
     expect(step.metrics?.modelCalls).toBeGreaterThan(0);
-    const [entry] = entriesFor(project, 'archives a record');
+    const [entry] = (await entriesFor(project, 'archives a record'));
     expect(entry!.payload.startPath).toBe('/drafts/1a2b3c4d5e6f');
   });
 
-  it('misses with target-not-found when the first control vanished, and heals the entry', () => {
+  it('misses with target-not-found when the first control vanished, and heals the entry', async () => {
     const step = onlyActStep(replayed, 'retires a record');
     expectMissed(step, 'target-not-found', 1);
-    const [entry] = entriesFor(project, 'retires a record');
+    const [entry] = (await entriesFor(project, 'retires a record'));
     expect(entry!.payload.actions[0]).toMatchObject({ name: 'tap', target: { role: 'button', name: 'Retire' } });
   });
 });
@@ -278,21 +278,14 @@ describe('trace cache: --strict-cache fails a step whose key changed under its r
     app = await startFixtureApp();
     project = createProject({ [FLOWS_FILE]: COUNTER_SUITE });
     expectPassed(await runExisting(project, { appUrl: app.url, config: cacheConfig(flowsModel()) }));
-    const entries = readEntries(project);
+    const entries = (await readEntries(project));
     expect(entries).toHaveLength(1);
-    const { file, entry } = entries[0]!;
+    const { file, keyHash, entry } = entries[0]!;
     const recordedFor = entry.payload.recordedFor!;
     expect(recordedFor).toMatchObject({ paramsDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), callIndex: 0, agent: 'default' });
     // The test's title reaches the prompt, not the context, so the key's context digest stays empty.
     expect(entry.payload.keyedBy?.agentContextDigest).toBe(createHash('sha256').update('').digest('hex'));
-    // An entry from before the occurrence fields: a read-write replay completes it.
-    const { testId, targetId, instructionDigest } = recordedFor;
-    writeFileSync(file, JSON.stringify({ ...entry, payload: { ...entry.payload, recordedFor: { testId, targetId, instructionDigest } } }), 'utf8');
-    const replayed = await runExisting(project, { appUrl: app.url, config: cacheConfig(flowsModel()) });
-    expectPassed(replayed);
-    expectReplayed(onlyActStep(replayed, 'increments the counter'), 2);
-    expect(readEntries(project)[0]!.entry.payload.recordedFor).toEqual(recordedFor);
-    oldEntry = path.basename(file);
+    oldEntry = `${path.basename(file)} holds it under another cache key (${keyHash.slice(0, 12)})`;
   }, 120_000);
 
   afterAll(async () => {
@@ -306,7 +299,7 @@ describe('trace cache: --strict-cache fails a step whose key changed under its r
     expect(loopCalls).toHaveLength(0);
     const step = onlyActStep(outcome, 'increments the counter');
     expect(step.error?.code).toBe('REPLAY_STALE');
-    expect(step.error?.message).toContain(`the store holds it under another cache key (${oldEntry})`);
+    expect(step.error?.message).toContain(oldEntry);
     // The entry recorded its key's context, so the message names what changed.
     expect(step.error?.message).toContain("since the agent's context (its context, or the test's agentContext) changed after it was recorded");
     expect(step.error?.message).toMatch(/commit the changed entry under \.e2e\/cache$/u);
@@ -318,7 +311,8 @@ describe('trace cache: --strict-cache fails a step whose key changed under its r
     expectPassed(lenient);
     expect(loopCalls.length).toBeGreaterThan(0);
     expectMissed(onlyActStep(lenient, 'increments the counter'), 'no-entry', 0);
-    expect(readEntries(project)).toHaveLength(2);
+    // The new recording takes the step's place in the test's file: one recording per step and target.
+    expect((await readEntries(project))).toHaveLength(1);
 
     const strict = await runExisting(project, { appUrl: app.url, config: rekeyed(), runOptions: { strictCache: true } });
     expectPassed(strict);
@@ -368,11 +362,16 @@ describe('trace cache: two targets keep separate entries', () => {
     const outcome = await runExisting(project, { appUrl: app.url, config: twoTargets() });
     expectPassed(outcome);
     expect(outcome.results.map((result) => result.target.name).toSorted()).toEqual(['web', 'web-b']);
-    const entries = readEntries(project);
+    const entries = (await readEntries(project));
     expect(entries.map(({ entry }) => entry.payload.recordedFor?.targetId).toSorted()).toEqual(['web', 'web-b']);
+    // One file for the test, the step listed once with a recording under each target.
+    const yaml = readFileSync(entries[0]!.file, 'utf8');
+    expect(yaml.match(/- act: increment the counter twice/gu)).toHaveLength(1);
+    expect(yaml).toMatch(/^ {6}web:$/mu);
+    expect(yaml).toMatch(/^ {6}web-b:$/mu);
     const listing = await cacheCli(project, 'ls');
-    expect(listing).toMatch(/increments%20the%20counter\s+web\s+/u);
-    expect(listing).toMatch(/increments%20the%20counter\s+web-b\s+/u);
+    expect(listing).toMatch(/flows-increments-the-counter\.yml\s+web\s+increment the counter twice/u);
+    expect(listing).toMatch(/flows-increments-the-counter\.yml\s+web-b\s+increment the counter twice/u);
   }, 120_000);
 
   it('replays on both targets without a model call', async () => {
@@ -410,6 +409,6 @@ describe('trace cache: --repeat-each records on the first repeat and replays on 
     expect(outcome.results).toHaveLength(2);
     expectMissed(onlyActStep(outcome, 'increments the counter', 0), 'no-entry', 0);
     expectReplayed(onlyActStep(outcome, 'increments the counter', 1), 2);
-    expect(readEntries(project)).toHaveLength(1);
+    expect((await readEntries(project))).toHaveLength(1);
   }, 120_000);
 });

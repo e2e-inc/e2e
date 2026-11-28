@@ -1,0 +1,24 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-promo-storefront.lock.json
+
+test: act completes promo-storefront
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: buy any one product, dismissing the promotional overlays that get in the way, until the order is confirmed"
+    targets:
+      web:
+        at: /e/promo-storefront
+        do:
+          - tap: { role: button, name: Buy now, testId: buy-headphones, within: Wireless Headphones }
+        expect:
+          shows:
+            - { text: Order confirmed, testId: success-message }
+            - { text: Jonas ★★★★★ Great bass and the battery lasts all week. }
+            - { text: "Amelia ★★★★ Comfortable fit, pairing was instant." }
+            - { role: listitem, name: Wireless Headphones $80.00 $40.00 50% OFF Order confirmed, testId: deal-headphones }
+          gone:
+            - { role: listitem, name: Wireless Headphones $80.00 $40.00 50% OFF Buy now, testId: deal-headphones }

@@ -1,0 +1,58 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Flattened%20Registration%20Form",
+  "entries": [
+    {
+      "key": "21c26ef65b43c8ca1338372eea1412028bc5ba3fa6b7f3d31a238f29b56debe6",
+      "target": "android-emulator",
+      "digest": "0d1d159ead108c39709799d084076fc06ddc635b5648cd22734b43e90ccdbee5",
+      "createdAt": "2026-10-09T06:57:23.475Z",
+      "instructionDigest": "99f3046e1cffa27d71f282e7a46fd975917dcd9e39992518bc6fc19c46f414ac",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Filled the registration form with Ada Lovelace, ada@example.com, and the requested password, then submitted it. The screen confirms “Account created.”",
+      "endWaitMs": 15000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "96dbe50d1d0e8ea20edae76d25c00397dac07e3679d0588a0bba7d574fd04ce9",
+      "target": "ios-simulator",
+      "digest": "448a0215a94816f19b2fb09511d512ee39934d0207d0a1ac77bdc99eecd48166",
+      "createdAt": "2026-10-15T15:58:17.562Z",
+      "instructionDigest": "99f3046e1cffa27d71f282e7a46fd975917dcd9e39992518bc6fc19c46f414ac",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Filled the registration form with Ada Lovelace, ada@example.com, and the requested password; dismissed the system password-save prompt. The screen now displays “Account created.”",
+      "endWaitMs": 15000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

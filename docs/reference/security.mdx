@@ -398,15 +398,15 @@ Cache entries replay actions without a model and aren't signed.
 
 | Rule | Detail |
 | --- | --- |
-| Validation | Every entry is validated before use. An invalid entry is a miss. |
-| File name | A hash of the expected key. A file larger than 1 MiB is refused. |
+| Validation | Every entry is validated before use, and must match the digest its lock entry holds. An invalid entry is never replayed. |
+| File name | Named for the test (`<test>.yml`, beside a generated `<test>.lock.json`). A file larger than 1 MiB is refused. |
 | Key | Holds the agent's context only as a hash of its redacted text. |
-| Contents | Actions and a redacted summary. Replay runs only the actions. Other typed values are stored verbatim. |
+| Contents | Actions, the end checks, a redacted summary, and the step's instruction and params with registered secret values redacted. Replay runs only the actions. Other typed values are stored verbatim. |
 | Secret fills | Store a name and authorize the fill again on replay. |
 | Agent | An entry recorded by one agent never replays for another. |
 | Start screen | An entry that doesn't start with a navigation replays only on the route where it was recorded: the same path and query, with generated ids ignored. A route on the app's own origin matches on any deployment that shares `app.identity`. A route on another origin keeps that origin. See [Caching](/cache). |
 | CI | A cache mode you didn't set becomes `read-only`, unless you configure a `cache.store`. |
-| Git | `e2e init` ignores `.e2e/cache/`. If you [commit recordings](/cache#commit-the-replay-cache), review their actions and typed values. |
+| Git | `e2e init` ignores `.e2e/cache/`. If you [commit recordings](/cache#commit-the-replay-cache), review their actions and typed values, and a change to a `.lock.json` that comes with no YAML change. |
 | `cache.store` | Receives every recorded entry and supplies every replayed one. What comes back is validated again. |
 
 ### Artifacts

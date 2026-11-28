@@ -9,8 +9,9 @@
  * the report.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { FileCacheStore, MAX_CACHE_WIRE_BYTES } from '@e2e-dev/core/lib/cache/store';
 import { displayPath } from '@e2e-dev/core/lib/internal/paths';
 import { resultSegment } from '@e2e-dev/core/lib/run/artifacts';
 import type { Report1Document, ReportExplore, ReportResult } from './build.ts';
@@ -48,7 +49,7 @@ export interface WriteTracePagesOptions {
   readonly resultsRoot: string;
   /** Published results directory when the pages are written into staging. */
   readonly publishedResultsRoot?: string;
-  /** Absolute replay cache directory, where a step's entry file is; absent when a custom store holds the cache. */
+  /** Absolute replay cache directory, where the test's recording file is; absent when a custom store holds the cache. */
   readonly cacheDir?: string | undefined;
 }
 
@@ -73,14 +74,17 @@ export async function writeTracePages(report: Report1Document, traced: ReadonlyS
   };
   const publishedResults = options.publishedResultsRoot ?? options.resultsRoot;
   const pages = new Map<string, string>();
+  const store = options.cacheDir === undefined ? undefined : new FileCacheStore({ directory: options.cacheDir, maxBytes: MAX_CACHE_WIRE_BYTES, writable: false });
   for (const result of tracedResults(report, traced)) {
     const dir = resultSegment(result);
     const file = path.join(options.resultsRoot, dir, TRACE_PAGE);
+    // Named only when it is there: a title that spells a secret the run learned later was filed under another name.
+    const recording = store === undefined || options.cacheDir === undefined ? undefined : path.join(options.cacheDir, await store.recordingFile(result.testId));
     const page = renderTracePage(report, result, outcome(result, serialGroups), {
       artifactsDir: relative(publishedResults),
       pageDir: dir,
       readArtifact,
-      ...(options.cacheDir === undefined ? {} : { cacheDir: displayPath(options.projectRoot, options.cacheDir) }),
+      ...(recording === undefined || !existsSync(recording) ? {} : { cacheFile: displayPath(options.projectRoot, recording) }),
     });
     await writeTextReport(file, page);
     pages.set(result.id, relative(path.join(publishedResults, dir, TRACE_PAGE)));

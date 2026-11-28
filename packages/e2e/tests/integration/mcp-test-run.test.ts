@@ -476,7 +476,7 @@ describe('open_session {test}', { timeout: 120_000 }, () => {
       expect(modelCalls).toBeGreaterThan(before);
       // Its agent steps read the test's title, as a run's do.
       expect(loopCalls[before]!.prompt).toContain('Test: increments the counter');
-      expect(entriesFor(project, counter.title)).toHaveLength(1);
+      expect((await entriesFor(project, counter.title))).toHaveLength(1);
 
       // The next session replays what the first recorded, with no model call.
       expect(await sessions.open({ test: 'tests/flows.e2e.ts' })).toMatch(/^Test "increments the counter" \(tests\/flows\.e2e\.ts:\d+\) passed/);

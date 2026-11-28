@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/control-inventory.e2e.ts::control%20inventory::a%20right-click%20opens%20the%20file%20menu%20and%20Rename%20renames%20the%20file",
+  "entries": [
+    {
+      "key": "e4472e79abcc4566856591a2baba5ae0e474e37f95fc2cd9cd2fd336f2d9da80",
+      "target": "web",
+      "digest": "f6fdc4025e6c505129a52a75d866a4c521ba8234599bce1e0c6d2547f9d7d47f",
+      "createdAt": "2026-10-04T08:29:14.465Z",
+      "instructionDigest": "cb3da13c69639f87ac80d3bd6fa2b908c9df0bbbda211433bdc779611d4909fe",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Right-clicked report.pdf to open its actions menu, selected Rename, and verified the file list now shows summary.pdf with the status “report.pdf renamed to summary.pdf.”",
+      "endWaitMs": 12000
+    }
+  ]
+}

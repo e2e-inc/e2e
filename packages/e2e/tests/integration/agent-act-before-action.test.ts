@@ -49,7 +49,7 @@ describe('agent.act onBeforeAction', () => {
       const recorded = await runExisting(project, options());
       expect(resultByTitle(recorded, TITLE).status).toBe('passed');
       expect(labels(recorded)).toEqual(['before 1 model', 'before 2 model']);
-      expect(readEntries(project)).toHaveLength(1);
+      expect((await readEntries(project))).toHaveLength(1);
       const replayed = await runExisting(project, options());
       expect(resultByTitle(replayed, TITLE).status).toBe('passed');
       expect(labels(replayed)).toEqual(['before 1 replay', 'before 2 replay']);
@@ -83,7 +83,7 @@ test('observer fails', async ({ app, agent, screen }) => {
     try {
       const recorded = await runExisting(project, options());
       expect(resultByTitle(recorded, TITLE).status).toBe('passed');
-      const files = readEntries(project).map(({ file }) => [file, readFileSync(file, 'utf8')] as const);
+      const files = (await readEntries(project)).map(({ file }) => [file, readFileSync(file, 'utf8')] as const);
       expect(files).toHaveLength(1);
       writeFileSync(path.join(project.dir, 'tests/before.e2e.ts'), SUITE.replace(
         "onBeforeAction: async ({ index, source }) => {",
@@ -92,7 +92,7 @@ test('observer fails', async ({ app, agent, screen }) => {
       const replayed = await runExisting(project, options());
       expect(resultByTitle(replayed, TITLE).attempts[0]!.error?.message).toContain('onBeforeAction failed: replay observer broke');
       expect(loopCalls).toHaveLength(0);
-      expect(readEntries(project).map(({ file }) => [file, readFileSync(file, 'utf8')] as const)).toEqual(files);
+      expect((await readEntries(project)).map(({ file }) => [file, readFileSync(file, 'utf8')] as const)).toEqual(files);
     } finally { project.cleanup(); }
   }, 120_000);
 
@@ -101,7 +101,7 @@ test('observer fails', async ({ app, agent, screen }) => {
     const { outcome, project } = await runProject({ 'tests/before.e2e.ts': suite }, { appUrl: app.url, config: { agents: { default: { model: twoTaps() } }, cache: 'read-write' } });
     try {
       expect(resultByTitle(outcome, TITLE).status).toBe('passed');
-      expect(readEntries(project)).toEqual([]);
+      expect((await readEntries(project))).toEqual([]);
     } finally { project.cleanup(); }
   });
 

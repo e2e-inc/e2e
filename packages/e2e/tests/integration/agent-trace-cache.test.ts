@@ -23,6 +23,7 @@ import {
   type RunOutcome,
 } from '../helpers/run-project.ts';
 import { readEntries } from '../helpers/trace-cache.ts';
+import { FileCacheStore, MAX_CACHE_WIRE_BYTES } from '@e2e-dev/core/lib/cache/store';
 import { findNode } from '../helpers/executor-tree.ts';
 import type {
   ExecutorNode,
@@ -84,23 +85,29 @@ function cacheDir(project: FixtureProject): string {
   return path.join(project.dir, '.e2e', 'cache');
 }
 
-/** The single entry the suite wrote, as (path, parsed entry). */
-function readOnlyEntry(project: FixtureProject): { file: string; entry: TraceEntry } {
-  const entries = readEntries(project);
+/** The single entry the suite wrote: the YAML file it is in, its key, and the entry. */
+async function readOnlyEntry(project: FixtureProject): Promise<{ file: string; keyHash: string; entry: TraceEntry }> {
+  const entries = await readEntries(project);
   expect(entries).toHaveLength(1);
   return entries[0]!;
 }
 
-/** Rewrites the single entry's payload in place: the shape of a store holding a stale or damaged recording. */
-function rewriteOnlyEntry(project: FixtureProject, edit: (payload: ActionTrace) => ActionTrace): void {
-  const { file, entry } = readOnlyEntry(project);
-  writeFileSync(file, JSON.stringify({ ...entry, payload: edit(entry.payload) }, null, 2), 'utf8');
+/** Rewrites the single entry's payload through the store: the shape of a store holding a stale or damaged recording. */
+async function rewriteOnlyEntry(project: FixtureProject, edit: (payload: ActionTrace) => ActionTrace): Promise<void> {
+  const { keyHash, entry } = await readOnlyEntry(project);
+  const store = new FileCacheStore({ directory: cacheDir(project), maxBytes: MAX_CACHE_WIRE_BYTES, writable: true });
+  expect(await store.write(keyHash, edit(entry.payload))).toBeDefined();
 }
 
-/** The one entry file's bytes and modification time, to prove a replay left it alone. */
-function entryFileState(project: FixtureProject): { bytes: string; mtimeMs: number } {
-  const { file } = readOnlyEntry(project);
-  return { bytes: readFileSync(file, 'utf8'), mtimeMs: statSync(file).mtimeMs };
+/** The one test's recording files, their bytes and modification times, to prove a replay left them alone. */
+async function entryFileState(project: FixtureProject): Promise<{ name: string; bytes: string; mtimeMs: number }[]> {
+  await readOnlyEntry(project);
+  return readdirSync(cacheDir(project))
+    .toSorted()
+    .map((name) => {
+      const file = path.join(cacheDir(project), name);
+      return { name, bytes: readFileSync(file, 'utf8'), mtimeMs: statSync(file).mtimeMs };
+    });
 }
 
 describe('trace cache: divergence hands the step over mid-step', () => {
@@ -124,7 +131,7 @@ describe('trace cache: divergence hands the step over mid-step', () => {
     await runExisting(project, options(first));
     // Sabotage the second recorded action's descriptor: relocation must fail
     // there, after the first action already replayed against the live page.
-    rewriteOnlyEntry(project, (payload) => {
+    await rewriteOnlyEntry(project, (payload) => {
       const [firstTap, secondTap] = payload.actions;
       if (firstTap === undefined || secondTap?.name !== 'tap') throw new Error(`expected two taps, got ${JSON.stringify(payload.actions)}`);
       return { ...payload, actions: [firstTap, { ...secondTap, target: { ...secondTap.target, name: 'No Such Button' } }] };
@@ -156,8 +163,8 @@ describe('trace cache: divergence hands the step over mid-step', () => {
     });
   });
 
-  it('rewrites the entry on pass, healing the sabotaged descriptor', () => {
-    const { entry } = readOnlyEntry(project);
+  it('rewrites the entry on pass, healing the sabotaged descriptor', async () => {
+    const { entry } = (await readOnlyEntry(project));
     expect(entry.payload.actions[1]).toMatchObject({ name: 'tap', target: { name: 'Increment' } });
   });
 });
@@ -224,14 +231,15 @@ describe('trace cache: unconfirmed traces are withheld and poisoned entries evic
   it('evicts a previously good entry once its flow is implicated in a failure', async () => {
     project = createProject({ 'tests/act.e2e.ts': SUITE });
     await runExisting(project, options());
-    expect(readdirSync(cacheDir(project))).toHaveLength(1);
+    // One test's YAML file and its lock.
+    expect(readdirSync(cacheDir(project))).toHaveLength(2);
     // Same instruction, stricter assertion: the replay self-finalizes, the
     // assertion fails, and the entry must be evicted rather than kept.
     writeFileSync(path.join(project.dir, 'tests', 'act.e2e.ts'), WRONG_EXPECT_SUITE, 'utf8');
     const outcome = await runExisting(project, options());
     expect(outcome.exitCode).not.toBe(0);
     expect(records.at(-1)!.calls).toBe(0);
-    expect(readdirSync(cacheDir(project))).toHaveLength(0);
+    expect(readdirSync(cacheDir(project)).filter((name) => !name.startsWith('.'))).toHaveLength(0);
   }, 240_000);
 });
 
@@ -296,7 +304,7 @@ describe('trace cache: a model that never answered implicates nothing', () => {
 
   it('keeps an entry replayed whole when a later judgment finds no model', async () => {
     await recordEntry();
-    const recorded = entryFileState(project);
+    const recorded = (await entryFileState(project));
     writeFileSync(path.join(project.dir, 'tests', 'act.e2e.ts'), PROVIDER_DOWN_ASSERT_SUITE, 'utf8');
     const outcome = await runExisting(project, {
       appUrl: app.url,
@@ -309,18 +317,18 @@ describe('trace cache: a model that never answered implicates nothing', () => {
     expect(outcome.exitCode).not.toBe(0);
     expect(actStep(outcome).cache?.mode).toBe('self-finalized');
     expect(stepErrorCode(outcome, 'agent.assert')).toBe('MODEL_PROVIDER_FAILED');
-    expect(entryFileState(project)).toEqual(recorded);
+    expect((await entryFileState(project))).toEqual(recorded);
     project.cleanup();
   }, 240_000);
 
   it('keeps an entry whose replay handed off to a model that never answered', async () => {
     await recordEntry();
-    rewriteOnlyEntry(project, (payload) => {
+    await rewriteOnlyEntry(project, (payload) => {
       const [firstTap, secondTap] = payload.actions;
       if (firstTap === undefined || secondTap?.name !== 'tap') throw new Error(`expected two taps, got ${JSON.stringify(payload.actions)}`);
       return { ...payload, actions: [firstTap, { ...secondTap, target: { ...secondTap.target, name: 'No Such Button' } }] };
     });
-    const handedOff = entryFileState(project);
+    const handedOff = (await entryFileState(project));
     const outcome = await runExisting(project, {
       appUrl: app.url,
       config: {
@@ -332,7 +340,7 @@ describe('trace cache: a model that never answered implicates nothing', () => {
     expect(outcome.exitCode).not.toBe(0);
     expect(actStep(outcome).cache).toMatchObject({ mode: 'agent-concluded', reason: 'target-not-found', replayedActions: 1 });
     expect(stepErrorCode(outcome, 'agent.act')).toBe('MODEL_PROVIDER_FAILED');
-    expect(entryFileState(project)).toEqual(handedOff);
+    expect((await entryFileState(project))).toEqual(handedOff);
     project.cleanup();
   }, 240_000);
 
@@ -350,7 +358,7 @@ describe('trace cache: a model that never answered implicates nothing', () => {
     expect(outcome.exitCode).not.toBe(0);
     expect(actStep(outcome).cache?.mode).toBe('self-finalized');
     expect(stepErrorCode(outcome, 'agent.assert')).toBe('MODEL_PROVIDER_FAILED');
-    expect(readEntries(project)).toHaveLength(0);
+    expect((await readEntries(project))).toHaveLength(0);
     project.cleanup();
   }, 240_000);
 });
@@ -417,7 +425,7 @@ describe('trace cache: the recorded end state gates self-finalization', () => {
   it('records the effect of a same-path mutation as end anchors and replays on them', async () => {
     const first = await runExisting(project, options());
     expect(first.exitCode).toBe(0);
-    const { entry } = readOnlyEntry(project);
+    const { entry } = (await readOnlyEntry(project));
     expect(entry.payload.startPath).toBe('/storage');
     expect(entry.payload.endPath).toBe('/storage');
     expect(entry.payload.endAnchors).toContainEqual({ role: 'status', name: 'Marker', text: 'saved' });
@@ -511,7 +519,7 @@ describe('trace cache: modes', () => {
 
       const second = await runExisting(project, options({ calls: 0, prefixes: [] }, false));
       expect(second.exitCode).toBe(0);
-      const recorded = entryFileState(project);
+      const recorded = (await entryFileState(project));
 
       // Neither replayed nor rewritten: the entry keeps its bytes and its mtime.
       const again: ExecutorRecord = { calls: 0, prefixes: [] };
@@ -519,7 +527,7 @@ describe('trace cache: modes', () => {
       expect(third.exitCode).toBe(0);
       expect(again.calls).toBe(1);
       expect(actStep(third).cache).toBeUndefined();
-      expect(entryFileState(project)).toEqual(recorded);
+      expect((await entryFileState(project))).toEqual(recorded);
     } finally {
       project.cleanup();
     }
@@ -538,19 +546,16 @@ describe('trace cache: modes', () => {
     try {
       const first = await runExisting(project, options({ calls: 0, prefixes: [] }));
       expect(first.exitCode).toBe(0);
-      expect(readdirSync(cacheDir(project))).toHaveLength(1);
+      // One test's YAML file and its lock.
+    expect(readdirSync(cacheDir(project))).toHaveLength(2);
 
-      // An entry from before the occurrence fields: a read-write replay would complete and rewrite it.
-      const { file, entry } = readOnlyEntry(project);
-      const { testId, targetId, instructionDigest } = entry.payload.recordedFor!;
-      writeFileSync(file, JSON.stringify({ ...entry, payload: { ...entry.payload, recordedFor: { testId, targetId, instructionDigest } } }), 'utf8');
-      const legacy = entryFileState(project);
+      const recorded = (await entryFileState(project));
       const inCi: ExecutorRecord = { calls: 0, prefixes: [] };
       const second = await runExisting(project, options(inCi, { ...process.env, APP_URL: app.url, CI: '1' }));
       expect(second.exitCode).toBe(0);
       expect(inCi.calls).toBe(0);
       expect(actStep(second).cache).toEqual({ mode: 'self-finalized', replayedActions: 2, totalActions: 2, entry: expect.stringMatching(/^[0-9a-f]{64}$/u) });
-      expect(entryFileState(project)).toEqual(legacy);
+      expect((await entryFileState(project))).toEqual(recorded);
     } finally {
       project.cleanup();
     }
@@ -600,8 +605,8 @@ describe('trace cache: --strict-cache never writes the cache', () => {
     try {
       const recording = await runExisting(project, options({ calls: 0, prefixes: [] }, false));
       expect(recording.exitCode).toBe(0);
-      const recorded = entryFileState(project);
-      const entry = path.basename(readOnlyEntry(project).file, '.json');
+      const recorded = (await entryFileState(project));
+      const entry = (await readOnlyEntry(project)).keyHash;
 
       writeFileSync(path.join(project.dir, 'fail-once'), '', 'utf8');
       const strict: ExecutorRecord = { calls: 0, prefixes: [] };
@@ -618,7 +623,7 @@ describe('trace cache: --strict-cache never writes the cache', () => {
           entry,
         });
       }
-      expect(entryFileState(project)).toEqual(recorded);
+      expect((await entryFileState(project))).toEqual(recorded);
     } finally {
       project.cleanup();
     }
@@ -694,7 +699,7 @@ describe('trace cache: a bare-point tap replays like a coordinate-driven tool', 
   it('records the point with its viewport and replays it zero-turn on the same-sized viewport', async () => {
     const first = await runExisting(project, options());
     expect(first.exitCode).toBe(0);
-    const { entry } = readOnlyEntry(project);
+    const { entry } = (await readOnlyEntry(project));
     expect(entry.payload.actions).toEqual([
       { name: 'tapAt', summary: 'tap the point (300, 60)', point: { x: 300, y: 60 }, viewport: { width: 1280, height: 720 } },
     ]);
@@ -772,7 +777,7 @@ describe('trace cache: a point tap on a repeated control replays in its row', ()
     const first = await runExisting(project, options());
     expect(first.exitCode).toBe(0);
     expect(results[0]?.target).toBeDefined();
-    const { entry } = readOnlyEntry(project);
+    const { entry } = (await readOnlyEntry(project));
     expect(entry.payload.actions[0]).toMatchObject({ name: 'tapAt', within: { target: { role: 'button', name: 'Reserve now', within: 'Offer A' } } });
 
     // The `b` variant lists the offers C, B, A: the recorded point now sits in Offer C's row.
@@ -854,7 +859,7 @@ describe('trace cache: a replayed typed value is the flow\'s data on an app that
   it('replays the typed value on the second and third run although the first run left it on screen', async () => {
     const first = await runExisting(project, options());
     expect(first.exitCode).toBe(0);
-    const recorded = readOnlyEntry(project).entry.payload.actions;
+    const recorded = (await readOnlyEntry(project)).entry.payload.actions;
     expect(recorded.map((action) => action.name)).toEqual(['type', 'tap']);
     expect(recorded[0]).toMatchObject({ name: 'type', value: 'Buy milk' });
 
@@ -868,7 +873,7 @@ describe('trace cache: a replayed typed value is the flow\'s data on an app that
       const step = cacheOf(outcome);
       expect(step.cache, `run ${String(run)}`).toMatchObject({ mode: 'self-finalized', replayedActions: 2, totalActions: 2 });
       expect(step.metrics!.modelCalls).toBe(0);
-      const restaged = readOnlyEntry(project).entry.payload.actions;
+      const restaged = (await readOnlyEntry(project)).entry.payload.actions;
       expect(restaged, `run ${String(run)}`).toEqual(recorded);
     }
   }, 360_000);
@@ -881,7 +886,7 @@ describe('trace cache: a replayed typed value is the flow\'s data on an app that
       const first = await runExisting(fresh, options());
       expect(first.exitCode).toBe(0);
       expect(records.at(-1)!.calls).toBe(1);
-      const actions = readOnlyEntry(fresh).entry.payload.actions;
+      const actions = (await readOnlyEntry(fresh)).entry.payload.actions;
       expect(actions.map((action) => action.name)).toEqual(['tool', 'tap']);
       expect(actions[0]).toEqual({ name: 'tool', summary: 'tool type (run-time value)', derived: 'whole-node' });
 
@@ -966,7 +971,7 @@ describe('trace cache: a composed word that appears on screen is not a run-time 
   it('records both fills verbatim and replays the whole step on the second run', async () => {
     const first = await runExisting(project, options());
     expect(first.exitCode).toBe(0);
-    const { entry } = readOnlyEntry(project);
+    const { entry } = (await readOnlyEntry(project));
     // "one" sits inside "Row one" on screen, and is still the model's own
     // word: neither fill is recorded as a run-time value gap.
     expect(entry.payload.actions.map((action) => action.name)).toEqual(['type', 'type']);
@@ -1038,7 +1043,7 @@ describe('trace cache: a navigate on the app replays where the app runs now', ()
     const first = await runExisting(project, options(recordedOn!, recording, false));
     expect(first.exitCode).toBe(0);
     expect(recording.calls).toBe(1);
-    const { entry } = readOnlyEntry(project);
+    const { entry } = (await readOnlyEntry(project));
     expect(entry.payload.actions).toEqual([{ name: 'navigate', summary: 'navigate to "/about"', url: '/about' }]);
     expect(entry.payload).toMatchObject({ startPath: '/', endPath: '/about' });
 

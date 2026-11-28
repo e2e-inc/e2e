@@ -1,0 +1,74 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-flattened-registration-form.lock.json
+
+test: act completes Flattened Registration Form
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: fill the registration form with first name Ada, last name Lovelace, email ada@example.com, and password Lovelace1815, then sign up until it says Account created. The screen lists nothing useful; take a screenshot and work from it."
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - type: Ada
+            into: { role: textbox, within: Create your benchmark account, position: { index: 0, of: 3 } }
+          - type: Lovelace
+            into: { role: textbox, within: Create your benchmark account, position: { index: 0, of: 2 } }
+          - type: ada@example.com
+            into: { role: textbox, within: Create your benchmark account, position: { index: 0, of: 1 } }
+          - type: Lovelace1815
+            into: { role: textbox, inputPurpose: password, within: Create your benchmark account, position: { index: 0, of: 1 } }
+          - tap: { role: group, name: CREATE ACCOUNT, within: Create your benchmark account }
+        expect:
+          shows:
+            - { role: text, name: Account created }
+          gone:
+            - { role: text, name: Create your benchmark account }
+            - { role: text, name: First name }
+            - { role: text, name: Last name }
+            - { role: text, name: Email address }
+            - { role: text, name: Set password }
+            - { role: text, name: "Passwords must contain a minimum of 8 characters. By signing up you confirm you have read the benchmark terms. This filler paragraph exists so the form spans roughly two screens and the scroll indicator reports multiple pages, matching the production app this scenario was distilled from." }
+            - { role: text, name: CREATE ACCOUNT }
+            - { role: text, name: "More filler content below the primary action: support links, privacy policy, and terms and conditions would normally live here. It pads the scroll extent so off-screen estimation has something to measure." }
+      ios-simulator:
+        at: dev.e2e.benchmark / Flattened Registration Form
+        do:
+          - tapAt: { x: 191, y: 227 }
+            viewport: 402x874
+            on: { role: other, name: "Create your benchmark account, First name, Last name, Email address, Set password, Passwords must contain a minimum of 8 characters. By signing up you confirm you have read the benchmark terms. This filler paragraph exists so the form spans roughly two screens and the scroll indicator reports multi…" }
+            offset: [ 0.4751, 0.1464 ]
+          - type: Ada
+          - tapAt: { x: 199, y: 310 }
+            viewport: 402x874
+            on: { role: other, name: "Create your benchmark account, First name, Last name, Email address, Set password, Passwords must contain a minimum of 8 characters. By signing up you confirm you have read the benchmark terms. This filler paragraph exists so the form spans roughly two screens and the scroll indicator reports multi…" }
+            offset: [ 0.495, 0.2559 ]
+          - type: Lovelace
+          - tapAt: { x: 186, y: 396 }
+            viewport: 402x874
+            on: { role: other, name: "Create your benchmark account, First name, Last name, Email address, Set password, Passwords must contain a minimum of 8 characters. By signing up you confirm you have read the benchmark terms. This filler paragraph exists so the form spans roughly two screens and the scroll indicator reports multi…" }
+            offset: [ 0.4627, 0.3694 ]
+          - type: ada@example.com
+          - tapAt: { x: 198, y: 478 }
+            viewport: 402x874
+            on: { role: other, name: "Create your benchmark account, First name, Last name, Email address, Set password, Passwords must contain a minimum of 8 characters. By signing up you confirm you have read the benchmark terms. This filler paragraph exists so the form spans roughly two screens and the scroll indicator reports multi…" }
+            offset: [ 0.4925, 0.4776 ]
+          - type: Lovelace1815
+          - dismissKeyboard
+          - tapAt: { x: 199, y: 757 }
+            viewport: 402x874
+            on: { role: other, name: "Create your benchmark account, First name, Last name, Email address, Set password, Passwords must contain a minimum of 8 characters. By signing up you confirm you have read the benchmark terms. This filler paragraph exists so the form spans roughly two screens and the scroll indicator reports multi…" }
+            offset: [ 0.495, 0.8456 ]
+          - tap: { role: button, name: Not Now }
+        expect:
+          shows:
+            - { role: other, name: Account created }
+          gone:
+            - { role: other, name: "Vertical scroll bar, 2 pages", value: 0% }
+            - { role: other, name: "Horizontal scroll bar, 1 page", value: 0% }
+            - { role: other, name: "Vertical scroll bar, 2 pages" }
+            - { role: other, name: "Create your benchmark account, First name, Last name, Email address, Set password, Passwords must contain a minimum of 8 characters. By signing up you confirm you have read the benchmark terms. This filler paragraph exists so the form spans roughly two screens and the scroll indicator reports multi…" }
+            - { role: scroll-view, name: "Create your benchmark account, First name, Last name, Email address, Set password, Passwords must contain a minimum of 8 characters. By signing up you confirm you have read the benchmark terms. This filler paragraph exists so the form spans roughly two screens and the scroll indicator reports multi…" }

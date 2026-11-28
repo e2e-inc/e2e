@@ -155,6 +155,14 @@ declare const remoteStore: CacheStore;
 // @ts-expect-error TraceCacheStore is CacheStore: the store serves the replay cache
 declare const renamedStore: import('../../src/index.ts').TraceCacheStore;
 renamedStore;
+// A store written before reads and deletes took the step still satisfies CacheStore: the step is an optional hint.
+const keyOnlyStore: CacheStore = {
+  writable: false,
+  read: async (_keyHash: string) => ({ status: 'miss' as const }),
+  write: async () => undefined,
+  delete: async (_keyHash: string) => undefined,
+};
+keyOnlyStore;
 declare const artifactStore: ArtifactStore;
 const toolContext = getToolContext({});
 void toolContext.read({ id: 'n1' }, { style: ['color', 'font-weight', 'visibility', 'opacity'] });

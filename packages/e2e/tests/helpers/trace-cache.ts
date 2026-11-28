@@ -5,9 +5,9 @@
  * store holds.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect } from 'vitest';
+import { FileCacheStore, MAX_CACHE_WIRE_BYTES } from '@e2e-dev/core/lib/cache/store';
 import type { TraceEntry } from '@e2e-dev/core/lib/cache/trace';
 import type { E2EConfig, ModelInstance } from '../../src/index.ts';
 import type { StepCacheInfo, StepRecord } from '@e2e-dev/core/lib/run/steps';
@@ -283,22 +283,25 @@ export function cacheConfig(model: ModelInstance): Omit<E2EConfig, 'targets'> {
   return { tests: 'tests/**/*.e2e.ts', agents: { default: { model } }, cache: 'read-write' };
 }
 
-/** The entry files under the project's store, parsed, in file order. */
-export function readEntries(project: FixtureProject): { readonly file: string; readonly entry: TraceEntry }[] {
+/**
+ * The entries under the project's store, as the store reads them back, file
+ * by file in name order and each file's in the order it lists them. `file`
+ * is the reviewed YAML file the entry is in.
+ */
+export async function readEntries(project: FixtureProject): Promise<{ readonly file: string; readonly keyHash: string; readonly entry: TraceEntry }[]> {
   const dir = path.join(project.dir, '.e2e', 'cache');
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((name) => name.endsWith('.json'))
-    .toSorted()
-    .map((name) => {
-      const file = path.join(dir, name);
-      return { file, entry: JSON.parse(readFileSync(file, 'utf8')) as TraceEntry };
-    });
+  const store = new FileCacheStore({ directory: dir, maxBytes: MAX_CACHE_WIRE_BYTES, writable: false });
+  return (await store.list()).flatMap((listed) => {
+    if (listed.parsed.status !== 'ok') return [];
+    return listed.parsed.recordings.flatMap((recording) =>
+      recording.status === 'hit' ? [{ file: path.join(dir, `${listed.name}.yml`), keyHash: recording.keyHash, entry: recording.entry }] : [],
+    );
+  });
 }
 
 /** The entries recorded for one test, by the title its id carries, in file order. */
-export function entriesFor(project: FixtureProject, title: string): TraceEntry[] {
-  return readEntries(project)
+export async function entriesFor(project: FixtureProject, title: string): Promise<TraceEntry[]> {
+  return (await readEntries(project))
     .map(({ entry }) => entry)
     .filter((entry) => {
       const testId = entry.payload.recordedFor?.testId ?? '';

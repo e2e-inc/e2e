@@ -18,6 +18,7 @@ import {
   targetLabel,
   type NodeActionName,
   type PointActionName,
+  type RecordedAction,
   type TraceTargetDescriptor,
   type TracePosition,
 } from '../cache/trace.ts';
@@ -276,72 +277,121 @@ export function describeAction(action: RecordableAction, redaction: NodeRedactio
       : action.name === 'dragAt'
         ? describePlaced(action.to.under, action.to, redaction)
         : undefined;
-  const where = describeForSummary(target);
-  const safe = (value: string) => quote(redaction.redact(sanitizeText(value)));
-  const prose = (() => {
-    if (isNodeAction(action)) {
-      const said = NODE_ACTION_PROSE[action.name](where);
-      const held = 'modifiers' in action ? action.modifiers : undefined;
-      return held === undefined || held.length === 0 ? said : `${said} with ${held.join('+')} held`;
-    }
-    switch (action.name) {
-      case 'type':
-        return `type ${safe(action.value)} into ${where}`;
-      case 'typeSecret':
-        return `fill secret ${quote(action.secret)} into ${where}`;
-      case 'press':
-        return `press ${safe(action.key)} on ${where}`;
-      case 'select':
-        return `select ${safe(action.value)} in ${where}`;
-      case 'check':
-        return `${action.checked ? 'check' : 'uncheck'} ${where}`;
-      case 'upload':
-        return `upload ${action.paths.map(safe).join(', ')} to ${where}`;
-      case 'drag':
-        return `drag ${where} to ${describeForSummary(destination)}`;
-      case 'scroll':
-        return target === undefined ? `scroll ${action.direction}` : `scroll ${action.direction} on ${where}`;
-      case 'scrollUntil': {
-        const pages = action.screens === 0 ? 'already there' : `${String(action.screens)} ${action.screens === 1 ? 'screen' : 'screens'}`;
-        return target === undefined
-          ? `scroll ${action.direction} until ${safe(action.text)} shows (${pages})`
-          : `scroll ${action.direction} on ${where} until ${safe(action.text)} shows (${pages})`;
-      }
-      case 'navigate':
-        return `navigate to ${safe(action.url)}`;
-      case 'back':
-        return 'navigate back';
-      case 'resize':
-        return `resize the viewport to ${String(action.size.width)}x${String(action.size.height)}`;
-      case 'switchTab':
-        return `switch to tab ${String(action.tab + 1)}`;
-      case 'closeTab':
-        return `close tab ${String(action.tab + 1)}`;
-      case 'typeText':
-        return `type ${safe(action.value)} into the focused field${action.replace ? ', replacing its value' : ''}`;
-      case 'pressKey':
-        return `press ${safe(action.key)} on the focused field`;
-      case 'dismissKeyboard':
-        return 'dismiss the keyboard';
-      case 'tapAt':
-      case 'hoverAt': {
-        const at = `${POINT_ACTION_PROSE[action.name]} the point (${String(action.point.x)}, ${String(action.point.y)})`;
-        return target === undefined ? at : `${at} on ${where}`;
-      }
-      case 'dragAt': {
-        const { point: start } = action.from;
-        const { point: end } = action.to;
-        const from = `drag from the point (${String(start.x)}, ${String(start.y)})${target === undefined ? '' : ` on ${where}`}`;
-        const to = `the point (${String(end.x)}, ${String(end.y)})${destination === undefined ? '' : ` on ${describeForSummary(destination)}`}`;
-        return `${from} to ${to}`;
-      }
-    }
-  })();
+  const prose = actionProse(action, target, destination, (value) => quote(redaction.redact(sanitizeText(value))));
   return {
     target,
     summary: bound(prose, MAX_TRACE_SUMMARY_CHARS),
     ...(destination === undefined ? {} : { destination }),
   };
+}
+
+/**
+ * The fields of an action its prose reads, whether the action was just
+ * committed (`RecordableAction`) or read back from a recording
+ * (`RecordedAction`): one wording for the live event and the stored entry.
+ */
+type ProseAction =
+  | { readonly name: NodeActionName; readonly modifiers?: readonly KeyModifier[] }
+  | { readonly name: 'type' | 'select'; readonly value: string }
+  | { readonly name: 'typeSecret'; readonly secret: string }
+  | { readonly name: 'press' | 'pressKey'; readonly key: string }
+  | { readonly name: 'check'; readonly checked: boolean }
+  | { readonly name: 'upload'; readonly paths: readonly string[] }
+  | { readonly name: 'drag' | 'back' | 'dismissKeyboard' }
+  | { readonly name: 'scroll'; readonly direction: ScrollDirection }
+  /** `screens` is the live count of pages; a recording keeps none, since a replay pages for itself. */
+  | { readonly name: 'scrollUntil'; readonly text: string; readonly direction: ScrollDirection; readonly screens?: number }
+  | { readonly name: 'navigate'; readonly url: string }
+  | { readonly name: 'resize'; readonly size: { readonly width: number; readonly height: number } }
+  | { readonly name: 'switchTab' | 'closeTab'; readonly tab: number }
+  | { readonly name: 'typeText'; readonly value: string; readonly replace: boolean }
+  | { readonly name: PointActionName; readonly point: ViewportPoint }
+  | { readonly name: 'dragAt'; readonly from: { readonly point: ViewportPoint }; readonly to: { readonly point: ViewportPoint } };
+
+/** One line of prose for an action: `tap button "Save"`, `type "Ada" into textbox "Name"`. */
+function actionProse(
+  action: ProseAction,
+  target: TraceTargetDescriptor | undefined,
+  destination: TraceTargetDescriptor | undefined,
+  safe: (value: string) => string,
+): string {
+  const where = describeForSummary(target);
+  if (isNodeAction(action)) {
+    const said = NODE_ACTION_PROSE[action.name](where);
+    const held = 'modifiers' in action ? action.modifiers : undefined;
+    return held === undefined || held.length === 0 ? said : `${said} with ${held.join('+')} held`;
+  }
+  switch (action.name) {
+    case 'type':
+      return `type ${safe(action.value)} into ${where}`;
+    case 'typeSecret':
+      return `fill secret ${quote(action.secret)} into ${where}`;
+    case 'press':
+      return `press ${safe(action.key)} on ${where}`;
+    case 'select':
+      return `select ${safe(action.value)} in ${where}`;
+    case 'check':
+      return `${action.checked ? 'check' : 'uncheck'} ${where}`;
+    case 'upload':
+      return `upload ${action.paths.map(safe).join(', ')} to ${where}`;
+    case 'drag':
+      return `drag ${where} to ${describeForSummary(destination)}`;
+    case 'scroll':
+      return target === undefined ? `scroll ${action.direction}` : `scroll ${action.direction} on ${where}`;
+    case 'scrollUntil': {
+      const { screens } = action;
+      const pages = screens === undefined ? '' : ` (${screens === 0 ? 'already there' : `${String(screens)} ${screens === 1 ? 'screen' : 'screens'}`})`;
+      return target === undefined
+        ? `scroll ${action.direction} until ${safe(action.text)} shows${pages}`
+        : `scroll ${action.direction} on ${where} until ${safe(action.text)} shows${pages}`;
+    }
+    case 'navigate':
+      return `navigate to ${safe(action.url)}`;
+    case 'back':
+      return 'navigate back';
+    case 'resize':
+      return `resize the viewport to ${String(action.size.width)}x${String(action.size.height)}`;
+    case 'switchTab':
+      return `switch to tab ${String(action.tab + 1)}`;
+    case 'closeTab':
+      return `close tab ${String(action.tab + 1)}`;
+    case 'typeText':
+      return `type ${safe(action.value)} into the focused field${action.replace ? ', replacing its value' : ''}`;
+    case 'pressKey':
+      return `press ${safe(action.key)} on the focused field`;
+    case 'dismissKeyboard':
+      return 'dismiss the keyboard';
+    case 'tapAt':
+    case 'hoverAt': {
+      const at = `${POINT_ACTION_PROSE[action.name]} the point (${String(action.point.x)}, ${String(action.point.y)})`;
+      return target === undefined ? at : `${at} on ${where}`;
+    }
+    case 'dragAt': {
+      const { point: start } = action.from;
+      const { point: end } = action.to;
+      const from = `drag from the point (${String(start.x)}, ${String(start.y)})${target === undefined ? '' : ` on ${where}`}`;
+      const to = `the point (${String(end.x)}, ${String(end.y)})${destination === undefined ? '' : ` on ${describeForSummary(destination)}`}`;
+      return `${from} to ${to}`;
+    }
+  }
+}
+
+/**
+ * The summary of an action read back from a recording, which keeps none: the
+ * prose `describeAction` gave it when it ran, but for what a recording does
+ * not keep: the page count of a `scrollUntil`, and the node under a point
+ * action that was not durable enough to keep as its `within` ("on group").
+ * A gap's summary is its own (`tool <name>`), so the store writes it, never
+ * this.
+ */
+export function summarizeRecordedAction(action: Exclude<RecordedAction, { readonly name: 'tool' }>): string {
+  const target =
+    'target' in action ? action.target : 'point' in action ? action.within?.target : action.name === 'dragAt' ? action.from.within?.target : undefined;
+  const destination = action.name === 'drag' ? action.destination : action.name === 'dragAt' ? action.to.within?.target : undefined;
+  return bound(
+    actionProse(action, target, destination, (value) => quote(sanitizeText(value))),
+    MAX_TRACE_SUMMARY_CHARS,
+  );
 }
 
 /** A node's durable descriptor with the placement it was acted on in; undefined for no node or nothing durable. */

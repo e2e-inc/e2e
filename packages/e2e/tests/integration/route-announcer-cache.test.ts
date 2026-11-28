@@ -40,7 +40,7 @@ it.each([
     const recorded = await runExisting(project, { appUrl: app.url, config });
     expect(recorded.exitCode).toBe(0);
     expect(calls).toBe(1);
-    const entries = readEntries(project);
+    const entries = (await readEntries(project));
     expect(entries).toHaveLength(1);
     const { entry } = entries[0]!;
     expect(entry!.payload.endPath).toBe('/library');

@@ -1,0 +1,62 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Gestures",
+  "entries": [
+    {
+      "key": "c0d68bc778f40b67bf2783588be85c1605082e05990a15b7ea413123b981f08d",
+      "target": "android-emulator",
+      "digest": "8da837c0c02c9e185de9b3add4710ddf38b61a6de14765918abe36d7f38bb5d6",
+      "createdAt": "2026-10-09T06:54:08.240Z",
+      "instructionDigest": "548193505ec38bc1149592fdc74a267de461a8b29e29f4e7a168b20807a81a11",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Long-pressed the first target, swiped the card left, and double-tapped the last target. The screen confirms “All gestures completed.”",
+      "endWaitMs": 16000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "c31dbe874e4e3538e48ba58a9bdde56e1c371bdc46f9c1398f3fb3bfdd496453",
+      "target": "ios-simulator",
+      "digest": "dd77e1448d4a1d6611ae2cd8d61038d9a5575dd3aa060d22123d26fb237e368b",
+      "createdAt": "2026-10-30T17:07:00.127Z",
+      "instructionDigest": "548193505ec38bc1149592fdc74a267de461a8b29e29f4e7a168b20807a81a11",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "recordedBy": {
+        "provider": "gateway",
+        "model": "openai/gpt-6-luna-fast"
+      },
+      "summary": "Completed the long-press and left-swipe actions, then double-tapped the final target. The screen now confirms “All gestures completed.”",
+      "endWaitMs": 14000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Vision%20Only",
+  "entries": [
+    {
+      "key": "d0fbdd88e282e0528e734ff6145a9f78f209e4bc4be0a4245d067651a80ee4a1",
+      "target": "android-emulator",
+      "digest": "f6c3dc421a423c340f22090490872e9644dc2cb471c72deca71486f132e5608c",
+      "createdAt": "2026-10-09T06:53:41.843Z",
+      "instructionDigest": "e950bf904a3587f9a1d42a4dc15c29517000d20a1e31c8bd896e96a9c6ebd6d1",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Tapped the square, circle, and diamond in the instructed order. The screen now displays “Sequence complete.”",
+      "endWaitMs": 15000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

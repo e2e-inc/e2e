@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20date-picker",
+  "entries": [
+    {
+      "key": "be7d298262310938ce138756a44f67f5f87010d6eca26d02996608769c664c54",
+      "target": "web",
+      "digest": "a2a8dd35118c5d8c4dbb60faee9005c7689ada4dc0bfe43e15ac96e0d54129bf",
+      "createdAt": "2026-10-04T08:32:31.439Z",
+      "instructionDigest": "dcf88f9a5a9a284823967721c9316e3541f960b36032c247343f678217019dde",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Navigated the calendar from June to September 2026, selected September 17, and confirmed. The page shows “Appointment booked for September 17, 2026.”",
+      "endWaitMs": 12000
+    }
+  ]
+}

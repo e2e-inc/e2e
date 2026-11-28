@@ -41,18 +41,22 @@ it.each(['same', 'different', 'legacy', 'null', 'invalid-model', 'missing-provid
   try {
     const recorded = await runExisting(project, { appUrl: app.url, config: { agents: { default: { model: counterModel('model-A') } } } });
     expect(recorded.exitCode).toBe(0);
-    const [entry] = readEntries(project);
+    const [entry] = (await readEntries(project));
     expect(entry!.entry.payload.recordedBy).toEqual(source);
     const known = mode === 'same' || mode === 'different';
+    // The model a recording was made with is provenance, kept in the generated lock file beside the YAML.
+    const lockFile = entry!.file.replace(/\.yml$/u, '.lock.json');
     if (!known) {
-      const { recordedBy: _recordedBy, ...payload } = entry!.entry.payload;
       const invalid: Record<string, unknown> = {
         null: null, 'invalid-model': { provider: 'test', model: 1 }, 'missing-provider': { model: 'test' },
         'blank-model': { provider: 'test', model: ' ' }, 'oversized-provider': { provider: 'x'.repeat(301), model: 'A' }, 'oversized-model': { provider: 'test', model: 'x'.repeat(301) },
       };
-      writeFileSync(entry!.file, JSON.stringify({ ...entry!.entry, payload: { ...payload, ...(mode === 'legacy' ? {} : { recordedBy: invalid[mode] }) } }));
+      const lock = JSON.parse(readFileSync(lockFile, 'utf8')) as { entries: Record<string, unknown>[] };
+      const { recordedBy: _recordedBy, ...rest } = lock.entries[0]!;
+      lock.entries[0] = { ...rest, ...(mode === 'legacy' ? {} : { recordedBy: invalid[mode] }) };
+      writeFileSync(lockFile, JSON.stringify(lock, null, 2));
     }
-    const before = readFileSync(entry!.file, 'utf8');
+    const before = [readFileSync(entry!.file, 'utf8'), readFileSync(lockFile, 'utf8')];
     const lines: string[] = [];
     const list = new ListReporter({ write: (line) => lines.push(line) }, { live: false, colors: false });
     const replayed = await runExisting(project, {
@@ -69,7 +73,7 @@ it.each(['same', 'different', 'legacy', 'null', 'invalid-model', 'missing-provid
     expect(step.cache?.recordedBy).toEqual(known ? source : undefined);
     expect(step.model).toBeUndefined();
     expect(lines.filter((line) => line.includes('recorded with'))).toEqual(mode === 'different' ? [expect.stringContaining('replayed · recorded with fake-loop/model-A')] : []);
-    expect(readFileSync(entry!.file, 'utf8')).toBe(before);
+    expect([readFileSync(entry!.file, 'utf8'), readFileSync(lockFile, 'utf8')]).toEqual(before);
     const traces = contentsUnder(path.join(project.dir, '.e2e/results')).filter(([name]) => name.endsWith('trace.md'));
     expect(traces.some(([, text]) => text.includes('recorded with `fake-loop/model-A`'))).toBe(known);
     assertValidReport(replayed.report);
@@ -103,7 +107,7 @@ it.each([true, false])('attributes an executor to its configured model only, con
   try {
     const recorded = await runExisting(project, { appUrl: app.url, config });
     expect(recorded.exitCode).toBe(0);
-    const [entry] = readEntries(project);
+    const [entry] = (await readEntries(project));
     expect(entry!.entry.payload.recordedBy).toEqual(configured ? { provider: 'fake-loop', model: 'text-model' } : undefined);
     expect(onlyActStep(recorded, TITLE).model).toMatchObject(configured ? { provider: 'decision-provider', model: 'decision-model', calls: 2 } : { provider: 'mixed-model', model: 'mixed-model', calls: 2 });
     lines.length = 0;

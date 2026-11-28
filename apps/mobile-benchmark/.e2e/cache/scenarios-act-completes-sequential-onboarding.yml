@@ -1,0 +1,42 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-sequential-onboarding.lock.json
+
+test: act completes Sequential Onboarding
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: complete the signup wizard with the email, name, and phone the screen asks for, dismissing the keyboard before each Continue"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - type: jane@example.com
+            into: { role: textbox, name: e.g. jane@example.com, testId: email-input, placeholder: e.g. jane@example.com, selector: id=email-input, within: Step 1 of 3 }
+          - dismissKeyboard
+          - tap: { role: group, name: Continue, testId: continue-button, selector: id=continue-button, within: Step 1 of 3 }
+          - type: Jane
+            into: { role: textbox, name: e.g. Jane, testId: first-name-input, placeholder: e.g. Jane, selector: id=first-name-input, within: Step 2 of 3 }
+          - type: Merchant
+            into: { role: textbox, name: e.g. Merchant, testId: last-name-input, placeholder: e.g. Merchant, selector: id=last-name-input, within: Step 2 of 3 }
+          - dismissKeyboard
+          - tap: { role: group, name: Continue, testId: continue-button, selector: id=continue-button, within: Step 2 of 3 }
+          - type: "0612435678"
+            into: { role: textbox, name: e.g. 0612435678, testId: phone-input, placeholder: e.g. 0612435678, selector: id=phone-input, within: Step 3 of 3 }
+          - dismissKeyboard
+          - tap: { role: group, name: Continue, testId: continue-button, selector: id=continue-button, within: Step 3 of 3 }
+        expect:
+          shows:
+            - { role: text, name: Onboarding complete, testId: success-message }
+            - { role: text, name: jane@example.com, testId: echo-email }
+            - { role: text, name: Jane Merchant, testId: echo-name }
+            - { role: text, name: "0612435678", testId: echo-phone }
+          gone:
+            - { role: text, name: Step 1 of 3 }
+            - { role: text, name: Let's start with your email }
+            - { role: textbox, name: e.g. jane@example.com, testId: email-input, placeholder: e.g. jane@example.com }
+            - { role: text, name: Continue }
+            - { role: group, testId: onboarding-step-email }
+            - { role: group, name: Continue, testId: continue-button }

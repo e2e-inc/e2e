@@ -1,0 +1,45 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-broken-accessibility.lock.json
+
+test: act completes Broken Accessibility
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: complete the flow the screen describes until it says Access granted. The screen lists nothing useful; take a screenshot and work from it."
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - tapAt: { x: 637, y: 1389 }
+            viewport: 1080x2400
+          - runtimeValue: pixels
+          - tap: { role: group, name: →, within: Enter the code 7291 and press the arrow }
+        expect:
+          shows:
+            - { role: text, name: Access granted }
+          gone:
+            - { role: text, name: Tap the green circle to continue }
+      ios-simulator:
+        at: dev.e2e.benchmark / Broken Accessibility
+        do:
+          - tapAt: { x: 237, y: 514 }
+            viewport: 402x874
+            on: { role: other, name: Tap the green circle to continue }
+            offset: [ 0.5896, 0.5251 ]
+          - tapAt: { x: 165, y: 514 }
+            viewport: 402x874
+            on: { role: other, name: "Enter the code 7291 and press the arrow, →" }
+            offset: [ 0.4104, 0.5251 ]
+          - runtimeValue: pixels
+          - tapAt: { x: 268, y: 512 }
+            viewport: 402x874
+            on: { role: other, name: "Enter the code 7291 and press the arrow, →" }
+            offset: [ 0.6667, 0.5224 ]
+        expect:
+          shows:
+            - { role: other, name: Access granted }
+          gone:
+            - { role: other, name: Tap the green circle to continue }

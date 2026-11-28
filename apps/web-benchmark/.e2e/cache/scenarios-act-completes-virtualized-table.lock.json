@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20virtualized-table",
+  "entries": [
+    {
+      "key": "ab82f44f8dd2d4e8af4f76d0ac9d147e010ba0949f734270332fa8c889789108",
+      "target": "web",
+      "digest": "2523d6027052ca67fe815741cde4e3bb1986f64f925d2a665d4a15cce0fded21",
+      "createdAt": "2026-10-04T08:31:06.435Z",
+      "instructionDigest": "3e0bdeec3c893eadd972848c89ef841ec7722fd896ed12998ef945cf20af30ec",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Scrolled the windowed table until Row 4322 — Golden Row was rendered, clicked Claim, and verified the “Golden Row claimed” success message.",
+      "endWaitMs": 12000
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-otp-auto-advance.lock.json
+
+test: act completes otp-auto-advance
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: enter the 6-digit code the page shows into the segmented code inputs and verify it"
+    targets:
+      web:
+        at: /e/otp-auto-advance
+        do:
+          - type: "4"
+            into: { role: textbox, testId: otp-input-0, inputPurpose: one-time-code }
+          - type: "9"
+            into: { role: textbox, testId: otp-input-1, inputPurpose: one-time-code }
+          - type: "3"
+            into: { role: textbox, testId: otp-input-2, inputPurpose: one-time-code }
+          - type: "0"
+            into: { role: textbox, testId: otp-input-3, inputPurpose: one-time-code }
+          - type: "2"
+            into: { role: textbox, testId: otp-input-4, inputPurpose: one-time-code }
+          - type: "7"
+            into: { role: textbox, testId: otp-input-5, inputPurpose: one-time-code }
+        expect:
+          shows:
+            - { text: Code verified, testId: success-message }
+          gone:
+            - { text: Enter code 493027. }
+            - { role: textbox, testId: otp-input-0, inputPurpose: one-time-code }
+            - { role: textbox, testId: otp-input-1, inputPurpose: one-time-code }
+            - { role: textbox, testId: otp-input-2, inputPurpose: one-time-code }
+            - { role: textbox, testId: otp-input-3, inputPurpose: one-time-code }
+            - { role: textbox, testId: otp-input-4, inputPurpose: one-time-code }
+            - { role: textbox, testId: otp-input-5, inputPurpose: one-time-code }

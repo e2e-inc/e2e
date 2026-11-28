@@ -1,0 +1,21 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: control-inventory-scroll-to-brings-the-footnote-into-view.lock.json
+
+test: control inventory › scroll_to brings the footnote into view
+file: tests-agent/control-inventory.e2e.ts
+
+steps:
+  - act: bring the Footnote paragraph at the bottom of the page into view
+    targets:
+      web:
+        at: /e/control-inventory
+        do:
+          - scrollTo: { text: Footnote }
+        expect:
+          shows:
+            - { role: status, name: Footnote state, text: in view }
+          gone:
+            - { role: status, name: Footnote state, text: out of view }

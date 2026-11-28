@@ -1,0 +1,31 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-stale-dom.lock.json
+
+test: act completes stale-dom
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: click the Tap me button three times; the list rebuilds itself every second"
+    targets:
+      web:
+        at: /e/stale-dom
+        do:
+          - tap: { role: button, name: Tap me, testId: target-button }
+          - tap: { role: button, name: Tap me, testId: target-button }
+          - tap: { role: button, name: Tap me, testId: target-button }
+        expect:
+          shows:
+            - { text: "Progress: 3 / 3", testId: progress }
+            - { text: Target clicked 3 times, testId: success-message }
+          gone:
+            - { text: "Progress: 0 / 3", testId: progress }
+            - { text: Slot 1 }
+            - { role: button, name: Decoy, testId: decoy-button }
+            - { text: Slot 2 }
+            - { text: Slot 3 }
+            - { role: button, name: Tap me, testId: target-button }
+            - { text: Slot 4 }
+            - { text: Slot 5 }

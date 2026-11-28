@@ -1,0 +1,66 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Bottom%20Tabs",
+  "entries": [
+    {
+      "key": "4e85a1a62b850f53a939103b6446aada085655ab250e434a614d0a96b1b5a41a",
+      "target": "android-emulator",
+      "digest": "b84d4a7559dc51efd2690a140d6b7b362193aa35e4b3b9b337d3c70d203e03c5",
+      "createdAt": "2026-11-23T16:45:57.336Z",
+      "instructionDigest": "e537c4fc20970c63b73faeca0620f6f3aa5afdc8ad6e5b0964959e0f5762de45",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "recordedBy": {
+        "provider": "gateway",
+        "model": "openai/gpt-6-luna-fast"
+      },
+      "summary": "Opened the Actions tab and tapped “Complete action.” The screen confirmed “Action completed.”",
+      "endWaitMs": 12000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "f3878ab8a2c7d2d0773efabcd031e4c078302faf5793fb0bb45430970301d06d",
+      "target": "ios-simulator",
+      "digest": "e136d926ab5ee22a609a23346d30485497f1014b4cea1dd0bb1165314706991d",
+      "createdAt": "2026-10-30T17:02:13.437Z",
+      "instructionDigest": "e537c4fc20970c63b73faeca0620f6f3aa5afdc8ad6e5b0964959e0f5762de45",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "recordedBy": {
+        "provider": "gateway",
+        "model": "openai/gpt-6-luna-fast"
+      },
+      "summary": "The Actions tab is selected and the screen displays “Action completed,” confirming the action took effect.",
+      "endWaitMs": 11000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

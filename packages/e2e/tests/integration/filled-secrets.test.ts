@@ -148,9 +148,9 @@ describe('filled secrets', () => {
     expect(store.puts.find((stored) => stored.path === download.path)).toMatchObject({ redaction: 'complete' });
   });
 
-  it('records the executor fill in the cache by the secret name alone, with no value', () => {
-    expect(readEntries(project)).toHaveLength(1);
-    const [entry] = entriesFor(project, 'fills through the executor');
+  it('records the executor fill in the cache by the secret name alone, with no value', async () => {
+    expect((await readEntries(project))).toHaveLength(1);
+    const [entry] = (await entriesFor(project, 'fills through the executor'));
     expect(entry!.payload.actions).toEqual([
       {
         name: 'typeSecret',

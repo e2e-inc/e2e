@@ -1,0 +1,24 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-debounced-search.lock.json
+
+test: act completes debounced-search
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: search for trail mix and add exactly the item the page asks for to the cart"
+    targets:
+      web:
+        at: /e/debounced-search
+        do:
+          - type: trail mix
+            into: { role: combobox, name: Search snacks, testId: search-input, placeholder: Search snacks }
+          - tap: { role: option, name: Trail Mix 500 g, testId: option-trail-mix-500-g }
+        expect:
+          shows:
+            - { text: Added Trail Mix 500 g to the cart, testId: success-message }
+          gone:
+            - { text: Search for trail mix and pick exactly Trail Mix 500 g. }
+            - { role: combobox, name: Search snacks, testId: search-input, placeholder: Search snacks }

@@ -1,0 +1,58 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Broken%20Accessibility",
+  "entries": [
+    {
+      "key": "286f4c460f10ea043ed72d4b4109e071dc9aebcbb0ea9c48933e60a0649f6e16",
+      "target": "android-emulator",
+      "digest": "c59a0ec2e6b7d36380faefe6dc61d4ef5707f4b9cc52bc654bc5aafa4e385309",
+      "createdAt": "2026-10-09T06:53:08.882Z",
+      "instructionDigest": "39a6071dd8e903747ecddcc20ac06b4c62c7e399b90ef1a0c2e79a3bcb5c4e92",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Tapped the green circle, entered code 7291, and pressed the arrow. The screen now displays “Access granted.”",
+      "endWaitMs": 15000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "cb2bc9d1e809fa5cf3823e7df21dc826a605c2192f8e2e5d2ceaa563cbde4236",
+      "target": "ios-simulator",
+      "digest": "96751f223028a7951264a4c6fb16690fa0e81dda321059cf716bfcca1b610d3f",
+      "createdAt": "2026-10-15T15:53:05.668Z",
+      "instructionDigest": "39a6071dd8e903747ecddcc20ac06b4c62c7e399b90ef1a0c2e79a3bcb5c4e92",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Entered code 7291 and pressed the green arrow. The screen now displays “Access granted.”",
+      "endWaitMs": 16000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

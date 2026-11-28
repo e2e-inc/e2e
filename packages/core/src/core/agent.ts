@@ -13,6 +13,7 @@ import { resolveAgentConfig } from '../config/agent.ts';
 import type { ResolvedCacheConfig } from '../config/resolve.ts';
 import { AgentError } from '../agent/error.ts';
 import { TestError } from '../internal/errors.ts';
+import { standaloneTestId } from '../internal/ids.ts';
 import { rejectUnknownKeys } from '../internal/options.ts';
 import { lazily, lazyBuiltInAgent } from '../run/fixtures.ts';
 import { targetIdentity } from '../run/sessions.ts';
@@ -150,7 +151,7 @@ export function createAgent(session: Session, options: CreateAgentOptions): Cach
     if (context === undefined) {
       context = createAgentCacheContext({
         cache: cacheConfig, projectRoot: config.projectRoot, projectId: CACHE_PROJECT_ID,
-        testId: `core:${cacheKey}`, target: targetIdentity(target), attemptIndex: 0,
+        testId: standaloneTestId(cacheKey), target: targetIdentity(target), attemptIndex: 0,
         recordings: storedRecordingsFor(cacheConfig),
       });
       if (context !== undefined) caches.set(cacheKey, context);

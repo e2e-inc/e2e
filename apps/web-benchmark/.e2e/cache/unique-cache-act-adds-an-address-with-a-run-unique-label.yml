@@ -1,0 +1,29 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: unique-cache-act-adds-an-address-with-a-run-unique-label.lock.json
+
+test: act adds an address with a run-unique label
+file: tests-agent/unique-cache.e2e.ts
+
+steps:
+  - act: add a new address labelled {label} at {line}
+    params:
+      label: "{{param:/label}}"
+      line: 7 Pine Way, Bend
+    targets:
+      web:
+        at: /e/saved-addresses
+        do:
+          - type: "{{param:/label}}"
+            into: { role: textbox, name: Label (e.g. Cabin), testId: label-input, placeholder: Label (e.g. Cabin) }
+          - type: 7 Pine Way, Bend
+            into: { role: textbox, name: Street address, testId: line-input, placeholder: Street address }
+          - tap: { role: button, name: Add address, testId: add-button }
+        expect:
+          shows:
+            - { text: Address saved, testId: toast }
+            - { text: "{{param:/label}}" }
+            - { role: listitem, name: "{{param:/label}} 7 Pine Way, Bend Delete", testId: address-custom-2 }
+            - { text: "7 Pine Way, Bend" }

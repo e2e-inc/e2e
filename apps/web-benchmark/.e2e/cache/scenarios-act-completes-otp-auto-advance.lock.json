@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20otp-auto-advance",
+  "entries": [
+    {
+      "key": "1d59459d7a881c6b4678da3686969d22fe1258a8be44e53d70929ed7d91def84",
+      "target": "web",
+      "digest": "04caf1c4f96377e1a8f2f75857bc2fe4ea2dbddc839101b1b000623cdbbca7c6",
+      "createdAt": "2026-10-04T08:32:21.685Z",
+      "instructionDigest": "c878aa968fdbc93d377500f8aecb2f3b0ab701c37b7f9757f8d993f0fc87e109",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Entered the displayed code 493027 into the six segmented inputs. The page now displays “Code verified.”",
+      "endWaitMs": 15000
+    }
+  ]
+}

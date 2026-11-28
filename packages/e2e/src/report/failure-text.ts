@@ -47,8 +47,8 @@ export interface TracePageOptions {
   readonly pageDir?: string | undefined;
   /** Reads one artifact by its report path, for inlining the screen text; absent when the files are not at hand. */
   readonly readArtifact?: ((reportPath: string) => string | undefined) | undefined;
-  /** The replay cache directory as the reader should see it; a step's entry is named as a file there. */
-  readonly cacheDir?: string | undefined;
+  /** The file holding the test's replay recordings, as the reader should see it; each of the test's own recorded steps names it with its key. */
+  readonly cacheFile?: string | undefined;
 }
 
 // --- facts shared with the run page ---
@@ -329,7 +329,7 @@ const CACHE_WRITE_TEXT: Readonly<Record<NonNullable<StepCacheRecord['write']>, s
   unconfirmed: 'recording not saved: no check passed after this step',
   evicted: 'recording deleted: its replay ended in a failure or a repair, or no check confirmed it',
   'no-change': 'nothing recorded: the step changed nothing a replay could check',
-  'not-written': 'recording not saved: the cache store did not write it',
+  'not-written': "recording not saved: the cache store did not write it (the file store refuses a test's file that would go over the size limit, or that holds a recording `npx e2e cache ls` names as unreadable)",
 };
 
 /** Where an app log line came from, as the page names it. */
@@ -380,9 +380,9 @@ function appLogLine(entry: AppLogRecord, format: 'markdown' | 'text' = 'markdown
  * poll that waited or failed (the values it read in order), where the app
  * went, and every line the app logged while it ran (`appLog`, the attempt's).
  */
-function stepDetailLines(step: ReportStep, appLog: readonly AppLogRecord[], options: Pick<TracePageOptions, 'cacheDir'> = {}): string[] {
+function stepDetailLines(step: ReportStep, appLog: readonly AppLogRecord[], options: Pick<TracePageOptions, 'cacheFile'> = {}): string[] {
   const lines: string[] = [];
-  if (step.cache !== undefined) lines.push(cacheLine(step.cache, options.cacheDir));
+  if (step.cache !== undefined) lines.push(cacheLine(step.cache, options.cacheFile));
   const items: PageItem[] = [
     ...step.events
       .filter((event) => event.kind === 'engine' || event.kind === 'navigation' || (event.kind === 'poll' && ((event.count ?? 0) > 1 || event.status !== 'passed')))
@@ -426,7 +426,7 @@ export function numberedAppLogLines(
   });
 }
 
-function cacheLine(cache: StepCacheRecord, cacheDir: string | undefined): string {
+function cacheLine(cache: StepCacheRecord, cacheFile: string | undefined): string {
   const how =
     cache.mode === 'self-finalized'
       ? `replayed all ${plural(cache.totalActions, 'recorded action')}, no model call`
@@ -440,7 +440,8 @@ function cacheLine(cache: StepCacheRecord, cacheDir: string | undefined): string
     ...(cache.write === undefined ? [] : [CACHE_WRITE_TEXT[cache.write]]),
     ...(cache.notRecorded === 'param-collision' ? ['nothing recorded: a unique() value collides with another param'] : []),
   ];
-  const entry = cache.entry === undefined || cacheDir === undefined ? '' : ` (${code(`${cacheDir}/${cache.entry}.json`, MAX_PATH_CHARS)})`;
+  const key = cache.entry === undefined ? undefined : `key ${code(cache.entry.slice(0, 12), MAX_ID_CHARS)}`;
+  const entry = key === undefined ? '' : cacheFile === undefined ? ` (${key})` : ` (${code(cacheFile, MAX_PATH_CHARS)}, ${key})`;
   return `${parts.join('; ')}${entry}`;
 }
 
@@ -610,7 +611,8 @@ export function renderTracePage(report: Report1Document, result: ReportResult, f
       if (step.status !== 'passed' && step.explanation !== undefined && step.explanation.trim() !== '') {
         lines.push(`   > ${cell(step.explanation, MAX_DETAIL_CHARS)}`);
       }
-      for (const line of stepDetailLines(step, told.appLog, options)) lines.push(`   - ${line}`);
+      // A session's step records under that session's own cache key, never in the test's file.
+      for (const line of stepDetailLines(step, told.appLog, step.actor === undefined ? options : {})) lines.push(`   - ${line}`);
       for (const artifact of told.artifacts) {
         if (artifact.kind === 'screenshot' && step.artifacts.includes(artifact.id)) lines.push(`   - ${artifactPath(artifact, options)}`);
       }

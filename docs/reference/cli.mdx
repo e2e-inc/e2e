@@ -1251,9 +1251,9 @@ bunx e2e cache ls --config packages/web/e2e.config.ts
 
 | Command | Prints |
 | --- | --- |
-| `e2e cache ls` | One row per entry: the test and target it was recorded for, the first 12 characters of its instruction digest, its age, and how many actions a replay would run (`(truncated)` when recording hit the action cap). Rows are grouped by test, then target, oldest first. |
-| `e2e cache stats` | The store directory, the number of readable entries, their total size, and the number of unreadable files when there are any. |
-| `e2e cache clear` | Deletes every cache file, then the directory when nothing else is left in it, and reports how many files went. |
+| `e2e cache ls` | One row per recording: the test's recording file, the target it was recorded on, its instruction on one line (cut at 48 characters), its age, and how many actions a replay would run (`(truncated)` when recording hit the action cap). Rows go file by file, each in the order the file lists them. |
+| `e2e cache stats` | The store directory, the number of tests and readable entries, their total size, and the counts of unreadable recordings and of entries an older `e2e` wrote, when there are any. |
+| `e2e cache clear` | Deletes every recording file and lock, every entry an older `e2e` wrote, and a crashed writer's leftovers, then the directory when nothing else is left in it, and reports how many files went. |
 
 | Option | Description |
 | --- | --- |
@@ -1261,16 +1261,18 @@ bunx e2e cache ls --config packages/web/e2e.config.ts
 | `--cache-dir <dir>` | The store directory. Default: `E2E_CACHE_DIR`, then `cache.dir`, then `.e2e/cache/`. |
 
 ```text
-TEST                             TARGET  INSTRUCTION   AGE  ACTIONS
-tests/billing.e2e.ts::upgrades   web     4f1c0a9d3b62  2h   4
-tests/signup.e2e.ts::signs%20up  web     9ab7715ce004  3d   7 (truncated)
+FILE                   TARGET  STEP                     AGE  ACTIONS
+billing-upgrades.yml   web     upgrade the plan to Pro  2h   4
+signup-signs-up.yml    web     sign up as {name}        3d   7 (truncated)
 ```
 
-- An entry recorded before entries carried provenance prints `-` in those
-  columns and still replays.
-- A file the store cannot read (truncated, over the 1 MiB ceiling, or from a
-  newer schema) is counted separately on stderr, treated as a miss by a run,
-  and removed by `clear`.
+- A recording the store cannot read (a torn or hand-edited file, one over
+  the 1 MiB ceiling, or a lock of another format) is named on stderr with
+  the reason, read as `invalid-entry` by a run, and removed by `clear`. One
+  it cannot open at all (another account's files, say) is named the same
+  way, and `clear` leaves it.
+- An entry an older `e2e` wrote, one `<key>.json` file per key, is no longer
+  read. `ls` counts these on stderr, and `clear` removes them.
 - Files the runner never wrote are left alone.
 
 <Note>

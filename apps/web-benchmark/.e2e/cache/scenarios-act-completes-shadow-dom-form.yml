@@ -1,0 +1,25 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-shadow-dom-form.lock.json
+
+test: act completes shadow-dom-form
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: fill the form buried in the nested shadow roots and submit it to get access"
+    targets:
+      web:
+        at: /e/shadow-dom-form
+        do:
+          - runtimeValue: minted-token
+          - tap: { role: button, name: Submit }
+        expect:
+          shows:
+            - { text: Access granted, testId: success-message }
+          gone:
+            - { text: The form below lives inside a closed shadow root. Enter SHADOW-42 and press Submit. }
+            - { text: "Access code hint: SHADOW-42" }
+            - { role: textbox, name: Access code, placeholder: Access code }
+            - { role: button, name: Submit }

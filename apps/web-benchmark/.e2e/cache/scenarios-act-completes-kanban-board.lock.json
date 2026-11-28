@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20kanban-board",
+  "entries": [
+    {
+      "key": "d074cdb59fb33fe1fa582d2693674613b638080f050432967bd46ade6515eb26",
+      "target": "web",
+      "digest": "8ed18fec58159f3fd61a2a644e519217740b677d2a64731d0bc830de658ed6c0",
+      "createdAt": "2026-10-04T08:31:50.082Z",
+      "instructionDigest": "79f28df979547ae9abe14bba1c341873d1aa9d74dccc07d1e76bf46c279b8cb5",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Moved Fix payment bug to Done and Refactor onboarding to In Progress, then submitted. The page confirmed “Board matches the goal.”",
+      "endWaitMs": 12000
+    }
+  ]
+}

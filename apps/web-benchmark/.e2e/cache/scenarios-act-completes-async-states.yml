@@ -1,0 +1,23 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-async-states.lock.json
+
+test: act completes async-states
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: wait for the page to finish loading, read the verification code it shows, enter it, and submit once the button enables"
+    targets:
+      web:
+        at: /e/async-states
+        do:
+          - tap: { role: button, name: Send code, testId: send-code-button }
+          - runtimeValue: minted-token
+          - tap: { role: button, name: Verify, testId: verify-button }
+        expect:
+          shows:
+            - { text: Code verified successfully, testId: success-message }
+          gone:
+            - { testId: initial-loading }

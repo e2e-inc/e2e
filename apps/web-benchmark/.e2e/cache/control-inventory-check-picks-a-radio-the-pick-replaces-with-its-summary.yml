@@ -1,0 +1,27 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: control-inventory-check-picks-a-radio-the-pick-replaces-with-its-summary.lock.json
+
+test: control inventory › check picks a radio the pick replaces with its summary
+file: tests-agent/control-inventory.e2e.ts
+
+steps:
+  - act: pick Express delivery
+    targets:
+      web:
+        at: /e/control-inventory
+        do:
+          - tap: { role: radio, name: Express, within: Delivery }
+        expect:
+          shows:
+            - { role: status, name: Delivery state, text: Express }
+            - { text: Express delivery selected }
+            - { role: button, name: Change delivery }
+          gone:
+            - { role: status, name: Delivery state, text: unset }
+            - { role: radio, name: Standard }
+            - { role: radio, name: Express }
+            - { role: group, name: Delivery }
+            - { text: Standard }

@@ -1,0 +1,29 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-context-menu-trap.lock.json
+
+test: act completes context-menu-trap
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: rename the file report.pdf to summary.pdf in the file manager"
+    targets:
+      web:
+        at: /e/context-menu-trap
+        do:
+          - secondaryTap: { text: report.pdf }
+          - tap: { role: button, name: More actions for report.pdf, text: ⋯ }
+          - tap: { role: button, name: Rename }
+          - type: summary.pdf
+            into: { role: textbox, name: New file name }
+          - tap: { role: button, name: Save }
+        expect:
+          shows:
+            - { text: summary.pdf }
+            - { role: button, name: More actions for summary.pdf, text: ⋯ }
+            - { text: File renamed to summary.pdf, testId: success-message }
+          gone:
+            - { text: report.pdf }
+            - { role: button, name: More actions for report.pdf, text: ⋯ }

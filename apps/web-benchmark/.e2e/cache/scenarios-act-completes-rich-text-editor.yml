@@ -1,0 +1,75 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-rich-text-editor.lock.json
+
+test: act completes rich-text-editor
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: 'Complete this scenario as the page instructs: type "release approved" into the editor, make exactly the word approved bold, and check the document'
+    targets:
+      web:
+        at: /e/rich-text-editor
+        do:
+          - type: release approved
+            into: { role: textbox, testId: editor }
+          - press: Control+Shift+ArrowLeft
+            on: { role: textbox, text: release approved, testId: editor }
+          - press: ArrowRight
+            on: { role: textbox, text: release approved, testId: editor }
+          - press: Control+Shift+ArrowLeft
+            on: { role: textbox, text: release approved, testId: editor }
+          - tap: { role: textbox, text: release approved, testId: editor }
+          - press: Shift+End
+            on: { role: textbox, text: release approved, testId: editor }
+          - press: Shift+ArrowRight
+            on: { role: textbox, text: release approved, testId: editor }
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - tap: { role: textbox, text: release approved, testId: editor }
+          - press: Control+a
+            on: { role: textbox, text: release approved, testId: editor }
+          - tap: { role: textbox, text: release approved, testId: editor }
+          - press: Control+a
+            on: { role: textbox, text: release approved, testId: editor }
+          - press: Control+Shift+ArrowLeft
+            on: { role: textbox, text: release approved, testId: editor }
+          - press: Home
+            on: { role: textbox, text: release approved, testId: editor }
+          - press: Shift+ArrowRight
+            on: { role: textbox, text: release approved, testId: editor }
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: ArrowRight
+            on: { role: textbox, text: release approved, testId: editor }
+          - press: Shift+ArrowRight
+            on: { role: textbox, text: release approved, testId: editor }
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - press: Shift+ArrowRight
+          - tap: { role: button, name: B, testId: bold-button }
+          - tap: { role: button, name: Check document, testId: check-button }
+        expect:
+          shows:
+            - { text: Document approved, testId: success-message }
+          gone:
+            - { text: 'Type "release approved" in the editor and make the word approved bold, then check the document.' }
+            - { role: button, name: B, testId: bold-button }
+            - { role: textbox, testId: editor }
+            - { role: button, name: Check document, testId: check-button }

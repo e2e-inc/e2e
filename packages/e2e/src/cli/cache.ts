@@ -1,24 +1,27 @@
 /**
  * `e2e cache`: what is in the replay cache, and how to get rid of it.
  *
- * The store is a directory of digest-named files, so a committed cache is
- * unreadable without a reader: `ls` prints each entry's provenance — the test,
- * the target, the instruction digest, its age, and how many actions it would
- * replay — `stats` sizes the store, and `clear` empties it.
+ * The store keeps one reviewable YAML file per test, beside a generated
+ * lock file: `ls` prints one row per recording (its file, target, step,
+ * age, and how many actions it would replay) and names the files no run can
+ * read, `stats` sizes the store, and `clear` empties it.
  *
  * Every command works on files only. A project that configures `cache.store`
  * replaced the filesystem with its own store, and this CLI has no way to
  * enumerate it, so it says so instead of listing an empty directory.
  */
 
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { readdir, rm, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { Command } from 'commander';
 import picocolors from 'picocolors';
-import { FileCacheStore, MAX_CACHE_WIRE_BYTES } from '@e2e-dev/core/lib/cache/store';
+import { isLockToken, withFileLock } from '@e2e-dev/core/lib/cache/file-lock';
+import { RECORDING_NAME } from '@e2e-dev/core/lib/cache/recording-name';
+import { FileCacheStore, LOCK_EXTENSION, MAX_CACHE_WIRE_BYTES, RECORDING_EXTENSION } from '@e2e-dev/core/lib/cache/store';
 import { discoverConfig, loadConfigModule, missingConfigError } from '../config/load.ts';
 import { resolveConfig } from '../config/resolve-run.ts';
-import { errorMessage } from '@e2e-dev/core/lib/internal/errors';
+import { errorMessage, sanitizeText } from '@e2e-dev/core/lib/internal/errors';
 import { redactError } from '@e2e-dev/core/lib/run/secrecy';
 import { visibleWidth } from '../report/format.ts';
 import { formatBytes } from './format-bytes.ts';
@@ -38,33 +41,106 @@ interface CacheOptions {
   readonly cwd?: string;
 }
 
-/** One entry as `ls` prints it, or a file that is not a readable entry. */
+/** One recording as `ls` prints it. */
 interface CacheEntrySummary {
-  readonly keyHash: string;
-  readonly bytes: number;
+  /** The reviewed file it is in. */
+  readonly file: string;
   readonly createdAt: string;
   readonly actions: number;
   readonly truncated: boolean;
   readonly testId: string | undefined;
   readonly targetId: string | undefined;
-  readonly instructionDigest: string | undefined;
+  /** The instruction it was recorded for, else its digest's prefix. */
+  readonly step: string;
 }
 
 interface CacheContents {
   readonly directory: string;
   readonly entries: readonly CacheEntrySummary[];
-  /** Digest-named files the store could not read: a miss to the runner too. */
-  readonly unreadable: readonly { readonly name: string; readonly bytes: number }[];
+  /** Each test's pair: its name and size. */
+  readonly files: readonly { readonly name: string; readonly bytes: number }[];
+  /** Recordings, or whole file pairs, the store could not read: an `invalid-entry` to the runner, never a replay. */
+  readonly unreadable: readonly { readonly file: string; readonly reason: string }[];
+  /** Entries an older e2e wrote, one digest-named `.json` file each, which no run reads. */
+  readonly legacy: readonly string[];
   /** Files in the directory that are not cache-shaped; never touched. */
   readonly foreign: readonly string[];
+  /** Pairs named like recordings that could not be opened (another account's, say): unreadable, and never deleted. */
+  readonly unopened: readonly string[];
 }
 
-/** Store file names: the key digest, as `FileCacheStore` writes them. */
-const ENTRY_FILE = /^([a-f0-9]{64})\.json$/u;
-/** A crashed writer's leftover; a store file for cleanup purposes. */
-const TEMPORARY_FILE = /^[a-f0-9]{64}\.json\.[a-f0-9]{16}\.tmp$/u;
+/** An entry file of the store before recordings were kept per test: the key digest. */
+const LEGACY_ENTRY_FILE = /^[a-f0-9]{64}\.json$/u;
+/** A name `recordingName` gives a test before any `--<hash>` suffix: lowercase words joined by single dashes. */
+const STEM = '[a-z0-9]+(?:-[a-z0-9]+)*';
+/** A name a pair's files take, suffix included (`RECORDING_NAME`). */
+const NAME = RECORDING_NAME.source.slice(1, -1);
+/** A crashed writer's leftover, a store file for cleanup purposes: an atomic write's temporary file, of a pair's file or of its pending record. */
+const TEMPORARY_FILE = new RegExp(`^(?:${NAME}(?:\\.yml|\\.lock\\.json)|\\.${STEM}\\.pending|[a-f0-9]{64}\\.json)\\.[a-f0-9]{16}\\.tmp$`, 'u');
+/**
+ * The lock a writer holds while it rewrites a test's files, or the one a
+ * waiter holds while it takes over a stale lock: it holds only its holder's
+ * token (`isLockToken`), so a file of that name holding anything else is
+ * another tool's.
+ */
+const LOCK_FILE = new RegExp(`^\\.${STEM}\\.writing(?:\\.takeover)?$`, 'u');
+/**
+ * The record a writer leaves beside a pair just before its two renames, so
+ * the next writer can finish a pair a crash cut in half: a JSON object
+ * naming the pair, its YAML's digest, and the lock to publish. A file of
+ * that name holding anything else is another tool's.
+ */
+const PENDING_FILE = new RegExp(`^\\.${STEM}\\.pending$`, 'u');
 
-/** Digest prefix printed instead of the full 64 hex characters. */
+/**
+ * Age past which a store lock or temporary file was left by a writer that
+ * died: the store takes a lock over at the same age (`cache/file-lock.ts`).
+ * A younger one belongs to a writer still at work.
+ */
+const LEFTOVER_MS = 30_000;
+
+/**
+ * Whether a file in the store directory is the store's working file (a
+ * temporary, a lock holding a token, or a pending pair record), and if so
+ * whether a writer that died left it (`stale`) or one is still using it
+ * (`live`).
+ */
+function workingFile(directory: string, name: string): 'stale' | 'live' | undefined {
+  const owns = TEMPORARY_FILE.test(name) ? () => true : LOCK_FILE.test(name) ? isOwnLock : PENDING_FILE.test(name) ? isOwnPending : undefined;
+  if (owns === undefined) return undefined;
+  const file = path.join(directory, name);
+  let modified: number;
+  try {
+    modified = statSync(file).mtimeMs;
+  } catch {
+    return undefined;
+  }
+  if (!owns(file)) return undefined;
+  return Date.now() - modified > LEFTOVER_MS ? 'stale' : 'live';
+}
+
+function isOwnLock(file: string): boolean {
+  try {
+    return isLockToken(readFileSync(file, 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
+function isOwnPending(file: string): boolean {
+  try {
+    const record: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    if (typeof record !== 'object' || record === null) return false;
+    const { name, yamlDigest, lock, replaces } = record as Record<string, unknown>;
+    return typeof name === 'string' && typeof yamlDigest === 'string' && typeof lock === 'string' && (typeof replaces === 'string' || replaces === null);
+  } catch {
+    return false;
+  }
+}
+
+/** Characters of a step's instruction a row prints. */
+const STEP_CHARS = 48;
+/** Digest prefix printed for a step recorded without its instruction. */
 const DIGEST_PREFIX_CHARS = 12;
 
 /**
@@ -125,10 +201,10 @@ export function registerCacheCommand(program: Command): void {
   cacheSubcommand(
     'ls',
     'list the cached traces',
-    'Print one row per cached trace: the test and target it was recorded for, the digest of its instruction, its age, and how many actions a replay would run.',
+    'Print one row per cached trace: the recording file it is in, the target it was recorded on, the instruction it was recorded for, its age, and how many actions a replay would run.',
   );
-  cacheSubcommand('clear', 'delete every cached trace', 'Delete the cache files and the directory itself; files the runner never wrote are left alone.');
-  cacheSubcommand('stats', 'print the entry count and size', 'Print the store directory, how many readable entries it holds, and how many bytes they take.');
+  cacheSubcommand('clear', 'delete every cached trace', 'Delete the recording files, entries an older e2e wrote, and the directory itself; files the runner never wrote are left alone.');
+  cacheSubcommand('stats', 'print the entry count and size', 'Print the store directory, how many tests and readable entries it holds, and how many bytes they take.');
 }
 
 /**
@@ -156,56 +232,86 @@ async function resolveCacheDirectory(options: CacheOptions): Promise<string> {
 
 /**
  * Every file in the store directory, classified. Reads go through the store
- * itself, so a file this CLI calls an entry is exactly one a run would
- * replay: an oversized or unparseable file is unreadable here and a miss
- * there. A directory that does not exist is an empty store.
+ * itself, so a recording this CLI lists is exactly one a run would replay:
+ * an oversized or unparseable file is unreadable here and a miss there. A
+ * directory that does not exist is an empty store.
  */
 async function readContents(directory: string): Promise<CacheContents> {
   const store = new FileCacheStore({ directory, maxBytes: MAX_CACHE_WIRE_BYTES, writable: false });
   const entries: CacheEntrySummary[] = [];
-  const unreadable: { name: string; bytes: number }[] = [];
+  const files: { name: string; bytes: number }[] = [];
+  const unreadable: { file: string; reason: string }[] = [];
+  const legacy: string[] = [];
   const foreign: string[] = [];
+  const unopened: string[] = [];
 
+  // Listed first: taking each test's lock can remove a stale one a crashed writer left.
+  const listedFiles = await store.list({ unconfirmed: true });
   let names: string[];
   try {
     names = await readdir(directory);
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { directory, entries, unreadable, foreign };
+      return { directory, entries, files, unreadable, legacy, foreign, unopened };
     }
     throw cause;
   }
-
+  // A file named like a recording is the store's only when the store lists it: one it never wrote stays foreign.
+  const owned = new Set(
+    listedFiles.flatMap((listed) => (listed.unconfirmed === true ? [`${listed.name}${RECORDING_EXTENSION}`, `${listed.name}${LOCK_EXTENSION}`] : listed.files)),
+  );
   for (const name of names.toSorted()) {
-    const keyHash = ENTRY_FILE.exec(name)?.[1];
-    if (keyHash === undefined) {
-      if (!TEMPORARY_FILE.test(name)) foreign.push(name);
-      continue;
-    }
-    const read = await store.read(keyHash);
-    if (read.status !== 'hit') {
-      unreadable.push({ name, bytes: read.status === 'invalid' ? (read.bytes ?? 0) : 0 });
-      continue;
-    }
-    const trace = read.entry.payload;
-    entries.push({
-      keyHash,
-      bytes: read.bytes,
-      createdAt: read.entry.createdAt,
-      actions: trace.actions.length,
-      truncated: trace.truncated === true,
-      testId: trace.recordedFor?.testId,
-      targetId: trace.recordedFor?.targetId,
-      instructionDigest: trace.recordedFor?.instructionDigest,
-    });
+    if (LEGACY_ENTRY_FILE.test(name)) legacy.push(name);
+    else if (!owned.has(name) && workingFile(directory, name) === undefined) foreign.push(name);
   }
-  return { directory, entries, unreadable, foreign };
+
+  for (const listed of listedFiles) {
+    const file = `${listed.name}${RECORDING_EXTENSION}`;
+    const { parsed } = listed;
+    if (listed.unconfirmed === true) {
+      unopened.push(file);
+      if (parsed.status === 'invalid') unreadable.push({ file, reason: parsed.reason });
+      continue;
+    }
+    files.push({ name: listed.name, bytes: listed.bytes });
+    if (parsed.status === 'invalid') {
+      unreadable.push({ file, reason: parsed.reason });
+      continue;
+    }
+    for (const where of parsed.unclaimed) unreadable.push({ file, reason: `${file}: ${where} has no entry in the lock file, so it never replays` });
+    for (const recording of parsed.recordings) {
+      if (recording.status === 'invalid') {
+        unreadable.push({ file, reason: `${file}: ${recording.reason}` });
+        continue;
+      }
+      const trace = recording.entry.payload;
+      const instruction = trace.recordedFor?.instruction;
+      entries.push({
+        file,
+        createdAt: recording.entry.createdAt,
+        actions: trace.actions.length,
+        truncated: trace.truncated === true,
+        testId: trace.recordedFor?.testId,
+        targetId: trace.recordedFor?.targetId,
+        step:
+          instruction === undefined
+            ? (trace.recordedFor?.instructionDigest.slice(0, DIGEST_PREFIX_CHARS) ?? '-')
+            : oneLine(sanitizeText(instruction)),
+      });
+    }
+  }
+  return { directory, entries, files, unreadable, legacy, foreign, unopened };
+}
+
+/** An instruction on one line, cut to `STEP_CHARS`. */
+function oneLine(text: string): string {
+  const flat = text.replaceAll(/\s+/gu, ' ').trim();
+  return flat.length <= STEP_CHARS ? flat : `${flat.slice(0, STEP_CHARS - 1)}…`;
 }
 
 /**
- * Prints one row per entry, newest last within a test, so a reviewer reads a
- * committed cache test by test. Provenance an entry does not carry — one
- * recorded before entries described themselves — prints as `-`.
+ * Prints one row per recording, file by file in the order each file lists
+ * them, so a reviewer reads a committed cache test by test.
  */
 function list(contents: CacheContents): number {
   if (contents.entries.length === 0) {
@@ -214,21 +320,14 @@ function list(contents: CacheContents): number {
     return 0;
   }
   const now = Date.now();
-  const rows = contents.entries
-    .toSorted(
-      (left, right) =>
-        (left.testId ?? '').localeCompare(right.testId ?? '') ||
-        (left.targetId ?? '').localeCompare(right.targetId ?? '') ||
-        left.createdAt.localeCompare(right.createdAt),
-    )
-    .map((entry) => [
-      entry.testId ?? '-',
-      entry.targetId ?? '-',
-      entry.instructionDigest?.slice(0, DIGEST_PREFIX_CHARS) ?? '-',
-      formatAge(entry.createdAt, now),
-      `${entry.actions}${entry.truncated ? ' (truncated)' : ''}`,
-    ]);
-  const header = ['TEST', 'TARGET', 'INSTRUCTION', 'AGE', 'ACTIONS'];
+  const rows = contents.entries.map((entry) => [
+    entry.file,
+    sanitizeText(entry.targetId ?? '-'),
+    entry.step,
+    formatAge(entry.createdAt, now),
+    `${entry.actions}${entry.truncated ? ' (truncated)' : ''}`,
+  ]);
+  const header = ['FILE', 'TARGET', 'STEP', 'AGE', 'ACTIONS'];
   const widths = header.map((title, column) =>
     Math.max(visibleWidth(title), ...rows.map((row) => visibleWidth(row[column]!))),
   );
@@ -245,13 +344,15 @@ function list(contents: CacheContents): number {
 
 /** Prints the store's size: where it is, how many entries, how many bytes. */
 function stats(contents: CacheContents): number {
-  const bytes = contents.entries.reduce((total, entry) => total + entry.bytes, 0);
+  const bytes = contents.files.reduce((total, file) => total + file.bytes, 0);
   const rows: [string, string][] = [
     ['directory', contents.directory],
+    ['tests', String(contents.files.length)],
     ['entries', String(contents.entries.length)],
     ['size', formatBytes(bytes)],
   ];
   if (contents.unreadable.length > 0) rows.push(['unreadable', String(contents.unreadable.length)]);
+  if (contents.legacy.length > 0) rows.push(['legacy', String(contents.legacy.length)]);
   const width = Math.max(...rows.map(([label]) => label.length));
   for (const [label, value] of rows) {
     process.stdout.write(`${label.padEnd(width)}  ${value}\n`);
@@ -266,23 +367,32 @@ function stats(contents: CacheContents): number {
  * and a mistyped one must not take a project's files with it.
  */
 async function clear(contents: CacheContents): Promise<number> {
-  const removable = [
-    ...contents.entries.map((entry) => `${entry.keyHash}.json`),
-    ...contents.unreadable.map((file) => file.name),
-  ];
-  for (const name of removable) {
-    await rm(path.join(contents.directory, name), { force: true });
+  const store = new FileCacheStore({ directory: contents.directory, maxBytes: MAX_CACHE_WIRE_BYTES, writable: false });
+  let removedFiles = 0;
+  // Each test's pair under the lock its writers take, so a run writing it meanwhile is never cut in half.
+  for (const file of contents.files) removedFiles += await store.clear(file.name);
+  for (const name of contents.legacy) {
+    const file = path.join(contents.directory, name);
+    if (!existsSync(file)) continue;
+    await rm(file, { force: true });
+    removedFiles += 1;
   }
-  // Leftover temporaries are neither entries nor foreign files; they go too.
+  // A dead writer's working files are neither entries nor foreign files; they go too. A live writer's stay.
   const temporaries = await removeTemporaries(contents.directory);
-  const removed = removable.length + temporaries;
+  const removed = removedFiles + temporaries;
   if (contents.foreign.length === 0) await rmdir(contents.directory).catch(() => undefined);
   process.stdout.write(
     removed === 0
       ? `no replay cache entries to clear in ${contents.directory}\n`
       : `cleared ${removed} file(s) from ${contents.directory}\n`,
   );
-  warnAboutSkipped(contents);
+  // Unreadable recordings and old entries were just deleted; only what was left alone is worth a word.
+  if (contents.unopened.length > 0) {
+    process.stderr.write(
+      `${contents.unopened.length} recording(s) in ${contents.directory} could not be opened and were left alone: ${sanitizeText(contents.unopened.join(', '))}\n`,
+    );
+  }
+  warnAboutForeign(contents);
   return 0;
 }
 
@@ -295,8 +405,16 @@ async function removeTemporaries(directory: string): Promise<number> {
   }
   let removed = 0;
   for (const name of names) {
-    if (!TEMPORARY_FILE.test(name)) continue;
-    await rm(path.join(directory, name), { force: true });
+    if (workingFile(directory, name) !== 'stale') continue;
+    const file = path.join(directory, name);
+    if (name.endsWith('.writing')) {
+      // Through the lock's own takeover, never by path: a writer may have just taken this one over, and
+      // removing its lock would let a second writer in beside it. Holding it and letting go removes it.
+      await withFileLock(file, async () => undefined).catch(() => undefined);
+      if (!existsSync(file)) removed += 1;
+      continue;
+    }
+    await rm(file, { force: true });
     removed += 1;
   }
   return removed;
@@ -306,12 +424,21 @@ async function removeTemporaries(directory: string): Promise<number> {
 function warnAboutSkipped(contents: CacheContents): void {
   if (contents.unreadable.length > 0) {
     process.stderr.write(
-      `${contents.unreadable.length} file(s) in ${contents.directory} are not readable trace-1 entries; a run treats each as a miss\n`,
+      `${contents.unreadable.length} recording(s) in ${contents.directory} are not readable; a run never replays them (invalid-entry):\n${contents.unreadable.map((item) => `  ${sanitizeText(item.reason)}`).join('\n')}\n`,
     );
   }
+  if (contents.legacy.length > 0) {
+    process.stderr.write(
+      `${contents.legacy.length} file(s) in ${contents.directory} are entries an older e2e wrote, one .json file per key, which no run reads; record those steps again once they are gone (e2e cache clear removes them and every recording beside them, so run it before recording; after, delete only the .json files)\n`,
+    );
+  }
+  warnAboutForeign(contents);
+}
+
+function warnAboutForeign(contents: CacheContents): void {
   if (contents.foreign.length > 0) {
     process.stderr.write(
-      `${contents.foreign.length} file(s) in ${contents.directory} are not cache files and were left alone: ${contents.foreign.join(', ')}\n`,
+      `${contents.foreign.length} file(s) in ${contents.directory} are not cache files and were left alone: ${sanitizeText(contents.foreign.join(', '))}\n`,
     );
   }
 }

@@ -1,0 +1,26 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-apple-pay.lock.json
+
+test: act completes Apple Pay
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: start the Apple Pay payment and authorize it in the sheet that appears; the sheet is not in the tree, use the screenshot"
+    targets:
+      ios-simulator:
+        at: dev.e2e.benchmark / Apple Pay
+        do:
+          - tap: { role: other, name: Buy with Apple Pay, testId: apple-pay-button, selector: id=apple-pay-button }
+          - tap: { role: button, name: Pay with Passcode, testId: footer, selector: id=footer }
+        expect:
+          shows:
+            - { role: text, name: "Payment complete: $8.99", testId: success-message }
+          gone:
+            - { role: other, name: Buy with Apple Pay, testId: apple-pay-button }
+            - { role: text, name: Order summary }
+            - { role: text, name: Trail Mix 500 g — $6.99 }
+            - { role: text, name: Rush delivery — $2.00 }
+            - { role: text, name: Total — $8.99 }

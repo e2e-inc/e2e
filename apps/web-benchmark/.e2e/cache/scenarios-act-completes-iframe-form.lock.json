@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20iframe-form",
+  "entries": [
+    {
+      "key": "7e416edb8b37f403cd14184fa4f662f78b1a861bd0bac454aed7785cd0e0932b",
+      "target": "web",
+      "digest": "fd31575d2e71801142415f6e8586612423e9cec588037dd962aa1e0c589977c0",
+      "createdAt": "2026-10-04T08:29:07.236Z",
+      "instructionDigest": "5ea16155d5cd3ee4fc67e7511534964bca91116fa0412e4523428844f9f85c15",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Read coupon SAVE-1234 from the first frame, entered it in the checkout form, and applied it. The page now shows “Coupon applied.”",
+      "endWaitMs": 12000
+    }
+  ]
+}

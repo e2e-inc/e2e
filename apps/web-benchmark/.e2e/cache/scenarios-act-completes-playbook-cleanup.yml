@@ -1,0 +1,33 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-playbook-cleanup.lock.json
+
+test: act completes playbook-cleanup
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: 'Complete this scenario as the page instructs: delete the playbook named "Launch Approval Draft", confirm the removal, then search for its exact name to verify it is gone'
+    targets:
+      web:
+        at: /e/playbook-cleanup
+        do:
+          - tap: { role: button, name: More actions for Launch Approval Draft, text: ⋯, within: Launch Approval Draft }
+          - tap: { role: menuitem, name: Delete, within: Launch Approval Draft }
+          - tap: { role: button, name: Remove, within: Remove Playbook }
+          - type: Launch Approval Draft
+            into: { role: searchbox, name: Search playbooks, placeholder: Search }
+        expect:
+          shows:
+            - { role: searchbox, name: Search playbooks, placeholder: Search, value: Launch Approval Draft }
+            - { text: No playbooks match "Launch Approval Draft"., testId: success-message }
+          gone:
+            - { role: searchbox, name: Search playbooks, placeholder: Search }
+            - { role: heading, name: NDA Review }
+            - { text: 8 rules }
+            - { role: button, name: More actions for NDA Review, text: ⋯ }
+            - { role: heading, name: Launch Approval Draft }
+            - { text: 4 rules }
+            - { role: button, name: More actions for Launch Approval Draft, text: ⋯ }
+            - { role: heading, name: Vendor Onboarding }

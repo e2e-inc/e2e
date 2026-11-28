@@ -1,0 +1,27 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: control-inventory-a-right-click-opens-the-file-menu-and-rename-renames-the-file.lock.json
+
+test: control inventory › a right-click opens the file menu and Rename renames the file
+file: tests-agent/control-inventory.e2e.ts
+
+steps:
+  - act: rename report.pdf to summary.pdf; its menu opens on right-click
+    targets:
+      web:
+        at: /e/control-inventory
+        do:
+          - secondaryTap: { role: listitem, name: report.pdf, within: Files }
+          - secondaryTap: { text: report.pdf }
+          - tap: { role: menuitem, name: Rename, within: report.pdf }
+        expect:
+          shows:
+            - { role: status, name: File state, text: report.pdf renamed to summary.pdf }
+            - { text: summary.pdf }
+            - { role: listitem, name: summary.pdf }
+          gone:
+            - { role: status, name: File state, text: no menu open }
+            - { text: report.pdf }
+            - { role: listitem, name: report.pdf }

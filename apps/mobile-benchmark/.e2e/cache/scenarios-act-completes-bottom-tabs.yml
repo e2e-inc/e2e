@@ -1,0 +1,47 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-bottom-tabs.lock.json
+
+test: act completes Bottom Tabs
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: go to the Actions tab and complete the action there"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - tap: { role: tab, name: "⏷, Actions", testId: tab-actions, selector: id=tab-actions, within: Home }
+          - tap: { role: group, name: Complete action, testId: complete-action-button, selector: id=complete-action-button }
+        expect:
+          shows:
+            - { role: heading, name: Actions }
+            - { role: text, name: Action completed, testId: success-message }
+            - { role: text, name: Actions, states: [ selected ] }
+            - { role: text, name: ⏷, states: [ selected ] }
+            - { role: tab, name: "⏷, Home", testId: tab-home }
+            - { role: tab, name: "⏷, Actions", testId: tab-actions, states: [ selected ] }
+          gone:
+            - { role: heading, name: Home }
+            - { role: text, name: Go to the Actions tab and press the button there. }
+            - { role: text, name: Actions }
+            - { role: tab, name: "⏷, Home", testId: tab-home, states: [ selected ] }
+            - { role: tab, name: "⏷, Actions", testId: tab-actions }
+      ios-simulator:
+        at: dev.e2e.benchmark
+        do:
+          - tap: { role: button, name: "Actions, tab, 3 of 3", testId: tab-actions, selector: id=tab-actions }
+          - tap: { role: other, name: Complete action, testId: complete-action-button, selector: id=complete-action-button }
+        expect:
+          shows:
+            - { role: button, name: "Home, tab, 1 of 3", testId: tab-home }
+            - { role: button, name: "Actions, tab, 3 of 3", testId: tab-actions, states: [ selected ] }
+            - { role: text, name: Actions }
+            - { role: text, name: Action completed, testId: success-message }
+          gone:
+            - { role: button, name: "Home, tab, 1 of 3", testId: tab-home, states: [ selected ] }
+            - { role: button, name: "Actions, tab, 3 of 3", testId: tab-actions }
+            - { role: text, name: Home }
+            - { role: text, name: Go to the Actions tab and press the button there. }

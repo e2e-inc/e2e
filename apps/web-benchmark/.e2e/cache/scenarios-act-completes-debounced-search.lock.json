@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20debounced-search",
+  "entries": [
+    {
+      "key": "ed226f92f03c6086530e8eb4128d4f2a1c1403692d110633a0ef607f14be1e6d",
+      "target": "web",
+      "digest": "fff0d07c56d49e3387667ff556b9ba85e52b38f4352b67da9573da5d68e72e88",
+      "createdAt": "2026-10-04T08:31:33.402Z",
+      "instructionDigest": "e5044d8a420a21763ff0ba6ba21266a9cf45e9607dd3496c435089c8d757d4e8",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Searched for trail mix and selected exactly Trail Mix 500 g. The page confirms it was added to the cart.",
+      "endWaitMs": 12000
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-modal-flow.lock.json
+
+test: act completes Modal Flow
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: open the modal, continue, and confirm the alert that follows"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - tap: { role: group, name: Open modal, testId: open-modal-button, selector: id=open-modal-button }
+          - tap: { role: group, name: Continue, testId: continue-button, selector: id=continue-button, within: Benchmark modal }
+          - tap: { role: button, name: CONFIRM, testId: android:id/button1, selector: id=android:id/button1, within: CANCEL }
+        expect:
+          shows:
+            - { role: text, name: Flow completed, testId: success-message }
+          gone:
+            - { role: text, name: Open modal }
+            - { role: group, name: Open modal, testId: open-modal-button }
+      ios-simulator:
+        at: dev.e2e.benchmark / Modal Flow
+        do:
+          - tap: { role: other, name: Open modal, testId: open-modal-button, selector: id=open-modal-button }
+          - tap: { role: other, name: Continue, testId: continue-button, selector: id=continue-button }
+          - tap: { role: button, name: Confirm, within: Confirm action }
+        expect:
+          shows:
+            - { role: text, name: Flow completed, testId: success-message }
+          gone:
+            - { role: other, name: Open modal, testId: open-modal-button }

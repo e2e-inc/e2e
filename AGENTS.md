@@ -823,17 +823,20 @@ trees, on both platforms, without a device.
   repository's branches only, since a fork's has no key; the merge queue runs
   them, with the key, for every queued pull request the change reaches.
   Re-record with the package's `test:agent` and commit the changed entries in
-  the same pull request as the scenario change.
+  the same pull request as the scenario change. Each test's recordings are
+  one `<test>.yml` (reviewed: each step's `act`, then per target `do` and
+  `expect`) and a generated `<test>.lock.json` (keys and provenance,
+  `linguist-generated` in `.gitattributes`); the format is
+  `cache/recording-file.ts`, and a step keeps one recording per target.
   The web benchmark's agent job runs with `--strict-cache`, so a recording a
   change broke fails with `REPLAY_STALE` instead of quietly calling the model.
   That includes a change to the cache key (`REPLAY_POLICY_VERSION`, a new key
-  field): strict lists the file store and fails a step whose
+  field): strict reads the test's file in the file store and fails a step whose
   key misses while an entry recorded for the same step sits under another key
   (`cache/rekeyed.ts`). Only entries whose `recordedFor` names the whole step
-  (params digest, occurrence, agent) count; a lenient `read-write` replay
-  completes an older one. Such a change re-records every entry and deletes the
-  old ones in the same pull request. A step that was never recorded still runs
-  live. A strict run replays on retries too and never writes or deletes an
+  (params digest, occurrence, agent) count, which every lock entry does.
+  Such a change re-records every entry and deletes the old ones in the same
+  pull request. A step that was never recorded still runs live. A strict run replays on retries too and never writes or deletes an
   entry, whatever the mode.
   The web benchmark's entries are in. The mobile benchmark's iOS and Android
   entries are recorded on a Mac; Android replays with `--strict-cache`, iOS

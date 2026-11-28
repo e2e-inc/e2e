@@ -1,0 +1,32 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-gift-card-purchase.lock.json
+
+test: act completes gift-card-purchase
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: buy a gift card for friend@example.com and complete the purchase"
+    targets:
+      web:
+        at: /e/gift-card-purchase
+        do:
+          - tap: { role: button, name: gift_card_amount_option_undefined, text: $25, testId: amount-25 }
+          - type: friend@example.com
+            into: { role: textbox, name: "{{recipient_email_label}}", testId: recipient-input, placeholder: friend@example.com }
+          - tap: { role: button, name: btn_purchase_label, text: Buy gift card, testId: buy-button }
+        expect:
+          shows:
+            - { text: Gift card sent to friend@example.com, testId: success-message }
+            - { text: A $25.00 gift card is on its way. }
+          gone:
+            - { text: Send a digital gift card. Delivered by email within minutes. }
+            - { role: button, name: gift_card_amount_option_undefined, text: $10, testId: amount-10 }
+            - { role: button, name: gift_card_amount_option_undefined, text: $25, testId: amount-25 }
+            - { role: button, name: gift_card_amount_option_undefined, text: $50, testId: amount-50 }
+            - { role: textbox, name: "{{recipient_email_label}}", testId: recipient-input, placeholder: friend@example.com }
+            - { text: Total }
+            - { text: "Total: $NaN" }
+            - { role: button, name: btn_purchase_label, text: Buy gift card, testId: buy-button }

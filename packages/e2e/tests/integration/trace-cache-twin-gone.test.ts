@@ -51,9 +51,9 @@ function firstSetUp(calls: Calls): StepExecutor {
 }
 
 /** The recorded target of the entry each test wrote, by test title. */
-function recordedTargets(project: FixtureProject): Record<string, TraceTargetDescriptor | undefined> {
+async function recordedTargets(project: FixtureProject): Promise<Record<string, TraceTargetDescriptor | undefined>> {
   const targets: Record<string, TraceTargetDescriptor | undefined> = {};
-  for (const { entry } of readEntries(project)) {
+  for (const { entry } of await readEntries(project)) {
     const title = decodeURIComponent(entry.payload.recordedFor?.testId.split('::').at(-1) ?? '');
     const [first] = entry.payload.actions;
     targets[title] = first?.name === 'tap' ? first.target : undefined;
@@ -94,7 +94,7 @@ describe('trace cache: the recorded control is gone and its twin is left', () =>
   it('hands the step back with nothing pressed, with or without test ids', async () => {
     const first = await runExisting(project, options());
     expect(first.exitCode).toBe(0);
-    const targets = recordedTargets(project);
+    const targets = await recordedTargets(project);
     expect(targets['sets up without test ids']).toEqual({ role: 'button', name: 'Set up', position: { index: 0, of: 2 } });
     expect(targets['sets up by test id']).toMatchObject({ role: 'button', name: 'Set up', testId: 'setup-primary' });
 
@@ -180,7 +180,7 @@ test('removes both drafts', async ({ app, agent, screen }) => {
     expect((await runExisting(project, first.run)).exitCode).toBe(0);
     expect(first.calls[0]).toBe(1);
     // The second press was addressed from the look the first one ran from, so its count is marked.
-    const [entry] = readEntries(project);
+    const [entry] = await readEntries(project);
     expect(entry!.entry.payload.actions.map((action) => (action.name === 'tap' ? action.target : undefined))).toEqual([
       { role: 'button', name: 'Remove', position: { index: 0, of: 2 } },
       { role: 'button', name: 'Remove', position: { index: 1, of: 2 }, countedOnEarlierLook: true },
@@ -237,7 +237,7 @@ test('sets up both', async ({ app, agent, screen }) => {
       config: { tests: 'tests/**/*.e2e.ts', reporters: ['json'] as const, workers: 1, agents: { default: { executor: lookBetween } }, cache: 'read-write' as const },
     });
     expect(run.exitCode).toBe(0);
-    const [entry] = readEntries(project);
+    const [entry] = await readEntries(project);
     expect(entry!.entry.payload.actions.map((action) => (action.name === 'tap' ? action.target : undefined))).toEqual([
       { role: 'button', name: 'Set up', position: { index: 0, of: 2 } },
       { role: 'button', name: 'Set up', position: { index: 1, of: 2 } },
@@ -286,7 +286,7 @@ test('sets up and finishes', async ({ app, agent, screen }) => {
       config: { tests: 'tests/**/*.e2e.ts', reporters: ['json'] as const, workers: 1, agents: { default: { executor: oneLook } }, cache: 'read-write' as const },
     });
     expect(run.exitCode).toBe(0);
-    const [entry] = readEntries(project);
+    const [entry] = await readEntries(project);
     expect(entry!.entry.payload.actions.map((action) => (action.name === 'tap' ? action.target : undefined))).toEqual([
       { role: 'button', name: 'Set up', position: { index: 0, of: 2 } },
       { role: 'button', name: 'Done' },
@@ -338,7 +338,7 @@ test('scrolls and sets up', async ({ app, agent, screen }) => {
         },
       });
       expect(run.exitCode, JSON.stringify(run.report.run.errors)).toBe(0);
-      const [entry] = readEntries(project);
+      const [entry] = await readEntries(project);
       const tap = entry!.entry.payload.actions.find((action) => action.name === 'tap');
       expect(tap?.name === 'tap' ? tap.target : undefined).toEqual({ role: 'button', name: 'Set up', within: 'Not started', position: { index: 0, of: 2 } });
     } finally {
@@ -390,7 +390,7 @@ test('sets up twice', async ({ app, agent, screen }) => {
         },
       });
       expect(run.exitCode, JSON.stringify(run.report.run.errors)).toBe(0);
-      const [entry] = readEntries(project);
+      const [entry] = await readEntries(project);
       const last = entry!.entry.payload.actions.findLast((action) => action.name === 'tap');
       expect(last?.name === 'tap' ? last.target : undefined).toMatchObject({ position: { index: 1, of: 2 }, countedOnEarlierLook: true });
     } finally {

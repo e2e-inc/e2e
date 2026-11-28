@@ -9,8 +9,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startFixtureApp, type FixtureApp } from '../helpers/fixture-app.ts';
 import { nodeIdFor } from '../helpers/fake-loop-model.ts';
 import { createProject, resultByTitle, runExisting, runProject, type FixtureProject, type RunOutcome } from '../helpers/run-project.ts';
-import { writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { readEntries } from '../helpers/trace-cache.ts';
+import { FileCacheStore, MAX_CACHE_WIRE_BYTES } from '@e2e-dev/core/lib/cache/store';
 import type { StepExecutor, StepExecutorContext } from '@e2e-dev/core/lib/agent/executor';
 
 const TITLE = 'screenshots every action';
@@ -142,7 +143,7 @@ function screenshotLabels(outcome: RunOutcome, title: string): string[] {
  * executor, recording and then replaying; `between` edits the recording
  * before the replay.
  */
-async function recordThenReplay(app: FixtureApp, suite: string, between?: (project: FixtureProject) => void): Promise<{
+async function recordThenReplay(app: FixtureApp, suite: string, between?: (project: FixtureProject) => void | Promise<void>): Promise<{
   project: FixtureProject;
   recorded: RunOutcome;
   replayed: RunOutcome;
@@ -158,7 +159,7 @@ async function recordThenReplay(app: FixtureApp, suite: string, between?: (proje
     },
   });
   const recorded = await runExisting(project, options({ calls: 0 }));
-  between?.(project);
+  await between?.(project);
   const second: ExecutorRecord = { calls: 0 };
   const replayed = await runExisting(project, options(second));
   return { project, recorded, replayed, second };
@@ -244,7 +245,7 @@ test('captures point geometry', async ({ app, agent, screen }) => {
       const recorded = await runExisting(project, options);
       expect(resultByTitle(recorded, 'captures point geometry').attempts.at(-1)?.error).toBeUndefined();
       expect(resultByTitle(recorded, 'captures point geometry').status).toBe('passed');
-      expect(readEntries(project)[0]?.entry.payload.actions).toMatchObject([
+      expect((await readEntries(project))[0]?.entry.payload.actions).toMatchObject([
         { name: 'hoverAt', point: { x: 0, y: 0 } },
         { name: 'tapAt', point: { x: 300, y: 60 } },
         { name: 'dragAt', from: { point: { x: 300, y: 60 } }, to: { point: { x: 200, y: 100 } } },
@@ -263,7 +264,7 @@ test('captures point geometry', async ({ app, agent, screen }) => {
     try {
       expect(resultByTitle(recorded, 'checks only inside the hook').status).toBe('passed');
       expect(resultByTitle(replayed, 'checks only inside the hook').status).toBe('passed');
-      expect(readEntries(project)).toEqual([]);
+      expect((await readEntries(project))).toEqual([]);
       expect(second.calls).toBe(1);
     } finally {
       project.cleanup();
@@ -274,20 +275,21 @@ test('captures point geometry', async ({ app, agent, screen }) => {
     let recording = '';
     // The second recorded tap no longer finds its button: the replay taps
     // once and hands the step to the executor, whose tap the hook rejects.
-    const { project, replayed } = await recordThenReplay(app, THROW_AFTER_HAND_OFF_SUITE, (recorded) => {
-      const entries = readEntries(recorded);
+    const { project, replayed } = await recordThenReplay(app, THROW_AFTER_HAND_OFF_SUITE, async (recorded) => {
+      const entries = (await readEntries(recorded));
       expect(entries).toHaveLength(1);
-      const { file, entry } = entries[0]!;
+      const { keyHash, entry } = entries[0]!;
       const [first, second] = entry.payload.actions;
       if (first === undefined || second?.name !== 'tap') throw new Error(`expected two taps, got ${JSON.stringify(entry.payload.actions)}`);
       const payload = { ...entry.payload, actions: [first, { ...second, target: { ...second.target, name: 'No Such Button' } }] };
-      recording = JSON.stringify({ ...entry, payload }, null, 2);
-      writeFileSync(file, recording, 'utf8');
+      const store = new FileCacheStore({ directory: path.join(recorded.dir, '.e2e', 'cache'), maxBytes: MAX_CACHE_WIRE_BYTES, writable: true });
+      expect(await store.write(keyHash, payload)).toBeDefined();
+      recording = JSON.stringify((await readEntries(recorded)).map((stored) => stored.entry), null, 2);
     });
     try {
       const attempt = resultByTitle(replayed, 'throws after a hand-off').attempts.at(-1)!;
       expect(attempt.error?.message).toContain('agent.act onAction failed: hook broke after the hand-off');
-      expect(readEntries(project).map(({ entry }) => JSON.stringify(entry, null, 2))).toEqual([recording]);
+      expect(JSON.stringify((await readEntries(project)).map((stored) => stored.entry), null, 2)).toBe(recording);
     } finally {
       project.cleanup();
     }

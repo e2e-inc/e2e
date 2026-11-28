@@ -1,0 +1,58 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Product%20Catalog",
+  "entries": [
+    {
+      "key": "daf3ae5af4da333cba6ca81767518806f7fb143a4d1d14bb7133008cfdeed82c",
+      "target": "android-emulator",
+      "digest": "bb5d9862588b284d14d1c8964604bdb99a998567a47c92404a795517ace6eb26",
+      "createdAt": "2026-10-09T08:20:40.923Z",
+      "instructionDigest": "df6d87ed0275359863ecaf58d94669a7d2b9881afd75c25cb6af7327bb4e052d",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Opened the specific Trail Mix 500 g product, increased quantity to 2, added it to the cart, and opened the cart. The cart shows “2 × Trail Mix 500 g” and “Order ready: 2 × Trail Mix 500 g”.",
+      "endWaitMs": 12000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "d8c30c8431ed7a42fcfdbcc80bc83aa3c2137125b25974b9015774f92c9c1343",
+      "target": "ios-simulator",
+      "digest": "5a5a1ce43ebd92296a4d4dd2d9dda7cd60db3037b9cd139f751430501e99b1d8",
+      "createdAt": "2026-10-15T16:03:30.672Z",
+      "instructionDigest": "df6d87ed0275359863ecaf58d94669a7d2b9881afd75c25cb6af7327bb4e052d",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Opened the exact Trail Mix 500 g product, increased its quantity to 2, added it to the cart, and opened the cart. The cart shows “2 × Trail Mix 500 g” and “Order ready: 2 × Trail Mix 500 g”.",
+      "endWaitMs": 13000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

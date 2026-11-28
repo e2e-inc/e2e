@@ -5,9 +5,9 @@
  * step performed, each with a durable target descriptor and secret-free,
  * verbatim input — never model output, never plaintext secrets. An entry is
  * deliberately small: a schema version, when it was written, and the trace
- * with the provenance it had. It does not repeat its own key: the file name
- * is the key digest and a reader only ever opens the digest of the key it
- * just computed.
+ * with the provenance it had. It does not repeat its own key: a store files
+ * it under the key (the file store, in its test's YAML and lock, as
+ * `recording-file.ts` lays out).
  *
  * Actions are a discriminated union: each variant carries exactly the typed
  * input its grammar action needs, so validation in `trace-read.ts` is the
@@ -18,7 +18,7 @@
 
 import type { KeyModifier } from '../engine/contract.ts';
 import { timestamp } from '../internal/ids.ts';
-import type { ScrollDirection } from '../types.ts';
+import type { JsonValue, ScrollDirection } from '../types.ts';
 import { bound } from '../internal/text.ts';
 import type { RecordedModel } from './trace-fields.ts';
 
@@ -32,6 +32,16 @@ export const MAX_TRACE_ACTIONS = 50;
 /** Prose caps keep an entry a receipt, not a transcript. */
 export const MAX_TRACE_SUMMARY_CHARS = 300;
 export const MAX_TRACE_DESCRIPTOR_CHARS = 300;
+
+/**
+ * Cap on the test id an entry keeps. The id is the test file's path and its
+ * titles, percent-encoded: a title of up to 512 UTF-8 bytes can take 1,536
+ * characters, so a test titled in Japanese or Korean, a few `describe`s
+ * deep, runs far past the descriptor cap. The file store names and groups a
+ * test's recordings by it, and two tests must not meet in one cut; this
+ * holds dozens of such titles.
+ */
+export const MAX_TRACE_TEST_ID_CHARS = 65_536;
 
 /**
  * Cap on verbatim replay inputs (typed text, URLs, option labels). Inputs are
@@ -112,7 +122,23 @@ export interface TraceProvenance {
    * share the digest only when their names differ in a secret value alone.
    */
   readonly identityDigest?: string;
+  /**
+   * The instruction as the test wrote it, redacted and bounded, so a
+   * reviewer reads the step it records instead of `instructionDigest`.
+   * Never replay input: the digest is what the key holds.
+   */
+  readonly instruction?: string;
+  /**
+   * The step's params as the key digests them (`paramsDigest`): projected,
+   * so a secret is its name, with a placeholder for each `unique()` value,
+   * then redacted. Absent when there were none, or when they are longer than
+   * an entry keeps (`MAX_TRACE_PARAMS_CHARS`).
+   */
+  readonly params?: Readonly<Record<string, JsonValue>>;
 }
+
+/** Longest the canonical JSON of a step's params may be for an entry to keep them. */
+export const MAX_TRACE_PARAMS_CHARS = 4_096;
 
 /**
  * How a recorded action addressed its node, independent of observation ids.

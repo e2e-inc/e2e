@@ -341,6 +341,7 @@ docs/integrations/index.mdx (online: https://e2e.com/docs/integrations).
 
 - `npx e2e run tests/example.e2e.ts` passes against the app.
 - `package.json` has a script such as `"test:e2e": "e2e run"`.
-- `.gitignore` lists the `.e2e/` outputs (init adds them); drop the
-  `.e2e/cache/` line to commit replays.
+- `.gitignore` lists the `.e2e/` outputs (init adds them); to commit
+  replays, replace the `.e2e/cache/` line with `.e2e/cache/.*` and
+  `.e2e/cache/*.tmp`, the files a writer works with.
 - CI runs the whole suite, agent steps included, on PRs; see `running`.

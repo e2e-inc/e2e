@@ -46,6 +46,7 @@ export type {
   ActionTrace,
   RecordedAction,
   TraceEntry,
+  TraceProvenance,
   TraceTargetDescriptor,
 } from './cache/trace.ts';
 

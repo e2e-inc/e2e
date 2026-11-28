@@ -1,0 +1,52 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-async-states.lock.json
+
+test: act completes Async States
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: wait for the screen to load, scroll up on the reward area to refresh it, then claim the reward"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - tool: swipe
+          - tool: swipe
+          - tool: swipe
+          - tool: swipe
+          - back
+          - tool: swipe
+          - back
+          - scroll: up
+            on: { role: group, testId: reward-scroll, selector: id=reward-scroll, within: Pull down to refresh and reveal your reward }
+            spans: 0.8821
+          - tap: { role: group, name: Claim reward, testId: claim-button, selector: id=claim-button }
+        expect:
+          shows:
+            - { role: text, name: Reward claimed, testId: success-message }
+            - { role: group, testId: reward-scroll }
+          gone:
+            - { role: text, name: Loading… }
+            - { role: group, testId: initial-loading }
+      ios-simulator:
+        at: dev.e2e.benchmark / Async States
+        do:
+          - tool: swipe
+          - tool: swipe
+          - tap: { role: other, name: Claim reward, testId: claim-button, selector: id=claim-button }
+        expect:
+          shows:
+            - { role: other, name: "Vertical scroll bar, 1 page", value: 0% }
+            - { role: other, name: "Horizontal scroll bar, 1 page", value: 0% }
+            - { role: other, name: "Vertical scroll bar, 1 page" }
+            - { role: other, name: Reward claimed, testId: reward-scroll }
+            - { role: scroll-view, name: Reward claimed }
+            - { role: text, name: Reward claimed, testId: success-message }
+          gone:
+            - { role: status, name: In progress, value: "1" }
+            - { role: text, name: Loading… }
+            - { role: other, name: Loading… }
+            - { role: other, name: In progress }

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { createAgentCacheContext, settleStagedTraces } from '@e2e-dev/core/lib/cache/context';
 import { recordedProvenance } from '@e2e-dev/core/lib/cache/recorder';
 import { FileCacheStore } from '@e2e-dev/core/lib/cache/store';
-import { buildTraceEntry } from '@e2e-dev/core/lib/cache/trace';
+import { buildTraceEntry, MAX_TRACE_TEST_ID_CHARS } from '@e2e-dev/core/lib/cache/trace';
 import { readTraceEntry } from '@e2e-dev/core/lib/cache/trace-read';
 import { SecretLedger } from '@e2e-dev/core/lib/internal/redact';
 import { resolveConfig } from '../../src/config/resolve-run.ts';
@@ -242,6 +242,25 @@ describe('settleStagedTraces', () => {
     expect(context.staged).toHaveLength(0);
   });
 
+  it('masks a secret the run learned after the step in what it writes', async () => {
+    const store = memoryStore();
+    const secrets = new SecretLedger();
+    const step = { ...STEP, instruction: 'sign in as alice@example.com', params: { account: 'alice@example.com' } };
+    const context = contextWith(store);
+    context.staged.push({
+      kind: 'write',
+      keyHash: KEY_A,
+      trace: { ...trace('signed in'), recordedFor: recordedProvenance(step, secrets.redact) },
+      stepIndex: 1,
+      settledProvenance: () => recordedProvenance(step, secrets.redact),
+    });
+    // A later fill resolves the address from a credential provider, before the attempt settles.
+    secrets.register('account', 'alice@example.com');
+    await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
+    expect(store.entries.get(KEY_A)).toBeDefined();
+    expect(store.entries.get(KEY_A)).not.toContain('alice@example.com');
+  });
+
   it('writes nothing when no verification step ever passed', async () => {
     const store = memoryStore();
     const context = contextWith(store);
@@ -281,7 +300,8 @@ describe('settleStagedTraces', () => {
     try {
       const store = new FileCacheStore({ directory, maxBytes: 1_048_576, writable: true });
       await store.write(KEY_B, trace('stale trailing flow'));
-      const entryPath = path.join(directory, `${KEY_B}.json`);
+      // The example test's id names its recording file `a.yml`.
+      const entryPath = path.join(directory, 'a.yml');
       const before = await readFile(entryPath, 'utf8');
       await chmod(directory, 0o500);
       const context = contextWith(store);
@@ -360,9 +380,18 @@ describe('settleStagedTraces', () => {
     expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload).toEqual({ ...recorded, recordedFor: STEP });
   });
 
+  it('keeps a number in the params as redacted text when its digits are a secret', () => {
+    const ledger = new SecretLedger();
+    ledger.register('pin', '246810');
+    const recordedFor = recordedProvenance({ ...STEP, params: { pin: 246810, count: 3, nested: [246810] } }, (text) => ledger.redact(text));
+    expect(JSON.stringify(recordedFor.params)).not.toContain('246810');
+    expect(recordedFor.params).toMatchObject({ count: 3 });
+    expect(typeof recordedFor.params?.['pin']).toBe('string');
+  });
+
   it('writes the identity digest into a confirmed kept entry that cut a long test id before entries kept one', async () => {
     const store = memoryStore();
-    const long = { ...STEP, testId: `${STEP.testId}${'x'.repeat(400)}` };
+    const long = { ...STEP, testId: `${STEP.testId}${'x'.repeat(MAX_TRACE_TEST_ID_CHARS + 100)}` };
     const recordedFor = recordedProvenance(long, (text) => text);
     const { identityDigest, ...legacy } = recordedFor;
     expect(identityDigest).toMatch(/^[a-f0-9]{64}$/u);
@@ -375,7 +404,7 @@ describe('settleStagedTraces', () => {
 
   it('leaves a confirmed kept entry that already keeps the step\'s identity digest exactly as stored', async () => {
     const store = memoryStore();
-    const recordedFor = recordedProvenance({ ...STEP, testId: `${STEP.testId}${'x'.repeat(400)}` }, (text) => text);
+    const recordedFor = recordedProvenance({ ...STEP, testId: `${STEP.testId}${'x'.repeat(MAX_TRACE_TEST_ID_CHARS + 100)}` }, (text) => text);
     expect(recordedFor.identityDigest).toMatch(/^[a-f0-9]{64}$/u);
     const stored = JSON.stringify(buildTraceEntry({ ...trace('replayed flow'), recordedFor }));
     store.entries.set(KEY_A, stored);
@@ -396,7 +425,7 @@ describe('settleStagedTraces', () => {
 
   it('replaces the identity digest of a confirmed kept entry whose names redact differently now', async () => {
     const store = memoryStore();
-    const step = { ...STEP, testId: `${STEP.testId}${'x'.repeat(400)} as hunter2` };
+    const step = { ...STEP, testId: `${STEP.testId}${'x'.repeat(MAX_TRACE_TEST_ID_CHARS + 100)} as hunter2` };
     store.entries.set(KEY_A, JSON.stringify(buildTraceEntry({ ...trace('replayed flow'), recordedFor: recordedProvenance(step, (text) => text) })));
     const secrets = new SecretLedger();
     secrets.register('password', 'hunter2');
@@ -409,7 +438,7 @@ describe('settleStagedTraces', () => {
 
   it('drops the identity digest of a confirmed kept entry whose names no longer need one', async () => {
     const store = memoryStore();
-    const step = { ...STEP, testId: `${'x'.repeat(290)}hunter2` };
+    const step = { ...STEP, testId: `${'x'.repeat(MAX_TRACE_TEST_ID_CHARS - 10)}hunter2` };
     const secrets = new SecretLedger();
     secrets.register('password', 'hunter2');
     const recorded = recordedProvenance(step, secrets.redact);
@@ -420,6 +449,22 @@ describe('settleStagedTraces', () => {
     context.staged.push({ kind: 'keep', keyHash: KEY_A, stepIndex: 1, recordedFor });
     await settleStagedTraces(context, { lastVerifiedStepIndex: 2, implicatesUnconfirmed: true });
     expect(readTraceEntry(JSON.parse(store.entries.get(KEY_A)!))?.payload.recordedFor?.identityDigest).toBeUndefined();
+  });
+
+  it("goes on to a custom store's next write when one throws before it returns", async () => {
+    const store = memoryStore();
+    const write = store.write.bind(store);
+    let calls = 0;
+    store.write = (keyHash, recorded) => {
+      calls += 1;
+      if (calls === 1) throw new Error('write unavailable');
+      return write(keyHash, recorded);
+    };
+    const context = contextWith(store);
+    context.staged.push({ kind: 'write', keyHash: KEY_A, trace: trace('first'), stepIndex: 0 });
+    context.staged.push({ kind: 'write', keyHash: KEY_B, trace: trace('second'), stepIndex: 1 });
+    const writes = await settleStagedTraces(context, { lastVerifiedStepIndex: 5, implicatesUnconfirmed: false });
+    expect([...writes]).toEqual([[0, 'not-written'], [1, 'saved']]);
   });
 
   it('writes what was confirmed and leaves every unconfirmed entry as stored when the failure implicates nothing', async () => {
@@ -466,7 +511,7 @@ describe('settleStagedTraces', () => {
 
 describe('recorded provenance', () => {
   it('takes the identity digest over the redacted names, so it never depends on a secret value', () => {
-    const long = `${STEP.testId}${'x'.repeat(400)}`;
+    const long = `${STEP.testId}${'x'.repeat(MAX_TRACE_TEST_ID_CHARS + 100)}`;
     const digestWith = (value: string) => {
       const secrets = new SecretLedger();
       secrets.register('password', value);
@@ -480,7 +525,7 @@ describe('recorded provenance', () => {
     const recorded = (value: string) => {
       const secrets = new SecretLedger();
       secrets.register('password', value);
-      return recordedProvenance({ ...STEP, testId: `${STEP.testId}${'x'.repeat(400)}`, [field]: `staging-${value}` }, secrets.redact);
+      return recordedProvenance({ ...STEP, testId: `${STEP.testId}${'x'.repeat(MAX_TRACE_TEST_ID_CHARS + 100)}`, [field]: `staging-${value}` }, secrets.redact);
     };
     expect(recorded('hunter2')[field]).not.toContain('hunter2');
     expect(recorded('hunter2').identityDigest).toMatch(/^[a-f0-9]{64}$/u);
@@ -490,8 +535,8 @@ describe('recorded provenance', () => {
   it('measures the redacted names, so a name a secret makes longer than an entry keeps gets a digest', () => {
     const secrets = new SecretLedger();
     secrets.register('password', 'hunter2');
-    // Under 300 characters as written, over 300 once `hunter2` is redacted.
-    const variant = (title: string) => recordedProvenance({ ...STEP, testId: `${'x'.repeat(280)} hunter2 ${title}` }, secrets.redact);
+    // Within the length an entry keeps as written, over it once `hunter2` is redacted.
+    const variant = (title: string) => recordedProvenance({ ...STEP, testId: `${'x'.repeat(MAX_TRACE_TEST_ID_CHARS - 20)} hunter2 ${title}` }, secrets.redact);
     const [first, second] = [variant('first'), variant('second')];
     expect(first.testId).toBe(second.testId);
     expect(first.identityDigest).toMatch(/^[a-f0-9]{64}$/u);

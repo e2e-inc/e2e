@@ -456,7 +456,7 @@ describe('e2e/core', { timeout: 60_000 }, () => {
         await session.close();
         expect(brain.calls).toBe(1);
       }
-      expect(readdirSync(cacheDir, { recursive: true }).filter((file) => String(file).endsWith('.json'))).toHaveLength(1);
+      expect(readdirSync(cacheDir, { recursive: true }).filter((file) => String(file).endsWith('.lock.json'))).toHaveLength(1);
     });
 
     it('replays a recording another host made, since a host\'s token is not part of the key', async () => {
@@ -473,8 +473,8 @@ describe('e2e/core', { timeout: 60_000 }, () => {
         await opened.close();
       }
       expect(brain.calls).toBe(1);
-      const entry = readdirSync(cacheDir, { recursive: true }).find((file) => String(file).endsWith('.json'));
-      expect(readFileSync(path.join(cacheDir, String(entry)), 'utf8')).toMatch(/"targetId":\s*"fake"/);
+      // The cacheKey names the recording file; its lock says which target made the recording.
+      expect(readFileSync(path.join(cacheDir, 'core-checkout.lock.json'), 'utf8')).toMatch(/"target":\s*"fake"/);
     });
 
     it('keeps a confirmed recording when the host closes the session, and after a failure the program caught', async () => {
@@ -488,7 +488,7 @@ describe('e2e/core', { timeout: 60_000 }, () => {
       await session.screen.getByRole('button', 'Pay now').waitFor();
       await expect(session.screen.getByRole('button', 'Missing').waitFor({ timeout: 100 })).rejects.toMatchObject({ code: 'LOCATOR_NOT_FOUND' });
       await opened.close();
-      expect(readdirSync(cacheDir, { recursive: true }).filter((file) => String(file).endsWith('.json'))).toHaveLength(1);
+      expect(readdirSync(cacheDir, { recursive: true }).filter((file) => String(file).endsWith('.lock.json'))).toHaveLength(1);
     });
 
     it('drops only what a caught agent failure found unconfirmed, and evicts nothing when a session closes before its check', async () => {
@@ -500,7 +500,7 @@ describe('e2e/core', { timeout: 60_000 }, () => {
           : brain.runStep(context),
       };
       const cacheDir = path.join(dir, 'cache');
-      const recordings = () => readdirSync(cacheDir, { recursive: true }).filter((file) => String(file).endsWith('.json'));
+      const recordings = () => readdirSync(cacheDir, { recursive: true }).filter((file) => String(file).endsWith('.lock.json'));
       const opened = await host(createFakeEngine({ scene: shop }).engine, { app: FAKE_APP });
       const round = async (steps: (agent: ReturnType<typeof agentOn>, session: Awaited<ReturnType<typeof opened.newSession>>) => Promise<void>) => {
         const session = await opened.newSession();

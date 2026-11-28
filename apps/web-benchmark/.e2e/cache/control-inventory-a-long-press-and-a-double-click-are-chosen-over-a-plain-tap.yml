@@ -1,0 +1,24 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: control-inventory-a-long-press-and-a-double-click-are-chosen-over-a-plain-tap.lock.json
+
+test: control inventory › a long press and a double click are chosen over a plain tap
+file: tests-agent/control-inventory.e2e.ts
+
+steps:
+  - act: long-press the Hold me button until its state reads long-pressed, then double-click the Double-click me button
+    targets:
+      web:
+        at: /e/control-inventory
+        do:
+          - longPress: { role: button, name: Hold me, within: Gestures }
+          - doubleTap: { role: button, name: Double-click me, within: Gestures }
+        expect:
+          shows:
+            - { role: status, name: Hold state, text: long-pressed }
+            - { role: status, name: Double-click state, text: double-clicked }
+          gone:
+            - { role: status, name: Hold state, text: none }
+            - { role: status, name: Double-click state, text: none }

@@ -1,0 +1,27 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-filters-the-list-and-the-url-carries-the-filter.lock.json
+
+test: act filters the list and the URL carries the filter
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: filter the product list down to the mug
+    targets:
+      web:
+        from: /e/filter-deep-link
+        to: /e/filter-deep-link?q=mug
+        do:
+          - type: mug
+            into: { role: textbox, name: Filter products, testId: filter-input, placeholder: Filter products }
+        expect:
+          shows:
+            - { role: textbox, name: Filter products, testId: filter-input, placeholder: Filter products, value: mug }
+          gone:
+            - { role: textbox, name: Filter products, testId: filter-input, placeholder: Filter products }
+            - { role: listitem, name: Trail Backpack }
+            - { role: listitem, name: Steel Water Bottle }
+            - { role: listitem, name: Merino Hiking Socks }
+            - { role: listitem, name: Camp Lantern }

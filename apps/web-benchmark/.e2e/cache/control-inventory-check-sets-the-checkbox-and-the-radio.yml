@@ -1,0 +1,26 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: control-inventory-check-sets-the-checkbox-and-the-radio.lock.json
+
+test: control inventory › check sets the checkbox and the radio
+file: tests-agent/control-inventory.e2e.ts
+
+steps:
+  - act: agree to the terms and pick the Medium size
+    targets:
+      web:
+        at: /e/control-inventory
+        do:
+          - check: { role: checkbox, name: Agree to terms, within: Toggles }
+          - check: { role: radio, name: Medium, within: Size }
+        expect:
+          shows:
+            - { role: status, name: Toggles state, text: "terms agreed, size Medium" }
+            - { role: checkbox, name: Agree to terms, states: [ checked ] }
+            - { role: radio, name: Medium, states: [ checked ] }
+          gone:
+            - { role: status, name: Toggles state, text: "terms not agreed, size unset" }
+            - { role: checkbox, name: Agree to terms }
+            - { role: radio, name: Medium }

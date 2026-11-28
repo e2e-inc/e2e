@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20overlay-trap",
+  "entries": [
+    {
+      "key": "3aa75b32cb016b70702dbf3853d17fb70dcd7fca5274a024199db5d58a671d00",
+      "target": "web",
+      "digest": "39be0743622a69d4f3478874999e88c5f8229a60680068af2d12017a2195b8bf",
+      "createdAt": "2026-10-04T08:31:11.942Z",
+      "instructionDigest": "6705af9140f936652f275b785be7e42b157ba15b3fa16eefba2c51d6f3fdcd1b",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Dismissed the cookie banner, closed the overlay, and pressed Continue. The page shows “You made it past the overlay.”",
+      "endWaitMs": 12000
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Permission%20Prompt",
+  "entries": [
+    {
+      "key": "f50a29e19e742730567db09904ee11673498a119cb2ef0da68c08ab6834873ec",
+      "target": "android-emulator",
+      "digest": "b1dbd10d4411be79ec07c4be328e7a2bea1e7c5b137f276b8dd3cd2545cefbc0",
+      "createdAt": "2026-10-09T07:00:28.966Z",
+      "instructionDigest": "b0942b32f51f5f05d38db2a1978624dad1187acfb8aca674dbbb09cc9c29ac87",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Requested microphone access and allowed it using “While using the app” in the system dialog. The app now displays “Microphone enabled.”",
+      "endWaitMs": 12000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "c88b3e2074686fa95172580baee395a9efd45c3ce815d8fdfc695293c1f94228",
+      "target": "ios-simulator",
+      "digest": "b3fa0180876a4890f7d36e38f879b77833aeba17278a0221b8f5b41ae79132d4",
+      "createdAt": "2026-10-15T16:28:56.782Z",
+      "instructionDigest": "b0942b32f51f5f05d38db2a1978624dad1187acfb8aca674dbbb09cc9c29ac87",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Requested microphone access and selected Allow in the system dialog. The app now shows “Microphone enabled.”",
+      "endWaitMs": 13000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/control-inventory.e2e.ts::control%20inventory::check%20sets%20the%20checkbox%20and%20the%20radio",
+  "entries": [
+    {
+      "key": "1f2ad4f61f8c80341b1a181b5f505c12fb2e7562c4c888ec21d4d3edf90d3a50",
+      "target": "web",
+      "digest": "c44fb8473045ae7f0c27835459458dbe7eaa57ecb2fa05c54fa028a3a83bdb36",
+      "createdAt": "2026-10-04T08:28:55.544Z",
+      "instructionDigest": "31e69bd3b8b58acb08fa60eaea2976e3271b633b840b8ffca9440e21488961fc",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Agreed to the terms and selected Medium. The Toggles state confirms “terms agreed, size Medium.”",
+      "endWaitMs": 12000
+    }
+  ]
+}

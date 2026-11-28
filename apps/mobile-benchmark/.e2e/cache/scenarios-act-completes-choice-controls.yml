@@ -1,0 +1,58 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-choice-controls.lock.json
+
+test: act completes Choice Controls
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: order a Medium pizza with exactly Cheese and Olives, enable rush delivery, dismiss the keyboard, and place the order"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - check: { role: checkbox, name: Cheese, testId: topping-cheese, selector: id=topping-cheese, within: "Order a Medium pizza with exactly Cheese and Olives, enable rush delivery, then…" }
+          - check: { role: checkbox, name: Olives, testId: topping-olives, selector: id=topping-olives, within: "Order a Medium pizza with exactly Cheese and Olives, enable rush delivery, then…" }
+          - check: { role: switch, testId: rush-delivery, selector: id=rush-delivery, within: "Order a Medium pizza with exactly Cheese and Olives, enable rush delivery, then…" }
+          - tap: { role: radio, name: Medium, testId: size-medium, selector: id=size-medium, within: "Order a Medium pizza with exactly Cheese and Olives, enable rush delivery, then…" }
+          - tap: { role: textbox, name: Ring the doorbell twice, testId: delivery-notes, placeholder: Ring the doorbell twice, selector: id=delivery-notes, within: "Order a Medium pizza with exactly Cheese and Olives, enable rush delivery, then…" }
+          - dismissKeyboard
+          - tap: { role: group, name: Place order, testId: place-order, selector: id=place-order, within: "Order a Medium pizza with exactly Cheese and Olives, enable rush delivery, then…" }
+        expect:
+          shows:
+            - { role: text, name: "Order placed: Medium with Cheese, Olives (rush)", testId: success-message }
+          gone:
+            - { role: text, name: "Order a Medium pizza with exactly Cheese and Olives, enable rush delivery, then place the order (dismiss the keyboard first)." }
+            - { role: text, name: Size }
+            - { role: text, name: Small }
+            - { role: text, name: Medium }
+            - { role: text, name: Large }
+            - { role: text, name: Toppings }
+            - { role: text, name: Cheese }
+            - { role: text, name: Olives }
+      ios-simulator:
+        at: dev.e2e.benchmark / Choice Controls
+        do:
+          - check: { role: checkbox, name: Cheese, testId: topping-cheese, selector: id=topping-cheese }
+          - check: { role: checkbox, name: Olives, testId: topping-olives, selector: id=topping-olives }
+          - check: { role: switch, name: "0", testId: rush-delivery, selector: id=rush-delivery }
+          - tap: { role: radio, name: Medium, testId: size-medium, selector: id=size-medium }
+          - tap: { role: textbox, testId: delivery-notes, placeholder: Ring the doorbell twice, selector: id=delivery-notes }
+          - tap: { role: checkbox, name: "✓, Mushrooms", testId: topping-mushrooms, selector: id=topping-mushrooms }
+          - tap: { role: button, name: return, testId: Return, selector: id=Return }
+          - tap: { role: other, name: Place order, testId: place-order, selector: id=place-order }
+        expect:
+          shows:
+            - { role: other, name: "Order placed: Medium with Cheese, Olives (rush)" }
+            - { role: text, name: "Order placed: Medium with Cheese, Olives (rush)", testId: success-message }
+          gone:
+            - { role: text, name: "Order a Medium pizza with exactly Cheese and Olives, enable rush delivery, then place the order (dismiss the keyboard first)." }
+            - { role: text, name: Size }
+            - { role: radio, name: Small, testId: size-small }
+            - { role: radio, name: Medium, testId: size-medium }
+            - { role: radio, name: Large, testId: size-large }
+            - { role: text, name: Toppings }
+            - { role: checkbox, name: Cheese, testId: topping-cheese }
+            - { role: checkbox, name: Olives, testId: topping-olives }

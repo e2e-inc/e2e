@@ -82,7 +82,7 @@ describe('trace cache: a node only a test id minted per node identifies', () => 
   it('records the effect without the minted id, and replays the next run, the click by the id\'s shape', async () => {
     const first = await runExisting(project, options());
     expect(first.exitCode).toBe(0);
-    const payloads = readEntries(project).map(({ entry }) => entry.payload);
+    const payloads = (await readEntries(project)).map(({ entry }) => entry.payload);
     const added = payloads.find((payload) => firstTapTarget(payload)?.name === 'Add node');
     expect(added?.endAnchors).toEqual([{ role: 'status', name: 'Node added' }]);
     const selected = payloads.find((payload) => firstTapTarget(payload)?.testId?.startsWith('rf__node-') === true);

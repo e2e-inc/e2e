@@ -65,7 +65,7 @@ In the JSON report, `step.cache.write` records what happened to the entry:
 | `unconfirmed` | Not saved because no verification check passed after the step. |
 | `evicted` | Deleted because the replay failed, needed repair, or wasn't confirmed before a failure. |
 | `no-change` | Not saved because no visible control or route changed (including steps that only touch a [cross-origin iframe](/browser#reach-into-an-iframe)). Such a step runs live on every run. |
-| `not-written` | Not saved because the cache store rejected it (for example, exceeding the size limit). |
+| `not-written` | Not saved because the cache store rejected it. The file store does when the test's file would go over the 1 MiB limit, or when it holds a recording the store can't read, which `npx e2e cache ls` names. |
 
 If a test fails partway through, e2e still saves any earlier steps that were
 already confirmed, and evicts the broken replay. To preserve setup steps
@@ -187,8 +187,9 @@ Each `act` step includes cache details in the
 | `missed` | `missed` | Ran live from the start. |
 
 When a step misses or hands off, the trace shows the reason and which action
-stopped. A `truncated` recording never replays, so the default reporter
-also says so on the step's line, on every run until the step changes:
+stopped. `step.cache.entry` is the entry's key, and the trace page names the
+test's recording file. A `truncated` recording never replays, so the default
+reporter also says so on the step's line, on every run until the step changes:
 
 ```text
    ✓ adds a note > agent.act "Add a note to the first row" 9.41s · 3 model calls · not replayed: truncated
@@ -198,7 +199,7 @@ also says so on the step's line, on every run until the step changes:
 | --- | --- | --- |
 | `no-entry` | No recording matches this step and params. | The next verified pass will record it. |
 | `retry` | Retries run live (unless `--strict-cache` is on). | Nothing. |
-| `invalid-entry` | Recording is unreadable, too large, or from an incompatible schema. | Run `npx e2e cache clear`. |
+| `invalid-entry` | The test's recording file is unreadable (a merge conflict in its lock, say), over 1 MiB, or edited. The test records nothing until it reads again. | Undo the edit, or delete the test's `.yml` and `.lock.json`. `npx e2e cache ls` names the file and what's wrong. |
 | `truncated` | Recording hit a size or action limit ([see below](#limits-and-gaps)). | Split the step into smaller goals, or pass secrets as `Secret` handles. |
 | `wrong-context` | App started on a different route than recorded. | Open the same screen before the step. |
 | `target-not-found` | A recorded control didn't appear within 15 seconds. | If the UI changed, the next passing run updates the cache. Give unnamed controls labels or put them in named containers. |
@@ -247,10 +248,81 @@ separate digit boxes are a gap from the first character.
 
 ## What a recording holds
 
-Each entry is a JSON file under `.e2e/cache/` containing the recorded
-actions, target descriptions, typed text, a short summary, and the expected
-end-state checks. Recordings never store prompts, transcripts, screenshots,
-DOM trees, or secret values (secret fills store only the secret's name).
+Each test's recordings are one YAML file under `.e2e/cache/`, named for the
+test (`tests/admin/login.e2e.ts`'s `signs in` is `admin-login-signs-in.yml`),
+beside a generated `<test>.lock.json` that holds the cache keys and digests.
+Don't edit the lock. Review it only when it changes with no YAML change
+beside it: such a change can point a key at another step's recording. Each
+step sits under its instruction, then under each target it was recorded on:
+
+```yaml title=".e2e/cache/login-form-signs-in.yml"
+test: signs in
+file: tests/login-form.e2e.ts
+
+steps:
+  - act: log in with the given credentials
+    params:
+      email: tester@example.com
+      password: { kind: secret, name: account.password, purpose: password }
+    targets:
+      web:
+        at: /login
+        do:
+          - type: tester@example.com
+            into: { role: textbox, name: Email }
+          - secret: account.password
+            into: { role: textbox, name: Password, inputPurpose: password }
+          - tap: { role: button, name: Log in }
+        expect:
+          shows:
+            - { role: status, text: Logged in }
+          gone:
+            - { role: button, name: Log in }
+```
+
+- `do` is what a replay does, and `expect` is the end check: up to eight
+  controls that appeared and eight that went away. `at` is the route, or
+  `from` and `to` when the step moved.
+- A step keeps one recording per target; a recording under a new key
+  replaces it. Steps are in the order the test runs them, and a repeated
+  `act` shows `call: 2`, `call: 3`, and so on.
+- Review the YAML, but don't edit it. An edited recording reads as
+  `invalid-entry`, and the test records nothing until the edit is undone.
+  Meanwhile a run that evicts another of the test's recordings drops it
+  from the lock only, so it stops replaying. Its block stays in the YAML,
+  and `npx e2e cache ls` names it: delete it too, and the test records
+  again once the edit is undone.
+  A run rewrites the file when it records, so comments are lost. Moving
+  steps around is fine. A run killed while it writes leaves the pair for the
+  next `read-write` run, which finishes or drops that write before it reads.
+  Until then, `--strict-cache` and `npx e2e cache ls` read a step it was
+  recording again as `invalid-entry`, and a step it was adding as not
+  recorded, unless the test had no recordings yet: then its YAML has no
+  lock, and the test's steps read as `invalid-entry`.
+- To record a step again, or drop one whose instruction or params changed,
+  delete it from the YAML; the next run that records drops its lock entry.
+  To drop a test's recordings, delete both files: a YAML without its lock
+  doesn't read.
+- Two branches that each recorded into one test conflict in both files.
+  Keep both sides in each, then run `npx e2e cache ls` to check the file
+  reads. Where both sides recorded the same step under the same key, keep
+  one side's step in the YAML and its entry in the lock: a lock that lists
+  a key twice doesn't read.
+- A name is the test file's folders below the top one, the file's name
+  without `.e2e.ts`, and the test's titles. Two tests whose names come out
+  the same (`tests/login.e2e.ts` and `e2e/login.e2e.ts`, say) get one name
+  each: the second to record adds `--` and a hash of its test id. A name that leaves part of
+  the test out (a title in Japanese, say, since names use ASCII letters
+  and digits only, or a name cut at 80 characters) always ends in that
+  hash, so it doesn't depend on which test records first.
+- Recordings hold no prompts, conversations, screenshots, observed trees,
+  or secret values. A secret fill stores only the secret's name. A title
+  that spells a secret the run learns only mid-test is filed redacted, so
+  that test records again on every run, and an agent or target name that
+  spells one reads as `invalid-entry`. So does an agent context that spells
+  one: a step repeated on both sides of the fill that resolves it keeps one
+  recording of the two. Keep secret values out of titles, names, and
+  agent context.
 
 <Warning>
 Non-secret typed values are stored verbatim. Review cache diffs before
@@ -284,9 +356,14 @@ Point multiple checkouts or worktrees at one shared folder with
 `E2E_CACHE_DIR` or `--cache-dir`. Give each checkout the same `projectId`
 (or `package.json` `name`) so entries match across paths.
 
-- Writes are atomic so parallel runs can share the directory. Checkouts
-  share entries, so a failing run in any checkout evicts the shared entry
-  and different branches with the same app identity overwrite each other.
+- A write locks the test's files and replaces them atomically, so parallel
+  runs can share the directory. Checkouts share entries, so a failing run in
+  any checkout evicts the shared entry and different branches with the same
+  app identity overwrite each other.
+- A step keeps one recording per target, so runs of one target against two
+  environments (another `app.url` origin or `app.environment`) replace each
+  other's recordings, and fail as `REPLAY_STALE` under `--strict-cache`.
+  Give each environment its own target name.
 - While the override is set, a cache committed in `cache.dir` isn't read.
 - Keep one directory per project so `--strict-cache` doesn't confuse entries
   from another repo.
@@ -300,8 +377,28 @@ E2E_CACHE_DIR=~/.cache/my-app/e2e npx e2e run
 <span id="commit-your-traces" />
 
 `e2e init` adds `.e2e/cache/` to `.gitignore`. To share recordings across
-your team and CI, remove that line and commit `.e2e/cache/`. CI defaults to
-`read-only`, so it replays committed entries without modifying them.
+your team and CI, replace that line with these two, which keep out the files
+a writer works with (a lock, a record of a write in progress, a temporary
+file a crash left), and commit `.e2e/cache/`:
+
+```text title=".gitignore"
+.e2e/cache/.*
+.e2e/cache/*.tmp
+```
+
+CI defaults to `read-only`, so it replays committed entries without
+modifying them. Review
+the `.yml` files in the pull request that records them. To fold the
+generated lock files in GitHub diffs, add this line to `.gitattributes`:
+
+```text title=".gitattributes"
+**/.e2e/cache/*.lock.json linguist-generated=true
+```
+
+The reader refuses YAML tags, anchors, and unknown keys. It also refuses a
+lock entry edited to point a key at another step's recording, unless the
+entry says its step's act or params are redacted or cut, which it cannot
+check against the YAML.
 
 Local runs keep your git diff clean: e2e only rewrites a cache file when a
 step is recorded for the first time, heals after a UI change, gets evicted,
@@ -338,29 +435,34 @@ To refresh a stale recording:
 
 1. Run the test locally in `read-write` mode without `--strict-cache` (turn
    `cache.strict` off if your config sets it).
-2. Commit the updated cache file.
+2. Commit the updated `.yml` and `.lock.json`.
 
 ## Inspect the cache
 
 <CodeGroup>
 ```bash npm
-npx e2e cache ls      # one row per entry: test, target, instruction digest, age, actions
+npx e2e cache ls      # one row per recording: file, target, instruction, age, actions
 npx e2e cache stats   # entry count and size
 npx e2e cache clear   # delete every entry
 ```
 
 ```bash pnpm
-pnpm exec e2e cache ls      # one row per entry: test, target, instruction digest, age, actions
+pnpm exec e2e cache ls      # one row per recording: file, target, instruction, age, actions
 pnpm exec e2e cache stats   # entry count and size
 pnpm exec e2e cache clear   # delete every entry
 ```
 
 ```bash bun
-bunx e2e cache ls      # one row per entry: test, target, instruction digest, age, actions
+bunx e2e cache ls      # one row per recording: file, target, instruction, age, actions
 bunx e2e cache stats   # entry count and size
 bunx e2e cache clear   # delete every entry
 ```
 </CodeGroup>
+
+Entries an older `e2e` wrote, one `<key>.json` file each, are no longer
+read: `ls` counts them, and `clear` deletes them. Run `clear` first, then
+record those steps again with a `read-write` run: `clear` deletes the new
+recordings too. If you recorded first, delete only the `<key>.json` files.
 
 <Note>
 The `cached` percentage in AI usage is the provider's prompt cache. It

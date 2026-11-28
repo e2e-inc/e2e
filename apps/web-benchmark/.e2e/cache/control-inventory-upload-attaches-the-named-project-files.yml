@@ -1,0 +1,29 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: control-inventory-upload-attaches-the-named-project-files.lock.json
+
+test: control inventory › upload attaches the named project files
+file: tests-agent/control-inventory.e2e.ts
+
+steps:
+  - act: attach both files to the Attachments input
+    params:
+      files:
+        - fixtures/attachment.txt
+        - fixtures/second.txt
+    targets:
+      web:
+        at: /e/control-inventory
+        do:
+          - tap: { role: button, name: Attachments, within: Files }
+          - upload: [ fixtures/attachment.txt, fixtures/second.txt ]
+            to: { role: button, name: Attachments, within: Files }
+        expect:
+          shows:
+            - { role: status, name: Attachments state, text: "attachment.txt, second.txt" }
+            - { role: button, name: Attachments, value: C:\fakepath\attachment.txt }
+          gone:
+            - { role: status, name: Attachments state, text: none }
+            - { role: button, name: Attachments }

@@ -1,0 +1,45 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-debounced-search.lock.json
+
+test: act completes Debounced Search
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: search for Benchmark Target and select exactly that result once it loads"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - type: Benchmark Target
+            into: { role: textbox, name: Search…, testId: search-input, placeholder: Search…, selector: id=search-input, within: Search for and select "Benchmark Target" }
+          - tap: { role: group, name: Benchmark Target, testId: result-Benchmark Target, selector: id="result-Benchmark Target" }
+        expect:
+          shows:
+            - { role: text, name: Selected Benchmark Target, testId: success-message }
+          gone:
+            - { role: text, name: Search for and select "Benchmark Target" }
+            - { role: textbox, name: Search…, testId: search-input, placeholder: Search… }
+            - { role: group, testId: search-results }
+      ios-simulator:
+        at: dev.e2e.benchmark / Debounced Search
+        do:
+          - tap: { role: textbox, testId: search-input, placeholder: Search…, selector: id=search-input }
+          - type: Benchmark Target
+            into: { role: textbox, testId: search-input, placeholder: Search…, selector: id=search-input }
+          - tap: { role: other, name: Benchmark Target, testId: result-Benchmark Target, selector: id="result-Benchmark Target" }
+          - tap: { role: other, name: Benchmark Target, testId: result-Benchmark Target, selector: id="result-Benchmark Target" }
+        expect:
+          shows:
+            - { role: other, name: Selected Benchmark Target }
+            - { role: text, name: Selected Benchmark Target, testId: success-message }
+          gone:
+            - { role: text, name: Search for and select "Benchmark Target" }
+            - { role: textbox, testId: search-input, placeholder: Search… }
+            - { role: other, name: "Vertical scroll bar, 1 page", value: 0% }
+            - { role: other, name: "Horizontal scroll bar, 1 page", value: 0% }
+            - { role: other, name: Search for and select "Benchmark Target" }
+            - { role: other, name: "Vertical scroll bar, 1 page", testId: search-results }
+            - { role: scroll-view, name: "Vertical scroll bar, 1 page" }

@@ -1,0 +1,55 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-text-input-variations.lock.json
+
+test: act completes Text Input Variations
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: fill the username, the 4-digit PIN, and at least ten characters of notes, then submit"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - type: testuser
+            into: { role: textbox, testId: username-input, selector: id=username-input, within: Username (min 3 chars) }
+          - type: "4827"
+            into: { role: textbox, testId: pin-input, selector: id=pin-input, inputPurpose: password, within: Username (min 3 chars) }
+          - type: These are at least ten characters.
+            into: { role: textbox, testId: notes-input, selector: id=notes-input, within: Username (min 3 chars) }
+          - tap: { role: group, name: Submit, testId: submit-button, selector: id=submit-button, within: Username (min 3 chars) }
+        expect:
+          shows:
+            - { role: text, name: Form submitted, testId: success-message }
+          gone:
+            - { role: text, name: Username (min 3 chars) }
+            - { role: textbox, testId: username-input }
+            - { role: text, name: "PIN (exactly 4 digits, secure)" }
+            - { role: textbox, testId: pin-input, inputPurpose: password }
+            - { role: text, name: "Notes (multiline, min 10 chars) — 0/10" }
+            - { role: textbox, testId: notes-input }
+            - { role: text, name: Submit }
+            - { role: group, name: Submit, testId: submit-button }
+      ios-simulator:
+        at: dev.e2e.benchmark / Text Input Variations
+        do:
+          - type: tester
+            into: { role: textbox, testId: username-input, selector: id=username-input }
+          - type: "1234"
+            into: { role: textbox, testId: pin-input, selector: id=pin-input, inputPurpose: password }
+          - type: These are at least ten characters of notes.
+            into: { role: textbox, testId: notes-input, selector: id=notes-input }
+          - tap: { role: other, name: Submit, testId: submit-button, selector: id=submit-button }
+        expect:
+          shows:
+            - { role: text, name: Form submitted, testId: success-message }
+          gone:
+            - { role: textbox, testId: username-input }
+            - { role: textbox, testId: pin-input, inputPurpose: password }
+            - { role: other, name: Submit, testId: submit-button }
+            - { role: text, name: Username (min 3 chars) }
+            - { role: text, name: "PIN (exactly 4 digits, secure)" }
+            - { role: text, name: "Notes (multiline, min 10 chars) — 0/10" }
+            - { role: textbox, testId: notes-input }

@@ -1,0 +1,29 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-iframe-form.lock.json
+
+test: act completes iframe-form
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: read the coupon code shown in one frame and apply it through the form in the other frame"
+    targets:
+      web:
+        at: /e/iframe-form
+        do:
+          - runtimeValue: whole-node
+          - tap: { role: button, name: Apply }
+        expect:
+          shows:
+            - { text: Coupon applied, testId: success-message }
+          gone:
+            - { text: Read the coupon code from the first frame and apply it in the second. }
+            - { text: SAVE-1234 }
+            - { text: Apply your coupon at checkout }
+            - { role: textbox, name: Coupon code, placeholder: Coupon code }
+            - { role: button, name: Apply }
+            - { role: iframe, name: coupon-frame }
+            - { text: "Your coupon code:" }
+            - { role: iframe, name: checkout-frame }

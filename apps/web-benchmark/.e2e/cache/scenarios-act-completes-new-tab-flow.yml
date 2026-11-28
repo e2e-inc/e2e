@@ -1,0 +1,28 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-new-tab-flow.lock.json
+
+test: act completes new-tab-flow
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the page instructs: open the verification tab, read the code it shows, then go back to the original tab, enter the code there, and verify it"
+    targets:
+      web:
+        at: /e/new-tab-flow
+        do:
+          - tap: { role: button, name: Open verification tab, testId: open-tab-button }
+          - switchTab: 1
+          - switchTab: 0
+          - runtimeValue: whole-node
+          - tap: { role: button, name: Verify, testId: verify-button }
+        expect:
+          shows:
+            - { text: Verified successfully, testId: success-message }
+          gone:
+            - { text: "Open the verification tab, read the code there, come back and enter it." }
+            - { role: button, name: Open verification tab, testId: open-tab-button }
+            - { role: textbox, name: Verification code, testId: code-input, placeholder: Verification code }
+            - { role: button, name: Verify, testId: verify-button }

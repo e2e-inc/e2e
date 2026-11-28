@@ -1,0 +1,57 @@
+# Replay recording of one e2e test. Review it like code: each step lists what
+# a replay does (do) and what it checks before the step passes (expect).
+# Don't edit it: an edited recording no longer replays, and the test records
+# nothing until the edit is undone. To record a step again, delete it here.
+# Keys and digests: scenarios-act-completes-product-catalog.lock.json
+
+test: act completes Product Catalog
+file: tests-agent/scenarios.e2e.ts
+
+steps:
+  - act: "Complete this scenario as the screen instructs: open Trail Mix 500 g (not a look-alike), set the quantity to 2, add it to the cart, then open the cart"
+    targets:
+      android-emulator:
+        at: dev.e2e.benchmark
+        do:
+          - tap: { role: group, name: "Trail Mix, 500 g · $6.99", testId: product-trail-mix-500, selector: id=product-trail-mix-500, within: "Add exactly 2 × Trail Mix 500 g to the cart, then review the cart" }
+          - tap: { role: group, name: +, testId: quantity-increase, selector: id=quantity-increase }
+          - tap: { role: group, name: Add to cart, testId: add-to-cart, selector: id=add-to-cart }
+          - tap: { role: group, name: Cart (2), testId: open-cart, selector: id=open-cart, within: "Add exactly 2 × Trail Mix 500 g to the cart, then review the cart" }
+        expect:
+          shows:
+            - { role: text, name: ‹ Back to catalog }
+            - { role: text, name: Cart }
+            - { role: text, name: 2 × Trail Mix 500 g }
+            - { role: text, name: "Order ready: 2 × Trail Mix 500 g", testId: success-message }
+            - { role: group, name: ‹ Back to catalog, testId: back-to-list }
+          gone:
+            - { role: text, name: "Add exactly 2 × Trail Mix 500 g to the cart, then review the cart" }
+            - { role: text, name: Cart (0) }
+            - { role: text, name: Trail Mix }
+            - { role: text, name: 250 g · $3.99 }
+            - { role: text, name: ♡ }
+            - { role: text, name: 500 g · $6.99 }
+            - { role: text, name: 1 kg · $11.99 }
+            - { role: text, name: Granola }
+      ios-simulator:
+        at: dev.e2e.benchmark / Product Catalog
+        do:
+          - tap: { role: other, name: "Trail Mix, 500 g · $6.99", testId: product-trail-mix-500, selector: id=product-trail-mix-500 }
+          - tap: { role: other, name: +, testId: quantity-increase, selector: id=quantity-increase }
+          - tap: { role: other, name: Add to cart, testId: add-to-cart, selector: id=add-to-cart }
+          - tap: { role: other, name: Cart (2), testId: open-cart, selector: id=open-cart }
+        expect:
+          shows:
+            - { role: text, name: Cart }
+            - { role: text, name: 2 × Trail Mix 500 g }
+            - { role: other, name: ‹ Back to catalog }
+            - { role: text, name: "Order ready: 2 × Trail Mix 500 g", testId: success-message }
+          gone:
+            - { role: text, name: "Add exactly 2 × Trail Mix 500 g to the cart, then review the cart" }
+            - { role: other, name: Cart (0), testId: open-cart }
+            - { role: other, name: "Trail Mix, 250 g · $3.99", testId: product-trail-mix-250 }
+            - { role: other, name: Favorite Trail Mix 250 g, testId: favorite-trail-mix-250 }
+            - { role: other, name: "Trail Mix, 500 g · $6.99", testId: product-trail-mix-500 }
+            - { role: other, name: Favorite Trail Mix 500 g, testId: favorite-trail-mix-500 }
+            - { role: other, name: "Trail Mix, 1 kg · $11.99", testId: product-trail-mix-1000 }
+            - { role: other, name: Favorite Trail Mix 1 kg, testId: favorite-trail-mix-1000 }

@@ -1,0 +1,22 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20stale-dom",
+  "entries": [
+    {
+      "key": "f599e53124d76b9bbd58ae24ccd7408f2240133c0949652f6dc9b7393ecf005a",
+      "target": "web",
+      "digest": "a5b50aa7eca84edaf7b9fddc26b3805ca3bf74c2d0296141215986d925bb52ff",
+      "createdAt": "2026-10-04T08:32:08.612Z",
+      "instructionDigest": "c7958b2326b3f2b42541d8b8261d04bb3d18d3fbbf439d754e64d72856a74ba4",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Clicked Tap me three times. The page shows Progress: 3 / 3 and “Target clicked 3 times.”",
+      "endWaitMs": 12000
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "format": "e2e-replay-lock-1",
+  "testId": "tests-agent/scenarios.e2e.ts::act%20completes%20Flattened%20Login",
+  "entries": [
+    {
+      "key": "36d62803cb7ed0d77eb6d752b0d050eaf246b7b493d693bb6675c9d58b7dd91d",
+      "target": "android-emulator",
+      "digest": "67ddbba7a5a3f9d482760c3a684596e2df7c17f92a01397a26dff14a22747bd2",
+      "createdAt": "2026-10-09T06:57:52.132Z",
+      "instructionDigest": "2ac57f8c28a31069613ffb9bbf8151a42ea8ceb4bb65d0ad6dcd9eea0b8a2755",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Used the screenshot hint to log in with tester@tester.army and password <secret:benchmark.password>. The screen confirms “Logged in successfully.”",
+      "endWaitMs": 15000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "android",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "e18e9835187bab993e11f2dd7ff5624429bc26890c846accacf0057b525e92a0",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    },
+    {
+      "key": "034b8cb386ac765f9954ed6bf1d32a1f2f868c58c279be36fb916f0f090cb957",
+      "target": "ios-simulator",
+      "digest": "44498a8758ccac0e79e4481914d3fe5b461ded2bfa819563a7bf3a127381af2f",
+      "createdAt": "2026-10-15T16:00:01.561Z",
+      "instructionDigest": "2ac57f8c28a31069613ffb9bbf8151a42ea8ceb4bb65d0ad6dcd9eea0b8a2755",
+      "paramsDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "callIndex": 0,
+      "agent": "default",
+      "executor": {
+        "name": "e2e-default-agent",
+        "version": "2"
+      },
+      "summary": "Entered the hinted email and password, submitted the login, and verified the screen shows “Logged in successfully.”",
+      "endWaitMs": 15000,
+      "keyedBy": {
+        "cacheSchema": "trace-1",
+        "policyVersion": "conservative/6",
+        "project": "5db668e539f1f8a455eaa798ab239f0cfdc68c99776863db1ddd6f27a9fba643",
+        "platform": "ios",
+        "engineName": "mobile",
+        "engineSpiVersion": 1,
+        "appIdentity": "873e96a3c0364ffd8e603a0fb9ccef7bb32dd2c64eb8bddaa76d36fdfbf446ae",
+        "agentContextDigest": "9851c2b004c95e29037ba508c9a81e7efff8fcaa01e5491077154e702520281a"
+      }
+    }
+  ]
+}
