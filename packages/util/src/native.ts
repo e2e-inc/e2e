@@ -48,12 +48,15 @@ export interface RawComparison {
   readonly actual?: ImageSize;
 }
 
-/** The addon's image class. */
+/**
+ * The addon's image class. Its bytes come back as Node `Buffer`s, typed as the `Uint8Array` they are, so the
+ * published declarations need no Node types.
+ */
 export interface NativeImageHandle {
   readonly width: number;
   readonly height: number;
-  pixels(): Buffer;
-  encode(): Promise<Buffer>;
+  pixels(): Uint8Array;
+  encode(): Promise<Uint8Array>;
   compare(actual: NativeImageHandle, tolerance: ImageTolerance): Promise<RawComparison>;
   diff(actual: NativeImageHandle, threshold: number): Promise<NativeImageHandle>;
 }
@@ -64,7 +67,7 @@ export interface Binding {
   pngSize(bytes: Uint8Array): ImageSize | null;
   decodePng(bytes: Uint8Array): Promise<NativeImageHandle>;
   processPng(bytes: Uint8Array, steps: ProcessSteps): Promise<NativeImageHandle>;
-  processPngToPng(bytes: Uint8Array, steps: ProcessSteps): Promise<Buffer>;
+  processPngToPng(bytes: Uint8Array, steps: ProcessSteps): Promise<Uint8Array>;
 }
 
 /** The platforms a build is published for, each as `@e2e-dev/util-<platform>` (`packages/util/npm/<platform>`). */

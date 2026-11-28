@@ -17,7 +17,7 @@ export type ImageComparison =
   | { readonly kind: 'pixels'; readonly diffPixels: number; readonly ratio: number };
 
 /** A native buffer's bytes as a plain `Uint8Array`, whose `slice` copies where a `Buffer`'s shares memory. */
-function plain(buffer: Buffer): Uint8Array {
+function plain(buffer: Uint8Array): Uint8Array {
   return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 }
 
