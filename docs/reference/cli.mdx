@@ -173,8 +173,8 @@ For a new project, the wizard asks for:
   preselects the service the repository's remote, `.github/` folder, or
   `.gitlab-ci.yml` points to. See [CI pipeline](#ci-pipeline).
 
-In a Next.js app, the web target starts the app. See
-[Next.js apps](#nextjs-apps).
+In a Next.js or Vite app, the web target starts the app. See
+[Next.js apps](#nextjs-apps) and [Vite apps](#vite-apps).
 
 After you confirm the file changes, the wizard asks whether to install the
 selected dependencies. The installer follows the project's `packageManager`
@@ -189,7 +189,7 @@ installed. pnpm gets `--no-frozen-lockfile`, and Yarn
 | Creates | Content |
 | --- | --- |
 | `package.json` | Created as a private ESM package when missing; otherwise gets only the missing dependencies and scripts. Sibling packages (`@e2e-dev/web`, `@e2e-dev/mobile`) get the caret range of the version released with the CLI, or that exact version when the CLI is a prerelease. Adds a `test:e2e` script that runs `e2e run`, unless one exists |
-| `e2e.config.ts` | One target per selected engine, with the app in its `app`. Playwright reads `APP_URL` (default `http://localhost:3000`) into `app.url` and shows `app.command` in a comment. In a Next.js app, it sets `app.url` and `app.command` instead; see [Next.js apps](#nextjs-apps). Mobile sets `app: { bundleId: 'Settings' }` on iOS and `com.android.settings` on Android, and `workers: 1`. With a gateway, `agents.default` is `{ model, system }` |
+| `e2e.config.ts` | One target per selected engine, with the app in its `app`. Playwright reads `APP_URL` (default `http://localhost:3000`) into `app.url` and shows `app.command` in a comment. In a Next.js or Vite app, it sets `app.url` and `app.command` instead; see [Next.js apps](#nextjs-apps) and [Vite apps](#vite-apps). Mobile sets `app: { bundleId: 'Settings' }` on iOS and `com.android.settings` on Android, and `workers: 1`. With a gateway, `agents.default` is `{ model, system }` |
 | `tests/example.e2e.ts` | With a new config only. An app-open test that passes against any page, plus a commented agent test. Device setup gets a Settings check instead. With both engines, `tests/web.e2e.ts` and `tests/mobile.e2e.ts` instead, each test with `platforms` set to its own target's platform so the other target skips it |
 | `.gitignore` | Appends `node_modules/`, `.e2e/results/`, `.e2e/cache/`, `.e2e/sessions/`, `.e2e/report.json`, `.e2e/ai-trace.json`, `.e2e/timings.json`, `.e2e/junit.xml`, `.e2e/summary.md`, `.e2e/ctrf.json`, `.e2e/logs/`, and `.e2e/videos/`. Committing the cache is opt-in; see [commit the replay cache](/cache#commit-the-replay-cache) |
 | `.agents/skills/e2e/`, `.claude/skills/e2e/` | `SKILL.md` and one `references/<topic>.md` per `e2e guide` topic. With both chosen, the Claude Code directory is a relative symlink (`../../.agents/skills/e2e`) to the copy, the layout `npx skills add` produces |
@@ -218,6 +218,24 @@ it wrote:
 Without a `dev` script, or with a port that isn't a fixed number (such as
 `$PORT`) or that another command in the script sets, the target reads
 `APP_URL` as in any other project, and `init` says what to set.
+
+<a id="vite-apps" />
+##### Vite apps
+
+`init` finds a Vite app when `package.json` has `vite` in `dependencies` or
+`devDependencies` (a project with `next` is a Next.js app). When the `dev`
+script starts the Vite dev server, the web target runs that script with the
+project's package manager, locally and in CI, at `http://localhost:<port>`:
+the `--port` of the `vite` command, else 5173. Vite reads no `PORT`
+variable. A local run reuses a dev server already on the port.
+
+Otherwise the target reads `APP_URL` as in any other project, and `init`
+prints what to set. The common cases:
+
+- The root `vite.config.*` sets another port.
+- A backend serves the app and Vite only serves its assets (Laravel,
+  Symfony, Rails, Django). Point `app.url` at the backend's server.
+- The dev server uses HTTPS.
 
 <a id="ci-pipeline" />
 ##### CI pipeline

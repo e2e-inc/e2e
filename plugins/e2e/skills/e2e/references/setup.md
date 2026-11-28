@@ -239,6 +239,12 @@ the App Router's empty `role="alert"` route announcer means
 `getByRole('alert')` needs a text filter. Full reference:
 docs/frameworks/nextjs.mdx.
 
+Vite: `e2e init` writes the target (the `dev` script, locally and in CI, on
+the `vite` command's `--port`, else 5173). It keeps the placeholder when
+`vite.config.*` sets another port, a backend (Laravel, Symfony, Rails,
+Django) serves the app, or the dev server uses HTTPS. Full reference:
+docs/reference/cli.mdx, "Vite apps".
+
 ### Start the app's dependencies as services
 
 Put dependencies the app needs (an email API, an OAuth provider, a database)

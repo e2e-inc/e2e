@@ -1,15 +1,25 @@
 /**
- * The app frameworks `e2e init` recognizes in a project's package.json, so a
- * new config's web target starts the app with its own scripts on its own
- * port instead of a placeholder URL. Next.js is the one detector today; a
- * framework such as Vite or Astro adds an entry to `DETECTORS` with the same shape.
+ * The app frameworks `e2e init` recognizes, so a new config's web target
+ * starts the app with its own scripts on its own port instead of a
+ * placeholder URL. Each framework is a module under `frameworks/`, tried in
+ * the order `FRAMEWORKS` lists them.
  */
 
-/** The parts of package.json a detector reads. */
+import { nextjs } from './frameworks/nextjs.ts';
+import { vite } from './frameworks/vite.ts';
+
+/** The parts of package.json a framework reads. */
 export interface FrameworkManifest {
   readonly dependencies?: Readonly<Record<string, string>> | undefined;
   readonly devDependencies?: Readonly<Record<string, string>> | undefined;
   readonly scripts?: Readonly<Record<string, string>> | undefined;
+}
+
+/** What a framework reads: package.json, and files at the project root. */
+export interface Project {
+  readonly manifest: FrameworkManifest;
+  /** A file at the project root as text, or undefined when there is none. */
+  readonly readFile: (name: string) => string | undefined;
 }
 
 /** An app init can start: the URL it answers on and the package.json scripts that serve it. */
@@ -28,7 +38,7 @@ export interface FrameworkApp {
    * Absent when the project has no such scripts or they listen elsewhere,
    * and CI then starts the dev server too.
    */
-  readonly production?: { readonly build: string; readonly start: string };
+  readonly production?: ProductionScripts;
 }
 
 /** A framework init found but cannot start, with the reason, so the user knows to set the target by hand. */
@@ -39,117 +49,46 @@ interface UnsupportedFramework {
   readonly reason: string;
 }
 
-type Detection = FrameworkApp | UnsupportedFramework;
+export type Detection = FrameworkApp | UnsupportedFramework;
 
-interface FrameworkDetector {
-  readonly name: string;
-  readonly docs: string;
-  /** The package whose dependency marks the framework. */
-  readonly dependency: string;
-  /** The command a script runs to start the framework's server, whose arguments carry the port. */
-  readonly binary: string;
-  /** The port the dev server and the production server listen on when their scripts set none. */
-  readonly defaultPort: number;
+/** The package.json scripts that build the production app and serve the build. */
+export interface ProductionScripts {
+  readonly build: string;
+  readonly start: string;
 }
 
-const DETECTORS: readonly FrameworkDetector[] = [
-  { name: 'Next.js', docs: '/frameworks/nextjs', dependency: 'next', binary: 'next', defaultPort: 3000 },
-];
-
-const DEV_SCRIPT = 'dev';
-const BUILD_SCRIPT = 'build';
-const START_SCRIPT = 'start';
-
-/** The detector for the framework the project's package.json declares in `dependencies` or `devDependencies`. */
-function findDetector(manifest: FrameworkManifest): FrameworkDetector | undefined {
-  return DETECTORS.find(({ dependency }) =>
-    manifest.dependencies?.[dependency] !== undefined || manifest.devDependencies?.[dependency] !== undefined);
+/** One framework init can set up. */
+export interface Framework {
+  /** Whether the project uses this framework, from its package.json. The first framework that claims a project owns it. */
+  claims(manifest: FrameworkManifest): boolean;
+  /** How to start the app of a project this framework claims, or why init cannot. */
+  detect(project: Project): Detection;
+  /** The scripts that build and serve the production app on any port, for an existing config; only a framework with a production server has them. */
+  productionScripts?(manifest: FrameworkManifest): ProductionScripts | undefined;
 }
 
 /**
- * The scripts that build and serve the production app of a framework init
- * recognizes, whatever port they use, or undefined when the project has no
- * such framework or lacks either script. A pipeline added to an existing
- * config builds when that config runs the start script.
+ * The frameworks init tries, in order. A framework built on another one goes
+ * before it: Next.js before Vite, since a Next.js app can list `vite` too.
  */
-export function productionScripts(manifest: FrameworkManifest): { readonly build: string; readonly start: string } | undefined {
-  if (findDetector(manifest) === undefined) return undefined;
-  const scripts = manifest.scripts ?? {};
-  return scripts[BUILD_SCRIPT] === undefined || scripts[START_SCRIPT] === undefined ? undefined : { build: BUILD_SCRIPT, start: START_SCRIPT };
+const FRAMEWORKS: readonly Framework[] = [nextjs, vite];
+
+/** The first framework that claims the project, which answers every question about it. */
+function owner(manifest: FrameworkManifest): Framework | undefined {
+  return FRAMEWORKS.find((framework) => framework.claims(manifest));
+}
+
+/** How to start the app of the framework that owns the project, or undefined when no framework claims it. */
+export function detectFramework(project: Project): Detection | undefined {
+  return owner(project.manifest)?.detect(project);
 }
 
 /**
- * The framework the project's package.json declares in `dependencies` or
- * `devDependencies`, with how to start it, or undefined when it declares
- * none init knows. A project with the framework but no `dev` script, or a
- * `dev` script whose port init cannot read as a fixed number, is
- * `unsupported`.
+ * The scripts that build and serve the production app of the framework that
+ * owns the project, whatever port they use, or undefined when it has none or
+ * the project lacks either script. A pipeline added to an existing config
+ * builds when that config runs the start script.
  */
-export function detectFramework(manifest: FrameworkManifest): Detection | undefined {
-  const detector = findDetector(manifest);
-  if (detector === undefined) return undefined;
-  const scripts = manifest.scripts ?? {};
-  const dev = scripts[DEV_SCRIPT];
-  if (dev === undefined) {
-    return { kind: 'unsupported', framework: detector.name, docs: detector.docs, reason: `package.json has no ${DEV_SCRIPT} script` };
-  }
-  const port = scriptPort(dev, detector);
-  if (port === undefined) {
-    return { kind: 'unsupported', framework: detector.name, docs: detector.docs, reason: `init cannot read a fixed port from the ${DEV_SCRIPT} script` };
-  }
-  const start = scripts[START_SCRIPT];
-  const production = scripts[BUILD_SCRIPT] !== undefined && start !== undefined && scriptPort(start, detector) === port;
-  return {
-    kind: 'app',
-    framework: detector.name,
-    docs: detector.docs,
-    // localhost, never 127.0.0.1: Next.js 16 dev blocks cross-origin dev resources, so a 127.0.0.1 page renders but never hydrates.
-    url: `http://localhost:${port}`,
-    dev: DEV_SCRIPT,
-    ...(production ? { production: { build: BUILD_SCRIPT, start: START_SCRIPT } } : {}),
-  };
-}
-
-const PORT_FLAGS = new Set(['--port', '-p']);
-
-/** The words of one shell command, with the quotes around each stripped. */
-function words(command: string): string[] {
-  return command.split(/\s+/u).map((word) => word.replace(/^["']|["']$/gu, '')).filter((word) => word !== '');
-}
-
-/**
- * The port one command sets: the value of its `--port` or `-p` flag
- * (`--port 3100`, `--port=3100`, `-p 3100`, `-p3100`), else a `PORT=`
- * variable, else undefined. The value is raw, so `$PORT` stays as written.
- */
-function portSetting(tokens: readonly string[]): string | undefined {
-  let variable: string | undefined;
-  for (const [index, token] of tokens.entries()) {
-    const flag = PORT_FLAGS.has(token)
-      ? tokens[index + 1] ?? ''
-      : /^--port=(.*)$/u.exec(token)?.[1] ?? /^-p(\d.*)$/u.exec(token)?.[1];
-    if (flag !== undefined) return flag;
-    variable ??= /^PORT=(.*)$/u.exec(token)?.[1];
-  }
-  return variable;
-}
-
-/**
- * The port a script's server listens on, read from the command that runs the
- * framework's binary (`next` in `node check.js -p 8080 && next dev`), else the
- * framework's default port. Undefined when init cannot write the port into
- * `app.url`: a value that is not a fixed port, such as `$PORT` or `0`, or a
- * port another command in the script sets, which may or may not reach the
- * server. A script that never runs the binary, such as `turbo run dev`, is
- * read as one command.
- */
-function scriptPort(script: string, detector: FrameworkDetector): number | undefined {
-  const commands = script.split(/&&|\|\||[;&|]/u).map(words);
-  const server = commands.findIndex((command) => command.includes(detector.binary));
-  if (server !== -1 && commands.some((command, index) => index !== server && portSetting(command) !== undefined)) return undefined;
-  const value = portSetting(server === -1 ? commands.flat() : commands[server] ?? []);
-  if (value === undefined) return detector.defaultPort;
-  if (!/^\d+$/u.test(value)) return undefined;
-  const port = Number(value);
-  return port >= 1 && port <= 65_535 ? port : undefined;
+export function productionScripts(manifest: FrameworkManifest): ProductionScripts | undefined {
+  return owner(manifest)?.productionScripts?.(manifest);
 }

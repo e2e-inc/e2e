@@ -1776,6 +1776,60 @@ export default {
     });
   });
 
+  describe('in a Vite app', () => {
+    /** Writes the package.json `create vite` writes for its React template, with `scripts` in place of its own. */
+    function viteApp(scripts: Record<string, string> = { dev: 'vite', build: 'tsc -b && vite build', preview: 'vite preview' }): void {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({
+        name: 'my-app',
+        private: true,
+        type: 'module',
+        scripts,
+        dependencies: { react: '^19.3.1', 'react-dom': '^19.3.1' },
+        devDependencies: { '@vitejs/plugin-react': '^6.1.2', vite: '^8.3.6' },
+      }, null, 2));
+    }
+
+    it('starts the Vite dev server on its port, and asks for no APP_URL', async () => {
+      viteApp();
+      expect((await init(dir, { yes: true })).exitCode).toBe(0);
+      expect(read('e2e.config.ts')).toContain(`  targets: [{
+    engine: web(),
+    app: {
+      url: 'http://localhost:5173',
+      // The runner starts the Vite dev server, or uses one you already started on that port.
+      command: { executable: 'npm', args: ['run', 'dev'], reuseExisting: true },
+    },
+  }],`);
+      expect(read('e2e.config.ts')).not.toContain('const ci');
+      expect(read('e2e.config.ts')).not.toContain('APP_URL');
+      expect(output()).toContain('Found Vite: the web target starts npm run dev on http://localhost:5173\n');
+      expect(output()).toContain('Next: npm install, then npm run test:e2e');
+      expect(output()).not.toContain('APP_URL=');
+    });
+
+    it('keeps the placeholder target and says why when the Vite config sets another port', async () => {
+      viteApp();
+      writeFileSync(path.join(dir, 'vite.config.ts'), 'export default { server: { port: 3000 } };\n');
+      expect((await init(dir, { yes: true })).exitCode).toBe(0);
+      expect(read('e2e.config.ts')).toContain("url: process.env.APP_URL ?? 'http://localhost:3000',");
+      expect(output()).toContain('Found Vite, but vite.config.ts sets a port other than 5173; set app.url and app.command in e2e.config.ts, see https://e2e.com/docs/reference/cli#vite-apps');
+    });
+
+    it('keeps the placeholder target when the dev script starts no Vite dev server', async () => {
+      viteApp({ dev: 'vite build --watch', build: 'vite build' });
+      expect((await init(dir, { yes: true })).exitCode).toBe(0);
+      expect(read('e2e.config.ts')).toContain("url: process.env.APP_URL ?? 'http://localhost:3000',");
+      expect(output()).toContain('Found Vite, but the dev script does not start the Vite dev server');
+    });
+
+    it('starts the dev server in CI too, with no build step and nothing missing', async () => {
+      viteApp();
+      expect((await init(dir, { yes: true, ci: 'github-actions' })).exitCode).toBe(0);
+      expect(read('.github/workflows/e2e.yml')).not.toContain('Build the app');
+      expect(output()).not.toContain('Nothing starts the app in CI');
+    });
+  });
+
   describe('with a CI workflow', () => {
     const workflow = '.github/workflows/e2e.yml';
 

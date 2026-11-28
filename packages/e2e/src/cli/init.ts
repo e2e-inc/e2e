@@ -421,8 +421,10 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
     return done('invalid-project', 2);
   }
 
-  // A new config's web target starts an app init recognizes, such as Next.js, with the project's own scripts.
-  const framework = existingConfig === undefined && engines.includes('web') ? detectFramework(pkg.manifest) : undefined;
+  // A new config's web target starts an app init recognizes, such as Next.js or Vite, with the project's own scripts.
+  const framework = existingConfig === undefined && engines.includes('web')
+    ? detectFramework({ manifest: pkg.manifest, readFile: (name) => readProjectFile(cwd, name) })
+    : undefined;
   const app = framework?.kind === 'app' ? framework : undefined;
   if (framework?.kind === 'app') {
     clack.log.info(describeApp(framework, manager));
@@ -835,6 +837,16 @@ function describeApp(app: FrameworkApp, manager: PackageManager): string {
 function servedBuild(manifest: FrameworkManifest, config: string): string | undefined {
   const scripts = productionScripts(manifest);
   return scripts !== undefined && configRunsScript(config, scripts.start) ? scripts.build : undefined;
+}
+
+/** A file at the project root as text, or undefined when there is none or it cannot be read, so detection never stops init. */
+function readProjectFile(cwd: string, name: string): string | undefined {
+  try {
+    const file = path.join(cwd, name);
+    return statSync(file).isFile() ? readFileSync(file, 'utf8') : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Whether `manager` runs in the workspace root, which exists before init writes and where a Corepack shim picks the workspace's version. */
