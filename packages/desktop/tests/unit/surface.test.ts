@@ -963,22 +963,23 @@ describe('desktop fixture: windows', () => {
     expect(await Promise.all([first!.isActive(), second!.isActive()])).toEqual([false, true]);
   });
 
-  it('reads no window as closed while the screen is locked, which lists none', async () => {
+  it('reads no window as closed while the screen is locked, which lists none, and reads again until it unlocks', async () => {
     const { surface, fake } = await launched({ listWindows: [(driver) => windows(() => (driver.locked === true ? [] : [mine, panel]))(driver)] });
-    const desktop = createDesktopFixture(surface, fixtureContext());
+    const desktop = createDesktopFixture(surface, fixtureContext(1_000));
     const controls = (await desktop.windows())[1]!;
     fake.locked = true;
-    await expect(controls.isClosed()).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
-    fake.locked = false;
-    expect(await controls.isClosed()).toBe(false);
+    await expect(controls.isClosed()).rejects.toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/^the app's windows could not be read: .*screen is locked/) });
+    const closed = controls.isClosed();
+    setTimeout(() => (fake.locked = false), 300);
+    expect(await closed).toBe(false);
   });
 
   it('reads no window as closed while the screen is locked and lists only windows accessibility cannot read', async () => {
     const { surface, fake } = await launched({ listWindows: [(driver) => windows(() => (driver.locked === true ? [{ ...mine, accessible: false }] : [mine, panel]))(driver)] });
-    const desktop = createDesktopFixture(surface, fixtureContext());
+    const desktop = createDesktopFixture(surface, fixtureContext(500));
     const controls = (await desktop.windows())[1]!;
     fake.locked = true;
-    await expect(controls.isClosed()).rejects.toMatchObject({ code: 'NODE_STALE', retryable: true, message: expect.stringMatching(/screen is locked/) });
+    await expect(controls.isClosed()).rejects.toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/screen is locked/) });
   });
 
   it('closes a window through its handle, and leaves one that already closed alone', async () => {
@@ -1033,6 +1034,20 @@ describe('desktop fixture: windows', () => {
     const desktop = createDesktopFixture(surface, fixtureContext());
     await expect(desktop.window({ title: 'Controls' }, { timeout: 300 })).rejects.toMatchObject({ code: 'ACTION_FAILED', message: 'no window has the title "Controls"; open: "Sign In"' });
     await expect(desktop.window({} as { title: string })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+  });
+
+  it('reads the windows before the trigger again while the app does not answer, and runs the trigger once', async () => {
+    const stalled = failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer its window list in time', { retryable: true });
+    let opened = false;
+    const list = (driver: FakeDriver) => windows(() => (opened ? [mine, panel] : [mine]))(driver);
+    const { surface } = await launched({ listWindows: [list, list, stalled, stalled, list] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    let runs = 0;
+    const controls = await desktop.waitForWindow(async () => {
+      runs += 1;
+      opened = true;
+    });
+    expect([runs, await controls.title()]).toEqual([1, 'Controls']);
   });
 
   it('runs a trigger, waits for the window it opens, and makes that window active', async () => {

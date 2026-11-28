@@ -80,7 +80,7 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
   /** One handle per window id, which the window server gives to no other window while this one is open. */
   const handles = new Map<string, DesktopWindow>();
   const windowAction: FixtureOperation = { kind: 'resource' };
-  const read = async (id: string): Promise<OpenWindow | undefined> => (await surface.windows(context.operation())).find((window) => window.id === id);
+  const read = async (id: string): Promise<OpenWindow | undefined> => (await listed(context.operation())).find((window) => window.id === id);
   const handle = ({ id }: OpenWindow): DesktopWindow => {
     const known = handles.get(id);
     if (known !== undefined) return known;
@@ -99,13 +99,15 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
     return made;
   };
   /**
-   * Reads the open windows until `pick` finds one, or `waitMs` ends. Each
-   * read keeps the operation's own budget, so a wait with little time left
-   * still looks once.
+   * Reads the open windows until `pick` finds what it looks for, or `waitMs`
+   * ends. Each read keeps the operation's own budget, so a wait with little
+   * time left still looks once. `timedOut` gets the last list read, and the
+   * failure of the last read when it read none.
    */
-  const waitFor = async (pick: (windows: readonly OpenWindow[]) => OpenWindow | undefined, operation: OperationContext, waitMs: number, timedOut: (windows: readonly OpenWindow[]) => string): Promise<OpenWindow> => {
+  const waitFor = async <T>(pick: (windows: readonly OpenWindow[]) => T | undefined, operation: OperationContext, waitMs: number, timedOut: (windows: readonly OpenWindow[], unread?: Error) => string): Promise<T> => {
     let windows: readonly OpenWindow[] = [];
-    let found: OpenWindow | undefined;
+    let unread: Error | undefined;
+    let found: T | undefined;
     await pollCondition({
       // A little before the step's own end, so the wait reports what it waited for rather than a bare timeout.
       deadline: new Deadline(Math.max(1, waitMs - Math.min(WAIT_MARGIN_MS, waitMs / 10))),
@@ -114,27 +116,35 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
       evaluate: async () => {
         try {
           windows = await surface.windows(operation);
+          unread = undefined;
         } catch (cause) {
-          // An app busy opening its window does not answer its list in time: the next read may.
-          if (cause instanceof EngineError && cause.retryable) return false;
+          // An app busy opening its window, or a locked screen, does not answer its list: the next read may.
+          if (cause instanceof EngineError && cause.retryable) {
+            unread = cause;
+            return false;
+          }
           throw cause;
         }
         found = pick(windows);
         return found !== undefined;
       },
-      onTimeout: () => new TestError('ACTION_FAILED', timedOut(windows)),
+      onTimeout: () => new TestError('ACTION_FAILED', timedOut(windows, unread), unread === undefined ? {} : { cause: unread }),
     });
-    if (found === undefined) throw new TestError('ACTION_FAILED', timedOut(windows));
+    if (found === undefined) throw new TestError('ACTION_FAILED', timedOut(windows, unread));
     return found;
   };
+  /** The open windows, read again while the app does not answer for them, within the operation's budget. */
+  const listed = (operation: OperationContext): Promise<readonly OpenWindow[]> =>
+    waitFor((windows) => windows, operation, operation.timeoutMs, (_windows, unread) => `the app's windows could not be read: ${unread?.message ?? 'no read answered in time'}`);
   const desktop: Desktop = {
     platform: surface.platform,
-    windows: async () => (await surface.windows(context.operation())).map(handle),
+    windows: async () => (await listed(context.operation())).map(handle),
     async waitForWindow(trigger, options) {
       if (typeof trigger !== 'function') throw new ConfigurationError('INVALID_ARGUMENT', 'desktop.waitForWindow() takes the function that opens the window');
       const operation = context.operation(stepTimeout(options?.timeout, 'desktop.waitForWindow'));
       const waitMs = operation.timeoutMs;
-      const before = new Set((await surface.windows(operation)).map((window) => window.id));
+      // The windows open before the trigger, read until the app answers: the trigger runs once, after a list it can be told from.
+      const before = new Set((await listed(operation)).map((window) => window.id));
       const started = Date.now();
       // The trigger is test code: its error is reported as it is.
       await trigger();
