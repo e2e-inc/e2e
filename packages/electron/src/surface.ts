@@ -44,15 +44,13 @@ import { screenshotFile, screenshotName, withPixels } from './capture.ts';
 import { DevTools } from './devtools.ts';
 import { DialogRouter, type DialogHandler } from './dialogs.ts';
 import type { ElectronMainModule } from './fixtures.ts';
-import { hasKey, type MouseButton } from './cdp/input.ts';
-import { closedWindow, invalidState, notActionable, unsupported } from './errors.ts';
+import { closedWindow, invalidState, notActionable } from './errors.ts';
+import { checkJsonArgument, EvaluateError, functionSource } from './evaluate.ts';
 import { ensureFfmpeg } from './ffmpeg.ts';
 import { outsideApp } from './file-bound.ts';
 import { appPathProblem, describeExecutable, ensureElectronBinary, resolveExecutable } from './executable.ts';
 import { locateIn, projectRead, readWindow, type ProjectionContext, type RawRead } from './locate.ts';
-import { functionSource } from './main-process.ts';
-import { checkLaunchArguments, type ResolvedElectronOptions } from './options.ts';
-import { PageEvaluateError } from './page.ts';
+import { checkCwd, checkLaunchArguments, type ResolvedElectronOptions } from './options.ts';
 import type { WindowMatcher } from './fixtures.ts';
 import { Recorder } from './video.ts';
 import { ROOT_ID, Windows, type AppWindow } from './windows.ts';
@@ -119,6 +117,7 @@ export class ElectronSurface {
     const problem = info.app.appPath === undefined ? undefined : appPathProblem(info.projectRoot, info.app.appPath);
     if (problem !== undefined) throw new ConfigurationError('INVALID_CONFIG', problem);
     checkLaunchArguments(info.app.launchArguments);
+    checkCwd('electron({ cwd })', info.projectRoot, this.options.cwd, 'INVALID_CONFIG');
   }
 
   startAttempt(context: EngineAttemptContext): Promise<void> {
@@ -185,8 +184,17 @@ export class ElectronSurface {
 
   /** `electron.launch()`: a fresh launch as `app.open()` does, with `extra` added to this and every later launch of the attempt. */
   launchWith(extra: LaunchExtra, operation: OperationContext): Promise<void> {
-    this.launchExtra = extra;
-    return this.restart(operation);
+    return this.app.serialized(async () => {
+      // Set in turn with the launches: one already under way starts with what it was asked for.
+      this.launchExtra = extra;
+      await this.app.quit(operation, RESTART_CLOSE_MS);
+      await this.launch(operation);
+    });
+  }
+
+  /** The project root, which a test's relative paths resolve against. */
+  get root(): string {
+    return this.projectRoot;
   }
 
   private async launch(operation: OperationContext): Promise<void> {
@@ -236,12 +244,22 @@ export class ElectronSurface {
         const raw = await Promise.race([readWindow(this.devtools, window), crash]);
         if (raw !== 'crashed') return raw;
       } catch (cause) {
-        if (!window.page.isClosed() && !closedWindow(cause)) throw cause;
-        this.windowList.discard(window.page);
+        if (!this.closedUnder(window, cause)) throw cause;
       } finally {
         stopWaiting();
       }
     }
+  }
+
+  /**
+   * Whether work on a window failed because the window closed, which can
+   * happen before its close event arrives. It is forgotten here, so the
+   * caller goes on with the window shown in its place.
+   */
+  private closedUnder(window: AppWindow, cause: unknown): boolean {
+    if (!window.page.isClosed() && !closedWindow(cause)) return false;
+    this.windowList.discard(window.page);
+    return true;
   }
 
   async observe(operation: OperationContext, options?: EngineObserveOptions): Promise<EngineSnapshot> {
@@ -280,8 +298,7 @@ export class ElectronSurface {
         } catch (cause) {
           // The window closed between its read and the query (a popup that closes itself): the window shown in its
           // place is the one to find the node in, as a read that met the closed window does.
-          if (!raw.window.page.isClosed() && !closedWindow(cause)) throw cause;
-          this.windowList.discard(raw.window.page);
+          if (!this.closedUnder(raw.window, cause)) throw cause;
         }
       }
     });
@@ -377,41 +394,16 @@ export class ElectronSurface {
     await this.act(operation, 'keyboard.press', window, (budget) => pressKey(window, key, budget));
   }
 
-  // --- the fixture's keyboard and mouse: input to the shown window, wherever its focus and pointer are ---
+  // --- the fixture's keyboard and mouse ---
 
-  /** `electron.keyboard.down()` and `up()`: one key held or released; a held modifier applies to the input after it. */
-  async holdKey(key: string, direction: 'down' | 'up', operation: OperationContext): Promise<void> {
-    if (!hasKey(key)) throw unsupported(`the keyboard has no key ${JSON.stringify(key)}: name a key such as "Shift" or "Enter", or a character of a US keyboard`);
+  /**
+   * `electron.keyboard.*` and `electron.mouse.*`: input to the shown window,
+   * wherever its focus and pointer are, taking its turn after the gestures
+   * before it as every action does.
+   */
+  async input(label: string, send: (window: AppWindow, budget: Budget) => Promise<void>, operation: OperationContext): Promise<void> {
     const window = this.requireWindow();
-    await this.act(operation, `keyboard.${direction}`, window, (budget) => budget.send(() => window.page.keyboard[direction](key)));
-  }
-
-  /** `electron.keyboard.type()`: each character's key, or the character inserted when the layout has no key for it. */
-  async typeKeys(text: string, delayMs: number, operation: OperationContext): Promise<void> {
-    const window = this.requireWindow();
-    await this.act(operation, 'keyboard.type', window, async (budget) => {
-      let first = true;
-      for (const character of text) {
-        if (!first && delayMs > 0) await sleep(delayMs, operation.signal);
-        first = false;
-        await budget.send(() => window.page.keyboard.type(character));
-      }
-    });
-  }
-
-  /** `electron.keyboard.insertText()`: text committed as an input method would, with no key events. */
-  async insertText(text: string, operation: OperationContext): Promise<void> {
-    const window = this.requireWindow();
-    await this.act(operation, 'keyboard.insertText', window, (budget) => budget.send(() => window.page.keyboard.insertText(text)));
-  }
-
-  /** `electron.mouse.*`: one pointer event in the shown window's viewport. */
-  async mouse(input: { readonly kind: 'move'; readonly x: number; readonly y: number } | { readonly kind: 'down' | 'up'; readonly button: MouseButton } | { readonly kind: 'wheel'; readonly deltaX: number; readonly deltaY: number }, operation: OperationContext): Promise<void> {
-    const window = this.requireWindow();
-    const { mouse } = window.page;
-    await this.act(operation, `mouse.${input.kind}`, window, (budget) =>
-      budget.send(() => (input.kind === 'move' ? mouse.move(input.x, input.y) : input.kind === 'wheel' ? mouse.wheel(input.deltaX, input.deltaY) : mouse[input.kind](input.button))),
-    );
+    await this.act(operation, label, window, (budget) => send(window, budget));
   }
 
   // --- windows as tabs ---
@@ -460,16 +452,10 @@ export class ElectronSurface {
   async evaluateInWindow<R, A>(window: AppWindow, fn: (arg: A) => R | Promise<R>, arg: A, operation: OperationContext): Promise<R> {
     this.failOnDialog();
     if (window.page.isClosed()) throw new TestError('ACTION_FAILED', 'window.evaluate: the window has closed');
-    let payload: string | undefined;
-    try {
-      payload = arg === undefined ? undefined : JSON.stringify(arg);
-    } catch (cause) {
-      throw new TestError('INVALID_ARGUMENT', `window.evaluate: its argument is not JSON (${cause instanceof Error ? (cause.message.split('\n')[0] ?? '') : String(cause)}); pass plain data`, { cause });
-    }
-    const source = functionSource(fn, 'window.evaluate');
+    checkJsonArgument(arg, 'window.evaluate');
     // Its message is the test's, never read for a pattern.
-    const run = window.page.evaluateInPage(source, payload === undefined ? undefined : (JSON.parse(payload) as unknown)).catch((cause: unknown) => {
-      throw cause instanceof PageEvaluateError ? new TestError('EVALUATE_FAILED', `window.evaluate: ${cause.message}`, { cause }) : cause;
+    const run = window.page.evaluateInPage(functionSource(fn, 'window.evaluate'), arg).catch((cause: unknown) => {
+      throw cause instanceof EvaluateError ? new TestError('EVALUATE_FAILED', `window.evaluate: ${cause.message}`, { cause }) : cause;
     });
     // A cancelled step never awaits it.
     run.catch(() => undefined);

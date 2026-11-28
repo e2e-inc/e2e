@@ -3,7 +3,7 @@ import { resolveExpression, type SemanticNode } from '@e2e-dev/core/engine';
 import { describe, expect, it } from 'vitest';
 import type { AXNode } from '../../src/fields.ts';
 import { DomSnapshot, type SnapshotDocument } from '../../src/snapshot.ts';
-import { projectTree, spokenName, type ProjectionMode } from '../../src/tree.ts';
+import { projectTree, type ProjectionMode } from '../../src/tree.ts';
 
 /**
  * One read of the testbed's sign-in window, captured from Electron 45 with
@@ -17,10 +17,10 @@ const captured = JSON.parse(readFileSync(new URL('../fixtures/sign-in.json', imp
   metrics: { layoutViewport: { clientWidth: number }; cssLayoutViewport: { clientWidth: number }; cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } };
 };
 
-function project(mode: ProjectionMode, extra: { maxNodes?: number; keep?: ReadonlySet<number> } = {}) {
+function project(mode: ProjectionMode, extra: { maxNodes?: number; keep?: ReadonlySet<number> } = {}, ax: AXNode[] = captured.ax) {
   const { metrics } = captured;
   return projectTree(
-    captured.ax,
+    ax,
     new DomSnapshot(captured.snapshot.documents[0]!, captured.snapshot.strings),
     {
       scale: metrics.layoutViewport.clientWidth / metrics.cssLayoutViewport.clientWidth,
@@ -311,13 +311,13 @@ describe('unmaskableCount', () => {
     expect(new DomSnapshot(documentWith({ name: 3, attributes: [4, 5], shadow: 6, rendered: false }), strings).unmaskableCount()).toBe(0);
     expect(new DomSnapshot(documentWith({ name: 3, attributes: [4, 9], shadow: 6 }), strings).unmaskableCount()).toBe(0);
   });
-});
 
-describe('spokenName', () => {
-  it('reads an icon font\'s glyph as no character, and keeps a name of glyphs alone', () => {
-    expect(spokenName('\uf090 Scan')).toBe('Scan');
-    expect(spokenName('Save\uf00c  all')).toBe('Save all');
-    expect(spokenName('\uf1f8')).toBe('\uf1f8');
-    expect(spokenName('  plain   name ')).toBe('plain name');
+  it('names a control by its text, not its icon font\'s glyph, and keeps a name of glyphs alone', () => {
+    const renamed = (from: string, to: string): AXNode[] => captured.ax.map((node) => (node.name?.value === from && node.role?.value === 'button' ? { ...node, name: { ...node.name, value: to } } : node));
+    for (const mode of ['tree', 'node'] as const) {
+      expect(all(project(mode, {}, renamed('Sign in', '\uf090 Sign in')).root).filter((node) => node.role === 'button').map((node) => node.name)).toContain('Sign in');
+      expect(all(project(mode, {}, renamed('Sign in', 'Save\uf00c  all')).root).filter((node) => node.role === 'button').map((node) => node.name)).toContain('Save all');
+      expect(all(project(mode, {}, renamed('Sign in', '\uf1f8')).root).filter((node) => node.role === 'button').map((node) => node.name)).toContain('\uf1f8');
+    }
   });
 });

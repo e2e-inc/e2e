@@ -56,6 +56,8 @@ export interface ElectronLaunchOptions {
   readonly args?: readonly string[] | undefined;
   /** Variables over the engine's `env`. Never `ELECTRON_RUN_AS_NODE` or `NODE_OPTIONS`. */
   readonly env?: Readonly<Record<string, string>> | undefined;
+  /** The directory the app's process starts in, over the engine's `cwd`: absolute, or relative to the project root. */
+  readonly cwd?: string | undefined;
   /** How long the launch may take, in milliseconds. Default: the test's `timeout`. */
   readonly timeout?: number | undefined;
 }
@@ -76,9 +78,13 @@ export interface ElectronKeyboard {
 
 /** Pointer input to the active window, in viewport CSS pixels. */
 export interface ElectronMouse {
+  /** Moves the pointer to a point of the viewport. */
   move(x: number, y: number): Promise<void>;
+  /** Presses a button where the pointer is; the left one by default. */
   down(options?: { readonly button?: 'left' | 'right' | 'middle' }): Promise<void>;
+  /** Releases a button where the pointer is; the left one by default. */
   up(options?: { readonly button?: 'left' | 'right' | 'middle' }): Promise<void>;
+  /** Scrolls by a wheel turn where the pointer is. */
   wheel(deltaX: number, deltaY: number): Promise<void>;
 }
 
@@ -93,8 +99,9 @@ export interface Electron {
   /**
    * Launches the app fresh, as `app.open()` does, with arguments and
    * variables of this test's own added to the target's. They stay for the
-   * rest of the test: `app.restart()` and `app.clearState()` launch with
-   * them too.
+   * rest of the test: `app.open()`, `app.restart()`, and `app.clearState()`
+   * launch with them too. Another `launch()` replaces them; it does not add
+   * to them.
    */
   launch(options?: ElectronLaunchOptions): Promise<void>;
   /** The active window, the one `screen`, `expect`, and the agent act on. Throws `INVALID_STATE` when the app has no open window. */

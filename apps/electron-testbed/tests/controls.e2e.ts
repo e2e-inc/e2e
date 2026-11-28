@@ -207,6 +207,8 @@ test.describe('controls page', () => {
   test('taps text where it is, not the middle of the container the tree folds it into', async ({ screen }) => {
     await screen.getByText('Unselect All').tap();
     await expect(screen.getByTestId('unselect-clicks')).toHaveText('1');
+    await screen.getByText('Open row').tap();
+    await expect(screen.getByTestId('open-row-clicks')).toHaveText('1');
     // A control is its text wherever the text is drawn: the query answers with the button, and its state.
     await expect(screen.getByText('Wide save')).toBeDisabled();
     await expect(screen.getByText('Wide save')).toHaveRole('button');

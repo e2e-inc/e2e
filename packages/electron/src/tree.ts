@@ -15,10 +15,9 @@ import { OBSERVED_NAME_LIMIT, OBSERVED_TEXT_LIMIT, type SemanticNode } from '@e2
 import { elementFields, isButtonInput, isCheckable, isFocusable, isHiddenSubtree, isSecure, isTextField, roleOf, stringOf, type AXNode, type FieldContext, type ProjectionPolicy } from './fields.ts';
 import { collapse, type DomFacts, type DomSnapshot } from './snapshot.ts';
 
-/** Roles that group other content: a tap in the middle of one is a tap on whatever happens to be there. */
-const CONTAINER_ROLES = new Set([
-  'generic', 'toolbar', 'group', 'region', 'navigation', 'banner', 'main', 'complementary', 'contentinfo', 'form', 'list', 'menu', 'menubar', 'tablist', 'tree', 'grid', 'table',
-  'listbox', 'document', 'article', 'dialog',
+/** Controls that are their text wherever it is drawn: a text query answers with the control, and its state. */
+const TEXT_IS_THE_NODE = new Set([
+  'button', 'link', 'heading', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'checkbox', 'radio', 'switch', 'treeitem', 'textbox', 'searchbox', 'combobox',
 ]);
 
 /** An icon font's glyphs: private-use code points Chromium puts in a name from CSS generated content. */
@@ -29,7 +28,7 @@ const ICON_GLYPHS = /\p{Co}/gu;
  * character, so a button drawn as an icon and "Scan" is named "Scan". A name
  * of glyphs alone is kept as it is, the only name the node has.
  */
-export function spokenName(name: string): string {
+function spokenName(name: string): string {
   const spoken = collapse(name.replace(ICON_GLYPHS, ' '));
   return spoken === '' ? collapse(name) : spoken;
 }
@@ -350,21 +349,16 @@ class TreeProjector {
   }
 
   /**
-   * Whether a container's lone text run stays a node of its own for a
-   * locator: the run sits inside elements the tree leaves out
-   * (`<div role="toolbar"><span>Unselect All</span></div>`), and a tap at the
-   * container's middle would land beside the text, on none of them. A control
-   * (a button, a link, a heading) is its text wherever the text is drawn.
+   * Whether a node's lone text run stays a node of its own for a locator:
+   * the run sits inside elements the tree leaves out
+   * (`<div role="toolbar"><span>Unselect All</span></div>`), so the text has
+   * a box of its own, which is where a tap on the text belongs and what a
+   * text query on the web answers with. Decided by the document's structure
+   * alone, never by where things are drawn.
    */
   private runStandsApart(draft: Draft, run: Draft): boolean {
-    if (draft.role !== undefined && !CONTAINER_ROLES.has(draft.role)) return false;
-    if (this.snapshot.parentOf(run.order) === draft.order) return false;
-    const { rect: box } = draft;
-    const { rect: text } = run;
-    if (box === undefined || text === undefined) return false;
-    const x = box.x + box.width / 2;
-    const y = box.y + box.height / 2;
-    return x < text.x || x > text.x + text.width || y < text.y || y > text.y + text.height;
+    if (draft.role !== undefined && TEXT_IS_THE_NODE.has(draft.role)) return false;
+    return this.snapshot.parentOf(run.order) !== draft.order;
   }
 
   /**

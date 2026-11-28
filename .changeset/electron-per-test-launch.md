@@ -4,7 +4,7 @@
 
 The `electron` fixture covers what a real app's suite needs beside `screen`:
 
-- `electron.launch({ args, env })` launches the app with arguments and environment variables of one test, and `electron.userDataDir` is there before the launch, so a test can put data in it first. [Per-test arguments](https://e2e.com/docs/electron#launch-with-per-test-arguments)
+- `electron.launch({ args, env, cwd })` launches the app with arguments, environment variables, and a working directory of one test (`electron({ cwd })` sets the directory for every test), and `electron.userDataDir` is there before the launch, so a test can put data in it first. [Per-test arguments](https://e2e.com/docs/electron#launch-with-per-test-arguments)
 - `electron.keyboard` and `electron.mouse` send input to the active window, wherever its focus is: `await electron.keyboard.press('Escape')`. [Keyboard and mouse](https://e2e.com/docs/electron#keyboard-and-mouse)
 - `electron.activeWindow()` returns the window `screen` reads, and a window has `evaluate(fn, arg)`, which runs in its page, and `reload()`. [Run code in a window](https://e2e.com/docs/electron#run-code-in-a-window)
 

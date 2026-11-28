@@ -15,7 +15,8 @@ import type { ElectronMainModule } from './fixtures.ts';
 import { closedWindow, invalidState, unsupported } from './errors.ts';
 import { appDirectory } from './file-bound.ts';
 import { ElectronProcess, type ProcessExit } from './launcher.ts';
-import { MainEvaluateError, MainProcess } from './main-process.ts';
+import { EvaluateError } from './evaluate.ts';
+import { MainProcess } from './main-process.ts';
 import { REFUSED_ENV, type ResolvedElectronOptions } from './options.ts';
 import { PageTarget } from './page.ts';
 import type { Windows } from './windows.ts';
@@ -42,6 +43,8 @@ export interface LaunchSetup {
 export interface LaunchExtra {
   readonly args: readonly string[];
   readonly env: Readonly<Record<string, string>>;
+  /** The directory the process starts in, over the engine's `cwd`. */
+  readonly cwd?: string;
 }
 
 /** How long the main process gets to answer a question whose answer is optional. */
@@ -218,7 +221,7 @@ export class AppProcess {
   private start(setup: LaunchSetup): RunningApp {
     const { appPath, launchArguments } = setup.app;
     const args = [`--user-data-dir=${setup.userDataDir}`, ...(appPath === undefined ? [] : [path.resolve(setup.projectRoot, appPath)]), ...(launchArguments ?? []), ...(setup.extra?.args ?? [])];
-    const process = new ElectronProcess({ executable: setup.executable, args, cwd: setup.projectRoot, env: launchEnv(setup.env, { ...this.options.env, ...setup.extra?.env }) });
+    const process = new ElectronProcess({ executable: setup.executable, args, cwd: path.resolve(setup.projectRoot, setup.extra?.cwd ?? this.options.cwd ?? '.'), env: launchEnv(setup.env, { ...this.options.env, ...setup.extra?.env }) });
     let withoutMain: () => void = () => undefined;
     const none = new Promise<undefined>((resolve) => {
       withoutMain = () => resolve(undefined);
@@ -336,7 +339,7 @@ export class AppProcess {
     });
     session.on('Page.loadEventFired', () => {
       this.windows.markLoaded(page);
-      page.emit('load');
+      page.markLoaded();
     });
     session.on('Page.frameNavigated', ({ frame }) => {
       if (frame.parentId !== undefined) return;
@@ -382,7 +385,7 @@ export class AppProcess {
       const exiting = this.app === app && (closedWindow(cause) || /Execution context was destroyed/.test(String(cause)));
       if (exiting) await answerWithin(app.process.exited, ANSWER_MS);
       if (this.app !== app) throw new EngineError('INVALID_STATE', 'the app quit while electron.evaluate ran', { retryable: false, cause });
-      if (!(cause instanceof MainEvaluateError)) throw cause;
+      if (!(cause instanceof EvaluateError)) throw cause;
       // Its message is the test's, never read for a pattern.
       throw new TestError('EVALUATE_FAILED', `electron.evaluate: ${cause.message}`, { cause });
     }

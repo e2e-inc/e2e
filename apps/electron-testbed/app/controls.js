@@ -111,5 +111,6 @@ hostButton.textContent = 'Hosted action';
 hostButton.addEventListener('click', () => count('host-clicks'));
 document.querySelector('[data-testid="disabled-host"]').attachShadow({ mode: 'open' }).append(hostButton);
 document.querySelector('#unselect').addEventListener('click', () => count('unselect-clicks'));
+document.querySelector('#open-row').addEventListener('click', () => count('open-row-clicks'));
 const compositeRow = document.querySelector('[data-testid="composite-row"]');
 compositeRow.addEventListener('focus', () => compositeRow.querySelector('input').focus());

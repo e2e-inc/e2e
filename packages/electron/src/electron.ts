@@ -4,9 +4,12 @@
  * `electron.<method>` step bounded by the action timeout.
  */
 
-import { ConfigurationError, isSecret, stepTimeout, type EngineFixtureContext, type FixtureOperation } from '@e2e-dev/core/engine';
+import { ConfigurationError, isSecret, stepTimeout, TestError, type EngineFixtureContext, type FixtureOperation } from '@e2e-dev/core/engine';
 import type { Electron, ElectronMainModule, ElectronWindow } from './fixtures.ts';
-import { ownedArgument, REFUSED_ENV } from './options.ts';
+import { typeKeys } from './actions.ts';
+import { hasKey, type MouseButton } from './cdp/input.ts';
+import { unsupported } from './errors.ts';
+import { checkLaunchOptions } from './options.ts';
 import type { ElectronSurface } from './surface.ts';
 import type { AppWindow } from './windows.ts';
 
@@ -33,58 +36,67 @@ export function createElectronFixture(surface: ElectronSurface, context: EngineF
     handles.set(window, made);
     return made;
   };
-  const button = (options: { readonly button?: 'left' | 'right' | 'middle' } | undefined): 'left' | 'right' | 'middle' => {
+  const mouseButton = (options: { readonly button?: MouseButton } | undefined): MouseButton => {
     const chosen = options?.button ?? 'left';
-    if (chosen !== 'left' && chosen !== 'right' && chosen !== 'middle') throw new ConfigurationError('INVALID_ARGUMENT', "electron.mouse takes { button: 'left' | 'right' | 'middle' }");
+    if (chosen !== 'left' && chosen !== 'right' && chosen !== 'middle') throw new TestError('INVALID_ARGUMENT', "electron.mouse takes { button: 'left' | 'right' | 'middle' }");
     return chosen;
   };
-  const text = (value: unknown, method: string): string => {
+  const numbers = (call: string, ...values: readonly unknown[]): void => {
+    if (values.some((value) => typeof value !== 'number' || !Number.isFinite(value))) throw new TestError('INVALID_ARGUMENT', `electron.mouse.${call} takes two numbers`);
+  };
+  const plainText = (value: unknown, method: string): string => {
     if (isSecret(value)) throw new ConfigurationError('POLICY_DENIED', `electron.keyboard.${method} cannot take a secret: fill it into a field with locator.fill`);
-    if (typeof value !== 'string') throw new ConfigurationError('INVALID_ARGUMENT', `electron.keyboard.${method} takes a string`);
+    if (typeof value !== 'string') throw new TestError('INVALID_ARGUMENT', `electron.keyboard.${method} takes a string`);
     return value;
+  };
+  const holdKey = (direction: 'down' | 'up') => async (key: string): Promise<void> => {
+    const name = plainText(key, direction);
+    if (!hasKey(name)) throw unsupported(`the keyboard has no key ${JSON.stringify(name)}: name a key such as "Shift" or "Enter", or a character of a US keyboard`);
+    await surface.input(`keyboard.${direction}`, (window, budget) => budget.send(() => window.page.keyboard[direction](name)), context.operation());
   };
   const electron: Electron = {
     get userDataDir() {
       return surface.dataDirectory();
     },
     async launch(options) {
-      const { args = [], env = {}, timeout, ...unknown } = options ?? {};
-      const extra = Object.keys(unknown)[0];
-      if (extra !== undefined) throw new ConfigurationError('INVALID_ARGUMENT', `electron.launch() takes { args, env, timeout }, not ${extra}`);
-      if (!Array.isArray(args) || args.some((argument) => typeof argument !== 'string')) throw new ConfigurationError('INVALID_ARGUMENT', 'electron.launch({ args }) takes a list of strings');
-      if (typeof env !== 'object' || env === null || Array.isArray(env) || Object.values(env).some((value) => typeof value !== 'string')) {
-        throw new ConfigurationError(holdsSecret(env) ? 'POLICY_DENIED' : 'INVALID_ARGUMENT', 'electron.launch({ env }) takes an object of variable name to string value, and never a secret');
-      }
-      const owned = args.map(ownedArgument).find((reason) => reason !== undefined);
-      if (owned !== undefined) throw new ConfigurationError('INVALID_ARGUMENT', `electron.launch({ args }) ${owned}`);
-      const refused = Object.keys(env).find((name) => REFUSED_ENV.has(name.toUpperCase()));
-      if (refused !== undefined) throw new ConfigurationError('INVALID_ARGUMENT', `electron.launch({ env }) must not set ${refused}`);
-      await surface.launchWith({ args: [...args], env: { ...env } }, context.operation(stepTimeout(timeout, 'electron.launch') ?? context.timeouts.test));
+      // A secret would reach the app's command line or environment, where any process can read it.
+      if (holdsSecret(options)) throw new ConfigurationError('POLICY_DENIED', 'electron.launch() cannot take a secret in its arguments or variables');
+      const extra = checkLaunchOptions(options, surface.root);
+      await surface.launchWith(extra, context.operation(stepTimeout(options?.timeout, 'electron.launch') ?? context.timeouts.test));
     },
     activeWindow: () => handle(surface.shownWindow()),
     keyboard: {
-      press: (key) => surface.pressKey(text(key, 'press'), context.operation()),
-      down: (key) => surface.holdKey(text(key, 'down'), 'down', context.operation()),
-      up: (key) => surface.holdKey(text(key, 'up'), 'up', context.operation()),
+      press: async (key) => surface.pressKey(plainText(key, 'press'), context.operation()),
+      down: holdKey('down'),
+      up: holdKey('up'),
       async type(value, options) {
         const delay = options?.delay ?? 0;
-        if (typeof delay !== 'number' || !Number.isFinite(delay) || delay < 0) throw new ConfigurationError('INVALID_ARGUMENT', 'electron.keyboard.type({ delay }) takes a number of milliseconds');
-        const typed = text(value, 'type');
+        if (typeof delay !== 'number' || !Number.isFinite(delay) || delay < 0) throw new TestError('INVALID_ARGUMENT', 'electron.keyboard.type({ delay }) takes a number of milliseconds');
+        const typed = plainText(value, 'type');
         // One budget for the whole text: the action timeout, and the time its delays ask on top.
-        await surface.typeKeys(typed, delay, context.operation(context.timeouts.action + [...typed].length * delay));
+        await surface.input('keyboard.type', (window, budget) => typeKeys(window, typed, delay, budget), context.operation(context.timeouts.action + [...typed].length * delay));
       },
-      insertText: (value) => surface.insertText(text(value, 'insertText'), context.operation()),
+      async insertText(value) {
+        const inserted = plainText(value, 'insertText');
+        await surface.input('keyboard.insertText', (window, budget) => budget.send(() => window.page.keyboard.insertText(inserted)), context.operation());
+      },
     },
     mouse: {
       async move(x, y) {
-        if (!Number.isFinite(x) || !Number.isFinite(y)) throw new ConfigurationError('INVALID_ARGUMENT', 'electron.mouse.move(x, y) takes two numbers');
-        await surface.mouse({ kind: 'move', x, y }, context.operation());
+        numbers('move(x, y)', x, y);
+        await surface.input('mouse.move', (window, budget) => budget.send(() => window.page.mouse.move(x, y)), context.operation());
       },
-      down: async (options) => surface.mouse({ kind: 'down', button: button(options) }, context.operation()),
-      up: async (options) => surface.mouse({ kind: 'up', button: button(options) }, context.operation()),
+      async down(options) {
+        const pressed = mouseButton(options);
+        await surface.input('mouse.down', (window, budget) => budget.send(() => window.page.mouse.down(pressed)), context.operation());
+      },
+      async up(options) {
+        const released = mouseButton(options);
+        await surface.input('mouse.up', (window, budget) => budget.send(() => window.page.mouse.up(released)), context.operation());
+      },
       async wheel(deltaX, deltaY) {
-        if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY)) throw new ConfigurationError('INVALID_ARGUMENT', 'electron.mouse.wheel(deltaX, deltaY) takes two numbers');
-        await surface.mouse({ kind: 'wheel', deltaX, deltaY }, context.operation());
+        numbers('wheel(deltaX, deltaY)', deltaX, deltaY);
+        await surface.input('mouse.wheel', (window, budget) => budget.send(() => window.page.mouse.wheel(deltaX, deltaY)), context.operation());
       },
     },
     async evaluate<R, A>(fn: (electron: ElectronMainModule, arg: A) => R | Promise<R>, arg?: A): Promise<R> {

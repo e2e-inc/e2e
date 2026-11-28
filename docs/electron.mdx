@@ -89,7 +89,7 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
 
 | Method | What it does |
 | --- | --- |
-| `launch({ args, env }?)` | Launches the app with [arguments and variables for this test](#launch-with-per-test-arguments) |
+| `launch({ args, env, cwd, timeout }?)` | Launches the app with [arguments and variables for this test](#launch-with-per-test-arguments) |
 | `userDataDir` | The test's user-data directory, which exists before the app is launched |
 | `evaluate(fn, arg?)` | Runs `fn` in the main process with the `electron` module and returns its JSON-serializable result |
 | `windows()` | The open windows, in the order they opened |
@@ -104,8 +104,10 @@ test('signs in and opens settings', async ({ app, screen, electron }) => {
 ## Launch with per-test arguments
 
 `electron.launch()` launches the app as `app.open()` does, and adds arguments
-and environment variables for this test to the target's. `app.restart()` and
-`app.clearState()` keep them until the test ends.
+and environment variables for this test to the target's. `cwd` sets the
+directory the process starts in. `app.open()`, `app.restart()`, and
+`app.clearState()` keep them until the test ends. Another `launch()` replaces
+them.
 
 `electron.userDataDir` exists before the app is launched, so a test can put
 data in it first:
@@ -209,8 +211,8 @@ await electron.mouse.move(0, 0);
 
 - `keyboard` has `press`, `down`, `up`, `type`, and `insertText`. `mouse` has
   `move`, `down`, `up`, and `wheel`.
-- A shortcut the page handles works, and so do copy and paste. A menu
-  accelerator doesn't: see [Limits](#limits).
+- A shortcut the page handles works. A menu accelerator doesn't: see
+  [Limits](#limits).
 - `type` never takes a secret. Fill one with `locator.fill()`.
 
 ## Handle alert and confirm dialogs
@@ -369,6 +371,7 @@ The engine adds `--no-sandbox` on Linux automatically.
 | Option | Type | Default | What it sets |
 | --- | --- | --- | --- |
 | `executablePath` | `string` | project's `electron` | Binary to start, such as a [packaged app](#test-a-packaged-app) |
+| `cwd` | `string` | project root | Directory the app's process starts in: absolute, or relative to the project root |
 | `env` | `Record<string, string>` | `{}` | Extra environment variables for the app (not `ELECTRON_RUN_AS_NODE` or `NODE_OPTIONS`); see [Security](#security) |
 | `testIdAttribute` | `string` | `'data-testid'` | Attribute `getByTestId` reads |
 | `settle` | `number \| false` | `100` | Wait time in milliseconds after an agent action before the next read (`false` skips it) |

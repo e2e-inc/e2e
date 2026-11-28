@@ -38,6 +38,11 @@ test.describe('electron.launch', () => {
     expect(await launched()).toEqual({ args: ['--greeting=Hello from e2e', '--per-test'], mode: 'per-test' });
   });
 
+  test('starts the app\'s process in the directory the test names', async ({ electron }) => {
+    await electron.launch({ cwd: 'app' });
+    expect(await electron.evaluate(() => process.cwd())).toMatch(/electron-testbed[\\/]app$/);
+  });
+
   test('starts the next test without them', async ({ app, screen, electron }) => {
     await app.open();
     await expect(screen.getByRole('heading', 'Hello from e2e')).toBeVisible();
@@ -48,7 +53,20 @@ test.describe('electron.launch', () => {
     expect(await failure(electron.launch({ args: ['--user-data-dir=/tmp/elsewhere'] }))).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('electron.launch({ args })') });
     expect(await failure(electron.launch({ env: { TOKEN: credentials.user('ada').password as never } }))).toMatchObject({ code: 'POLICY_DENIED' });
     expect(await failure(electron.launch({ env: { NODE_OPTIONS: '--inspect' } }))).toMatchObject({ code: 'INVALID_ARGUMENT' });
-    expect(await failure(electron.launch({ cwd: '/tmp' } as never))).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(await failure(electron.launch({ cwd: 'no-such-directory' }))).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('not a directory') });
+    expect(await failure(electron.launch({ headless: true } as never))).toMatchObject({ code: 'INVALID_ARGUMENT' });
+  });
+});
+
+test.describe('the app not running', () => {
+  test('has no active window to hand out', async ({ electron }) => {
+    let thrown: unknown;
+    try {
+      electron.activeWindow();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ code: 'INVALID_STATE' });
   });
 });
 
@@ -70,11 +88,19 @@ test.describe('electron.keyboard and a window\'s page', () => {
     await electron.keyboard.press('ControlOrMeta+A');
     await electron.keyboard.insertText('grace');
     await expect(username).toHaveValue('grace');
+    // A chord with a modifier the test holds leaves it held: the next arrow still selects.
+    await username.fill('ada');
+    await electron.keyboard.down('Shift');
+    await electron.keyboard.press('Shift+ArrowLeft');
+    await electron.keyboard.press('ArrowLeft');
+    await electron.keyboard.up('Shift');
+    await electron.keyboard.press('Backspace');
+    await expect(username).toHaveValue('a');
     expect(await failure(electron.keyboard.down('NoSuchKey'))).toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
     expect(await failure(electron.keyboard.type(credentials.user('ada').password as never))).toMatchObject({ code: 'POLICY_DENIED' });
   });
 
-  test('runs code in the active window\'s page, with its argument and its own error', async ({ screen, electron }) => {
+  test('runs code in the active window\'s page, with its argument and its own error', async ({ electron }) => {
     const window = electron.activeWindow();
     expect(window.isActive()).toBe(true);
     expect(await window.evaluate(() => (globalThis as unknown as PageGlobals).document.title)).toBe('Sign In');
@@ -84,8 +110,31 @@ test.describe('electron.keyboard and a window\'s page', () => {
     expect(await failure(window.evaluate((held: unknown) => held, { nested: [credentials.user('ada').password] }))).toMatchObject({ code: 'POLICY_DENIED' });
     // What comes back is plain data, as from the main process: a bigint as its digits, a function left out.
     expect(await window.evaluate(() => ({ big: 10n, run: () => 1, kept: 'yes' }))).toEqual({ big: '10', kept: 'yes' });
-    await screen.getByRole('textbox', 'Username').fill('ada');
+    // The new document is there when reload() resolves: what the old one held is gone, with no wait.
+    await window.evaluate(() => {
+      (globalThis as { marked?: boolean }).marked = true;
+    });
     await window.reload();
-    await expect(screen.getByRole('textbox', 'Username')).toHaveValue('');
+    expect(await window.evaluate(() => (globalThis as { marked?: boolean }).marked ?? null)).toBeNull();
+    expect(await window.evaluate(() => (globalThis as unknown as { document: { readyState: string } }).document.readyState)).toBe('complete');
+  });
+
+  test('moves, presses, and scrolls with the mouse where the test points it', async ({ screen, electron }) => {
+    const box = await screen.getByRole('button', 'Add one').boundingBox();
+    if (box === null) throw new Error('the button has no box');
+    await electron.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await electron.mouse.down();
+    await electron.mouse.up();
+    await expect(screen.getByTestId('count')).toHaveText('1');
+    // A right press is no click.
+    await electron.mouse.down({ button: 'right' });
+    await electron.mouse.up({ button: 'right' });
+    await expect(screen.getByTestId('count')).toHaveText('1');
+    const scrolled = (): Promise<number> => electron.activeWindow().evaluate(() => (globalThis as unknown as { scrollY: number }).scrollY);
+    const before = await scrolled();
+    await electron.mouse.wheel(0, 200);
+    await expect.poll(scrolled).toBeGreaterThan(before);
+    expect(await failure(electron.mouse.move(Number.NaN, 0))).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(await failure(electron.mouse.down({ button: 'side' as never }))).toMatchObject({ code: 'INVALID_ARGUMENT' });
   });
 });

@@ -7,7 +7,7 @@
 import type { Deadline } from '@e2e-dev/core/engine';
 import type { Session } from './cdp/connection.ts';
 import { Keyboard, Mouse, type InputTarget } from './cdp/input.ts';
-import { plainData } from './main-process.ts';
+import { callForPlainData } from './evaluate.ts';
 
 /** How long past its operation's end a gesture may still hold the page's input, to release what it pressed. */
 const RELEASE_MS = 1_000;
@@ -21,9 +21,6 @@ type PageEvent = 'close' | 'crash' | 'load' | 'document';
 export function thrown(details: { readonly text: string; readonly exception?: { readonly description?: string } }): string {
   return details.exception?.description ?? details.text;
 }
-
-/** What test code run in a page threw: its own failure, not the engine's. */
-export class PageEvaluateError extends Error {}
 
 export class PageTarget implements InputTarget {
   readonly keyboard: Keyboard;
@@ -82,7 +79,6 @@ export class PageTarget implements InputTarget {
   }
 
   emit(event: PageEvent): void {
-    if (event === 'load') this.loaded = true;
     if (event === 'close') {
       if (this.closed) return;
       this.closed = true;
@@ -107,6 +103,12 @@ export class PageTarget implements InputTarget {
    */
   get generation(): number {
     return this.documents;
+  }
+
+  /** The current document fired its load event. */
+  markLoaded(): void {
+    this.loaded = true;
+    this.emit('load');
   }
 
   /** The page has another document: the isolated world of the last one is dropped, and its nodes are no longer this page's. */
@@ -196,27 +198,18 @@ export class PageTarget implements InputTarget {
 
   /**
    * Runs test code in the page's own world, where the app's globals are:
-   * `source` is a function expression called with `arg`, its promise awaited
-   * and its result returned by value. Rejects with `PageEvaluateError` when
-   * the code throws.
+   * `source` is a function expression called with `arg`. Rejects with
+   * `EvaluateError` when the code throws.
    */
   async evaluateInPage(source: string, arg: unknown): Promise<unknown> {
     const { session } = this;
-    // The argument travels as a protocol value, never as text in the code that runs.
     const { result: scope } = await session.send('Runtime.evaluate', { expression: 'globalThis' });
     if (scope.objectId === undefined) throw new Error('the page has no global object to run code on');
-    const { result, exceptionDetails } = await session.send('Runtime.callFunctionOn', {
-      objectId: scope.objectId,
-      functionDeclaration: `async function (arg) { return (${plainData.toString()})(await (${source})(arg)); }`,
-      arguments: arg === undefined ? [] : [{ value: arg }],
-      returnByValue: true,
-      awaitPromise: true,
-      userGesture: true,
-    });
-    void session.send('Runtime.releaseObject', { objectId: scope.objectId }).catch(() => undefined);
-    if (exceptionDetails !== undefined) throw new PageEvaluateError(thrown(exceptionDetails).split('\n')[0] ?? exceptionDetails.text);
-    // NaN, an infinity, and -0 have no JSON: the protocol names them instead.
-    return result.unserializableValue === undefined ? result.value : Number(result.unserializableValue);
+    try {
+      return await callForPlainData(session, { objectId: scope.objectId, source, arg, userGesture: true });
+    } finally {
+      void session.send('Runtime.releaseObject', { objectId: scope.objectId }).catch(() => undefined);
+    }
   }
 
   /**
@@ -226,13 +219,20 @@ export class PageTarget implements InputTarget {
    */
   async reload(): Promise<void> {
     const before = this.documents;
-    const ended = Promise.race([this.next('close'), this.next('crash')]).then(() => {
-      throw new Error('the window closed or its renderer crashed while it reloaded (Target closed)');
+    let stop: () => void = () => undefined;
+    const ended = new Promise<never>((_resolve, reject) => {
+      const gone = (): void => reject(new Error('the window closed or its renderer crashed while it reloaded (Target closed)'));
+      const stops = [this.on('close', gone), this.on('crash', gone)];
+      stop = () => stops.forEach((off) => off());
     });
     ended.catch(() => undefined);
-    await this.session.send('Page.reload');
-    while (this.documents === before) await Promise.race([this.next('document'), ended]);
-    await Promise.race([this.loaded ? Promise.resolve() : this.next('load'), ended]);
+    try {
+      await this.session.send('Page.reload');
+      while (this.documents === before) await Promise.race([this.next('document'), ended]);
+      if (!this.loaded) await Promise.race([this.next('load'), ended]);
+    } finally {
+      stop();
+    }
   }
 
   /** Calls a self-contained page function in the isolated world with JSON arguments and returns its JSON result. */
