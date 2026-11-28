@@ -13,6 +13,15 @@ use napi_derive::napi;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::Semaphore;
 
+/// NAPI-RS's runtime, with one scheduler thread where its default starts one per core: the futures here only wait
+/// for a permit and a blocking thread, and loading the addon (as `@e2e-dev/mobile` does on import) should not start a
+/// thread per core in every runner process. The pixel work itself runs on tokio's blocking pool, bounded by `PERMITS`.
+#[napi_derive::module_init]
+fn init_runtime() {
+    let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("could not start the image runtime");
+    create_custom_tokio_runtime(runtime);
+}
+
 /// One permit per core: pixel work is CPU-bound, so more threads than cores only add switching.
 static PERMITS: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(std::thread::available_parallelism().map(std::num::NonZero::get).unwrap_or(4)));
 
