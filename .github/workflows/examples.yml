@@ -44,17 +44,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Builds the packages once and packs the ones an example installs, so every
-  # job below installs the same main build. Only this repository runs it:
-  # GitHub turns a fork's schedules off, but a fork's owner can still
-  # dispatch the workflow, and it would spend their runners and model key.
-  # Every example job needs this one, so on a fork they all skip with it.
   # @e2e-dev/util's addon for every platform, which `pack` puts in its
   # platform packages, so each example installs the build for its runner.
   util-native:
     if: ${{ github.repository == 'e2e-inc/e2e' }}
     uses: ./.github/workflows/util-native.yml
 
+  # Builds the packages once and packs the ones an example installs, so every
+  # job below installs the same main build. Only this repository runs it:
+  # GitHub turns a fork's schedules off, but a fork's owner can still
+  # dispatch the workflow, and it would spend their runners and model key.
+  # Every example job needs this one, so on a fork they all skip with it.
   pack:
     needs: util-native
     if: ${{ github.repository == 'e2e-inc/e2e' }}
