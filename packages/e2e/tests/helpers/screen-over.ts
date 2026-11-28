@@ -27,6 +27,7 @@ import { Deadline } from '@e2e-dev/core/lib/internal/time';
 import { LocatorEngine } from '@e2e-dev/core/lib/locator/engine';
 import { createScreen } from '@e2e-dev/core/lib/locator/screen';
 import { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
+import type { ScreenshotContext } from '@e2e-dev/core/lib/run/screenshots';
 import { StepRecorder } from '@e2e-dev/core/lib/run/steps';
 import type { Screen } from '@e2e-dev/core/lib/types';
 
@@ -57,6 +58,8 @@ export interface ScreenOverOptions {
   readonly timeoutMs: number;
   /** The attempt's signal; default one that never aborts. */
   readonly signal?: AbortSignal;
+  /** Where `toHaveScreenshot` keeps screenshots; without it the matcher refuses, as outside a test. */
+  readonly screenshots?: ScreenshotContext;
 }
 
 /** A screen and the recorder of its steps over the engine `options` describe. */
@@ -103,6 +106,7 @@ export function screenOver(options: ScreenOverOptions): { screen: Screen; steps:
       assertionTimeout: options.timeoutMs,
     }),
     steps,
+    ...(options.screenshots === undefined ? {} : { screenshots: options.screenshots }),
     secrets: { resolve: async () => 'plaintext' },
     artifacts: { dir: options.artifactsDir ?? '', register: (_kind, relativePath) => {
         options.registered?.(relativePath);

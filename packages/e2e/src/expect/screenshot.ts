@@ -7,11 +7,12 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { pollReadSignal } from '@e2e-dev/core/lib/expect/poll-scope';
 import type { LocatorExpression } from '@e2e-dev/core/lib/engine/surface';
 import { writeFileAtomic } from '@e2e-dev/core/lib/internal/atomic-write';
 import { InfrastructureError, TestError } from '@e2e-dev/core/lib/internal/errors';
 import { compareImages, decodePng, diffImage, encodePng, type Image, type ImageComparison } from '@e2e-dev/core/lib/internal/image';
-import { pollReads, type Deadline, type ReadWindow } from '@e2e-dev/core/lib/internal/time';
+import { cancelledError, pollReads, withAbort, type Deadline, type ReadWindow } from '@e2e-dev/core/lib/internal/time';
 import { describeExpression } from '@e2e-dev/core/lib/locator/expression';
 import type { ScreenContext } from '@e2e-dev/core/lib/locator/screen';
 import type { ScreenshotContext } from '@e2e-dev/core/lib/run/screenshots';
@@ -36,6 +37,7 @@ interface Run {
   readonly stored: Stored;
   readonly reads: ReadWindow;
   readonly capture: () => Promise<Capture>;
+  readonly signal: AbortSignal;
 }
 
 /** The `expect(screen, message?)` surface; a scoped screen (a frame) refuses, since its box is not known. */
@@ -91,7 +93,9 @@ export async function expectScreenshot(
     const capture = (): Promise<Capture> => captureOnce().catch((error: unknown) => {
       throw labelAmbiguous(error, message);
     });
-    const run: Run = { context, store, heading, call, stored, reads, capture };
+    const pollSignal = pollReadSignal();
+    const signal = pollSignal === undefined ? context.engine.signal : AbortSignal.any([context.engine.signal, pollSignal]);
+    const run: Run = { context, store, heading, call, stored, reads, capture, signal };
     const expected = existsSync(file) ? await readStored(api, stored) : undefined;
     if (expected !== undefined && (negated || !store.update) && store.written.has(file)) {
       throw failure(heading, `${stored.shown} was written earlier in this run and is not reviewed yet: look at it, commit it, and run again`, stored, 'unreviewed stored screenshot');
@@ -182,8 +186,9 @@ async function keep(run: Run, expected: Image | undefined, settled: Image): Prom
     const kept = await attach(run, path.join('snapshots', ...stored.shown.split('/')), settled);
     throw failure(heading, `no stored screenshot at ${stored.shown}, and CI writes none without --update-snapshots; commit this run's there\nactual: ${kept}`, stored, 'no stored screenshot');
   }
+  const png = await withAbort(() => encodePng(settled), run.signal, cancelledError);
   mkdirSync(path.dirname(stored.file), { recursive: true });
-  await writeFileAtomic(stored.file, await encodePng(settled));
+  await writeFileAtomic(stored.file, png);
   store.written.add(stored.file);
   if (expected === undefined && !store.update) {
     throw failure(heading, `no stored screenshot at ${stored.shown}; wrote this run's there. Look at it, commit it, and run again`, stored, 'no stored screenshot');
@@ -268,7 +273,7 @@ function formatRatio(ratio: number): string {
  * step. Returns its path as a failure names it: relative to the project root.
  */
 async function attach(run: Run, name: string, image: Image): Promise<string> {
-  const png = await encodePng(image);
+  const png = await withAbort(() => encodePng(image), run.signal, cancelledError);
   const { artifacts } = run.store;
   const wanted = name.endsWith('.png') ? name : path.join('screenshots', `${name}.png`);
   let relative = wanted;
