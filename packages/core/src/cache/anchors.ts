@@ -25,7 +25,7 @@
 
 import type { RedactedNode } from '../agent/observation.ts';
 import { describeTarget } from '../agent/actions.ts';
-import { CLOCK_TIME, DAY_MONTH_DATE, ISO_DATE, MONTH_DAY_DATE } from '../internal/dates.ts';
+import { CJK_DATE, CJK_TIME, CLOCK_TIME, DAY_MONTH_DATE, ISO_DATE, MONTH_DAY_DATE, NUMERIC_DATE } from '../internal/dates.ts';
 import { bound, collapseText } from '../internal/text.ts';
 import { descriptorTiers, fieldsEqual, tierView, type DescriptorField, type DescriptorTier } from './relocate.ts';
 import {
@@ -173,7 +173,10 @@ const VOLATILE_TEXT: readonly RegExp[] = [
   MONTH_DAY_DATE,
   DAY_MONTH_DATE,
   ISO_DATE,
+  NUMERIC_DATE,
+  CJK_DATE,
   CLOCK_TIME,
+  CJK_TIME,
 ];
 
 /**

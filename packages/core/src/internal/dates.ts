@@ -17,3 +17,20 @@ export const MONTH_DAY_DATE = new RegExp(String.raw`\b${MONTH}\s+${DAY}(?:,?\s+\
 
 /** A day followed by month with optional year (e.g. `3rd October`, `26th Oct 2026`). */
 export const DAY_MONTH_DATE = new RegExp(String.raw`\b${DAY}\s+${MONTH}(?:,?\s+\d{4})?\b`, 'i');
+
+/**
+ * A numeric date with a four-digit year, year first (`2026/11/15`, Korean
+ * `2026. 11. 15.`) or year last (`15.11.2026`, `11/15/2026`, Dutch `15-11-2026`).
+ */
+export const NUMERIC_DATE = /\b\d{4}(\/|\.\s?)\d{1,2}\1\d{1,2}(?!\d)|(?<![\w./-])\d{1,2}([/.-])\d{1,2}\2\d{4}\b/;
+
+/**
+ * A Chinese, Japanese or Korean month and day, with or without the year
+ * before it (`11月15日`, `2026年11月15日`, `2026년 11월 15일`). The year is part
+ * of the match, so a date in the next year reads the same. It anchors on the
+ * digits, since `\b` does not fire next to these characters.
+ */
+export const CJK_DATE = /(?<!\d)(?:\d{4}\s*[年년]\s*)?\d{1,2}\s*[月월]\s*\d{1,2}\s*[日일]/;
+
+/** A Chinese, Japanese or Korean clock time (`12時30分`, `12时30分`, `12시 30분`). */
+export const CJK_TIME = /(?<!\d)\d{1,2}\s*[時时시]\s*\d{1,2}\s*[分분]/;
