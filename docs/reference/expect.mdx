@@ -526,6 +526,8 @@ expect(order).toStrictEqual(new Order({ id: 7, note: undefined }));
 - Class types count: a class instance does not equal a plain object with
   the same properties.
 - A property whose value is `undefined` does not equal a missing property.
+- Inside a `Map` or a `Set`, a property whose value is `undefined` still
+  equals a missing one, as in Jest.
 - An array hole does not equal `undefined`: `[, 1]` is not `[undefined, 1]`.
 - The failure prints class names, `undefined` properties, and holes.
 
@@ -680,7 +682,7 @@ expect(() => parsePrice('abc')).toThrow(new Error('abc is not a price'));
 | `string` | Its message contains the text |
 | `RegExp` | Its message matches |
 | class | It is an instance, by `instanceof` |
-| error | Its message is the same, and so is each message down its `cause` chain |
+| error | Its message is the same, and so is each message down its `cause` chain. A cause that is not an error counts too |
 | [asymmetric matcher](#asymmetric-matchers) | The matcher accepts it |
 
 - The message of a thrown value that has no string `message` is the value
@@ -714,7 +716,8 @@ await expect(loadOrder(7)).resolves.not.toHaveProperty('error');
   counts too: `rejects.toThrow('boom')` passes on `Promise.reject('boom')`,
   where Jest reports that nothing was thrown.
 - After `resolves`, `toThrow` checks an error the promise resolved with as
-  it is, and calls a function, as in Jest.
+  it is, and calls a function, as in Jest. Any other value counts as
+  nothing thrown.
 - `resolves.toMatchSchema(schema)` resolves to the schema's output.
 - A value that is not a promise or a thenable is `INVALID_ARGUMENT`.
 - A call that the test body does not await fails the test with
@@ -1293,7 +1296,7 @@ export interface ValueExpectation<T> {
   toBe(expected: T): void;
   /** Performs recursive structural equality; `undefined` properties are ignored and class types are not compared. */
   toEqual(expected: unknown): void;
-  /** Performs `toEqual`'s comparison, and also tells apart class types, an `undefined` property from a missing one, and an array hole from `undefined`. */
+  /** Performs `toEqual`'s comparison, and also tells apart class types, an `undefined` property from a missing one, and an array hole from `undefined`. Inside a `Map` or a `Set`, an `undefined` property still equals a missing one. */
   toStrictEqual(expected: unknown): void;
   /** Requires every property of `expected` to match recursively; extra properties on the value are fine, arrays must match element-wise with equal length. */
   toMatchObject(expected: object): void;

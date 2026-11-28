@@ -1391,7 +1391,7 @@ export interface ValueExpectation<T> {
   toBe(expected: T): void;
   /** Performs recursive structural equality; `undefined` properties are ignored and class types are not compared. */
   toEqual(expected: unknown): void;
-  /** Performs `toEqual`'s comparison, and also tells apart class types, an `undefined` property from a missing one, and an array hole from `undefined`. */
+  /** Performs `toEqual`'s comparison, and also tells apart class types, an `undefined` property from a missing one, and an array hole from `undefined`. Inside a `Map` or a `Set`, an `undefined` property still equals a missing one. */
   toStrictEqual(expected: unknown): void;
   /** Requires every property of `expected` to match recursively; extra properties on the value are fine, arrays must match element-wise with equal length. */
   toMatchObject(expected: object): void;

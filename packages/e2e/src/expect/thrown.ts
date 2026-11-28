@@ -13,14 +13,17 @@ function messageOf(value: unknown): string {
   return typeof value === 'object' && value !== null ? format(value) : String(value);
 }
 
-/** The messages down an error's `cause` chain, so two errors with the same message and different causes differ. */
+/**
+ * The messages down an error's `cause` chain, so two errors with the same
+ * message and different causes differ. A cause may be any value.
+ */
 function causeChain(error: unknown): string[] {
   const messages: string[] = [];
   const seen = new Set<unknown>();
   for (let current = error; !seen.has(current); current = (current as { cause?: unknown }).cause) {
     seen.add(current);
     messages.push(messageOf(current));
-    if (!((current as { cause?: unknown } | null | undefined)?.cause instanceof Error)) break;
+    if (typeof current !== 'object' || current === null || (current as { cause?: unknown }).cause === undefined) break;
   }
   return messages;
 }
@@ -28,6 +31,10 @@ function causeChain(error: unknown): string[] {
 /** `value instanceof expected`, with a value that is not a class refused by the matcher's name. */
 export function isInstance(matcher: string, value: unknown, expected: unknown): boolean {
   if (typeof expected === 'function') {
+    // A class that answers `instanceof` itself is asked about the value only: its check may not hold for another object.
+    if ((expected as { [Symbol.hasInstance]?: unknown })[Symbol.hasInstance] !== Function.prototype[Symbol.hasInstance]) {
+      return value instanceof expected;
+    }
     try {
       // A primitive on the left is false before the right side is looked at, so an object asks first.
       void ({} instanceof expected);
@@ -63,8 +70,8 @@ export function describeExpected(expected: ThrowExpectation | undefined): string
 export function matchesThrown(thrown: unknown, expected: ThrowExpectation | undefined): boolean {
   if (expected === undefined) return true;
   if (typeof expected === 'string') return messageOf(thrown).includes(expected);
-  // A global or sticky RegExp keeps `lastIndex`; the same error must match the same way every time.
-  if (expected instanceof RegExp) return testPattern(expected.source, expected.flags.replace(/[gy]/g, ''), messageOf(thrown));
+  // A global or sticky RegExp keeps `lastIndex`, which `testPattern` resets: the same error matches the same way every time.
+  if (expected instanceof RegExp) return testPattern(expected.source, expected.flags, messageOf(thrown));
   if (typeof expected === 'function') return isInstance('toThrow', thrown, expected);
   if (isAsymmetric(expected)) return expected.asymmetricMatch(thrown);
   const [wanted, got] = [causeChain(expected), causeChain(thrown)];

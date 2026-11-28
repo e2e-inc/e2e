@@ -249,16 +249,19 @@ class ValueExpectationImpl<T> implements ValueExpectation<T>, NegatedValueExpect
 
   /**
    * Calls the function and checks what it threw. A rejection is checked as
-   * it is, without a call, and so is an error a promise resolved with, as in
-   * Jest.
+   * it is, without a call. So is what a promise resolved with, unless that
+   * is a function: an error counts as thrown and any other value as nothing
+   * thrown, as in Jest.
    */
   toThrow(expected?: ThrowExpectation): void {
     const wanted = describeExpected(expected);
     const actual = this.actual as unknown;
+    const settledBy = typeof actual === 'function' && this.settledBy === 'resolves' ? undefined : this.settledBy;
     let outcome: { readonly thrown: unknown } | { readonly returned: unknown };
-    const rejected = this.settledBy === 'rejects';
-    if (rejected || (this.settledBy === 'resolves' && actual instanceof Error)) {
+    if (settledBy === 'rejects' || (settledBy === 'resolves' && actual instanceof Error)) {
       outcome = { thrown: actual };
+    } else if (settledBy === 'resolves') {
+      outcome = { returned: actual };
     } else {
       if (typeof actual !== 'function') fail(`toThrow requires a function, got ${format(actual)}`);
       try {
@@ -268,17 +271,21 @@ class ValueExpectationImpl<T> implements ValueExpectation<T>, NegatedValueExpect
       }
     }
     const not = this.negated ? 'not ' : '';
-    const claim = rejected
-      ? `expected the promise ${not}to reject${wanted === '' ? '' : ' with'}${wanted}`
-      : `expected the function ${not}to throw${wanted}`;
+    const claims = {
+      rejects: `expected the promise ${not}to reject${wanted === '' ? '' : ' with'}${wanted}`,
+      resolves: `expected the promise ${not}to resolve with${wanted === '' ? ' an error' : wanted}`,
+      call: `expected the function ${not}to throw${wanted}`,
+    };
     const got = (): string => {
-      if ('thrown' in outcome) return `it ${rejected ? 'rejected with' : 'threw'} ${format(outcome.thrown)}`;
+      if (settledBy === 'rejects') return `it rejected with ${format(actual)}`;
+      if (settledBy === 'resolves') return `it resolved with ${format(actual)}`;
+      if ('thrown' in outcome) return `it threw ${format(outcome.thrown)}`;
       if (!types.isPromise(outcome.returned)) return 'it did not throw';
       // The failure below already reports the call; its rejection must not surface as a second, unhandled error.
       outcome.returned.catch(() => undefined);
       return 'it returned a promise; for an async function use `await expect(promise).rejects.toThrow()`';
     };
-    const failure = (): string => `${claim}, but ${got()}`;
+    const failure = (): string => `${claims[settledBy ?? 'call']}, but ${got()}`;
     this.check('thrown' in outcome && matchesThrown(outcome.thrown, expected), failure, failure);
   }
 
@@ -463,13 +470,17 @@ export const VALUE_MATCHER_NAMES = Object.keys(VALUE_MATCHERS) as ValueMatcherNa
 
 export type ValueMatcher = (this: unknown, ...args: unknown[]) => unknown;
 
-/** The promise's value for `.resolves` or its rejection for `.rejects`; the other outcome fails the assertion. */
+/**
+ * The promise's value for `.resolves` or its rejection for `.rejects`; the
+ * other outcome fails the assertion. Boxed, since a rejection may itself be
+ * a promise, which an async function would unwrap on return.
+ */
 async function settled(
   actual: unknown,
   kind: 'resolves' | 'rejects',
   message: string | undefined,
   signal: AbortSignal | undefined,
-): Promise<unknown> {
+): Promise<{ readonly settledWith: unknown }> {
   if (typeof (actual as { then?: unknown } | null | undefined)?.then !== 'function') {
     throw new TestError('INVALID_ARGUMENT', `expect(...).${kind} requires a promise, got ${format(actual)}`);
   }
@@ -479,11 +490,11 @@ async function settled(
   );
   const outcome = await (signal === undefined ? settling : withAbort(settling, signal, cancelledError));
   if (kind === 'resolves') {
-    if ('value' in outcome) return outcome.value;
+    if ('value' in outcome) return { settledWith: outcome.value };
     // No `cause`: a report takes its source line from the cause's stack, and the line to show is this call's.
     fail(withMessage(message, `expected the promise to resolve, but it rejected with ${format(outcome.error)}`));
   }
-  if ('error' in outcome) return outcome.error;
+  if ('error' in outcome) return { settledWith: outcome.error };
   fail(withMessage(message, `expected the promise to reject, but it resolved with ${format(outcome.value)}`));
 }
 
@@ -503,7 +514,8 @@ function promised<T>(
       name,
       (...args: unknown[]) =>
         track(`expect(...).${kind}.${negated ? 'not.' : ''}${name}(...)`, async (signal) => {
-          const expectation = new ValueExpectationImpl(await settled(actual, kind, message, signal), negated, message, kind);
+          const { settledWith } = await settled(actual, kind, message, signal);
+          const expectation = new ValueExpectationImpl(settledWith, negated, message, kind);
           return (expectation[name] as ValueMatcher).apply(expectation, args);
         }),
     ]),

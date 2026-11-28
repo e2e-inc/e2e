@@ -91,7 +91,69 @@ describe('toStrictEqual', () => {
   });
 });
 
+describe('a strict failure message', () => {
+  it('prints a long string whole, so the runner can redact a secret in it', () => {
+    const token = 'k'.repeat(400);
+    failsWith(() => e2eExpect({ token }).toStrictEqual({ token: 'x' }), `expected { token: '${token}' } to strictly equal { token: 'x' }`);
+    failsWith(() => e2eExpect(token).toBeInstanceOf(Order), `expected '${token}' to be an instance of Order`);
+  });
+
+  it('prints an error without its stack, at any depth', () => {
+    failsWith(() => e2eExpect(new TypeError('boom')).toBeInstanceOf(PaymentError), 'expected [TypeError: boom] to be an instance of PaymentError');
+    const holder = Object.assign(new Order(1), { failures: new Map([['a', [new TypeError('boom')]]]) });
+    failsWith(
+      () => e2eExpect(holder).toStrictEqual({}),
+      "expected Order { id: 1, failures: Map(1) { 'a' => [ [TypeError: boom] ] } } to strictly equal {}",
+    );
+  });
+
+  it('keeps a symbol key beside an asymmetric matcher, and does not call a getter', () => {
+    const key = Symbol('key');
+    failsWith(
+      () => e2eExpect({ a: 1, [key]: 1 }).toStrictEqual({ a: e2eExpect.any(Number), [key]: 2 }),
+      'expected { a: 1, Symbol(key): 1 } to strictly equal { a: Any<Number>, Symbol(key): 2 }',
+    );
+    const lazy = {
+      get body(): never {
+        throw new Error('body is unavailable');
+      },
+    };
+    failsWith(() => e2eExpect(lazy).toBeInstanceOf(Order), 'expected { body: [Getter] } to be an instance of Order');
+  });
+
+  it('prints a value that holds itself', () => {
+    const order: { id: number; self?: unknown } = { id: 1 };
+    order.self = order;
+    failsWith(() => e2eExpect(order).toBeInstanceOf(Order), 'expected <ref *1> { id: 1, self: [Circular *1] } to be an instance of Order');
+  });
+});
+
 describe('an error in a failure message', () => {
+  it('ends at an error that holds itself', () => {
+    const own = Object.assign(new Error('fail'), { self: undefined as unknown });
+    own.self = own;
+    failsWith(() => e2eExpect<unknown>(own).toBe(1), 'expected [Error: fail] {"self":"[Circular]"} to be 1');
+    const nested = Object.assign(new Error('fail'), { context: { errors: [] as unknown[] } });
+    nested.context.errors.push(nested);
+    failsWith(() => e2eExpect<unknown>(nested).toBe(1), 'expected [Error: fail] {"context":{"errors":["[Circular]"]}} to be 1');
+    const [first, second] = [Object.assign(new Error('a'), { other: undefined as unknown }), Object.assign(new Error('b'), { other: undefined as unknown })];
+    first.other = second;
+    second.other = first;
+    const inner = `[Error: b] ${JSON.stringify({ other: '[Circular]' })}`;
+    const outer = `[Error: a] ${JSON.stringify({ other: inner })}`;
+    failsWith(() => e2eExpect({ first }).toEqual({}), `expected ${JSON.stringify({ first: outer })} to equal {}`);
+  });
+
+  it('does not call a getter of the error', () => {
+    const error = Object.defineProperty(new Error('fail'), 'body', {
+      enumerable: true,
+      get: (): never => {
+        throw new Error('body is unavailable');
+      },
+    });
+    failsWith(() => e2eExpect<unknown>(error).toBeUndefined(), 'expected [Error: fail] {"body":"[Getter]"} to be undefined');
+  });
+
   it('reads by its class and message, with the own properties equality compares', () => {
     const failed = (status: number): Error => Object.assign(new PaymentError('failed'), { status });
     failsWith(
@@ -139,6 +201,21 @@ describe('toBeInstanceOf', () => {
     failsWith(() => e2eExpect(null).toBeInstanceOf(Order), 'expected null to be an instance of Order');
   });
 
+  it('asks a class with its own Symbol.hasInstance about the value only', () => {
+    class OrderLike {
+      readonly kind = 'order';
+
+      static [Symbol.hasInstance](value: { kind: string }): boolean {
+        return value.kind.toLowerCase() === 'order';
+      }
+    }
+    e2eExpect({ kind: 'Order' }).toBeInstanceOf(OrderLike);
+    e2eExpect({ kind: 'Refund' }).not.toBeInstanceOf(OrderLike);
+    e2eExpect(() => {
+      throw { kind: 'Order' };
+    }).toThrow(OrderLike);
+  });
+
   it('refuses an argument that is not a class', () => {
     const error = thrownBy(() => e2eExpect(1).toBeInstanceOf((() => 1) as never));
     vexpect(error.code).toBe('INVALID_ARGUMENT');
@@ -179,9 +256,13 @@ describe('toThrow', () => {
   });
 
   it('a RegExp tests the message, the same way on every call', () => {
-    const sticky = /declined/g;
+    const global = /declined/g;
+    e2eExpect(declined).toThrow(global);
+    e2eExpect(declined).toThrow(global);
+    const sticky = /card/y;
     e2eExpect(declined).toThrow(sticky);
     e2eExpect(declined).toThrow(sticky);
+    e2eExpect(declined).not.toThrow(/declined/y);
     e2eExpect(declined).not.toThrow(/^declined/);
     failsWith(
       () => e2eExpect(declined).toThrow(/expired/i),
@@ -208,6 +289,11 @@ describe('toThrow', () => {
     e2eExpect(withCause).toThrow(new Error('checkout failed', { cause: new Error('card declined') }));
     e2eExpect(withCause).not.toThrow(new Error('checkout failed', { cause: new Error('timeout') }));
     e2eExpect(withCause).not.toThrow(new Error('checkout failed'));
+    const withPlainCause = (): never => {
+      throw new Error('checkout failed', { cause: { message: 'declined' } });
+    };
+    e2eExpect(withPlainCause).toThrow(new Error('checkout failed', { cause: { message: 'declined' } }));
+    e2eExpect(withPlainCause).not.toThrow(new Error('checkout failed', { cause: { message: 'network' } }));
     failsWith(
       () => e2eExpect(declined).toThrow(new Error('card')),
       'expected the function to throw an error with the message "card", but it threw [PaymentError: card declined]',
@@ -321,7 +407,23 @@ describe('resolves', () => {
   it('toThrow takes an error the promise resolved with, as in Jest, and calls a function', async () => {
     await e2eExpect(Promise.resolve(new PaymentError('card declined'))).resolves.toThrow('declined');
     await e2eExpect(Promise.resolve(declined)).resolves.toThrow(PaymentError);
-    await rejectsWith(e2eExpect(Promise.resolve(1)).resolves.toThrow(), 'toThrow requires a function, got 1');
+    await rejectsWith(
+      e2eExpect(Promise.resolve(() => 1)).resolves.toThrow(),
+      'expected the function to throw, but it did not throw',
+    );
+  });
+
+  it('toThrow reads any other resolved value as nothing thrown, as in Jest', async () => {
+    await e2eExpect(Promise.resolve(5)).resolves.not.toThrow();
+    await rejectsWith(e2eExpect(Promise.resolve(5)).resolves.toThrow(), 'expected the promise to resolve with an error, but it resolved with 5');
+    await rejectsWith(
+      e2eExpect(Promise.resolve(new Error('x'))).resolves.toThrow('y'),
+      'expected the promise to resolve with an error with a message containing "y", but it resolved with [Error: x]',
+    );
+    await rejectsWith(
+      e2eExpect(Promise.resolve(new Error('x'))).resolves.not.toThrow(),
+      'expected the promise not to resolve with an error, but it resolved with [Error: x]',
+    );
   });
 
   it('resolves toMatchSchema to the schema output', async () => {
@@ -347,6 +449,11 @@ describe('rejects', () => {
     await e2eExpect(Promise.reject('no')).rejects.not.toBe('yes');
     await e2eExpect(Promise.reject('no')).not.rejects.toBe('yes');
     await rejectsWith(e2eExpect(Promise.reject('no')).rejects.toBe('yes'), 'expected "no" to be "yes"');
+  });
+
+  it('hands the matcher a rejection that is itself a promise', async () => {
+    const reason = Promise.resolve(42);
+    await e2eExpect(Promise.reject(reason)).rejects.toBe(reason);
   });
 
   it('toThrow checks the rejection without calling it', async () => {
