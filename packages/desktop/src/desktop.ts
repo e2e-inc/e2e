@@ -104,16 +104,17 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
    * ends. Each read gets the time left in the wait, and a match it brings back
    * after the wait ended is not taken. With `looksOnce` (a trigger that took
    * all of the wait, or all but too little for a read) it looks once, with the
-   * operation's own budget.
+   * operation's own budget. Without `margin` it reads to the end of `waitMs`.
    * `timedOut` gets the last list read, and the failure of the last read when
    * it read none.
    */
-  const waitFor = async <T>(pick: (windows: readonly OpenWindow[]) => T | undefined, operation: OperationContext, waitMs: number, timedOut: (windows: readonly OpenWindow[], unread?: Error) => string, looksOnce = false): Promise<T> => {
+  const waitFor = async <T>(pick: (windows: readonly OpenWindow[]) => T | undefined, operation: OperationContext, waitMs: number, timedOut: (windows: readonly OpenWindow[], unread?: Error) => string, { looksOnce = false, margin = true }: { looksOnce?: boolean; margin?: boolean } = {}): Promise<T> => {
     let windows: readonly OpenWindow[] = [];
     let unread: Error | undefined;
     let found: T | undefined;
-    // A little before the step's own end, so the wait reports what it waited for rather than a bare timeout.
-    const deadline = new Deadline(looksOnce ? 0 : Math.max(1, waitMs - Math.min(WAIT_MARGIN_MS, waitMs / 10)));
+    // A wait for a window ends a little before the step's own end, so it reports what it waited for rather than a bare
+    // timeout; a read of the list alone keeps the whole budget.
+    const deadline = new Deadline(looksOnce ? 0 : Math.max(1, waitMs - (margin ? Math.min(WAIT_MARGIN_MS, waitMs / 10) : 0)));
     await pollCondition({
       deadline,
       signal: operation.signal,
@@ -144,7 +145,7 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
   };
   /** The open windows, read again while the app does not answer for them, within the operation's budget. */
   const listed = (operation: OperationContext): Promise<readonly OpenWindow[]> =>
-    waitFor((windows) => windows, operation, operation.timeoutMs, (_windows, unread) => `the app's windows could not be read: ${unread?.message ?? 'no read answered in time'}`);
+    waitFor((windows) => windows, operation, operation.timeoutMs, (_windows, unread) => `the app's windows could not be read: ${unread?.message ?? 'no read answered in time'}`, { margin: false });
   const desktop: Desktop = {
     platform: surface.platform,
     windows: async () => (await listed(context.operation())).map(handle),
@@ -168,7 +169,7 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
         operation,
         waitMs - (Date.now() - begun),
         () => `no window opened within ${waitMs}ms; the trigger resolved after ${triggerMs}ms`,
-        triggerTookIt,
+        { looksOnce: triggerTookIt },
       );
       // Activating it reads the windows again, within what is left of the call, or with the operation's own budget after
       // the one look.

@@ -1040,6 +1040,12 @@ describe('desktop fixture: windows', () => {
     expect(await Promise.all([first!.isActive(), second!.isActive()])).toEqual([false, true]);
   });
 
+  it("takes a window list that answers within the read's whole budget", async () => {
+    const { surface } = await launched({ listWindows: [windows(() => [mine, panel]), windows(() => [mine, panel]), windows(() => [mine, panel], 900)] });
+    const desktop = createDesktopFixture(surface, fixtureContext(1_000));
+    expect(await desktop.windows()).toHaveLength(2);
+  });
+
   it('reads no window as closed when the list fails as no app while the app still runs', async () => {
     const both = windows(() => [mine, panel]);
     const { surface } = await launched({ listWindows: [both, both, both, failure('APP_NOT_FOUND', 'not_delivered', 'the app is no longer running'), both] });
