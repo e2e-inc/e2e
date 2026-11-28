@@ -7,6 +7,7 @@
 
 import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
+import { UNRECORDED } from './recordings.ts';
 
 /** Whether the flow reported the product misbehaving, as an act verdict or a judgment. */
 async function caughtTheBug(flow: () => Promise<void>): Promise<boolean> {
@@ -44,3 +45,37 @@ test('wishlist: a judgment catches the lost saved items', async ({ app, agent })
   });
   expect(caught).toBe(true);
 });
+
+// The two bugs below show only across views: a judgment of one screen passes
+// over them. Each test credits a caught bug only once the deterministic checks
+// prove the flow reached the screen that shows it, so an agent that gave up
+// early earns nothing.
+
+test(
+  'profile settings: the flow catches the name that was never stored',
+  { skip: UNRECORDED },
+  async ({ app, agent, screen }) => {
+    await app.open('/e/profile-settings');
+    const caught = await caughtTheBug(async () => {
+      await agent.act(
+        'change the display name to Jordan Rivera, save the profile, and confirm on the public profile that the new name took effect',
+      );
+    });
+    await expect(screen.getByTestId('header-name')).toHaveText('Signed in as Jordan Rivera');
+    await expect(screen.getByRole('tab', 'Public profile')).toHaveAttribute('aria-selected', 'true');
+    expect(caught).toBe(true);
+  },
+);
+
+test(
+  'audit log: the flow catches the event missing between pages',
+  { skip: UNRECORDED },
+  async ({ app, agent, screen }) => {
+    await app.open('/e/audit-log');
+    const caught = await caughtTheBug(async () => {
+      await agent.act('go to page 2 of the audit log and check that it continues exactly where page 1 ended, with no event number missing');
+    });
+    await expect(screen.getByTestId('page-range')).not.toContainText('page 1 of 5');
+    expect(caught).toBe(true);
+  },
+);

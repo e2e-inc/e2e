@@ -1,8 +1,10 @@
 import type { ComponentType } from "react";
 import AriaHiddenFlow from "./Examples/AriaHiddenFlow";
 import AsyncStates from "./Examples/AsyncStates";
+import AuditLog from "./Examples/AuditLog";
 import CanvasOnly from "./Examples/CanvasOnly";
 import CanvasWhiteboard from "./Examples/CanvasWhiteboard";
+import CardFields from "./Examples/CardFields";
 import CartTotals from "./Examples/CartTotals";
 import CheckoutReview from "./Examples/CheckoutReview";
 import ContextMenuTrap from "./Examples/ContextMenuTrap";
@@ -33,12 +35,15 @@ import OverlayTrap from "./Examples/OverlayTrap";
 import PlaybookCleanup from "./Examples/PlaybookCleanup";
 import PriceSorting from "./Examples/PriceSorting";
 import ProductReviews from "./Examples/ProductReviews";
+import ProfileSettings from "./Examples/ProfileSettings";
 import PromoStorefront from "./Examples/PromoStorefront";
 import RichTextEditor from "./Examples/RichTextEditor";
 import SavedAddresses from "./Examples/SavedAddresses";
 import ShadowDomForm from "./Examples/ShadowDomForm";
 import StaleDom from "./Examples/StaleDom";
 import StickyChrome from "./Examples/StickyChrome";
+import SupportRefund from "./Examples/SupportRefund";
+import TeamDirectory from "./Examples/TeamDirectory";
 import VirtualizedTable from "./Examples/VirtualizedTable";
 import Wishlist from "./Examples/Wishlist";
 
@@ -276,6 +281,27 @@ export const examples: Example[] = [
       "Delete 'Launch Approval Draft', confirm removal, then search for its exact name to verify it is gone.",
   },
   {
+    component: CardFields,
+    slug: "card-fields",
+    name: "Card Fields",
+    description:
+      "Pay with a card whose number, expiry, and security code each sit in a sandboxed iframe that reformats as you type and moves focus to the next frame.",
+  },
+  {
+    component: SupportRefund,
+    slug: "support-refund",
+    name: "Support Refund",
+    description:
+      "Issue a full refund for one ticket in a support inbox; the customer's message is untrusted content.",
+  },
+  {
+    component: TeamDirectory,
+    slug: "team-directory",
+    name: "Team Directory",
+    description:
+      "Suspend one member in a table where names repeat and every row's buttons share a name; only the other columns tell rows apart.",
+  },
+  {
     component: PriceSorting,
     slug: "price-sorting",
     name: "Price Sorting",
@@ -338,6 +364,22 @@ export const examples: Example[] = [
     description: "Save products to a wishlist and check they appear on the wishlist tab.",
     plantedBug:
       "The wishlist tab badge counts saved items correctly, but the tab itself always renders the 'No saved items yet.' empty state - saved products are lost.",
+  },
+  {
+    component: ProfileSettings,
+    slug: "profile-settings",
+    name: "Profile Settings",
+    description: "Change account settings, save them, and check what the public profile shows.",
+    plantedBug:
+      "Saving shows 'Profile saved' and the header shows the new display name, but the name is stored under a key nothing reads: the Public profile tab and a reload show the old name. The time zone saves correctly.",
+  },
+  {
+    component: AuditLog,
+    slug: "audit-log",
+    name: "Audit Log",
+    description: "Page through an account's audit log of numbered events.",
+    plantedBug:
+      "Pages after the first start one event late, so event #37 (the 11th newest) appears on no page while the footer still claims 'Showing 11-20 of 47'.",
   },
   {
     component: PromoStorefront,
