@@ -573,18 +573,18 @@ async function placeDownloads(main: MainProcess, directory: string, withinMs: nu
 
 /**
  * Keeps the app's windows drawing while the app hides them, as the engine's
- * launch switches keep covered ones: `hide()` stops a window's compositor on
- * Windows and Linux, and a screenshot of it then never returns and a
- * recording gets no frame, whatever the DevTools protocol asks for. Electron
- * keeps the compositor of a window whose contents have background throttling
- * off, so it is turned off for every window, the ones opened later too. Only
- * the main process can: an app with no inspector keeps the limit.
+ * launch switches keep covered ones. `hide()` stops a window's compositor on
+ * Windows and Linux: a screenshot of it then never returns and a recording
+ * gets no frame, whatever the DevTools protocol asks for. Electron keeps the
+ * compositor of a window whose contents have background throttling off, so
+ * it is turned off for every window, the ones opened later too. Only the
+ * main process can: an app with no inspector keeps the limit.
  */
 async function keepWindowsDrawing(main: MainProcess, withinMs: number): Promise<void> {
   await answerWithin(
     main.evaluate(({ app: electronApp, webContents }) => {
       for (const contents of webContents.getAllWebContents()) contents.setBackgroundThrottling(false);
-      electronApp.on('web-contents-created', (_event, contents) => contents.setBackgroundThrottling(false));
+      electronApp.on('browser-window-created', (_event, window) => window.webContents.setBackgroundThrottling(false));
     }, undefined),
     withinMs,
   );

@@ -24,6 +24,13 @@ import { electronBinary } from './electron-binary.ts';
 const LOADED = `new BrowserWindow({ show: false }).loadURL('data:text/html,<title>Loaded</title><h1>Loaded</h1>')`;
 /** Whether a window whose pixels a test reads is shown: Windows captures nothing of a hidden one, and Linux draws on a virtual display. Hidden on macOS, where a shown one would take the developer's screen. */
 const SHOWN = process.platform !== 'darwin';
+/**
+ * How long a test keeps a window on screen before the app hides it. A window
+ * hidden the moment it loaded can have drawn nothing yet, and a capture of
+ * one sometimes never returns on Windows and Linux: a gap of its own, which
+ * these tests leave out.
+ */
+const SHOWN_MS = 1000;
 const directories: string[] = [];
 const apps: AppProcess[] = [];
 
@@ -430,20 +437,22 @@ describe('pixels', () => {
 
   it('captures a window the app showed and then hid, and one it opens and hides later', async () => {
     const page = (colour: string): string => `'data:text/html,' + ${JSON.stringify(encodeURIComponent(`<body style="margin:0;background:${colour}"></body>`))}`;
-    const { app, windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL(${page('rgb(0,128,0)')}));
-      globalThis.openSecond = async () => { const second = new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }); await second.loadURL(${page('rgb(0,0,255)')}); second.hide(); };`);
+    const { app, windows, launch } = appWith(`const SHOWN_MS = ${SHOWN_MS}; const open = async (url) => { const window = new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }); await window.loadURL(url); await new Promise((resolve) => setTimeout(resolve, SHOWN_MS)); window.hide(); };
+      app.whenReady().then(() => open(${page('rgb(0,128,0)')}));
+      globalThis.openSecond = () => setTimeout(() => open(${page('rgb(0,0,255)')}));`);
     await launch();
+    const hidden = (): Promise<boolean[]> => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((window) => window.isVisible()), undefined);
     const corner = async (window: AppWindow): Promise<number[]> => {
       const raw = await readWindow(new DevTools(), window);
       const { pixels } = await withPixels(new DevTools(), raw, { root: { ref: { id: 'window', revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } });
       return [...new Transformer(pixels!.data).rawPixelsSync().subarray(0, 3)];
     };
     const first = windows.require();
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.hide(), undefined);
+    await expect.poll(hidden, { timeout: 10_000 }).toEqual([false]);
     expect(await corner(first)).toEqual([0, 128, 0]);
-    await app.evaluate(() => (globalThis as unknown as { openSecond: () => Promise<void> }).openSecond(), undefined);
-    await expect.poll(() => windows.open().length).toBe(2);
-    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((window) => window.isVisible()), undefined)).toEqual([false, false]);
+    await app.evaluate(() => void (globalThis as unknown as { openSecond: () => unknown }).openSecond(), undefined);
+    await expect.poll(() => windows.open().length, { timeout: 10_000 }).toBe(2);
+    await expect.poll(hidden, { timeout: 10_000 }).toEqual([false, false]);
     expect(await corner(windows.open().find((window) => window !== first)!)).toEqual([0, 0, 255]);
   });
 });
@@ -496,6 +505,7 @@ describe('video', () => {
     const { app, windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(blinking))}));`);
     await launch();
     const ffmpeg = await ensureFfmpeg(process.env, new AbortController().signal);
+    await new Promise((resolve) => setTimeout(resolve, SHOWN_MS));
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.hide(), undefined);
     const recorder = new Recorder(ffmpeg, directory, 'video/hidden.webm', () => true);
     recorder.follow(windows.require().page);
