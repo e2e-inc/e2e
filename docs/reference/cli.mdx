@@ -110,7 +110,7 @@ bunx e2e init --yes --gateway openrouter --skills .agents/skills --mcp .mcp.json
 | `[directory]` | Where to scaffold; created when missing. Default: the working directory. |
 | `-y`, `--yes` | Skips the prompts. Each answer not given as a flag takes its default: Web engine, Vercel AI Gateway, skill and MCP config in both locations, no CI pipeline, no install. |
 | `--example [name]` | Starts from an example app: `with-vite`, `with-next`, `with-astro`, `with-angular`, `with-expo`, `with-swiftui`, `with-compose`, `with-kotlin-multiplatform`, `with-flutter`, or `with-maui`. The `with-` prefix is optional. Without a name, lists them to pick from. See [Starting from an example](#starting-from-an-example). |
-| `--engine <ids>` | The engines for a new config: `web`, `mobile`, `electron`, or `none`. Comma-separated or repeated; `web,mobile` writes a target for each. Default: asked. |
+| `--engine <ids>` | The engines for a new config: `web`, `mobile`, `electron`, `desktop`, or `none`. Comma-separated or repeated; `web,mobile` writes a target for each. Default: asked. |
 | `--gateway <id>` | The model gateway for agent steps in a new config: `vercel`, `openrouter`, `openai-compatible`, `chatgpt`, `copilot`, `opencode-console`, `grok`, or `none`. Default: asked. |
 | `--endpoint <url>` | Base URL for `--gateway openai-compatible`, and implies it. HTTPS, or HTTP on a loopback host. Default: asked; `http://127.0.0.1:11434/v1` with `--yes`. |
 | `--skills <dirs>` | Where to install the agent skill: `.agents/skills`, `.claude/skills`, or `none`. `.agents/skills` also adds the skill line to `AGENTS.md`, and `.claude/skills` to `CLAUDE.md`; `none` leaves both files alone. Comma-separated or repeated. Default: asked. |
@@ -141,7 +141,9 @@ For a new project, the wizard asks for:
   default) adds `@e2e-dev/web`. **Mobile (iOS/Android)** adds
   `@e2e-dev/mobile`, defaults to iOS on macOS and Android elsewhere, and opens
   Settings. **Electron** adds `@e2e-dev/electron` and a target whose
-  `app.appPath` is the project directory. Selecting none adds no engine, for
+  `app.appPath` is the project directory. **Desktop (macOS)** adds
+  `@e2e-dev/desktop` and opens Calculator; off macOS, `init` says the target
+  doesn't run there. Selecting none adds no engine, for
   HTTP tests or your own.
 - **A model provider or subscription for agent steps:** Vercel AI Gateway,
   OpenRouter, an OpenAI-compatible or local endpoint, ChatGPT, GitHub
@@ -174,9 +176,9 @@ the lockfile, in CI too.
 
 | Creates | Content |
 | --- | --- |
-| `package.json` | Created as a private ESM package when missing; otherwise gets only the missing dependencies and scripts. Sibling packages (`@e2e-dev/web`, `@e2e-dev/mobile`) get the caret range of the version released with the CLI, or that exact version when the CLI is a prerelease. Adds a `test:e2e` script that runs `e2e run`, unless one exists |
-| `e2e.config.ts` | One target per selected engine, with the app in its `app`. Playwright reads `APP_URL` (default `http://localhost:3000`) into `app.url` and shows `app.command` in a comment. In a Next.js app, it sets `app.url` and `app.command` instead; see [Next.js apps](#nextjs-apps). Mobile sets `app: { bundleId: 'Settings' }` on iOS and `com.android.settings` on Android, and `workers: 1`. With a gateway, `agents.default` is `{ model, system }` |
-| `tests/example.e2e.ts` | With a new config only. An app-open test that passes against any page, plus a commented agent test. Device setup gets a Settings check instead. With several engines, one file per engine instead, such as `tests/web.e2e.ts` and `tests/electron.e2e.ts`, each test with `platforms` set to its own target's platform so the other target skips it |
+| `package.json` | Created as a private ESM package when missing; otherwise gets only the missing dependencies and scripts. Sibling packages (`@e2e-dev/core`, `@e2e-dev/web`, `@e2e-dev/mobile`, `@e2e-dev/electron`, `@e2e-dev/desktop`) get the caret range of the version released with the CLI, or that exact version when the CLI is a prerelease. Adds a `test:e2e` script that runs `e2e run`, unless one exists |
+| `e2e.config.ts` | One target per selected engine, with the app in its `app`. Playwright reads `APP_URL` (default `http://localhost:3000`) into `app.url` and shows `app.command` in a comment. In a Next.js app, it sets `app.url` and `app.command` instead; see [Next.js apps](#nextjs-apps). Mobile sets `app: { bundleId: 'Settings' }` on iOS and `com.android.settings` on Android, and `workers: 1`. Desktop sets `app: { bundleId: 'com.apple.calculator' }`. With a gateway, `agents.default` is `{ model, system }` |
+| `tests/example.e2e.ts` | With a new config only. An app-open test that passes against any page, plus a commented agent test. Device setup gets a Settings check instead, and desktop a Calculator check. With several engines, one file per engine instead, such as `tests/web.e2e.ts` and `tests/electron.e2e.ts`, each test with `platforms` set to its own target's platform so the other target skips it |
 | `.gitignore` | Appends `node_modules/`, `.e2e/results/`, `.e2e/cache/`, `.e2e/sessions/`, `.e2e/report.json`, `.e2e/ai-trace.json`, `.e2e/timings.json`, `.e2e/junit.xml`, `.e2e/summary.md`, `.e2e/ctrf.json`, `.e2e/logs/`, and `.e2e/videos/`. Committing the cache is opt-in; see [commit the replay cache](/cache#commit-the-replay-cache) |
 | `.agents/skills/e2e/`, `.claude/skills/e2e/` | `SKILL.md` and one `references/<topic>.md` per `e2e guide` topic. With both chosen, the Claude Code directory is a relative symlink (`../../.agents/skills/e2e`) to the copy |
 | `AGENTS.md`, `CLAUDE.md` | Appends `End-to-end tests use e2e; read .agents/skills/e2e/SKILL.md before writing or running one.` to `AGENTS.md` when the skill is in `.agents/skills/`, and the same line with `.claude/skills/e2e/SKILL.md` to `CLAUDE.md` when it is in `.claude/skills/`. Created when missing; the rest of an existing file is unchanged. Neither with `--skills none` |
@@ -244,12 +246,15 @@ bunx e2e init --yes --ci gitlab
   existing one the way `e2e run` does, after you confirm the changes and
   after the install. When an existing config still doesn't load, `init` says
   why and falls back to `package.json`: with only the web engine, one web job
-  runs every target; with the mobile or the Electron engine, there's no
-  pipeline.
-- The web job runs every target that isn't iOS, Android, or Electron, HTTP
-  tests included, and all of them when the config has none of those.
+  runs every target; with the mobile, the Electron, or the desktop engine,
+  there's no pipeline.
+- The web job runs every target that isn't iOS, Android, Electron, or macOS,
+  HTTP tests included, and all of them when the config has none of those.
 - An Electron target gets no job, since it needs a display, and `init` says
   so. See [Run in CI on Linux](/electron#run-in-ci-on-linux).
+- A macOS target gets no job either, and `init` says so: it needs a Mac
+  runner whose CI agent has the Accessibility permission. See
+  [Desktop](/desktop#set-up).
 - The mobile jobs build the app. An Expo app builds with `expo run:ios` and
   `expo prebuild` and Gradle. A bare React Native app builds its
   `ios/*.xcworkspace` with `xcodebuild` (through Bundler with a `Gemfile`)

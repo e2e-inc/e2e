@@ -22,8 +22,12 @@ export interface EnginePreset {
   readonly aiExample: (options: string) => string;
   /** Whether the run hint sets APP_URL, for engines that drive a URL. */
   readonly needsAppUrl: boolean;
+  /** The only host OS the engine runs on, as `os.platform()` names it; any host when absent. */
+  readonly host?: NodeJS.Platform;
+  /** The step that swaps the target's placeholder app for the user's, before an agent command can run on it. */
+  readonly pointAtApp?: string;
   /** The platform the target drives, which is also its name in the config, for the CI job that runs it. */
-  readonly platform: 'web' | 'ios' | 'android' | 'electron';
+  readonly platform: 'web' | 'ios' | 'android' | 'electron' | 'macos';
 }
 
 /** Builds prompt choices and scaffolds with defaults for the machine running init. */
@@ -103,6 +107,7 @@ test('Settings opens', ${options}async ({ app, screen }) => {
 // });
 `,
       needsAppUrl: false,
+      pointAtApp: 'point the mobile target in e2e.config.ts at your app',
       platform: ios ? 'ios' : 'android',
     },
     {
@@ -132,7 +137,39 @@ test('app opens', ${options}async ({ app, electron }) => {
 // });
 `,
       needsAppUrl: false,
+      pointAtApp: 'point app.appPath in e2e.config.ts at your Electron app',
       platform: 'electron',
+    },
+    {
+      id: 'desktop',
+      label: 'Desktop (macOS)',
+      hint: 'native app',
+      host: 'darwin',
+      dependencies: siblingDependency('@e2e-dev/desktop'),
+      imports: ["import { desktop } from '@e2e-dev/desktop';"],
+      targetComment: "Replace com.apple.calculator with your app's bundle id, or set appPath to a built .app.",
+      target: "{ name: 'macos', engine: desktop(), app: { bundleId: 'com.apple.calculator' } }",
+      settings: [],
+      file: 'desktop',
+      example: (options: string) => `import { test } from '@e2e-dev/desktop';
+import { expect } from 'e2e';
+
+test('Calculator opens', ${options}async ({ app, screen }) => {
+  await app.open();
+  await expect(screen.getByRole('button', '7')).toBeVisible();
+});
+`,
+      aiExample: (options: string) => `
+// With the model key in the environment, uncomment:
+// test('the agent adds two numbers', ${options}async ({ agent, app }) => {
+//   await app.open();
+//   await agent.act('add 2 and 3');
+//   await agent.assert('the display shows 5');
+// });
+`,
+      needsAppUrl: false,
+      pointAtApp: 'point the macos target in e2e.config.ts at your app',
+      platform: 'macos',
     },
   ] as const satisfies readonly EnginePreset[];
 }

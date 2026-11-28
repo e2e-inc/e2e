@@ -257,6 +257,7 @@ describe('e2e init', () => {
     { engine: 'web', ai: true },
     { engine: 'mobile', ai: true },
     { engine: 'electron', ai: false },
+    { engine: 'desktop', ai: true },
   ] as const)('matches imports and dependencies to engine=$engine, ai=$ai', async ({ engine, ai }) => {
     answers.engines = engine === 'none' ? [] : [engine];
     vi.mocked(clack.select).mockResolvedValueOnce(ai ? 'openrouter' : 'none');
@@ -269,6 +270,7 @@ describe('e2e init', () => {
       ...(engine === 'web' ? ['@e2e-dev/web'] : []),
       ...(device ? ['@e2e-dev/mobile'] : []),
       ...(engine === 'electron' ? ['@e2e-dev/electron'] : []),
+      ...(engine === 'desktop' ? ['@e2e-dev/desktop'] : []),
       ...(engine === 'none' ? [] : ['@e2e-dev/core']),
       ...(ai ? ['ai', 'zod', '@openrouter/ai-sdk-provider'] : []),
     ]);
@@ -286,8 +288,13 @@ describe('e2e init', () => {
     expect(read('tests/example.e2e.ts').includes('@e2e-dev/mobile')).toBe(device);
     expect(read('e2e.config.ts').includes("engine: electron(), app: { appPath: '.' }")).toBe(engine === 'electron');
     expect(read('tests/example.e2e.ts').includes("import { test } from '@e2e-dev/electron';")).toBe(engine === 'electron');
+    expect(read('e2e.config.ts').includes("{ name: 'macos', engine: desktop(), app: { bundleId: 'com.apple.calculator' } }")).toBe(engine === 'desktop');
+    expect(read('tests/example.e2e.ts').includes("import { test } from '@e2e-dev/desktop';")).toBe(engine === 'desktop');
+    // A digit key reads the same in every system language, where a named key such as All Clear is translated.
+    expect(read('tests/example.e2e.ts').includes("await expect(screen.getByRole('button', '7')).toBeVisible();")).toBe(engine === 'desktop');
+    expect(read('tests/example.e2e.ts').includes("// test('the agent adds two numbers', async ({ agent, app }) => {")).toBe(engine === 'desktop');
     expect(read('e2e.config.ts').includes('APP_URL')).toBe(engine === 'web');
-    expect(output()).toContain(`Next: npm install, then ${device || engine === 'electron' ? '' : 'APP_URL=http://localhost:3000 '}npm run test:e2e`);
+    expect(output()).toContain(`Next: npm install, then ${engine === 'web' || engine === 'none' ? 'APP_URL=http://localhost:3000 ' : ''}npm run test:e2e`);
     expect(spawnSync).not.toHaveBeenCalled();
   });
 
@@ -310,10 +317,27 @@ describe('e2e init', () => {
         expect.objectContaining({ value: 'web', label: 'Web', hint: 'Playwright' }),
         expect.objectContaining({ value: 'mobile', label: 'Mobile (iOS/Android)', hint: 'agent-device' }),
         expect.objectContaining({ value: 'electron', label: 'Electron', hint: 'desktop app' }),
+        expect.objectContaining({ value: 'desktop', label: 'Desktop (macOS)', hint: 'native app' }),
       ],
     }));
     expect(read('e2e.config.ts')).toContain(`engine: mobile({ platform: '${platform}' }), app: { bundleId: '${app}' }`);
     expect(read('tests/example.e2e.ts')).toContain(label);
+  });
+
+  it('says a desktop target does not run off macOS, and says nothing on a Mac', async () => {
+    vi.spyOn(os, 'platform').mockReturnValue('linux');
+    expect(await init(dir, { yes: true, engines: ['web', 'desktop'] })).toMatchObject({ exitCode: 0, engine: 'web,desktop' });
+    expect(output()).toContain('Desktop (macOS) does not run on this operating system: pick the other targets here with --target');
+    expect(read('e2e.config.ts')).toContain("engine: desktop(), app: { bundleId: 'com.apple.calculator' }");
+
+    vi.spyOn(os, 'platform').mockReturnValue('darwin');
+    const mac = mkdtempSync(path.join(os.tmpdir(), 'e2e-init-desktop-mac-'));
+    try {
+      await init(mac, { yes: true, engines: ['desktop'] });
+      expect(output().match(/does not run on this operating system/g)).toHaveLength(1);
+    } finally {
+      rmSync(mac, { recursive: true, force: true });
+    }
   });
 
   it('writes one target and one example file per engine when both are selected', async () => {
@@ -743,6 +767,8 @@ describe('e2e init', () => {
       ['no gateway was chosen', ['web'], 'none', true, 'Next: add a model to agents in e2e.config.ts, then APP_URL='],
       ['no engine was chosen', [], 'vercel', true, 'Next: add an engine target to e2e.config.ts, then APP_URL='],
       ['the mobile target is a placeholder', ['mobile'], 'vercel', true, `Next: point the mobile target in e2e.config.ts at your app, then npm exec -- ${quoted}`],
+      ['the macOS target is a placeholder', ['desktop'], 'vercel', true, `Next: point the macos target in e2e.config.ts at your app, then npm exec -- ${quoted}`],
+      ['the Electron and macOS targets are placeholders', ['electron', 'desktop'], 'vercel', true, `Next: point app.appPath in e2e.config.ts at your Electron app, then point the macos target in e2e.config.ts at your app, then npm exec -- ${quoted}`],
     ])('ends the Next line with the command and is not ready when %s', async (_case, engines, gateway, install, next) => {
       answers.engines = engines;
       vi.mocked(clack.select).mockResolvedValueOnce(gateway);
@@ -1906,6 +1932,23 @@ export default {
       }
     });
 
+    it('leaves a macOS target out of the pipeline and says so, and writes none for the desktop engine alone', async () => {
+      expect(await init(dir, { yes: true, engines: ['web', 'desktop'], ci: 'github-actions' })).toMatchObject({ exitCode: 0, ci: 'github-actions' });
+      expect(read(workflow)).toContain('run: npx e2e run --target web --reporter list,junit');
+      expect(read(workflow)).not.toContain('macos');
+      expect(read('tests/desktop.e2e.ts')).toContain("test('Calculator opens', { platforms: ['macos'] }, async ({ app, screen }) => {");
+      expect(output()).toContain('No CI job runs macos: a macOS app needs a Mac runner whose CI agent has the Accessibility permission; see https://e2e.com/docs/desktop#set-up');
+
+      const alone = mkdtempSync(path.join(os.tmpdir(), 'e2e-init-desktop-'));
+      try {
+        expect(await init(alone, { yes: true, engines: ['desktop'], ci: 'github-actions' })).toMatchObject({ exitCode: 0, ci: null });
+        expect(existsSync(path.join(alone, '.github'))).toBe(false);
+        expect(output()).toContain('Ignoring --ci: init writes a pipeline for web, iOS, and Android targets, and the project has none');
+      } finally {
+        rmSync(alone, { recursive: true, force: true });
+      }
+    });
+
     it('writes no pipeline for a project with neither engine', async () => {
       expect(await init(dir, { yes: true, engines: [], ci: 'github-actions' })).toMatchObject({ exitCode: 0, ci: null });
       expect(existsSync(path.join(dir, '.github'))).toBe(false);
@@ -2036,8 +2079,8 @@ export default {
       expect(output()).toContain('No pipeline: the jobs are split by the config\'s targets');
     });
 
-    it('writes no pipeline when an existing web and Electron config does not load, rather than run the Electron target in the web job', async () => {
-      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: '*', '@e2e-dev/web': '*', '@e2e-dev/electron': '*' } }));
+    it.each(['@e2e-dev/electron', '@e2e-dev/desktop'])('writes no pipeline when an existing web and %s config does not load, rather than run that target in the web job', async (engine) => {
+      writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ devDependencies: { e2e: '*', '@e2e-dev/web': '*', [engine]: '*' } }));
       writeFileSync(path.join(dir, 'e2e.config.ts'), "import { web } from 'not-installed-engine';\nexport default { targets: [{ engine: web() }] };\n");
       await init(dir, { yes: true, ci: 'github-actions' });
       expect(existsSync(path.join(dir, workflow))).toBe(false);
