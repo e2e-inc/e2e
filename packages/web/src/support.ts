@@ -410,7 +410,7 @@ const STALE_PATTERN = /detached|not attached|resolved to hidden|no element|not f
  * new document — the same condition as a stale node, reported as one.
  */
 const NAVIGATION_RACE_PATTERN =
-  /execution context was destroyed|because of a navigation|navigating and changing the content|frame was detached|frame got detached|node is detached from document/i;
+  /execution context was destroyed|because of a navigation|navigating and changing the content|frame was detached|frame got detached|node is detached from document|cannot find context with specified id/i;
 
 /** Whether a Playwright failure describes a read that lost its document to a navigation. */
 export function isNavigationRace(cause: unknown): boolean {

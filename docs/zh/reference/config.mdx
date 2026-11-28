@@ -35,6 +35,7 @@ export default {
 | [`launchTimeout`](#launchtimeout) | `number` | `60000` |
 | [`actionTimeout`](#actiontimeout) | `number` | `30000` |
 | [`assertionTimeout`](#assertiontimeout) | `number` | `5000` |
+| [`toPass`](#topass) | `PassOptions` | [查看默认值](#topass) |
 | [`cleanupTimeout`](#cleanuptimeout) | `number` | `30000` |
 | [`retries`](#retries) | `number` | `0`，CI 中为 `1` |
 | [`failOnSkippedFailure`](#failonskippedfailure) | `boolean` | `false` |
@@ -136,6 +137,26 @@ assertionTimeout: 10_000, // default: 5000
 
 - 匹配器自身的 `timeout` 选项优先。`timeout: 0` 表示该匹配器不设截止时间；测试超时或 `afterEach` 中的 `cleanupTimeout` 仍会限制它。
 - `--assertion-timeout <ms>` 可在单次运行中覆盖此值。
+
+#### `toPass`
+
+[重试代码块](/reference/expect#retrying-a-block)的默认超时和暂停时间。每个调用选项都优先于对应的配置字段。
+
+```ts
+toPass: { timeout: 10_000, intervals: [100, 250, 500] },
+```
+
+| 选项 | 类型 | 默认值 |
+| --- | --- | --- |
+| `timeout` | `number` | `0` |
+| `intervals` | `readonly number[]` | `[100, 250, 500, 1000]` |
+
+- `timeout` 是以毫秒为单位的整数，范围为 0 到 2147483647。为 `0` 时，重试只受测试或钩子截止时间限制。
+- `intervals` 是以毫秒为单位的正整数列表，不能为空。最后一项会重复使用。
+
+无效的值或未知的键会在加载配置时报告为 `INVALID_CONFIG`。
+
+在 `beforeAll`、`afterAll` 和工作进程测试夹具清理中，配置的默认值适用于 `expect.poll` 和 `toPass`。重试受钩子截止时间限制。
 
 #### `cleanupTimeout`
 
@@ -1297,6 +1318,8 @@ export interface E2EConfig {
   actionTimeout?: number;
   /** Default `expect` deadline in milliseconds; default 5000. */
   assertionTimeout?: number;
+  /** Default timeout and pauses for `expect(fn).toPass()`. */
+  toPass?: PassOptions;
   /** Budget of each `afterEach` hook, fixture teardown, and engine cleanup in milliseconds; default 30000. */
   cleanupTimeout?: number;
   /** Retries per test, 0 through 10; default 1 in CI, else 0. */

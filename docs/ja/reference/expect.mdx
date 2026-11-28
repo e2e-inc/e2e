@@ -27,6 +27,7 @@ test('checkout summary', async ({ screen }) => {
 | [`expect(fixture)`](#browser-matchers) | エンジンのマッチャー群 |
 | [`expect(value, message?)`](#value-matchers) | `ValueExpectation<T>` |
 | [`expect.poll(read, options?)`](#polling-a-value) | `PollExpectation<T>` |
+| [`expect(fn).toPass(options?)`](#retrying-a-block) | `Promise<void>` |
 | [`expect.soft(actual, message?)`](#soft-assertions) | 同じマッチャー群。失敗は保持 |
 | [`expect.any(Class)` など](#asymmetric-matchers) | `AsymmetricMatcher` |
 
@@ -289,6 +290,8 @@ await expect(screen).toHaveScreenshot('feed.png', { mask: [screen.getByTestId('t
 | [`toHaveURL`](#tohaveurl) | 現在の URL が一致するまで待機 |
 | [`toHaveTitle`](#tohavetitle) | 現在のタイトルが一致するまで待機 |
 | [`toHaveClass`](#tohaveclass) | 対象の `class` が一致するまで待機 |
+| [`toHaveCSS`](#tohavecss) | 計算済みスタイルが一致するまで待機 |
+| [`toHaveJSProperty`](#tohavejsproperty) | DOM プロパティの値が一致するまで待機 |
 
 受け付けないオプションキーは `INVALID_ARGUMENT` になります。たとえば `toHaveTitle` の `ignoreCase` は、Playwright と同様に受け付けません。
 
@@ -324,7 +327,42 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 
 - ノード自体もポーリングします。対象にまだ一致するノードがなければ、即座に失敗せず、アサーションのタイムアウトまでポーリングを続けます。
 - 対象が曖昧な場合は、直ちに `LOCATOR_AMBIGUOUS` で失敗します。
+- e2e のロケーターでない対象や、別の screen や試行のロケーターは、直ちに `INVALID_LOCATOR` になります。
+- セキュアなフィールドは、`getAttribute()` と同じく `POLICY_DENIED` になります。
 - `class` 属性を読み取るため、`''` は `class=""` に一致しますが、`class` 属性自体がない要素には一致しません。Playwright の `toHaveClass('')` はどちらも受け付けます。
+
+#### `toHaveCSS`
+
+対象の計算済みスタイルのプロパティ 1 つが一致するまで待ちます。文字列なら値全体と比較し、`RegExp` なら値に適用します。どちらも `getPropertyValue` が返す元の値を、空白も含めてそのまま使います。Playwright と同じです。
+
+```ts
+const nav = screen.getByRole('navigation', { name: 'Main' });
+await expect(browser).toHaveCSS(nav, 'position', 'sticky');
+await expect(browser).toHaveCSS(nav, '--accent', /red/);
+```
+
+- `getComputedStyle(element).getPropertyValue(property)` をページのコードとして実行します。そのため、これらの関数を上書きしたページでは読み取る値が変わります。名前はケバブケース（`background-color`）で、カスタムプロパティ（`--accent`）も使えます。
+- 対象は [`browser.evaluateOn`](/reference/web#evaluateon) と同じく、スコープとフレームで解決します。対象にまだ一致するノードがなければ、失敗せずにアサーションのタイムアウトまでポーリングを続けます。対象が曖昧な場合は、直ちに `LOCATOR_AMBIGUOUS` で失敗します。e2e のロケーターでない対象や、別の screen や試行のロケーターは、直ちに `INVALID_LOCATOR` になります。
+- セキュアなフィールドは、[`browser.evaluateOn`](/reference/web#evaluateon) と同じく、スタイルであっても `POLICY_DENIED` になります。
+- 読み取り中にナビゲーションが起きた場合は、新しいページで対象をもう一度解決します。
+- 空の、または文字列でない `property` は `INVALID_ARGUMENT` になります。
+
+#### `toHaveJSProperty`
+
+対象の要素上のプロパティパスにある JavaScript の値が、JSON として `expected` と等しくなるまで待ちます。
+
+```ts
+const sidebar = browser.frameLocator('iframe').locator('aside');
+await expect(browser).toHaveJSProperty(sidebar, 'offsetWidth', 240);
+await expect(browser).toHaveJSProperty(screen.getByRole('navigation'), 'dataset.state', 'open');
+```
+
+- `path` はプロパティ名、またはドット区切りのパスで、Playwright と同じ方法でたどります。最後のキー以外のキーは、`null` でないオブジェクトから読みます。最後のキーは、たどり着いた値が何であってもその値から読みます。たとえば input の `value.length` は値の長さを読みます。
+- 存在しないプロパティは `undefined` として読み、一致しません。そのため `.not` が成功します。最後のキーより前のキーを文字列、関数、`null` から読むことになるパスも同じです。Playwright は、最後のキーより前の `null`、または最後のキーの直前の `undefined` で例外をスローします。
+- `style` や要素など、JSON でない値は一致しません。失敗メッセージには `is not JSON` と表示されます。
+- オブジェクトと配列は構造で比較します。オブジェクトのキーの順序は問いません。
+- 対象の解決と待機は [`toHaveCSS`](#tohavecss) と同じです。
+- 空の、または文字列でない `path`、あるいは [`JsonValue`](/reference/web#jsonvalue) でない `expected` は `INVALID_ARGUMENT` になります。
 
 ### 値のマッチャー
 
@@ -571,19 +609,21 @@ await expect.poll(() => readStatus(), { message: 'the batch never finished' }).n
 
 | オプション | 型 | デフォルト |
 | --- | --- | --- |
-| `timeout` | `number` | 試行中は `config.assertionTimeout`、それ以外は 5000 ms |
-| `interval` | `number` | `100` |
+| `timeout` | `number` | 試行中またはフック中は `config.assertionTimeout`、どちらでもなければ 5000 ms |
+| `interval`（非推奨） | `number` | - |
+| `intervals` | `readonly number[]` | `[100, 250, 500, 1000]` |
 | `message` | `string` | - |
 
-- `timeout` は期限までのミリ秒数で、0 以上の有限の数値です。テスト本体ではテストの期限、`afterEach` 中はフックの `cleanupTimeout` が上限になります。`0` はその上限までポーリングする指定なので、テストの外では `INVALID_CONFIG` になります。
-- `interval` は読み取り間の待ち時間（ミリ秒）で、0 より大きい有限の数値です。
+- `timeout` は期限までのミリ秒数で、0 以上の有限の数値です。テスト本体ではテストの期限、`afterEach` 中はフックの `cleanupTimeout` が上限になります。`beforeAll`、`afterAll`、ワーカーフィクスチャの後処理では、フックの期限が上限になります。`0` はその上限までポーリングする指定なので、テスト、フック、ホスト型セッションの外では `INVALID_CONFIG` になります。タイムアウトの最大値は 2147483647 ms です。
+- `interval` は読み取り間の待ち時間（ミリ秒）で、0 より大きい有限の数値です。非推奨なので、`intervals: [<ms>]` を渡してください。削除は早くても 2027 年 4 月 1 日以降です。
+- `intervals` は待ち時間（ミリ秒）の空でないリストです。各要素は正の安全な整数でなければなりません。待ち時間は順に使い、最後の値を繰り返します。
 - `message` は、タイムアウトエラーのマッチャーの行の後に追加する 1 行です。
 
 すべての値のマッチャーを使え、戻り値は Promise になります。
 
-- 毎回 `read` を呼び出してマッチャーを実行します。マッチャーの失敗も `read` の例外も、1 回の失敗した読み取りとして扱います。`read` が応答しない場合は期限で打ち切ります。
+- 毎回 `read` を呼び出してマッチャーを実行します。マッチャーの失敗も `read` の例外も、1 回の失敗した読み取りとして扱います。ただし、`read` が `test.skip()` または `test.fixme()` を呼び出した場合は別です。`read` が応答しない場合は期限で打ち切ります。`test.skip()` と `test.fixme()` はどちらもポーリングを終了し、テストをスキップ扱いにします。
 - `toMatchSchema` は、成功した読み取りのスキーマ出力で解決します。
-- 試行がキャンセルされると `CANCELLED` でループを止めます。試行の期限に達すると、その期限を示す `ASSERTION_FAILED` で止めます。進行中の `read` は待たなくなるだけで、停止はしません。そこで開始した処理は続くことがあります。
+- 試行がキャンセルされると `CANCELLED` でループを止めます。試行の期限に達すると、テストまたはホスト型セッションは `TEST_TIMEOUT` で失敗します。失敗した読み取りがあれば、テスト本体とホスト型セッションでは最後の失敗を `secondaryErrors` に記録します。スイートのフックとワーカーフィクスチャの後処理では、最後の失敗をタイムアウトのメッセージに含めます。進行中の `read` は待たなくなるだけで、停止はしません。そこで開始した処理は続くことがあります。ただし、実行中のステップはキャンセルし、以後のステップ呼び出しは拒否します。
 - `expect.poll` はレポートのステップとして記録しません。タイムアウトはテストの失敗としてだけ現れます。
 
 期限に達すると `ASSERTION_FAILED` をスローします。マッチャー、指定されていれば `message`、最後の読み取り結果の順に表示します。最後の結果は、マッチャーの失敗、`read` のエラー、または `no read completed` です。
@@ -597,7 +637,7 @@ last: expected "running" not to be "running"
 | エラー | 発生条件 |
 | --- | --- |
 | `ASSERTION_FAILED` | 成功する読み取りがないまま期限に達した場合 |
-| `INVALID_CONFIG` | 最初の読み取り前に、`timeout` または `interval` が範囲外と判明した場合 |
+| `INVALID_CONFIG` | 最初の読み取り前に、オプションがプレーンオブジェクトでない、未知のオプションがある、`timeout`、`interval`、`intervals` のいずれかが範囲外、または `interval` と `intervals` の両方が指定されていると判明した場合 |
 | `CANCELLED` | 試行がキャンセルまたはタイムアウトした場合 |
 | `STEP_NOT_AWAITED` | ポーリングを開始したフェーズが、ポーリングの実行中に戻った場合 |
 | `HOOK_FAILED` | `beforeAll` または `afterAll` フックが、ポーリングの実行中に戻った場合 |
@@ -607,6 +647,62 @@ last: expected "running" not to be "running"
 </Note>
 
 ポーリングが後続のテストを失敗させることはありません。フェーズの終了後も動き続けている処理（タイムアウト後のテスト本体など）が開始したポーリングは、最初の読み取りの前にキャンセルされます。
+
+### ブロックのリトライ
+
+`expect(fn).toPass()` は、ブロックが例外をスローしなくなるまでリトライします。複数のアサーションが同じトライで成功する必要がある場合に使います。変化する単一の値には [`expect.poll`](#polling-a-value) を使ってください。
+
+```ts
+await expect(async () => {
+  const response = await fetch(`${app.baseUrl}/api/orders/42`);
+  expect(response.status).toBe(200);
+  await expect(screen.getByRole('status')).toHaveText('Ready', { timeout: 200 });
+}, 'the order is ready').toPass({ timeout: 5_000 });
+```
+
+| オプション | 型 | デフォルト |
+| --- | --- | --- |
+| `timeout` | `number` | [`config.toPass.timeout`](/reference/config#topass)、なければ `0` |
+| `intervals` | `readonly number[]` | [`config.toPass.intervals`](/reference/config#topass)、なければ `[100, 250, 500, 1000]` |
+
+- `timeout` は期限までのミリ秒数で、0 から 2147483647 までです。`0` ではタイムアウトがなく、テストまたはフックの期限までブロックをリトライします。テストとフックの外では、正の `timeout` が必要です。
+- `intervals` はトライ間の待ち時間（ミリ秒）のリストです。各要素は正の安全な整数でなければなりません。最後の値を繰り返します。
+
+各トライでブロックを呼び出し、その完了を待ちます。
+
+- ブロックが例外をスローするか、その Promise が reject されると、そのトライは失敗です。ただし、ブロックが `test.skip()` または `test.fixme()` を呼び出した場合は別です。どちらもリトライを終了し、テストをスキップ扱いにします。トライが失敗すると、次の待ち時間の後にブロックをもう一度呼び出します。
+- `.not.toPass()` は、最初に失敗したトライで成功します。期限まですべてのトライが成功した場合は失敗します。
+- `expect.soft(fn).toPass()` はタイムアウトをソフトな失敗として保持し、テスト本体は続行します。
+- `expect(fn, message)` は、タイムアウトエラーに `message` を追加します。
+- すべての `toPass` 呼び出しを await してください。ルールは[ポーリング](#polling-a-value)と同じです。
+
+ブロックの中では、次の点に注意してください。
+
+- ロケーターのマッチャーは、トライごとにアサーションのタイムアウトをすべて待ちます。期限までにより多くのトライが入るよう、短い `timeout` を指定してください。
+- `expect.soft` の失敗はテスト本体の終わりまで保持されるため、トライを失敗にしません。`expect` を使ってください。
+- すべてのトライのステップがレポートに表示されます。そのため、成功したテストでも、初期のトライで失敗したステップが表示されることがあります。
+- トライが失敗するか期限で打ち切られると、そのトライでまだ実行中のステップをキャンセルします。そのトライからの以後のステップ呼び出しは拒否します。
+
+期限に達すると `ASSERTION_FAILED` をスローします。呼び出し、指定されていれば `message`、最後のエラーの順に表示します。
+
+```text
+expect(...).toPass() timed out after 5000 ms
+the order is ready
+last: expected 202 to be 200
+```
+
+どのトライも完了しなかった場合、最後の行は `last: no try completed` になります。`.not.toPass()` では `last: the block passed` になります。
+
+`timeout` を指定せず、ブロックが一度も成功しない場合は、テストがタイムアウトするまで実行します。そのときのエラーは `TEST_TIMEOUT`、フック内ではフックのタイムアウトエラーです。失敗したトライがあれば、テスト本体とホスト型セッションでは、ブロックの最後のエラーを `secondaryErrors` に記録します。スイートのフックとワーカーフィクスチャの後処理では、最後のエラーをタイムアウトのメッセージに含めます。
+
+| エラー | 発生条件 |
+| --- | --- |
+| `ASSERTION_FAILED` | 成功するトライがないまま期限に達した場合 |
+| `INVALID_ARGUMENT` | `expect` に渡した値が関数でない場合 |
+| `INVALID_CONFIG` | 最初のトライの前に、オプションがプレーンオブジェクトでない、未知のオプションがある、`timeout` または `intervals` が範囲外、またはテストとフックの外で正の `timeout` がないと判明した場合 |
+| `CANCELLED` | 試行がキャンセルまたはタイムアウトした場合 |
+| `STEP_NOT_AWAITED` | 呼び出しを開始したフェーズが、呼び出しの実行中に戻った場合 |
+| `HOOK_FAILED` | `beforeAll` または `afterAll` フックが、呼び出しの実行中に戻った場合 |
 
 ## 動作
 
@@ -655,9 +751,12 @@ last: expected "running" not to be "running"
 | --- | --- |
 | `toHaveValue`, `toHaveText`, `toContainText`, `toBeEmpty` | `inputValue()` や `textContent()` と同じく `POLICY_DENIED`。否定やリスト形式も同様 |
 | `toHaveAttribute` | `getAttribute()` と同じく `POLICY_DENIED`。すべての属性名と否定も対象 |
+| `expect(browser)` の `toHaveClass`、`toHaveCSS`、`toHaveJSProperty` | `POLICY_DENIED`。否定も同様 |
 | `toHaveAccessibleName`、`toHaveRole`、状態のマッチャー | 通常どおりに判定 |
 
 伏せられた値を `''` と読むと、入力済みのパスワード欄を空だと判定してしまいます。また、伏せられた `value` 属性を不存在と読むと、実際には属性のあるパスワード欄で `not.toHaveAttribute('value')` が成功してしまいます。フィールドそのものではなく、入力した結果を検証してください。
+
+`expect(browser)` のマッチャーが確認するのは、ロケーターが一致した要素です。`<label>` の `control.value` のように別の要素にたどり着く `toHaveJSProperty` のパスは、その要素の値を読み取ります。
 
 ### オプションの検証
 
@@ -679,6 +778,7 @@ export interface ExpectCall {
   <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
   <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
+  <F extends () => unknown>(actual: NotAny<F>, message?: string): PassExpectation<F>;
   <T>(actual: T, message?: string): ValueExpectation<T>;
 }
 
@@ -687,6 +787,7 @@ export interface SoftExpectCall {
   <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
   <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
+  <F extends () => unknown>(actual: NotAny<F>, message?: string): PassExpectation<F, SoftValueExpectation<F>>;
   <T>(actual: T, message?: string): SoftValueExpectation<T>;
 }
 
@@ -812,6 +913,29 @@ export interface BrowserExpectation {
   toHaveTitle(expected: TextMatch, options?: { timeout?: number }): Promise<void>;
   /** Waits for the target's `class` attribute to match: a string is the whole normalized class list, a RegExp is tested against it. */
   toHaveClass(target: Locator, expected: TextMatch, options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for the target's computed `property` (kebab-case, a custom
+   * `--property` included) to match: a string is the whole value, a RegExp
+   * is tested against it.
+   */
+  toHaveCSS(
+    target: Locator,
+    property: string,
+    expected: TextMatch,
+    options?: { timeout?: number },
+  ): Promise<void>;
+  /**
+   * Waits for the JavaScript value at `path` on the target's element (a
+   * property name, or a dotted path such as `dataset.state`) to equal
+   * `expected` as JSON. A path that runs out before its end, or a value that
+   * is not JSON, never matches.
+   */
+  toHaveJSProperty(
+    target: Locator,
+    path: string,
+    expected: JsonValue,
+    options?: { timeout?: number },
+  ): Promise<void>;
 }
 ```
 
@@ -907,8 +1031,13 @@ export interface AsymmetricMatcher {
 export interface PollOptions {
   /** Deadline in milliseconds. Default 5000. */
   timeout?: number;
-  /** Pause between reads in milliseconds. Default 100. */
+  /**
+   * Pause between reads in milliseconds.
+   * @deprecated Pass `intervals: [<ms>]`.
+   */
   interval?: number;
+  /** Pauses between reads in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  intervals?: readonly number[];
   /** Extra line in the timeout error, after the matcher line. */
   message?: string;
 }
@@ -934,5 +1063,26 @@ export type NegatedPollExpectation<T> = {
   readonly not: PollExpectation<T>;
 } & {
   readonly [K in Exclude<keyof ValueExpectation<T>, 'not'>]: (...args: Parameters<ValueExpectation<T>[K]>) => Promise<void>;
+};
+```
+
+### `PassOptions` と `PassExpectation`
+
+```ts
+export type PassOptions = {
+  /** Timeout in milliseconds. By default, only the phase deadline applies. */
+  timeout?: number;
+  /** Pauses between tries in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  intervals?: readonly number[];
+};
+
+type PassMatcher = {
+  /** Retries the block until the assertion passes or the deadline is reached. */
+  toPass(options?: PassOptions): Promise<void>;
+};
+
+/** Value matchers for a function, with retries for positive and negated assertions. */
+export type PassExpectation<T, Value = ValueExpectation<T>> = Omit<Value, 'not'> & PassMatcher & {
+  readonly not: NegatedValueExpectation<T, PassExpectation<T, Value>> & PassMatcher;
 };
 ```

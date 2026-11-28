@@ -67,7 +67,7 @@ import {
   describe,
   foldLastRun,
 } from '../../src/index.ts';
-import type { AppPermissionState, Engine, EngineAppInfo, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot } from '../../src/engine/index.ts';
+import type { AppPermissionState, Engine, EngineAppInfo, EngineAttemptContext, EngineCleanupContext, EngineDisposeContext, EngineFixtureContext, EngineHandle, EngineObserveOptions, EngineSnapshot, NodeRef, OperationContext, SemanticNode } from '../../src/engine/index.ts';
 import {
   BASE_RULES,
   createGrammarTools,
@@ -83,7 +83,7 @@ import {
   VERDICT_RULES,
   type ScreenOutput,
 } from '../../src/agent/public.ts';
-import { connectEngine, socketTransport, type EngineManifest } from '../../src/engine/index.ts';
+import { connectEngine, Deadline, pollCondition, socketTransport, type EngineManifest } from '../../src/engine/index.ts';
 import type { Report, TestFixtures, WorkerFixtures } from '../../src/index.ts';
 import type { ToolSet } from 'ai';
 import type { LanguageModelV2, LanguageModelV3, LanguageModelV4 } from '@ai-sdk/provider';
@@ -313,6 +313,39 @@ secrets.get('key') satisfies Secret;
 ({ name: 'gated', version: '1.0.0', spiVersion: 1, secrets: [secrets.get('key')] }) satisfies Engine;
 // @ts-expect-error an engine declares secrets.get() handles, never the values.
 ({ name: 'gated', version: '1.0.0', spiVersion: 1, secrets: ['sk_test'] }) satisfies Engine;
+declare const fixtureContext: EngineFixtureContext;
+declare const fixtureTarget: Locator;
+// withNode resolves to what `use` returns, and hands it the node's ref, the budget left, and the node.
+void (fixtureContext.withNode('custom.read', fixtureTarget, async (ref, operation, node) => {
+  ref satisfies NodeRef;
+  operation satisfies OperationContext;
+  node satisfies SemanticNode;
+  return 1;
+}) satisfies Promise<number>);
+// @ts-expect-error the result follows `use`: a number is not a string.
+void (fixtureContext.withNode('custom.read', fixtureTarget, async () => 1) satisfies Promise<string>);
+// `wait: false` resolves without waiting for a match; it takes a boolean only.
+void fixtureContext.withNode('custom.read', fixtureTarget, async () => 1, { timeout: 100, wait: false });
+// @ts-expect-error `wait` is a boolean.
+void fixtureContext.withNode('custom.read', fixtureTarget, async () => 1, { wait: 'no' });
+// @ts-expect-error `api` is required: an INVALID_LOCATOR names the public call that took the locator.
+void fixtureContext.withNode(fixtureTarget, async () => 1);
+// pollCondition hands evaluate the poll's reads: run each read through reads.read, nothing more.
+void pollCondition({
+  deadline: new Deadline(100),
+  signal: new AbortController().signal,
+  negated: false,
+  evaluate: async (reads) => (await reads.read(async (timeoutMs) => timeoutMs)) > 0,
+  onTimeout: () => new Error('never'),
+});
+void pollCondition({
+  deadline: new Deadline(100),
+  signal: new AbortController().signal,
+  negated: false,
+  // @ts-expect-error the window's judgment of a cut-off read is not engine API.
+  evaluate: async (reads) => reads.cutOff(new Error('timeout')),
+  onTimeout: () => new Error('never'),
+});
 declare const attemptContext: EngineAttemptContext;
 attemptContext.resolveSecret(secrets.get('key')) satisfies Promise<string>;
 // The forms the app sees in place of the value join its redaction.

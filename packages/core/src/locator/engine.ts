@@ -18,6 +18,7 @@ import {
   ConfigurationError,
   E2EError,
   isE2EError,
+  secureReadDenied,
   TestError,
   translateEngineError,
   type ErrorDetails,
@@ -66,7 +67,7 @@ export function attributeOf(node: SemanticNode, name: string): string | null {
  */
 export function denySecureRead(nodes: readonly SemanticNode[], label: string): void {
   if (nodes.some((node) => node.states?.secure === true)) {
-    throw new ConfigurationError('POLICY_DENIED', `reading values from a secure field is denied: ${label}`);
+    throw secureReadDenied(label);
   }
 }
 
@@ -393,11 +394,41 @@ if (sampled && reads.cutOff(cause)) throw await notFound(cause);
    * re-resolves while the deadline remains instead of failing the test.
    */
   async read(expression: LocatorExpression): Promise<SemanticNode> {
-    const reads = this.reads(this.deadline(this.options.actionTimeout));
+    const deadline = this.deadline(this.options.actionTimeout);
+    return this.withOne(
+      expression,
+      (ref, operation) => this.session.read(ref, operation),
+      deadline,
+    );
+  }
+
+  /**
+   * Runs `use` on the one node `expression` matches by `deadline`, the way
+   * `read` reads it: zero matches poll, two or more are `LOCATOR_AMBIGUOUS`
+   * at once, and a retryable `NODE_STALE` from `use` re-resolves while the
+   * deadline remains. `use` gets the budget one read of that wait has left.
+   * With `wait` false, zero matches (a missing frame included) are
+   * `LOCATOR_NOT_FOUND` at once, for a caller that polls itself.
+   */
+  async withOne<T>(
+    expression: LocatorExpression,
+    use: (ref: NodeRef, operation: OperationContext) => Promise<T>,
+    deadline: Deadline,
+    wait = true,
+  ): Promise<T> {
+    const reads = this.reads(deadline);
     for (;;) {
-      const { ref } = await this.resolveCounted(expression, reads);
+      const ref = wait
+        ? (await this.resolveCounted(expression, reads)).ref
+        : await this.singleOf(await this.resolveNow(expression, reads), expression);
+      if (ref === null) {
+        const described = describeExpression(expression);
+        throw new TestError('LOCATOR_NOT_FOUND', `locator matched no nodes: ${described}`, {
+          details: locatorDetails(expression, 0),
+        });
+      }
       try {
-        return await reads.read((timeoutMs) => this.session.read(ref, this.readOperation(timeoutMs)));
+        return await reads.read((timeoutMs) => use(ref, this.readOperation(timeoutMs)));
       } catch (cause) {
         const engineError = asEngineError(cause);
         if (engineError?.code === 'NODE_STALE' && engineError.retryable && !reads.deadline.expired()) {

@@ -106,7 +106,15 @@ const count = await browser.evaluate(() => document.querySelectorAll('li').lengt
 const flag = await browser.evaluate((name: string) => window.localStorage.getItem(name), 'featureFlags');
 ```
 
-仅对 `screen` 无法读取的状态使用 `evaluate`。
+要从定位器匹配的单个元素读取数据，请使用 `browser.evaluateOn`。它按定位器的作用域和框架解析定位器，并以该元素调用函数：
+
+```ts
+const nav = screen.getByRole('navigation', { name: 'Main' });
+const position = await browser.evaluateOn(nav, (el) => getComputedStyle(el).position);
+await expect(browser).toHaveCSS(nav, 'position', 'sticky');
+```
+
+仅对 `screen` 无法读取的状态使用 `evaluate` 和 `evaluateOn`。
 
 ## 在页面脚本之前运行脚本
 

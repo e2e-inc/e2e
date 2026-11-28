@@ -481,9 +481,9 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 
 - What reads or acts on a page acts on the active tab: `goto`, `reload`,
   `back`, `forward`, `url`, `title`, `waitForURL`, `locator`, `frameLocator`,
-  `evaluate`, `waitForResponse`, `waitForRequest`, `waitForDownload`,
-  `keyboard`, `mouse`, the `expect(browser)` matchers, and every `screen`
-  query.
+  `evaluate`, `evaluateOn`, `waitForResponse`, `waitForRequest`,
+  `waitForDownload`, `keyboard`, `mouse`, the `expect(browser)` matchers, and
+  every `screen` query.
 - What belongs to the browser covers every tab: `cookies`, `setCookies`,
   `clearCookies`, `route`, `unroute`, `unrouteAll`, `onDialog`,
   `addInitScript`, and [`clock`](#clock).
@@ -501,8 +501,8 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 - Declare `platforms: ['web']` in a suite that also runs on other
   platforms.
 - `expect(browser)` returns the `BrowserExpectation` the engine attaches:
-  `toHaveURL`, `toHaveTitle`, and `toHaveClass`. See
-  [browser matchers](/reference/expect#browser-matchers).
+  `toHaveURL`, `toHaveTitle`, `toHaveClass`, `toHaveCSS`, and
+  `toHaveJSProperty`. See [browser matchers](/reference/expect#browser-matchers).
 
 | Member | Returns |
 | --- | --- |
@@ -518,6 +518,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 | [`locator`](#locator) | `Locator` |
 | [`frameLocator`](#framelocator) | `FrameScreen` |
 | [`evaluate`](#evaluate) | `Promise<T>` |
+| [`evaluateOn`](#evaluateon) | `Promise<T>` |
 | [`addInitScript`](#init-scripts) | `Promise<void>` |
 | [`route`](#route) | `Promise<void>` |
 | [`unroute`](#unroute) | `Promise<void>` |
@@ -551,7 +552,7 @@ The [config](/reference/config) sets each member's budget:
 
 A `{ timeout }` option overrides the budget on `goto`, `reload`, `back`,
 `forward`, `waitForResponse`, `waitForRequest`, `waitForPopup`, `waitForDownload`, and `waitForDownloads`, capped
-by the test deadline (`cleanupTimeout` in `afterEach`); `0` waits until it. `url`, `title`, `evaluate`, `addInitScript`, `route`,
+by the test deadline (`cleanupTimeout` in `afterEach`); `0` waits until it. `url`, `title`, `evaluate`, `evaluateOn`, `addInitScript`, `route`,
 `unroute`, `unrouteAll`, `cookies`, `setCookies`, `clearCookies`, `setViewport`,
 `emulateMedia`, `setNetwork`, `onDialog`, `newTab`, the `BrowserTab` methods, `keyboard.*`, `mouse.*`, `webmcp.*`, and `clock.*` take no override.
 
@@ -744,6 +745,48 @@ const title = await browser.evaluate<string>('document.title');
 | `EVALUATE_FAILED` | The evaluated code threw, or the page replaced a JavaScript built-in such as `Map` that the engine needs. The error carries the message. |
 | `ACTION_FAILED` | A Playwright timeout. |
 | `ENGINE_FAILURE` | The page closed or the context was lost. |
+
+#### `evaluateOn`
+
+Evaluates trusted test code in the page on the one element a locator
+matches, and returns its result.
+
+```ts
+const nav = screen.getByRole('navigation', { name: 'Main' });
+const position = await browser.evaluateOn(nav, (el) => getComputedStyle(el).position);
+const width = await browser.evaluateOn(
+  browser.frameLocator('iframe').locator('aside'),
+  (el, extra: number) => (el as HTMLElement).offsetWidth + extra,
+  10,
+);
+```
+
+- The locator resolves like a locator read: its scope, its frame, and
+  exactly one match, waited for up to `actionTimeout`. A node the page
+  replaces before the code runs resolves again.
+- The function is called with the element, then `arg`. The element exists
+  only in the page, so the test never holds it. The rules for the function,
+  a string, and the result are those of [`evaluate`](#evaluate).
+- It is meant for reads. The code can change the page, but act through the
+  locator instead, so the step records the action.
+- The code runs once. A navigation while it runs fails the call with
+  `ENGINE_FAILURE`, exit code 3, as it fails [`evaluate`](#evaluate), and
+  the code is never run again on the new page. Playwright reports the same
+  case as a test failure.
+- To wait for a value, use
+  [`toHaveCSS`](/reference/expect#tohavecss) or
+  [`toHaveJSProperty`](/reference/expect#tohavejsproperty).
+
+| Throws | When |
+| --- | --- |
+| `INVALID_LOCATOR` | The target is not an e2e locator, or belongs to another target or attempt. The message names `browser.evaluateOn`. |
+| `LOCATOR_NOT_FOUND` | Nothing matches within `actionTimeout`. |
+| `LOCATOR_AMBIGUOUS` | Two or more elements match. |
+| `POLICY_DENIED` | The element is a secure field, such as a password input. The code never runs. |
+| `INVALID_ARGUMENT` | `arg` or the return value is not a [`JsonValue`](#jsonvalue). |
+| `EVALUATE_FAILED` | The evaluated code threw, or the top-level page replaced a JavaScript built-in that the engine needs. The error carries the message. |
+| `ACTION_FAILED` | The code did not finish within `actionTimeout`. |
+| `ENGINE_FAILURE` | The page closed or the context was lost, or the page navigated while the code ran. |
 
 #### `route`
 
@@ -1745,6 +1788,28 @@ export interface Browser extends Expectable<BrowserExpectation> {
   /** Evaluates trusted test code with one required JSON-safe argument. */
   evaluate<T extends JsonValue, Arg extends JsonValue>(
     fn: string | ((arg: Arg) => T | Promise<T>),
+    arg: Arg,
+  ): Promise<T>;
+  /**
+   * Evaluates trusted test code in the page on the one element `target`
+   * matches, with the locator's scope, strictness, and frame, waiting for it
+   * like a read. The element is passed inside the page only; the result is
+   * JSON. Meant for reads: the code can change the page, but a test should
+   * act through the locator instead. The code runs once: a navigation while
+   * it runs fails the call with `ENGINE_FAILURE`. A secure field is
+   * `POLICY_DENIED`, as the locator getters deny it.
+   */
+  evaluateOn<T extends JsonValue>(
+    target: Locator,
+    fn: string | ((element: Element) => T | Promise<T>),
+  ): Promise<T>;
+  /**
+   * Evaluates trusted test code on the one element `target` matches, with
+   * one required JSON-safe argument.
+   */
+  evaluateOn<T extends JsonValue, Arg extends JsonValue>(
+    target: Locator,
+    fn: string | ((element: Element, arg: Arg) => T | Promise<T>),
     arg: Arg,
   ): Promise<T>;
   /** Adds a script every document runs before the page's own, from the next navigation on. */

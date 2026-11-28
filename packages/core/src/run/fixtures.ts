@@ -22,11 +22,13 @@ import { baseUrlOf, resolveNavigationUrl } from '../internal/urls.ts';
 import { FixtureRecorder } from './fixture-recording.ts';
 import { createRequest } from './request.ts';
 import type { AttemptBudget } from './budget.ts';
-import { LocatorEngine } from '../locator/engine.ts';
+import { denySecureRead, LocatorEngine } from '../locator/engine.ts';
+import { describeExpression } from '../locator/expression.ts';
 import {
   createLocator,
   createScopedScreen,
   createScreen,
+  ownLocator,
   type ScreenContext,
   type SecretResolver,
 } from '../locator/screen.ts';
@@ -560,6 +562,20 @@ function fixtureContext(
     attachViewport: (viewport) => steps.attachViewport(viewport),
     locator: (expression) => createLocator(screenContext, expression),
     screen: (wrap) => createScopedScreen(screenContext, wrap),
+    withNode: async (api, locator, use, options) => {
+      const { expression } = ownLocator(locator, screenContext, api);
+      const deadline = engine.deadline(options?.timeout);
+      return engine.withOne(
+        expression,
+        async (ref, operation) => {
+          const node = await engine.session.read(ref, operation);
+          denySecureRead([node], describeExpression(expression));
+          return use(ref, operation, node);
+        },
+        deadline,
+        options?.wait !== false,
+      );
+    },
     expectable<T extends object, E extends object>(target: T, factory: () => E): T & Expectable<E> {
       let surface: E | undefined;
       Object.defineProperty(target, expectationBrand, {

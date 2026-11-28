@@ -511,7 +511,9 @@ background: `waitForPopup(() => trigger)` makes it active and returns it.
   `setNetwork('offline')` cuts the network until `setNetwork('online')`
   restores it or the test ends.
 - **Page:** `evaluate(fn, arg?)` runs in the page (JSON in and out, no
-  closures); `addInitScript` and `clock.install()` go before `app.open`;
+  closures); `evaluateOn(locator, fn, arg?)` runs it on the one element the
+  locator matches, never a `document.querySelector` in `evaluate`, which can
+  find another element; `addInitScript` and `clock.install()` go before `app.open`;
   `frameLocator(css)` scopes a `Screen` to an iframe.
 - **State:** `cookies(url?)`, `setCookies`, `clearCookies`, `setViewport`,
   `emulateMedia({ colorScheme, reducedMotion })`.

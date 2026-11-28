@@ -92,6 +92,7 @@ test('signs in', async ({ app, screen, browser }) => {
 | `switchTo().frame()`, `switchTo().alert().accept()` | `browser.frameLocator('#frame')`、操作前に `browser.onDialog('accept')` |
 | `switchTo().window(handle)`, `getWindowHandles()`, `switchTo().newWindow()` | `tab.activate()`、`browser.tabs()`、`browser.newTab()`。アプリが開くタブには `browser.waitForPopup(() => trigger)`。[タブ](/reference/web#tabs)を参照 |
 | `executeScript(script, args)` | `browser.evaluate(fn, arg)`。入出力は JSON のみ |
+| `executeScript(script, element)`, `getDomProperty`, `getCssValue` | `browser.evaluateOn(locator, fn, arg)`。値を待つには `expect(browser).toHaveJSProperty(locator, path, value)` と `toHaveCSS(locator, property, value)` |
 | ページオブジェクト | `test.extend` のフィクスチャ、または `agent.act` のゴール。[ページオブジェクト](/page-object-model)を参照 |
 
 ## e2e にまだない機能
@@ -102,7 +103,6 @@ test('signs in', async ({ app, screen, browser }) => {
 
 | Selenium | 現在使える方法 |
 | --- | --- |
-| `executeScript(script, element)`, `getDomProperty`, `getCssValue` | `.tap()` や `.scrollIntoView()` などのロケーターアクション、または CSS セレクターを渡す `browser.evaluate` |
 | `element.findElement(By.cssSelector)`、WebdriverIO の `$('a').$('b')` | 単一の `browser.locator('a >> b')` セレクター、または `getBy*` クエリの連結 |
 | `ChromeOptions.addArguments`, `setBinary`, `Proxy`, `acceptInsecureCerts` | フラグを指定して Chrome または Edge を起動し、`web({ connect })` で接続 |
 | `@BeforeSuite`、`@AfterSuite`、pytest のセッションスコープのフィクスチャ、WebdriverIO の `onPrepare` | 実行ごとに 1 回なら、`app.command` が起動するスクリプト、または `e2e run` を囲むラッパー。ファイルごとなら `beforeAll` と `afterAll`。サインインはセッションを保存するトップレベルの `test.setup` |

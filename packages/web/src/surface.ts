@@ -35,6 +35,7 @@ import {
   type NodeRef,
   type ComputedStyleProperty,
   type ComputedStyleValues,
+  type JsonValue,
   validateComputedStyleProperties,
   type OperationContext,
   type PointerAction,
@@ -76,6 +77,7 @@ import { SECURE_FIELD_SELECTOR, type RawNodeData } from './read-node.ts';
 import { readSelector, takeReadsFunction } from './read-selector.ts';
 import { credentialOrigins, httpCredentials, installConfiguredHeaders, lowercaseNames, configuredHeadersFor } from './protected-app.ts';
 import { RefRegistry } from './refs.ts';
+import { compileEvaluation, readEvaluation, type EvaluationResult } from './evaluation.ts';
 import {
   cancelled,
   DEFAULT_VIEWPORT,
@@ -1072,6 +1074,66 @@ export class PlaywrightSurface {
   }
 
   /**
+   * Runs trusted page code on the element a ref names, the element first and
+   * `arg` second, and returns the JSON it resolves to, or why that is not
+   * JSON. Nothing waits: a located ref that no longer matches exactly one
+   * element, or an element that left its document, is retryable
+   * `NODE_STALE`, so the caller resolves again. Those are found before
+   * `source` runs, and an operation that ran out of time while they were
+   * found never starts it. `options.owner` says whose code `source` is.
+   * The engine's own read of page state is safe to run again, so a
+   * navigation while it may be running is retryable, and a promise it
+   * returns is a value that is not JSON, its `then` never called. Test code
+   * is not run again, so that navigation fails it as `browser.evaluate`
+   * does, and a promise it returns is awaited.
+   */
+  async evaluateOn(
+    ref: NodeRef,
+    source: string,
+    arg: JsonValue | undefined,
+    operation: OperationContext,
+    options: { readonly owner: 'engine' | 'test' },
+  ): Promise<EvaluationResult> {
+    const testCode = options.owner === 'test';
+    const evaluate = compileEvaluation(source, ['element', 'arg'], { awaitResult: testCode });
+    const report = await this.guard(operation, 'evaluateOn', async (currentOperation) => {
+      const target = await this.requireSession().refs.lookup(ref);
+      const element = target.kind === 'element'
+        ? target.element
+        : await soleElement(target.locator);
+      try {
+        // A page that kept the main thread busy while the element was found
+        // may have used up the budget; the source must not start late.
+        currentOperation.signal.throwIfAborted();
+        // JSON safety is the caller's; Playwright's recursive argument type
+        // cannot expand JsonValue.
+        const input: unknown = arg;
+        const handle = await element.evaluateHandle(evaluate, input);
+        // The handle holds a string, but Playwright keeps a handle object for
+        // it on both sides of its connection until it is disposed, and a
+        // matcher polls this many times in one page.
+        try {
+          return await handle.jsonValue();
+        } finally {
+          void handle.dispose().catch(() => undefined);
+        }
+      } catch (cause) {
+        if (currentOperation.signal.aborted) throw cause;
+        const page = this.requirePage();
+        const failure = await pageScriptFailure(
+          page, cause, 'evaluateOn', currentOperation.timeoutMs,
+        );
+        if (failure !== undefined) throw failure;
+        if (testCode && isNavigationRace(cause)) throw translatePwError(cause, 'evaluateOn');
+        throw cause;
+      } finally {
+        if (target.kind === 'locator') void element.dispose().catch(() => undefined);
+      }
+    }, navigationStaleOr);
+    return readEvaluation(report);
+  }
+
+  /**
    * Measures how much of a located or observed element is inside the
    * viewport with the page's `IntersectionObserver`, the check Playwright's
    * `toBeInViewport` makes, so scrolling and overflow ancestors and frames
@@ -1082,18 +1144,7 @@ export class PlaywrightSurface {
   viewportIntersection(ref: NodeRef, operation: OperationContext): Promise<ViewportIntersection> {
     return this.guard(operation, 'measure viewport intersection', (currentOperation) => this.readingTab(async () => {
       const target = await this.requireSession().refs.lookup(ref);
-      let element: ElementHandle;
-      if (target.kind === 'element') {
-        element = target.element;
-      } else {
-        // A strict locator that matches anything but one element no longer names the node it located.
-        const handles = await target.locator.elementHandles();
-        if (handles.length !== 1) {
-          for (const handle of handles) void handle.dispose().catch(() => undefined);
-          throw new EngineError('NODE_STALE', `node reference ${ref.id} no longer matches one element`, { retryable: true });
-        }
-        element = handles[0]!;
-      }
+      const element = target.kind === 'element' ? target.element : await soleElement(target.locator);
       try {
         currentOperation.signal.throwIfAborted();
         const measured = await element.evaluate(measureViewportIntersection);
@@ -1662,6 +1713,20 @@ function inFrame(node: SemanticNode, frame: Rect | null | undefined): SemanticNo
   if (frame === undefined || node.rect === undefined) return node;
   const { rect, origin, ...rest } = node;
   return frame === null ? rest : { ...rest, ...placeBoxInFrame(rect, origin, frame) };
+}
+
+/**
+ * The one element a located ref's strict locator matches now, without
+ * waiting. Zero or several mean the page changed since the locate, so the
+ * ref is stale and the caller resolves again.
+ */
+async function soleElement(locator: Locator): Promise<ElementHandle<Element>> {
+  const handles = (await locator.elementHandles()) as ElementHandle<Element>[];
+  const [only] = handles;
+  if (only !== undefined && handles.length === 1) return only;
+  for (const handle of handles) void handle.dispose().catch(() => undefined);
+  const reason = `located node now matches ${handles.length} elements; resolve it again`;
+  throw new EngineError('NODE_STALE', reason, { retryable: true });
 }
 
 /**

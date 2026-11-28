@@ -64,7 +64,7 @@ description: 运行器对模型输入、工具调用、机密值、脱敏、会�
 | 导航到 `http:` 和 `https:` 以外的任何协议，`about:blank` 除外 | `file:`、`data:`、`javascript:` 和 `view-source:file:` 等包装协议会加载本地或内联内容。 |
 | 格式错误的 URL | 不会进行任何修复。 |
 | `Secret` 进入 JSON 输出位置 | 句柄不携带值，任何实际值都不得序列化。 |
-| 使用 getter 或 `toHaveValue`、`toHaveText`、`toContainText`、`toHaveAttribute` 匹配器读取安全字段的值、文本或属性 | 应断言结果，而不是机密值。被隐藏的值经过脱敏，并非空值或不存在。 |
+| 使用 getter 或 `toHaveValue`、`toHaveText`、`toContainText`、`toHaveAttribute` 匹配器读取安全字段的值、文本或属性，以及使用 `browser.evaluateOn` 或 `expect(browser)` 的定位器匹配器读取安全字段 | 应断言结果，而不是机密值。被隐藏的值经过脱敏，并非空值或不存在。 |
 | `type_secret` 使用未声明的名称 | 只能填入步骤参数中声明的机密值。 |
 | `type_secret` 填入禁用或不可编辑的节点 | 可接收值的节点为 `textbox`、`searchbox` 和 `combobox`。 |
 | 向非密码字段填入密码 | 用途必须匹配。通用机密值可填入任何可编辑输入框。`run_code` 的代码不受此限制。 |

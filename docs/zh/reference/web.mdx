@@ -360,7 +360,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 
 `browser` 表示整个浏览器，并显示一个活动标签页。
 
-- 读取或操作页面的方法作用于活动标签页：`goto`、`reload`、`back`、`forward`、`url`、`title`、`waitForURL`、`locator`、`frameLocator`、`evaluate`、`waitForResponse`、`waitForDownload`、`keyboard`、`mouse`、`expect(browser)` 匹配器，以及所有 `screen` 查询。
+- 读取或操作页面的方法作用于活动标签页：`goto`、`reload`、`back`、`forward`、`url`、`title`、`waitForURL`、`locator`、`frameLocator`、`evaluate`、`evaluateOn`、`waitForResponse`、`waitForDownload`、`keyboard`、`mouse`、`expect(browser)` 匹配器，以及所有 `screen` 查询。
 - 属于浏览器本身的操作覆盖所有标签页：`cookies`、`setCookies`、`clearCookies`、`route`、`unroute`、`unrouteAll`、`onDialog` 和 `addInitScript`。
 - `setViewport` 设置活动标签页及之后打开的所有标签页的尺寸。
 - [`emulateMedia`](#media-emulation) 更改所有已打开和将来打开的标签页的媒体特性。
@@ -368,7 +368,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 - 除 `locator` 和 `frameLocator` 外，每个 `browser` 调用都会记录为 `browser.<method>` 步骤。这两个方法只构造定位器，不访问页面；对定位器执行的操作或断言才是步骤。
 - 相对 URL 基于测试目标的 `app.url` 解析，否则触发 `APP_URL_REQUIRED`。
 - 在也会运行于其他平台的测试套件中声明 `platforms: ['web']`。
-- `expect(browser)` 返回引擎附加的 `BrowserExpectation`：`toHaveURL`、`toHaveTitle` 和 `toHaveClass`。参阅[浏览器匹配器](/reference/expect#browser-matchers)。
+- `expect(browser)` 返回引擎附加的 `BrowserExpectation`：`toHaveURL`、`toHaveTitle`、`toHaveClass`、`toHaveCSS` 和 `toHaveJSProperty`。参阅[浏览器匹配器](/reference/expect#browser-matchers)。
 
 | 成员 | 返回值 |
 | --- | --- |
@@ -382,6 +382,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 | [`locator`](#locator) | `Locator` |
 | [`frameLocator`](#framelocator) | `FrameScreen` |
 | [`evaluate`](#evaluate) | `Promise<T>` |
+| [`evaluateOn`](#evaluateon) | `Promise<T>` |
 | [`addInitScript`](#init-scripts) | `Promise<void>` |
 | [`route`](#route) | `Promise<void>` |
 | [`unroute`](#unroute) | `Promise<void>` |
@@ -408,7 +409,7 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 - `waitForURL`：[`assertionTimeout`](/reference/config#assertiontimeout)。
 - 其他所有成员：[`actionTimeout`](/reference/config#actiontimeout)。`locator` 和 `frameLocator` 不访问页面，也不占用预算。
 
-`{ timeout }` 选项可覆盖 `goto`、`reload`、`back`、`forward`、`waitForResponse`、`waitForPopup`、`waitForDownload` 和 `waitForDownloads` 的预算，但受测试截止时间限制（`afterEach` 中为 `cleanupTimeout`）；`0` 表示等待到该截止时间。`url`、`title`、`evaluate`、`addInitScript`、`route`、`unroute`、`unrouteAll`、`cookies`、`setCookies`、`clearCookies`、`setViewport`、`emulateMedia`、`onDialog`、`newTab`、`BrowserTab` 方法、`keyboard.*` 和 `mouse.*`、`webmcp.*` 不接受覆盖值。
+`{ timeout }` 选项可覆盖 `goto`、`reload`、`back`、`forward`、`waitForResponse`、`waitForPopup`、`waitForDownload` 和 `waitForDownloads` 的预算，但受测试截止时间限制（`afterEach` 中为 `cleanupTimeout`）；`0` 表示等待到该截止时间。`url`、`title`、`evaluate`、`evaluateOn`、`addInitScript`、`route`、`unroute`、`unrouteAll`、`cookies`、`setCookies`、`clearCookies`、`setViewport`、`emulateMedia`、`onDialog`、`newTab`、`BrowserTab` 方法、`keyboard.*` 和 `mouse.*`、`webmcp.*` 不接受覆盖值。
 
 #### `goto`
 
@@ -539,6 +540,37 @@ const title = await browser.evaluate<string>('document.title');
 | `EVALUATE_FAILED` | 被执行的代码抛出错误，或页面替换了引擎所需的 JavaScript 内置对象，例如 `Map`。错误携带具体消息。 |
 | `ACTION_FAILED` | Playwright 超时。 |
 | `ENGINE_FAILURE` | 页面关闭或上下文丢失。 |
+
+#### `evaluateOn`
+
+在页面中针对定位器匹配的单个元素执行受信任的测试代码，并返回其结果。
+
+```ts
+const nav = screen.getByRole('navigation', { name: 'Main' });
+const position = await browser.evaluateOn(nav, (el) => getComputedStyle(el).position);
+const width = await browser.evaluateOn(
+  browser.frameLocator('iframe').locator('aside'),
+  (el, extra: number) => (el as HTMLElement).offsetWidth + extra,
+  10,
+);
+```
+
+- 定位器像定位器读取一样解析：保留其作用域、框架，并等待恰好一个匹配，最长到 `actionTimeout`。如果页面在代码运行前替换了节点，会重新解析。
+- 函数以元素和 `arg` 依次作为参数调用。元素只存在于页面中，测试永远不会持有它。函数、字符串和结果的规则与 [`evaluate`](#evaluate) 相同。
+- 它用于读取。代码可以修改页面，但请通过定位器操作，以便步骤记录该操作。
+- 代码只运行一次。代码运行期间发生导航时，调用与 [`evaluate`](#evaluate) 一样以 `ENGINE_FAILURE`(退出码 3)失败，且绝不会在新页面上再次运行代码。Playwright 将同一情况报告为测试失败。
+- 要等待某个值，请使用 [`toHaveCSS`](/reference/expect#tohavecss) 或 [`toHaveJSProperty`](/reference/expect#tohavejsproperty)。
+
+| 抛出错误 | 触发条件 |
+| --- | --- |
+| `INVALID_LOCATOR` | 目标不是 e2e 定位器，或属于另一个目标或尝试。消息会指明 `browser.evaluateOn`。 |
+| `LOCATOR_NOT_FOUND` | 在 `actionTimeout` 内没有任何匹配。 |
+| `LOCATOR_AMBIGUOUS` | 匹配到两个或更多元素。 |
+| `POLICY_DENIED` | 该元素是安全字段，例如密码输入框。代码不会运行。 |
+| `INVALID_ARGUMENT` | `arg` 或返回值不是 [`JsonValue`](#jsonvalue)。 |
+| `EVALUATE_FAILED` | 被执行的代码抛出错误，或顶层页面替换了引擎所需的 JavaScript 内置对象。错误携带具体消息。 |
+| `ACTION_FAILED` | 代码未在 `actionTimeout` 内完成。 |
+| `ENGINE_FAILURE` | 页面关闭或上下文丢失，或代码运行期间页面发生了导航。 |
 
 #### `route`
 
@@ -1165,6 +1197,28 @@ export interface Browser extends Expectable<BrowserExpectation> {
   /** Evaluates trusted test code with one required JSON-safe argument. */
   evaluate<T extends JsonValue, Arg extends JsonValue>(
     fn: string | ((arg: Arg) => T | Promise<T>),
+    arg: Arg,
+  ): Promise<T>;
+  /**
+   * Evaluates trusted test code in the page on the one element `target`
+   * matches, with the locator's scope, strictness, and frame, waiting for it
+   * like a read. The element is passed inside the page only; the result is
+   * JSON. Meant for reads: the code can change the page, but a test should
+   * act through the locator instead. The code runs once: a navigation while
+   * it runs fails the call with `ENGINE_FAILURE`. A secure field is
+   * `POLICY_DENIED`, as the locator getters deny it.
+   */
+  evaluateOn<T extends JsonValue>(
+    target: Locator,
+    fn: string | ((element: Element) => T | Promise<T>),
+  ): Promise<T>;
+  /**
+   * Evaluates trusted test code on the one element `target` matches, with
+   * one required JSON-safe argument.
+   */
+  evaluateOn<T extends JsonValue, Arg extends JsonValue>(
+    target: Locator,
+    fn: string | ((element: Element, arg: Arg) => T | Promise<T>),
     arg: Arg,
   ): Promise<T>;
   /** Adds a script every document runs before the page's own, from the next navigation on. */

@@ -198,22 +198,29 @@ export function isOperationTimeout(cause: unknown): boolean {
   return engineError?.code === 'OPERATION_TIMEOUT';
 }
 
+/** The reads of one `pollCondition`, as its `evaluate` gets them. */
+export interface PollReads {
+  /** Runs one read with the budget the poll has left for it, `timeoutMs`, which the read must honor, and times it. */
+  read<T>(call: (timeoutMs: number) => Promise<T>): Promise<T>;
+}
+
 export interface PollConditionOptions {
   readonly deadline: Deadline;
   readonly signal: AbortSignal;
   readonly negated: boolean;
   /**
-   * Evaluates the positive condition once, every read bounded by
-   * `deadline`: a read on a longer budget outlasts the poll. Returns
-   * undefined when the condition cannot be evaluated yet: the poll keeps
-   * waiting, negated or not.
+   * Evaluates the positive condition once, every read run through
+   * `reads.read`, which hands the read its budget from `deadline` and times
+   * it, so a read the deadline cuts off is judged against the slowest one
+   * before it. Returns undefined when the condition cannot be evaluated yet:
+   * the poll keeps waiting, negated or not.
    */
-  evaluate(): Promise<boolean | undefined>;
+  evaluate(reads: PollReads): Promise<boolean | undefined>;
   /** Builds the poll's failure; `cause` is the read the deadline cut off, when one did. */
   onTimeout(cause?: unknown): Error | Promise<Error>;
 }
 
-/** `pollCondition` options whose reads run in a `ReadWindow` over the deadline. */
+/** `pollCondition` options whose reads run in a `ReadWindow` the caller made, with a cap of its own. */
 export interface PollReadsOptions extends Omit<PollConditionOptions, 'evaluate'> {
   readonly reads: ReadWindow;
   /** Evaluates the positive condition once, every read run through `reads`. */

@@ -106,7 +106,15 @@ const count = await browser.evaluate(() => document.querySelectorAll('li').lengt
 const flag = await browser.evaluate((name: string) => window.localStorage.getItem(name), 'featureFlags');
 ```
 
-`evaluate` は、`screen` では読み取れない状態にだけ使ってください。
+ロケーターが一致する 1 つの要素から読み取るには、`browser.evaluateOn` を使います。ロケーターをそのスコープとフレームで解決し、要素を引数に関数を呼び出します。
+
+```ts
+const nav = screen.getByRole('navigation', { name: 'Main' });
+const position = await browser.evaluateOn(nav, (el) => getComputedStyle(el).position);
+await expect(browser).toHaveCSS(nav, 'position', 'sticky');
+```
+
+`evaluate` と `evaluateOn` は、`screen` では読み取れない状態にだけ使ってください。
 
 ## ページのスクリプトより先に実行する
 

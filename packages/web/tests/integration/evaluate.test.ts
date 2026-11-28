@@ -6,6 +6,7 @@ import type { Page } from 'playwright-core';
 import type { EngineFixtureContext } from '@e2e-dev/core/engine';
 import { PlaywrightSurface } from '../../src/surface.ts';
 import { createBrowserFixture, type Browser } from '../../src/browser.ts';
+import { connectionObjectCount } from '../helpers/handles.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
 describe('browser.evaluate error boundaries', () => {
@@ -118,6 +119,15 @@ describe('browser.evaluate error boundaries', () => {
       .resolves.toEqual([{ sku: 'a' }, { sku: 'a' }]);
     await expect(browser.evaluate('() => "quote \\" line\\n\\u2028 \\ud83d\\ude00 lone \\ud800"'))
       .resolves.toBe('quote " line\n\u2028 \ud83d\ude00 lone \ud800');
+  });
+
+  it('releases the result handle of every evaluation', async () => {
+    const objects = await connectionObjectCount(page);
+    await browser.evaluate('() => 1');
+    const before = objects();
+    for (let index = 0; index < 50; index += 1) await browser.evaluate('() => 1');
+    await page.evaluate('1');
+    expect(objects() - before).toBeLessThanOrEqual(2);
   });
 
   it('returns a result after the page deletes or replaces the globals the transport could use', async () => {

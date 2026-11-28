@@ -138,7 +138,17 @@ const count = await browser.evaluate(() => document.querySelectorAll('li').lengt
 const flag = await browser.evaluate((name: string) => window.localStorage.getItem(name), 'featureFlags');
 ```
 
-Use `evaluate` only for state that `screen` can't read.
+To read from one element a locator matches, use `browser.evaluateOn`. It
+resolves the locator with its scope and frame, and calls the function with
+the element:
+
+```ts
+const nav = screen.getByRole('navigation', { name: 'Main' });
+const position = await browser.evaluateOn(nav, (el) => getComputedStyle(el).position);
+await expect(browser).toHaveCSS(nav, 'position', 'sticky');
+```
+
+Use `evaluate` and `evaluateOn` only for state that `screen` can't read.
 
 ## Run a script before the page
 

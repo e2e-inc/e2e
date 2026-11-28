@@ -1,6 +1,7 @@
 /** Separates exceptions thrown by trusted page code from failures of the evaluation transport. */
 import type { JsonValue } from '@e2e-dev/core';
-import { TestError } from '@e2e-dev/core/engine';
+import { EngineError, secureReadDenied, TestError } from '@e2e-dev/core/engine';
+import { SECURE_FIELD_SELECTOR } from './read-node.ts';
 import { message } from './support.ts';
 
 /** The `__name` helper tsx's `keepNames` output calls, declared beside test code serialized into the page; it takes `defineProperty` before that code runs. */
@@ -35,13 +36,34 @@ export function pageFunctionSource(fn: (...args: never[]) => unknown): string {
   }
 }
 
-/** What the page-side boundary reports, as JSON text: the result, a thrown message, or why the result is not JSON. */
+/**
+ * What the boundary `compileEvaluation` compiles passes the function the
+ * source evaluates to, in order: nothing, the argument, or the element
+ * Playwright supplies and the argument.
+ */
+export type EvaluationCall = readonly [] | readonly ['arg'] | readonly ['element', 'arg'];
+
+/** A finished evaluation: its JSON result, or why the result is not JSON. */
+export type EvaluationResult =
+  | { readonly ok: true; readonly value: JsonValue | undefined }
+  | { readonly ok: false; readonly invalid: string };
+
+/**
+ * What the page-side boundary reports, as JSON text: the result, a thrown
+ * message, why the result is not JSON, an element that left its document,
+ * or an element that is a secure field.
+ */
 type EvaluationReport =
   | { ok: true; value?: JsonValue }
   | { ok: false; message: string }
-  | { ok: false; invalid: string };
+  | { ok: false; invalid: string }
+  | { ok: false; detached: true }
+  | { ok: false; secure: true };
 
-/** Thrown by a `pageValueEncoder` encoder for a value that is not JSON; the reason completes `evaluate result ...`. */
+/**
+ * Thrown by a `pageValueEncoder` encoder for a value that is not JSON; the
+ * reason completes `evaluate result ...` or `evaluateOn result ...`.
+ */
 interface InvalidPageValue {
   readonly invalid: string;
 }
@@ -111,11 +133,27 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
 }
 
 /**
- * Compiles the page-side error boundary without evaluating the caller's source in this process.
- * The source is one expression: a function it evaluates to is called with the argument, any
- * other value is the result. The boundary resolves to JSON text, a primitive the caller takes
- * back without Playwright serializing it in the page, so a page that deleted or replaced a
- * global the serializer needs still returns its result; `decodeEvaluation` reads it.
+ * Compiles the page-side error boundary without evaluating the caller's
+ * source in this process. The source is one expression: a function it
+ * evaluates to is called with what `call` names, any other value is the
+ * result. A call that starts with the element runs on the element
+ * Playwright supplies, and reports a detached one or a secure field instead
+ * of running the source. The secure check runs in the same task as the
+ * source, so a node that turns into a password field after the caller's
+ * locate is still refused; a `matches` that throws counts as secure. Except
+ * for the `__name` helper below, the boundary's own bindings are prefixed
+ * `__e2e_` and its guard sits in a block, so the source still reads page
+ * globals named `element`, `arg`, or `secure`. The boundary returns JSON
+ * text, a primitive the caller takes back without Playwright serializing it
+ * in the page, so a page that deleted or replaced a global the serializer
+ * needs still returns its result; `readEvaluation` reads it.
+ *
+ * When `options.awaitResult` is true, the boundary is async and reports the
+ * value a returned promise or thenable settles to. When it is false, the
+ * boundary runs synchronously and encodes the returned value as it is: a
+ * promise or thenable is a value that is not JSON, and its `then` is never
+ * called, so an engine read of page state cannot adopt a promise the page put
+ * there.
  *
  * A function serialized with `toString()` carries whatever the loader compiled
  * it to. e2e before 0.17 loaded tests through tsx, whose esbuild `keepNames`
@@ -123,15 +161,33 @@ export function pageValueEncoder(): (root: unknown) => string | undefined {
  * helper; the page has no such helper, so the same one is declared next to
  * the inlined source for as long as this engine supports those runners.
  */
-export function compileEvaluation(source: string, hasArgument: boolean): (arg: unknown) => Promise<string> {
+export function compileEvaluation(
+  source: string,
+  call: EvaluationCall,
+  options: { readonly awaitResult: boolean },
+): (...args: unknown[]) => Promise<string> | string {
+  const { awaitResult } = options;
+  const onElement = call[0] === 'element';
+  const parameters = onElement ? ['__e2e_element', '__e2e_arg'] : ['__e2e_arg'];
+  const passed = call.map((name) => `__e2e_${name}`).join(', ');
+  const asyncKeyword = awaitResult ? 'async ' : '';
+  const awaitKeyword = awaitResult ? 'await ' : '';
   try {
-    return new Function('arg', `
-      ${KEEP_NAMES_HELPER}
-      return (async (encode, run) => {
+    return new Function(...parameters, `
+      ${KEEP_NAMES_HELPER}${onElement ? `
+      {
+        if (!__e2e_element.isConnected) return '{"ok":false,"detached":true}';
+        let secure = true;
+        try {
+          secure = __e2e_element.matches(${JSON.stringify(SECURE_FIELD_SELECTOR)}) !== false;
+        } catch {}
+        if (secure) return '{"ok":false,"secure":true}';
+      }` : ''}
+      return (${asyncKeyword}(encode, run) => {
         const report = (ok, key, text) => \`{"ok":\${ok}\${text === undefined ? '' : \`,"\${key}":\${text}\`}}\`;
         let value;
         try {
-          value = await run();
+          value = ${awaitKeyword}run();
         } catch (cause) {
           let message;
           try {
@@ -141,7 +197,8 @@ export function compileEvaluation(source: string, hasArgument: boolean): (arg: u
           }
           return report(false, 'message', encode(message));
         }
-        try {
+        try {${awaitResult ? '' : `
+          if (value !== null && typeof value === 'object' && typeof value.then === 'function') return report(false, 'invalid', encode('must be JSON-safe'));`}
           return report(true, 'value', encode(value));
         } catch (cause) {
           if (cause !== null && typeof cause === 'object' && typeof cause.invalid === 'string') {
@@ -149,15 +206,20 @@ export function compileEvaluation(source: string, hasArgument: boolean): (arg: u
           }
           return '{"ok":false,"message":"evaluate result cannot be read"}';
         }
-      })((${pageValueEncoder.toString()})(), async () => ((result) => typeof result === 'function' ? result(${hasArgument ? 'arg' : ''}) : result)((${source}\n)));
-    `) as (arg: unknown) => Promise<string>;
+      })((${pageValueEncoder.toString()})(), ${asyncKeyword}() => ((result) => typeof result === 'function' ? result(${passed}) : result)((${source}\n)));
+    `) as (...args: unknown[]) => Promise<string> | string;
   } catch (cause) {
     throw new TestError('EVALUATE_FAILED', message(cause), { cause });
   }
 }
 
-/** The result of the boundary `compileEvaluation` compiled, from the JSON text it resolved to; throws what the page threw. */
-export function decodeEvaluation(text: string): JsonValue | undefined {
+/**
+ * The result of the boundary `compileEvaluation` compiled, from the JSON
+ * text it resolved to. Throws what the page threw as `EVALUATE_FAILED`, as
+ * it does an unreadable report, an element that left its document as
+ * retryable `NODE_STALE`, and a secure field as `POLICY_DENIED`.
+ */
+export function readEvaluation(text: string): EvaluationResult {
   let report: EvaluationReport;
   try {
     // oxlint-disable-next-line e2e/no-unchecked-json -- the text is what compileEvaluation's own boundary wrote
@@ -165,7 +227,29 @@ export function decodeEvaluation(text: string): JsonValue | undefined {
   } catch (cause) {
     throw new TestError('EVALUATE_FAILED', 'page evaluation returned an unreadable result', { cause });
   }
-  if (report.ok) return report.value;
-  if ('invalid' in report) throw new TestError('INVALID_ARGUMENT', `evaluate result ${report.invalid}`);
+  if (report.ok) return { ok: true, value: report.value };
+  if ('detached' in report) {
+    throw new EngineError('NODE_STALE', 'node is detached; resolve it again before evaluating', {
+      retryable: true,
+    });
+  }
+  if ('secure' in report) {
+    throw secureReadDenied(
+      'the element is one now but was not when located, or its type cannot be checked',
+    );
+  }
+  if ('invalid' in report) return { ok: false, invalid: report.invalid };
   throw new TestError('EVALUATE_FAILED', report.message);
+}
+
+/**
+ * The JSON value of a finished evaluation. A result that is not JSON is
+ * `INVALID_ARGUMENT`, its message opening with `api` (`evaluateOn result ...`).
+ */
+export function evaluationValue(
+  result: EvaluationResult,
+  api: 'evaluate' | 'evaluateOn',
+): JsonValue | undefined {
+  if (!result.ok) throw new TestError('INVALID_ARGUMENT', `${api} result ${result.invalid}`);
+  return result.value;
 }

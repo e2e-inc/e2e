@@ -1607,7 +1607,7 @@ export class InfrastructureError extends E2EError {
 
 | エクスポート | 戻り値 |
 | --- | --- |
-| [`matchesText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `TextPattern`, `string` |
+| [`matchesText`, `compareText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `boolean`, `TextPattern`, `string` |
 | [`resolveExpression`](#resolveexpression) | `SemanticNode[]` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`, `sameSite`](#site-helpers) | `string`, `boolean` |
@@ -1621,15 +1621,17 @@ export class InfrastructureError extends E2EError {
 | [`obj`](#obj) | `WithoutUndefined<T>` |
 | [`raceAbort`, `withTimeout`, `withinCleanupBudget`](#timing-helpers) | `Promise<T>`, `Promise<T>`, `Promise<void>` |
 | [`isSecret`](#issecret) | `boolean` |
+| [`secureReadDenied`](#securereaddenied) | `ConfigurationError` |
 | [`isProviderRecording`, `stopProviderRecording`](#provider-recordings) | `boolean`, `Promise<VideoSegment>` |
 
 #### テキストパターン
 
-`locate` とテキストマッチャー用の `TextPattern` 照合です。
+`locate` とテキストマッチャー用の `TextPattern` 照合です。`matchesText` は `{ mode: 'equals', normalize: true }` を指定した `compareText` で、テキストと文字列パターンの空白をまとめてから比較し、`RegExp` はまとめたテキストに対して判定します。計算済みスタイルのように、プラットフォームが報告したままの値を比較するには `normalize: false` を渡します。`mode: 'contains'` は期待する文字列がどこにあっても一致とし、`ignoreCase` は文字列パターンの大文字と小文字を区別しません。
 
 ```ts
 export function toTextPattern(match: TextMatch, options?: { exact?: boolean }): TextPattern;
 export function matchesText(actual: string, pattern: TextPattern): boolean;
+export function compareText(actual: string, pattern: TextPattern, comparison: TextComparison): boolean;
 export function describePattern(pattern: TextPattern): string;
 ```
 
@@ -1726,12 +1728,13 @@ await pollCondition({
   deadline,
   signal: context.signal,
   negated: false,
-  evaluate: async () => (await read(context.operation(deadline.remaining()))) === 'Paid',
+  evaluate: async (reads) =>
+    (await reads.read((timeoutMs) => read(context.operation(timeoutMs)))) === 'Paid',
   onTimeout: (cause) => new TestError('ASSERTION_FAILED', 'status never became Paid', { cause }),
 });
 ```
 
-- `evaluate` が行う各読み取りは `deadline` で制限します（`context.operation(deadline.remaining())`）。操作タイムアウトを使うと、アサーション自身の期限を超える可能性があります。
+- `evaluate` が行う各読み取りは、`deadline` に対する `PollReads` の `reads.read` を通して実行します。これは読み取りに持ち時間を渡し（`context.operation(timeoutMs)`）、操作タイムアウトを使ってアサーション自身の期限を超えることを防ぎます。また読み取りの時間を測るため、期限で打ち切られた読み取りは、それまでで最も遅い読み取りと比べて判定されます。
 - 開始から 0、20、50 ms で読み取り、その後は 100 ms の倍数で読み取ります。各読み取りは、直前の完了から最短 10 ms、最長 100 ms 後に開始します。操作と `waitFor` も同じ方法でノードを待ちます。
 - `evaluate` の `OPERATION_TIMEOUT` は、[期限間際のタイムアウト](#timeouts-at-a-deadline)のルールでポーリングを終了します。`onTimeout(cause)` がそれを使って失敗を作成します。
 
@@ -1861,6 +1864,15 @@ const operation = context.operation(stepTimeout(options?.timeout, 'kiosk.print')
 const password = isSecret(options.password)
   ? await context.resolveSecret(options.password)
   : options.password;
+```
+
+#### `secureReadDenied`
+
+セキュアフィールドの読み取りに対する `POLICY_DENIED` エラーです。`subject` はメッセージの末尾に入り、読み取った対象か、エンジンが拒否した理由を示します。独自のエラーを書かずにこれを投げると、すべてのエンジンがランナーと同じ文言で拒否します。
+
+```ts
+if (node.states?.secure === true) throw secureReadDenied('the field is a password field');
+// POLICY_DENIED: reading values from a secure field is denied: the field is a password field
 ```
 
 ### 状態
@@ -2133,13 +2145,15 @@ test('prints a receipt', { platforms: ['kiosk'] }, async ({ printer }) => {
 | `attachViewport(viewport)` | 現在のステップが設定したビューポートを記録します。 |
 | `locator(expression)` | 生の式から公開ロケーターを作成します。 |
 | `screen(scope)` | screen のスコープを作成します。 |
+| [`withNode(api, locator, use, options?)`](#running-code-on-a-located-node) | ロケーターが一致する 1 つのノードで `use` を実行します。 |
 | [`expectable(target, factory)`](#expectations) | `expect(fixture)` がマッチャーを返すようにします。 |
 
 | 発生するエラー | 条件 |
 | --- | --- |
 | `INVALID_CONFIG` | ファクトリーが `context.fixture` で宣言したものではなく、通常の操作オブジェクトを返す。テストが初めて参照した時点で発生します。 |
 | `APP_URL_REQUIRED` | URL を宣言していないターゲットでの `app.resolveUrl`。 |
-| `POLICY_DENIED` | `app.resolveUrl` に `http:` と `https:` 以外のスキームを指定（`about:blank` を除く）。 |
+| `POLICY_DENIED` | `app.resolveUrl` に `http:` と `https:` 以外のスキームを指定（`about:blank` を除く）、または `withNode` をセキュアなフィールドに使った場合。 |
+| `INVALID_LOCATOR` | `withNode` に e2e のロケーターではない値、または別の screen や試行のロケーターを渡した場合。メッセージは `api` を示します。 |
 
 ```ts
 /**
@@ -2191,6 +2205,28 @@ export interface EngineFixtureContext {
   locator(expression: LocatorExpression): Locator;
   /** Mints a screen scope whose every query is wrapped by `scope` (a nested document, say). */
   screen(scope: (expression: LocatorExpression) => LocatorExpression): Screen;
+  /**
+   * Resolves the one node `locator` matches, with its scope, strictness, and
+   * frame, waiting for it like a locator read (the action timeout, or
+   * `timeout`), then calls `use` with its ref, the budget that read has left,
+   * and the node as that resolve read it. It is a read: a secure field is
+   * `POLICY_DENIED` before `use` runs, as the locator getters deny it.
+   * Zero matches by the deadline is `LOCATOR_NOT_FOUND`, two or more
+   * `LOCATOR_AMBIGUOUS` at once. A retryable `NODE_STALE` from `use`
+   * re-resolves while the deadline remains and runs `use` again, so report
+   * it only before work that must not repeat. `wait: false` resolves without
+   * waiting for a match: zero matches are `LOCATOR_NOT_FOUND` at once, for a
+   * caller that polls itself. A value that is not an e2e locator, or a
+   * locator from another screen or attempt, is `INVALID_LOCATOR` before any
+   * resolve, and its message names `api`, the public call that took the
+   * locator.
+   */
+  withNode<T>(
+    api: string,
+    locator: Locator,
+    use: (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<T>,
+    options?: { timeout?: number; wait?: boolean },
+  ): Promise<T>;
   /**
    * Attaches an expectation surface to a fixture object so `expect(fixture)`
    * returns it. The harness records every matcher call as an assertion step
@@ -2267,6 +2303,28 @@ export type FixtureOperations<T extends object> = {
 };
 ```
 
+#### 特定したノードでコードを実行する
+
+`withNode(api, locator, use, options?)` は、テストのロケーターが一致する 1 つのノードを解決し、その `NodeRef` と、解決で読み取ったノードを渡して `use` を呼び出します。`Locator` を受け取るフィクスチャーのメソッドは、これを使ってそのノードに対するエンジン自身のハンドル（ページのコードを実行する要素など）にたどり着きます。
+
+```ts
+evaluateOn: (target: Locator, source: string) =>
+  context.withNode('browser.evaluateOn', target, (ref, operation) =>
+    // `driver` stands for the engine's own client, which knows the element behind a ref.
+    driver.evaluateOn(ref.id, source, { timeoutMs: operation.timeoutMs })),
+```
+
+- `api` はロケーターを受け取った公開 API の呼び出しです。`INVALID_LOCATOR` のメッセージはこれを示します。
+- ロケーターはスコープ、厳密さ、フレームを保ちます。`withNode` はロケーターの読み取りと同じように、`actionTimeout` または `options.timeout` まで一致を待ちます。
+- `use` は読み取り自身の `OperationContext` を受け取ります。エンジンの呼び出しはこれで制限してください。
+- `use` は解決で読み取った `SemanticNode`（ロール、名前、状態、属性）も受け取るため、それらを読むのにエンジンをもう一度呼び出す必要はありません。
+- `withNode` は読み取りです。ロケーターのゲッターと同じく、セキュアなフィールドでは `use` を実行する前に `POLICY_DENIED` になります。
+- ref がもうそのノードを指さないとき、`use` はリトライ可能な `NODE_STALE` をスローします。期限が残っていれば、`withNode` はもう一度解決し、`use` をもう一度呼び出します。そのため、2 回実行してはいけない処理の前にだけスローしてください。
+- `options.wait: false` は一致を待たずに 1 回だけ解決します。一致がなければ直ちに `LOCATOR_NOT_FOUND` になります。自分でポーリングするマッチャーはこれを使い、ロケーターの読み取りではなく自分のポーリングでノードを待ちます。
+- `options.timeout: 0` は待機に独自の期限を付けません。それでもテストの持ち時間が上限になります。
+- `use` からのそれ以外のエラーは、ロケーターの読み取りでのエンジンのエラーと同じように変換します。
+- メソッドは `timeout: false` で宣言してください。ステップの期限がノードの待機と競合しなくなります。
+
 #### アサーション
 
 `expectable` はアサーション用の操作インターフェースを付け、`expect(fixture)` がそれを返すようにします。マッチャーの記録は、`context.fixture('expect', matchers,
@@ -2283,7 +2341,7 @@ return context.fixture('printer', printer, { print: { kind: 'resource' } });
 
 ### エクスポートされる名前
 
-`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`KNOWN_LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`PollConditionOptions`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT`、`OBSERVED_TEXT_LIMIT` は `e2e/engine` からエクスポートされます。[エンジンプロトコル](/reference/engine-protocol)の `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` と、それぞれの型も含まれます。
+`EngineCleanupContext`、`EngineDisposeContext`、`OperationContext`、`TextPattern`、`SemanticQuery`、`LocatorExpression`、`NodeRef`、`SemanticNode`、`ViewportPoint`、`ViewportSize`、`ObservationPixels`、`LocatorAction`、`LocatorActionKind`、`PointerAction`、`PointerActionKind`、`ScrollDirection`、`Momentum`、`SelectOption`、`Key`、`KeyModifier`、`KeyName`、`ParsedKey`、`ENGINE_SPI_VERSION`、`LOCATOR_ACTION_KINDS`、`KNOWN_LOCATOR_ACTION_KINDS`、`POINTER_ACTION_KINDS`、`KEY_MODIFIERS`、`KEY_NAMES`、`parseKey`、`ENGINE_ERROR_CODES`、`RETRYABLE_ENGINE_ERROR_CODES`、`Secret`、`isSecret`、`TextMatch`、`JsonValue`、`JsonValueRules`、`ResolveExpressionOptions`、`PollConditionOptions`、`PollReads`、`TextComparison`、`WithoutUndefined`、`FixtureOperation`、`EngineIsolation`、`OBSERVED_NAME_LIMIT`、`OBSERVED_TEXT_LIMIT` は `e2e/engine` からエクスポートされます。[エンジンプロトコル](/reference/engine-protocol)の `connectEngine`、`serveEngine`、`describeEngine`、`spawnTransport`、`socketTransport`、`loopbackTransport`、`ENGINE_METHODS`、`ENGINE_PROTOCOL_VERSION` と、それぞれの型も含まれます。
 
 ### `SemanticNode`
 

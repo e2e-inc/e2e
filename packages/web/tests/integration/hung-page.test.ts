@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Locator } from 'e2e';
-import type { EngineFixtureContext, EngineHandle, LocatorExpression, NodeRef, OperationContext } from '@e2e-dev/core/engine';
+import type { EngineFixtureContext, EngineHandle, LocatorExpression, NodeRef, OperationContext, SemanticNode } from '@e2e-dev/core/engine';
 import { web, type BrowserExpectation } from '../../src/index.ts';
 import { ignoreTrace, noSecrets } from '../helpers/secrets.ts';
 
@@ -128,9 +128,10 @@ describe('operations on a hung page', () => {
   /**
    * `expect(browser)` over the attempt, through a fixture context with the
    * harness's budgets: an operation with no explicit timeout gets the action
-   * timeout.
+   * timeout, and `withNode` locates the page's Next button the way core's
+   * does, within the action timeout.
    */
-  function browserExpectation(): BrowserExpectation {
+  function browserExpectation(withNodeOptions: unknown[] = []): BrowserExpectation {
     let expectation: (() => unknown) | undefined;
     const context = {
       targetName: 'web',
@@ -139,6 +140,16 @@ describe('operations on a hung page', () => {
       operation: (timeoutMs?: number) => ({ ...operation(), timeoutMs: Math.max(1, timeoutMs ?? ACTION_TIMEOUT_MS) }),
       app: { resolveUrl: (url: string) => new URL(url, origin).href },
       fixture: (_name: string, target: object) => target,
+      withNode: async (
+        _api: string,
+        _locator: Locator,
+        use: (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<unknown>,
+        options?: unknown,
+      ) => {
+        withNodeOptions.push(options);
+        const [node] = await engine.locate!(button('Next'), { ...operation(), timeoutMs: ACTION_TIMEOUT_MS });
+        return use(node!.ref as NodeRef, operation(), node as SemanticNode);
+      },
       expectable: (target: object, factory: () => unknown) => {
         expectation = factory;
         return target;
@@ -151,19 +162,18 @@ describe('operations on a hung page', () => {
   it('ends a browser assertion on a stuck page at its own timeout, not the action timeout', async () => {
     await start();
     await freeze();
-    const expectation = browserExpectation();
+    const withNodeOptions: unknown[] = [];
+    const expectation = browserExpectation(withNodeOptions);
     const title = await bounded(() => expectation.toHaveTitle('Other', { timeout: BUDGET_MS }));
     expect(title.error).toMatchObject({ code: 'OPERATION_TIMEOUT' });
-    // A locator read waits out the action timeout, as the harness's does.
-    const card = {
-      count: async () => 1,
-      getAttribute: async () => {
-        await engine.locate!(button('Next'), { ...operation(), timeoutMs: ACTION_TIMEOUT_MS });
-        return 'card';
-      },
-    } as unknown as Locator;
+    // The locate waits out the action timeout; the assertion ends at its own.
+    const card = {} as Locator;
     const negated = await bounded(() => expectation.not.toHaveClass(card, 'card', { timeout: BUDGET_MS }));
     expect(negated.error).toMatchObject({ code: 'OPERATION_TIMEOUT' });
+    // A sample asks for one resolve that does not wait, bounded by what is left of the assertion.
+    expect(withNodeOptions).toEqual([{ wait: false, timeout: expect.any(Number) }]);
+    const [{ timeout }] = withNodeOptions as [{ timeout: number }];
+    expect(timeout).toBeLessThanOrEqual(BUDGET_MS);
   });
 
   it('times out a navigation to a server that never answers', async () => {

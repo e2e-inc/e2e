@@ -35,11 +35,12 @@ export type { EngineFinishInfo, EnginePrepareInfo, EnginePrepareResult } from '.
 // semantic tree, URL matching, assertion polling, option-bag validation, the
 // JSON-value rules for data a fixture returns, and the unknown-key check
 // config options get.
-export { ConfigurationError, InfrastructureError, TestError } from '../internal/errors.ts';
+export { ConfigurationError, InfrastructureError, secureReadDenied, TestError } from '../internal/errors.ts';
 export { rejectUnknownKeys, rejectUnknownOptions } from '../internal/options.ts';
 export { appleUserDefaults, checkLaunchArguments } from '../internal/launch-arguments.ts';
 export { validateJsonValue, type JsonValueRules } from '../internal/json-value.ts';
-export { describePattern, matchesText, toTextPattern } from '../internal/text.ts';
+export { compareText, describePattern, matchesText, toTextPattern } from '../internal/text.ts';
+export type { TextComparison } from '../internal/text.ts';
 export { expressionSelectors, resolveExpression, type ResolveExpressionOptions } from './resolve.ts';
 export type { TextMatch } from '../types.ts';
 export { raceAbort } from './timing.ts';
@@ -51,7 +52,16 @@ export type {
   ProviderRecordingStopContext,
   ProviderRecordingTarget,
 } from './recording.ts';
-export { Deadline, pollCondition, sleep, stepTimeout, withTimeout, withinCleanupBudget, type PollConditionOptions } from '../internal/time.ts';
+export {
+  Deadline,
+  pollCondition,
+  sleep,
+  stepTimeout,
+  withTimeout,
+  withinCleanupBudget,
+  type PollConditionOptions,
+  type PollReads,
+} from '../internal/time.ts';
 export { readPngSize } from './png.ts';
 export { isRefusedLinkScheme, sameSite, siteOf, urlMatches } from '../internal/urls.ts';
 export { obj, type WithoutUndefined } from '../internal/objects.ts';
@@ -274,6 +284,30 @@ export interface EngineFixtureContext {
   locator(expression: LocatorExpression): Locator;
   /** Mints a screen scope whose every query is wrapped by `scope` (a nested document, say). */
   screen(scope: (expression: LocatorExpression) => LocatorExpression): Screen;
+  /**
+   * Resolves the one node `locator` matches, with its scope, strictness, and
+   * frame, waiting for it like a locator read (the action timeout, or
+   * `timeout`), then calls `use` with its ref, the budget that read has left,
+   * and the node as that resolve read it. It is a read: a secure field is
+   * `POLICY_DENIED` before `use` runs, as the locator getters deny it. The
+   * page can turn the node into a secure field after that check, so a
+   * `use` that runs page code on the element checks again in the same page
+   * task, before that code runs. Zero matches by the deadline is
+   * `LOCATOR_NOT_FOUND`, two or more `LOCATOR_AMBIGUOUS` at once. A
+   * retryable `NODE_STALE` from `use` re-resolves while the deadline remains
+   * and runs `use` again, so report it only before work that must not
+   * repeat. `wait: false` resolves without waiting for a match: zero matches
+   * are `LOCATOR_NOT_FOUND` at once, for a caller that polls itself. A value
+   * that is not an e2e locator, or a locator from another screen or attempt,
+   * is `INVALID_LOCATOR` before any resolve, and its message names `api`,
+   * the public call that took the locator.
+   */
+  withNode<T>(
+    api: string,
+    locator: Locator,
+    use: (ref: NodeRef, operation: OperationContext, node: SemanticNode) => Promise<T>,
+    options?: { timeout?: number; wait?: boolean },
+  ): Promise<T>;
   /**
    * Attaches an expectation surface to a fixture object so `expect(fixture)`
    * returns it. The harness records every matcher call as an assertion step

@@ -457,6 +457,17 @@ test('a relative toHaveURL prints the expected URL resolved', async ({ app, brow
   await expect(browser).toHaveURL('/about', { timeout: 300 });
 });
 
+test('CSS and property assertions name what they wait for', async ({ app, browser }) => {
+  await app.open('/classes');
+  await expect(browser).toHaveCSS(browser.locator('body'), 'display', 'block');
+  await expect(browser).toHaveJSProperty(browser.locator('body'), 'tagName', 'BODY');
+});
+
+test('a NaN property value is refused under its own label', async ({ app, browser }) => {
+  await app.open('/classes');
+  await expect(browser).toHaveJSProperty(browser.locator('body'), 'tagName', Number.NaN);
+});
+
 test('waitForURL reads URL globs, and toHaveURL compares exactly, as in Playwright', async ({ app, browser }) => {
   await app.open('/classes?tab=a');
   await browser.waitForURL('**/classes?tab=a');
@@ -559,6 +570,16 @@ test('an option waitForResponse does not take is refused', async ({ app, browser
 test('an option waitForRequest does not take is refused', async ({ app, browser }) => {
   await app.open();
   await browser.waitForRequest('**/api/flags', flag('signal', null));
+});
+`;
+
+// Run under a short action timeout, the budget `browser.evaluateOn` waits for
+// its node within, so a node that never arrives fails fast.
+const EVALUATE_ON = `import { test } from '@e2e-dev/web';
+
+test('evaluateOn on a node that never arrives', async ({ app, browser }) => {
+  await app.open('/classes');
+  await browser.evaluateOn(browser.locator('#never-card'), (el) => el.id);
 });
 `;
 
@@ -844,6 +865,18 @@ describe('web platform integration', () => {
     expect(result.attempts[0]!.durationMs).toBeGreaterThanOrEqual(5_000);
   });
 
+  it('labels a CSS and a property assertion with what they wait for', () => {
+    const result = resultByTitle(outcome, 'CSS and property assertions name what they wait for');
+    expect(result.status, JSON.stringify(result.attempts[0]?.error)).toBe('passed');
+    const { steps } = result.attempts[0]!;
+    expect(steps.find((step) => step.api === 'expect.toHaveCSS')?.label).toBe('display block');
+    expect(steps.find((step) => step.api === 'expect.toHaveJSProperty')?.label).toBe('tagName "BODY"');
+    const refused = resultByTitle(outcome, 'a NaN property value is refused under its own label');
+    expect(refused.attempts[0]!.error?.code).toBe('INVALID_ARGUMENT');
+    const step = refused.attempts[0]!.steps.find((candidate) => candidate.api === 'expect.toHaveJSProperty');
+    expect(step?.label).toBe('tagName NaN');
+  });
+
   it('fails a class assertion on an ambiguous locator with LOCATOR_AMBIGUOUS before the deadline', () => {
     const result = resultByTitle(outcome, 'class assertions on an ambiguous locator fail at once');
     expect(result.status).toBe('failed');
@@ -934,5 +967,36 @@ describe('web platform integration', () => {
     const result = resultByTitle(outcome, title);
     expect(result.status).toBe('failed');
     expect(result.attempts[0]!.error).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining(message) });
+  });
+});
+
+describe('web platform integration under a short action timeout', () => {
+  let app: FixtureApp;
+  let outcome: RunOutcome;
+  let project: FixtureProject;
+
+  beforeAll(async () => {
+    app = await startFixtureApp();
+    ({ outcome, project } = await runProjectWithConfigFile(
+      { 'tests/evaluate-on.e2e.ts': EVALUATE_ON },
+      { appUrl: app.url, configSource: workerConfigSource(1, "\n  cache: 'off',\n  actionTimeout: 500,") },
+    ));
+  }, 120_000);
+
+  afterAll(async () => {
+    project?.cleanup();
+    await app?.close();
+  });
+
+  it('fails evaluateOn on a node that never arrives with LOCATOR_NOT_FOUND, not a step timeout', () => {
+    const result = resultByTitle(outcome, 'evaluateOn on a node that never arrives');
+    expect(result.status).toBe('failed');
+    const attempt = result.attempts[0]!;
+    expect(attempt.error?.code, attempt.error?.message).toBe('LOCATOR_NOT_FOUND');
+    const step = attempt.steps.find((candidate) => candidate.status === 'failed');
+    expect(step?.api).toBe('browser.evaluateOn');
+    // It waits out the 500 ms action timeout, not the 30 s default.
+    expect(step?.durationMs).toBeGreaterThanOrEqual(400);
+    expect(step?.durationMs).toBeLessThan(5000);
   });
 });

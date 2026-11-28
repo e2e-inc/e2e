@@ -27,6 +27,7 @@ test('checkout summary', async ({ screen }) => {
 | [`expect(fixture)`](#browser-matchers) | 引擎的匹配器集合 |
 | [`expect(value, message?)`](#value-matchers) | `ValueExpectation<T>` |
 | [`expect.poll(read, options?)`](#polling-a-value) | `PollExpectation<T>` |
+| [`expect(fn).toPass(options?)`](#retrying-a-block) | `Promise<void>` |
 | [`expect.soft(actual, message?)`](#soft-assertions) | 相同的匹配器，但会保留失败 |
 | [`expect.any(Class)` 等](#asymmetric-matchers) | `AsymmetricMatcher` |
 
@@ -289,6 +290,8 @@ await expect(screen).toHaveScreenshot('feed.png', { mask: [screen.getByTestId('t
 | [`toHaveURL`](#tohaveurl) | 等待当前 URL |
 | [`toHaveTitle`](#tohavetitle) | 等待当前标题 |
 | [`toHaveClass`](#tohaveclass) | 等待目标元素的 `class` |
+| [`toHaveCSS`](#tohavecss) | 等待计算样式 |
+| [`toHaveJSProperty`](#tohavejsproperty) | 等待 DOM 属性值 |
 
 任何其他选项键都会导致 `INVALID_ARGUMENT`，例如 `toHaveTitle` 上的 `ignoreCase`，Playwright 同样不接受它。
 
@@ -324,7 +327,42 @@ await expect(browser).toHaveClass(browser.locator('.card'), 'card active');
 
 - 它也会轮询节点：目标暂时没有匹配项时，会继续轮询，而不是立即失败，直到断言超时。
 - 存在歧义的目标仍会立即因 `LOCATOR_AMBIGUOUS` 失败。
+- 不是 e2e 定位器的目标，或来自另一个屏幕或尝试的定位器，会立即导致 `INVALID_LOCATOR`。
+- 安全字段与 `getAttribute()` 一样触发 `POLICY_DENIED`。
 - 它读取 `class` 属性，因此 `''` 匹配 `class=""`，但不匹配完全没有 `class` 属性的元素。Playwright 的 `toHaveClass('')` 接受这两种情况。
+
+#### `toHaveCSS`
+
+等待目标元素的一个计算样式属性匹配：字符串对应整个值，`RegExp` 则对该值进行测试。两者都使用 `getPropertyValue` 返回的原始值，包括空白，与 Playwright 相同。
+
+```ts
+const nav = screen.getByRole('navigation', { name: 'Main' });
+await expect(browser).toHaveCSS(nav, 'position', 'sticky');
+await expect(browser).toHaveCSS(nav, '--accent', /red/);
+```
+
+- 它以页面代码的形式运行 `getComputedStyle(element).getPropertyValue(property)`，因此覆盖了这些函数的页面会改变读取结果。名称使用短横线形式（`background-color`），自定义属性（`--accent`）也可以使用。
+- 目标按其作用域和框架解析，与 [`browser.evaluateOn`](/reference/web#evaluateon) 相同。目标暂时没有匹配项时，会继续轮询，而不是失败，直到断言超时。存在歧义的目标会立即因 `LOCATOR_AMBIGUOUS` 失败。不是 e2e 定位器的目标，或来自另一个屏幕或尝试的定位器，会立即导致 `INVALID_LOCATOR`。
+- 安全字段与 [`browser.evaluateOn`](/reference/web#evaluateon) 一样触发 `POLICY_DENIED`，样式也不例外。
+- 读取期间发生导航时，会在新页面上重新解析目标。
+- 空的或非字符串的 `property` 会导致 `INVALID_ARGUMENT`。
+
+#### `toHaveJSProperty`
+
+等待目标元素上某个属性路径处的 JavaScript 值，以 JSON 形式等于 `expected`。
+
+```ts
+const sidebar = browser.frameLocator('iframe').locator('aside');
+await expect(browser).toHaveJSProperty(sidebar, 'offsetWidth', 240);
+await expect(browser).toHaveJSProperty(screen.getByRole('navigation'), 'dataset.state', 'open');
+```
+
+- `path` 是属性名或以点分隔的路径，按 Playwright 的方式遍历。除最后一个键外，每个键都从非 `null` 的对象上读取。最后一个键从遍历到达的任意值上读取，因此 input 上的 `value.length` 读取其值的长度。
+- 不存在的属性读取为 `undefined`，永远不会匹配，因此 `.not` 会通过。需要从字符串、函数或 `null` 上读取最后一个键之前的键时，结果也一样。Playwright 则会在最后一个键之前遇到 `null`，或在最后一个键的前一项遇到 `undefined` 时抛出错误。
+- 不是 JSON 的值，例如 `style` 或元素，永远不会匹配。失败信息显示 `is not JSON`。
+- 对象和数组按结构比较。对象的键顺序不限。
+- 目标的解析和等待与 [`toHaveCSS`](#tohavecss) 相同。
+- 空的或非字符串的 `path`，或不是 [`JsonValue`](/reference/web#jsonvalue) 的 `expected`，会导致 `INVALID_ARGUMENT`。
 
 ### 值匹配器
 
@@ -571,19 +609,21 @@ await expect.poll(() => readStatus(), { message: 'the batch never finished' }).n
 
 | 选项 | 类型 | 默认值 |
 | --- | --- | --- |
-| `timeout` | `number` | 尝试期间使用 `config.assertionTimeout`，尝试之外为 5000 毫秒 |
-| `interval` | `number` | `100` |
+| `timeout` | `number` | 尝试或钩子期间使用 `config.assertionTimeout`，两者之外为 5000 毫秒 |
+| `interval`（已弃用） | `number` | - |
+| `intervals` | `readonly number[]` | `[100, 250, 500, 1000]` |
 | `message` | `string` | - |
 
-- `timeout` 是以毫秒为单位的截止时间，必须是大于或等于 0 的有限数字。在测试体内受测试截止时间限制，在 `afterEach` 期间受钩子的 `cleanupTimeout` 限制。`0` 表示一直轮询到该上限，因此在测试外使用会导致 `INVALID_CONFIG`。
-- `interval` 是两次读取之间的暂停时间，单位为毫秒，必须是大于 0 的有限数字。
+- `timeout` 是以毫秒为单位的截止时间，必须是大于或等于 0 的有限数字。在测试体内受测试截止时间限制，在 `afterEach` 期间受钩子的 `cleanupTimeout` 限制。在 `beforeAll`、`afterAll` 和工作进程测试夹具清理中，受钩子截止时间限制。`0` 表示一直轮询到该上限，因此在测试、钩子或托管会话之外使用会导致 `INVALID_CONFIG`。超时上限为 2147483647 毫秒。
+- `interval` 是两次读取之间的暂停时间，单位为毫秒，必须是大于 0 的有限数字。它已弃用，请改为传入 `intervals: [<ms>]`。它最早会在 2027 年 4 月 1 日移除。
+- `intervals` 是以毫秒为单位的暂停时间列表，不能为空。每一项都必须是正的安全整数。暂停时间按顺序使用，最后一项会重复使用。
 - `message` 是超时错误中的额外一行，位于匹配器行之后。
 
 所有值匹配器都可用，返回 Promise。
 
-- 每次采样都会调用 `read` 并运行匹配器。匹配器失败或 `read` 抛出异常都算一次失败采样；挂起的 `read` 会在截止时间被放弃。
+- 每次采样都会调用 `read` 并运行匹配器。匹配器失败或 `read` 抛出异常都算一次失败采样，除非 `read` 调用了 `test.skip()` 或 `test.fixme()`；挂起的 `read` 会在截止时间被放弃。这两个调用都会结束轮询，并将测试标记为已跳过。
 - `toMatchSchema` 会解析为通过校验的那次读取所对应的 schema 输出。
-- 尝试被取消时，循环以 `CANCELLED` 停止。到达尝试截止时间时，以 `ASSERTION_FAILED` 停止，并指出截止时间。进行中的 `read` 会被放弃，而不会被停止：它启动的工作可以继续。
+- 尝试被取消时，循环以 `CANCELLED` 停止。到达尝试截止时间时，测试或托管会话以 `TEST_TIMEOUT` 失败。如果有采样失败过，对于测试体或托管会话，最后一次失败会记录在 `secondaryErrors` 下；对于测试套件钩子或工作进程测试夹具清理，最后一次失败会包含在超时消息中。进行中的 `read` 会被放弃，而不会被停止：它启动的工作可以继续，但正在运行的步骤会被取消，之后的步骤调用会被拒绝。
 - `expect.poll` 不会记录为报告步骤；超时只会表现为测试失败。
 
 到达截止时间时，它会抛出 `ASSERTION_FAILED`，依次给出匹配器、提供的 `message`，以及最后一次采样：最后的匹配器失败、最后的 `read` 错误，或 `no read completed`。
@@ -597,7 +637,7 @@ last: expected "running" not to be "running"
 | 抛出错误 | 触发条件 |
 | --- | --- |
 | `ASSERTION_FAILED` | 到达截止时间，仍没有通过的采样 |
-| `INVALID_CONFIG` | 首次读取前，发现 `timeout` 或 `interval` 超出范围 |
+| `INVALID_CONFIG` | 首次读取前，发现选项不是普通对象、含有未知选项、`timeout`、`interval` 或 `intervals` 超出范围，或同时设置了 `interval` 和 `intervals` |
 | `CANCELLED` | 尝试被取消或超时 |
 | `STEP_NOT_AWAITED` | 启动轮询的阶段已返回，而轮询仍在运行 |
 | `HOOK_FAILED` | `beforeAll` 或 `afterAll` 钩子已返回，而其轮询仍在运行 |
@@ -607,6 +647,62 @@ last: expected "running" not to be "running"
 </Note>
 
 轮询绝不会使后续测试失败：如果某个阶段遗留的工作启动了轮询，例如超时后仍运行的测试体，该轮询会在首次读取前被取消。
+
+### 重试代码块
+
+`expect(fn).toPass()` 会重试一个代码块，直到它不再抛出异常。当多个断言必须在同一轮中通过时使用它。对于单个会变化的值，请使用 [`expect.poll`](#polling-a-value)。
+
+```ts
+await expect(async () => {
+  const response = await fetch(`${app.baseUrl}/api/orders/42`);
+  expect(response.status).toBe(200);
+  await expect(screen.getByRole('status')).toHaveText('Ready', { timeout: 200 });
+}, 'the order is ready').toPass({ timeout: 5_000 });
+```
+
+| 选项 | 类型 | 默认值 |
+| --- | --- | --- |
+| `timeout` | `number` | [`config.toPass.timeout`](/reference/config#topass)，否则为 `0` |
+| `intervals` | `readonly number[]` | [`config.toPass.intervals`](/reference/config#topass)，否则为 `[100, 250, 500, 1000]` |
+
+- `timeout` 是以毫秒为单位的截止时间，范围为 0 到 2147483647。为 `0` 时没有超时，代码块会一直重试到测试或钩子的截止时间。在测试或钩子之外，必须提供正的 `timeout`。
+- `intervals` 是两轮之间的暂停时间列表，单位为毫秒。每一项都必须是正的安全整数。最后一项会重复使用。
+
+每一轮都会调用代码块并等待它完成。
+
+- 代码块抛出异常或其 Promise 被拒绝时，这一轮失败，除非它调用了 `test.skip()` 或 `test.fixme()`。这两个调用都会结束重试，并将测试标记为已跳过。某一轮失败后，代码块会在下一个暂停时间之后再次调用。
+- `.not.toPass()` 在第一个失败的轮次通过。如果每一轮都通过，它会在截止时间失败。
+- `expect.soft(fn).toPass()` 会把超时保留为软失败，测试体继续运行。
+- `expect(fn, message)` 会把 `message` 加入超时错误。
+- 等待每个 `toPass` 调用完成。规则与[轮询](#polling-a-value)相同。
+
+在代码块内：
+
+- 定位器匹配器每一轮都会等待其完整的断言超时。给它一个较短的 `timeout`，这样截止时间之前可以容纳更多轮次。
+- `expect.soft` 永远不会让某一轮失败，因为它的失败会保留到测试体结束时处理。请使用 `expect`。
+- 每一轮的步骤都会出现在报告中，因此通过的测试也可能显示早期轮次中失败的步骤。
+- 某一轮失败或在截止时间被中断时，其中仍在运行的步骤会被取消。这一轮之后的步骤调用会被拒绝。
+
+到达截止时间时，它会抛出 `ASSERTION_FAILED`，依次给出调用、提供的 `message`，以及最后一个错误。
+
+```text
+expect(...).toPass() timed out after 5000 ms
+the order is ready
+last: expected 202 to be 200
+```
+
+没有一轮完成时，最后一行为 `last: no try completed`；对于 `.not.toPass()`，最后一行为 `last: the block passed`。
+
+如果没有设置 `timeout`，一个始终不通过的代码块会一直运行到测试超时。此时错误为 `TEST_TIMEOUT`，在钩子中则为钩子的超时错误。如果有某一轮失败过，对于测试体或托管会话，代码块的最后一个错误会记录在 `secondaryErrors` 下；对于测试套件钩子或工作进程测试夹具清理，最后一个错误会包含在超时消息中。
+
+| 抛出错误 | 触发条件 |
+| --- | --- |
+| `ASSERTION_FAILED` | 到达截止时间，仍没有通过的轮次 |
+| `INVALID_ARGUMENT` | 传给 `expect` 的值不是函数 |
+| `INVALID_CONFIG` | 首次运行前，发现选项不是普通对象、含有未知选项、`timeout` 或 `intervals` 超出范围，或在测试或钩子之外没有正的 `timeout` |
+| `CANCELLED` | 尝试被取消或超时 |
+| `STEP_NOT_AWAITED` | 启动调用的阶段已返回，而调用仍在运行 |
+| `HOOK_FAILED` | `beforeAll` 或 `afterAll` 钩子已返回，而其调用仍在运行 |
 
 ## 行为
 
@@ -655,9 +751,12 @@ last: expected "running" not to be "running"
 | --- | --- |
 | `toHaveValue`、`toHaveText`、`toContainText`、`toBeEmpty` | 与 `inputValue()` 和 `textContent()` 一样触发 `POLICY_DENIED`，取反或列表形式也如此 |
 | `toHaveAttribute` | 与 `getAttribute()` 一样触发 `POLICY_DENIED`，所有属性名以及取反形式都如此 |
+| `expect(browser)` 的 `toHaveClass`、`toHaveCSS` 和 `toHaveJSProperty` | 触发 `POLICY_DENIED`，取反形式也如此 |
 | `toHaveAccessibleName`、`toHaveRole` 和状态匹配器 | 正常返回结果 |
 
 如果将未提供的值读取为 `''`，就会把已填入的密码字段当作已清空而通过；如果将未提供的 `value` 属性读取为不存在，就会让具有该属性的密码字段通过 `not.toHaveAttribute('value')`。请断言填入操作的结果，而不是字段本身。
+
+`expect(browser)` 的匹配器检查的是其定位器匹配的元素。通向另一个元素的 `toHaveJSProperty` 路径（例如 `<label>` 上的 `control.value`）会读取那个元素的值。
 
 ### 选项校验
 
@@ -679,6 +778,7 @@ export interface ExpectCall {
   <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
   <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
+  <F extends () => unknown>(actual: NotAny<F>, message?: string): PassExpectation<F>;
   <T>(actual: T, message?: string): ValueExpectation<T>;
 }
 
@@ -687,6 +787,7 @@ export interface SoftExpectCall {
   <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
   <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
   <E extends object>(actual: Expectable<E>): E;
+  <F extends () => unknown>(actual: NotAny<F>, message?: string): PassExpectation<F, SoftValueExpectation<F>>;
   <T>(actual: T, message?: string): SoftValueExpectation<T>;
 }
 
@@ -812,6 +913,29 @@ export interface BrowserExpectation {
   toHaveTitle(expected: TextMatch, options?: { timeout?: number }): Promise<void>;
   /** Waits for the target's `class` attribute to match: a string is the whole normalized class list, a RegExp is tested against it. */
   toHaveClass(target: Locator, expected: TextMatch, options?: { timeout?: number }): Promise<void>;
+  /**
+   * Waits for the target's computed `property` (kebab-case, a custom
+   * `--property` included) to match: a string is the whole value, a RegExp
+   * is tested against it.
+   */
+  toHaveCSS(
+    target: Locator,
+    property: string,
+    expected: TextMatch,
+    options?: { timeout?: number },
+  ): Promise<void>;
+  /**
+   * Waits for the JavaScript value at `path` on the target's element (a
+   * property name, or a dotted path such as `dataset.state`) to equal
+   * `expected` as JSON. A path that runs out before its end, or a value that
+   * is not JSON, never matches.
+   */
+  toHaveJSProperty(
+    target: Locator,
+    path: string,
+    expected: JsonValue,
+    options?: { timeout?: number },
+  ): Promise<void>;
 }
 ```
 
@@ -907,8 +1031,13 @@ export interface AsymmetricMatcher {
 export interface PollOptions {
   /** Deadline in milliseconds. Default 5000. */
   timeout?: number;
-  /** Pause between reads in milliseconds. Default 100. */
+  /**
+   * Pause between reads in milliseconds.
+   * @deprecated Pass `intervals: [<ms>]`.
+   */
   interval?: number;
+  /** Pauses between reads in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  intervals?: readonly number[];
   /** Extra line in the timeout error, after the matcher line. */
   message?: string;
 }
@@ -934,5 +1063,26 @@ export type NegatedPollExpectation<T> = {
   readonly not: PollExpectation<T>;
 } & {
   readonly [K in Exclude<keyof ValueExpectation<T>, 'not'>]: (...args: Parameters<ValueExpectation<T>[K]>) => Promise<void>;
+};
+```
+
+### `PassOptions` 和 `PassExpectation`
+
+```ts
+export type PassOptions = {
+  /** Timeout in milliseconds. By default, only the phase deadline applies. */
+  timeout?: number;
+  /** Pauses between tries in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  intervals?: readonly number[];
+};
+
+type PassMatcher = {
+  /** Retries the block until the assertion passes or the deadline is reached. */
+  toPass(options?: PassOptions): Promise<void>;
+};
+
+/** Value matchers for a function, with retries for positive and negated assertions. */
+export type PassExpectation<T, Value = ValueExpectation<T>> = Omit<Value, 'not'> & PassMatcher & {
+  readonly not: NegatedValueExpectation<T, PassExpectation<T, Value>> & PassMatcher;
 };
 ```

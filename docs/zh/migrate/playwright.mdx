@@ -45,6 +45,7 @@ e2e 可以在同一个项目中与 Playwright 并行运行，让你逐个文件�
 | `testDir`, `testMatch`, `testIgnore` | `tests`，相对于项目根目录的 glob 模式；前缀 `!` 表示排除 |
 | `retries`, `workers`, `timeout` | 名称相同，但[默认值不同](#defaults-that-differ)；`workers` 为整数 |
 | `expect.timeout`, `use.actionTimeout`, `globalTimeout` | `assertionTimeout`、`actionTimeout`、`maxDuration`；`maxDuration` 从测试开始时计时，不包含应用启动 |
+| `expect.toPass` | 顶层的 [`toPass`](/reference/config#topass) |
 | `maxFailures`, `use.headless: false` | CLI 上的 `--max-failures <n>` 和 `--headed` |
 | `reporter`, `outputDir` | `reporters: ['list', 'junit', htmlReporter()]`，其中 `htmlReporter` 来自 `@e2e-dev/html-reporter`；也支持 `dot`、`json` 和 `markdown`；`output` 默认为 `.e2e` |
 | `use.viewport`, `locale`, `timezoneId`, `colorScheme`, `reducedMotion`, `userAgent`, `testIdAttribute` | `web({ ... })` 中的同名键 |
@@ -125,10 +126,13 @@ test('checkout', async ({ app, agent, screen }) => {
 | `toBeVisible()`, `toBeHidden()`, `toBeEnabled()`, `toBeDisabled()`, `toBeChecked()`, `toBeFocused()`, `toBeAttached()`, `toHaveText()`, `toContainText()`, `toHaveValue()`, `toHaveAttribute()`, `toHaveCount()`, `toHaveAccessibleName()`, `toHaveRole()`, `toBeEditable()` | 相同，支持 `{ visible }`、`{ enabled }`、`{ editable }`、`{ checked }`、`{ attached }` 和 `{ ignoreCase }` |
 | `toHaveId(id)`, `toContainClass(name)` | `toHaveAttribute('id', id)`、`toHaveAttribute('class', RegExp)` |
 | `expect(page).toHaveURL()`, `toHaveTitle()` | `expect(browser).toHaveURL()`、`toHaveTitle()` |
+| `expect(locator).toHaveCSS(name, value)`, `toHaveJSProperty(name, value)` | `expect(browser).toHaveCSS(locator, name, value)`、`expect(browser).toHaveJSProperty(locator, name, value)`；没有 `pseudo` 选项，`undefined` 也不能作为期望值 |
 | `expect(page).toHaveScreenshot()`, `expect(locator).toHaveScreenshot()` | `expect(screen).toHaveScreenshot()` 及定位器形式，参阅[视觉比较](/visual-testing) |
 | `expect(value)` 配合 `toBe()`、`toEqual()`、`toMatchObject()`、`toContain()`、`toHaveLength()`、`toHaveProperty()`、`toMatch()`，以及真值和数值匹配器 | 相同，参阅[值匹配器](/reference/expect#value-matchers) |
 | `expect(locator, 'message')`, `expect(page, 'message').toHaveScreenshot()`, `expect(value, 'message')` | 相同，页面使用 `expect(screen, 'message')`；消息出现在失败信息的开头，参阅[定位器匹配器](/reference/expect#locator-matchers) |
-| `expect.any()`, `anything()`, `objectContaining()`, `arrayContaining()`, `stringMatching()`, `stringContaining()`, `expect.poll()`, `expect.soft()` | 相同；`poll` 接受一个 `interval` |
+| `expect.any()`, `anything()`, `objectContaining()`, `arrayContaining()`, `stringMatching()`, `stringContaining()`, `expect.poll()`, `expect.soft()` | 相同 |
+| `expect.poll(read, { intervals })` | 相同。参阅[轮询值](/reference/expect#polling-a-value) |
+| `expect(fn).toPass(options?)` | 相同。参阅[重试代码块](/reference/expect#retrying-a-block) |
 
 </Accordion>
 <Accordion title="导航和应用">
@@ -153,6 +157,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | `page.waitForEvent('popup')` | `browser.waitForPopup(() => trigger)`，会激活新标签页，参阅[标签页](/reference/web#tabs) |
 | `context.pages()`, `context.newPage()`, `page.bringToFront()` | `browser.tabs()`、`browser.newTab()`、`tab.activate()`；没有 `context.on('page')` 事件 |
 | `page.evaluate(fn, arg)` | `browser.evaluate(fn, arg)`，输入和输出均为 JSON |
+| `locator.evaluate(fn, arg)` | `browser.evaluateOn(locator, fn, arg)`，输入和输出均为 JSON；不接受 `{ timeout }`，最长等待到 `actionTimeout`；运行期间发生导航时为 `ENGINE_FAILURE`，退出码 3 |
 | `page.webmcp.tools()`、`page.webmcp.callTool(name, input)` | 在 `browser.webmcp` 上用法相同，用 `web({ webmcp: true })` 代替启动参数或首选项；仅覆盖主框架，见 [WebMCP](/reference/web#webmcp) |
 | `page.addInitScript()`, `page.emulateMedia({ colorScheme, reducedMotion })` | `browser.addInitScript()` 或 `web({ initScripts })`；`browser.emulateMedia()` |
 | `context.addCookies()`, `cookies()`, `clearCookies()` | `browser.setCookies()`、`browser.cookies()`、`browser.clearCookies()` |
@@ -242,7 +247,7 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 | Playwright | 目前可用的方式 |
 | --- | --- |
 | `locator.locator(selector)`, `locator.and()`, `filter({ visible })` | 一个 `browser.locator` 选择器，例如 `'.card >> .close'`，或作用域内的 `screen` 查询 |
-| `locator.evaluate()`, `expect(locator).toHaveClass()`, `toHaveCSS()`, `dispatchEvent()` | `browser.evaluate(fn, selector)`；`expect(browser).toHaveClass(locator, cls)` |
+| `expect(locator).toHaveClass()`, `dispatchEvent()` | `expect(browser).toHaveClass(locator, cls)`；`browser.evaluateOn(locator, (el, type) => el.dispatchEvent(new Event(type)), 'change')`；安全字段用 `browser.evaluate` |
 | `selectOption([...])`, `hover({ position })` | 多选使用 `browser.evaluate`；`browser.mouse` 配合 `boundingBox()` |
 
 </Accordion>
@@ -250,7 +255,6 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 
 | Playwright | 目前可用的方式 |
 | --- | --- |
-| `expect(fn).toPass()`, `expect.poll(fn, { intervals })` | `expect.poll(async () => { ...; return true }).toBe(true)` |
 | `toBeEmpty()`, `toBeInViewport()` | 表单控件上使用 `toHaveValue('')`，其他元素上使用 `toHaveText('')`；通过 `expect.poll` 检查 `boundingBox()` |
 | `locator.screenshot()`, `{ fullPage, clip }`, `snapshotPathTemplate`, `ignoreSnapshots` | 对视口或单个定位器使用 `toHaveScreenshot`；通过标签和 `--exclude-tag` 跳过视觉测试 |
 | `expect.configure()` | 每次调用上设置 `{ timeout }` |
@@ -349,6 +353,8 @@ export const test = base.extend<{ accountPage: AccountPage }>({
 - `toHaveRole` 接受 `getByRole` 使用的角色集合，因此 `paragraph`、`generic` 及其他未包含的角色会导致类型错误，`img` 则读取为 `image`。它比较的是语义树读取的角色，其中 `contenteditable` 编辑器是 `textbox`。
 - 定位器采用严格匹配。对多个匹配项执行操作、读取或正向匹配器会触发 `LOCATOR_AMBIGUOUS`，而 Playwright 的 `page.click(selector)` 和 `isVisible()` 会取第一个。使用 `filter` 或 `first()` 缩小范围。
 - `.not.toBeChecked()` 在按钮或标题上会通过。按角色查询控件，让断言在控件类型改变时失败。
+- `expect.poll` 的读取抛出异常时会重试。
+- 对于 `toPass`，报告中只会显示每一轮内部的步骤。
 - 会话仅持续一次运行。`test.setup` 以指定名称保存状态，`{ session }` 恢复状态。文件会加密，并在清理时删除，因此没有可复用的 `.auth/user.json`。
 - 测试无法获取原始 `Page`，因为其上的任何操作都不会被记录、脱敏或遮蔽。`surfaceOf(engine)` 用于[自定义执行器](/executors#driving-the-page-yourself)，不用于测试代码。
 
