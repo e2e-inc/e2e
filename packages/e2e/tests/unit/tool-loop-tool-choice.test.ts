@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { isForcedToolCallSkipped, isForcedToolChoiceRejected } from '@e2e-dev/core/lib/agent/model/tool-choice';
 import { defineTool } from '@e2e-dev/core/lib/agent/tool';
@@ -244,6 +244,48 @@ describe('tool loop downgraded tool choice', () => {
     await fixtures.agent.act('second');
 
     expect(loopCalls.map((call) => call.toolChoice)).toEqual(['required', 'required']);
+  });
+});
+
+describe('tool loop warnings the AI SDK logs', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The messages the AI SDK's default logger emitted, which prints through `process.emitWarning`. */
+  function emittedWarnings(): string[] {
+    const emitted: string[] = [];
+    vi.spyOn(process, 'emitWarning').mockImplementation((warning: string | Error) => {
+      emitted.push(String(warning));
+    });
+    return emitted;
+  }
+
+  it('does not print the forced-choice downgrade the loop handles, and still switches to auto', async () => {
+    const emitted = emittedWarnings();
+    const model = installFakeLoopModel(
+      downgradingForcedChoice(({ turn }) => (turn === 1 ? [{ toolName: 'peek', input: {} }] : [conclude])),
+    );
+    const { fixtures } = runtime({ agents: { default: { tools: { peek }, model } } });
+
+    await fixtures.agent.act('look around');
+
+    expect(loopCalls.map((call) => call.toolChoice)).toEqual(['required', 'auto']);
+    expect(emitted.filter((message) => message.includes('toolChoice'))).toEqual([]);
+  });
+
+  it('still prints every other warning', async () => {
+    const emitted = emittedWarnings();
+    const model = installFakeLoopModel(() => ({
+      toolCalls: [conclude],
+      warnings: [DOWNGRADE, { type: 'unsupported', feature: 'temperature' }],
+    }));
+    const { fixtures } = runtime({ agents: { default: { model } } });
+
+    await fixtures.agent.act('look around');
+
+    expect(emitted.some((message) => message.includes('temperature'))).toBe(true);
+    expect(emitted.filter((message) => message.includes('toolChoice'))).toEqual([]);
   });
 });
 
