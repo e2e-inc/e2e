@@ -97,12 +97,18 @@ export function revyl(options: RevylOptions): DeviceProvider {
       const { revylSessionIdForLease } = (await import(PLUGIN)) as { revylSessionIdForLease: (leaseId: string) => string };
       const client = new RevylDeviceClient(revylCredentials(context.env));
       const recording = await client.startRecording(revylSessionIdForLease(lease.id), context.signal);
-      // The worker hands the video back only to the call that stops it, so a stop the engine repeats gets the first one's outcome.
+      // A stop the engine repeats shares one in flight and reuses one that wrote the video; a failed stop is asked again on the next call.
       let stopped: Promise<{ readonly file: string }> | undefined;
       return {
         startedAt: recording.startedAt,
         stop: ({ dir, signal }) =>
-          (stopped ??= client.stopRecording(recording, path.join(dir, RECORDING_FILE), signal).then(() => ({ file: RECORDING_FILE }))),
+          (stopped ??= client.stopRecording(recording, path.join(dir, RECORDING_FILE), signal).then(
+            () => ({ file: RECORDING_FILE }),
+            (error: unknown) => {
+              stopped = undefined;
+              throw error;
+            },
+          )),
       };
     },
   };

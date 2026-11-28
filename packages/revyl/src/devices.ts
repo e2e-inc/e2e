@@ -5,15 +5,22 @@
  * run's API key and is bounded by its caller's signal.
  */
 
-import { writeFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
+import type { ReadableStream } from 'node:stream/web';
 import type { RevylCredentials } from './credentials.ts';
 import { DEFAULT_API_URL } from './web/client.ts';
 
 /** Revyl's backend gives up on a proxied worker call after 30 s. */
 const REQUEST_TIMEOUT_MS = 35_000;
+/** A stop finalizes and streams the whole MP4, which Revyl's own CLI allows 5 minutes for. */
+const STOP_TIMEOUT_MS = 300_000;
 const READ_ATTEMPTS = 3;
+const STOP_ATTEMPTS = 3;
 /** Session states Revyl never brings back to a running device. */
 const ENDED_STATUSES = new Set(['failed', 'completed', 'cancelled', 'timeout', 'stopping']);
 // Revyl's edge refuses requests without a client user agent.
@@ -70,17 +77,51 @@ export class RevylDeviceClient {
   }
 
   /**
-   * Stops a recording and writes the MP4 the worker answers with to `file`.
-   * Sent once: the worker hands the video back only to the call that stops it.
+   * Stops a recording and streams the MP4 the worker answers with to `file`.
+   * A stop is asked again after a dropped connection, a gateway error, a
+   * broken download, or a worker that kept the recording to be stopped
+   * again: the worker answers a repeated stop of the same recording with the
+   * same video while the session lasts. A recording the worker no longer
+   * holds fails for good.
    */
-  async stopRecording({ workflowRunId, recordingId }: DeviceRecording, file: string, signal: AbortSignal): Promise<void> {
-    const response = await this.#request('POST', `${proxy(workflowRunId)}/stop_screen_recording`, { recording_id: recordingId }, signal);
-    if (response.ok && response.headers.get('content-type')?.startsWith('video/') === true) {
-      await writeFile(file, new Uint8Array(await response.arrayBuffer()), { signal });
-      return;
+  async stopRecording(recording: DeviceRecording, file: string, signal: AbortSignal): Promise<void> {
+    for (let attempt = 1; ; attempt += 1) {
+      const failure = await this.#stop(recording, file, signal);
+      if (failure === undefined) return;
+      if (signal.aborted || attempt >= STOP_ATTEMPTS) throw failure;
+      await delay(500 * attempt, undefined, { signal });
     }
-    action(await json(response, 'stop_screen_recording'), 'stop_screen_recording');
-    throw new Error('Revyl stopped the recording without returning a video');
+  }
+
+  /** One stop: nothing once the video is in `file`, the error of a failure another stop can get past, and a throw for any other. */
+  async #stop({ workflowRunId, recordingId }: DeviceRecording, file: string, signal: AbortSignal): Promise<Error | undefined> {
+    let response: Response;
+    try {
+      response = await this.#request('POST', `${proxy(workflowRunId)}/stop_screen_recording`, { recording_id: recordingId }, signal, STOP_TIMEOUT_MS);
+    } catch (error) {
+      return error instanceof Error ? error : new Error(String(error));
+    }
+    if (response.ok && response.body !== null && response.headers.get('content-type')?.startsWith('video/') === true) {
+      try {
+        await pipeline(Readable.fromWeb(response.body as ReadableStream<Uint8Array>), createWriteStream(file), { signal });
+        return undefined;
+      } catch (error) {
+        await rm(file, { force: true });
+        return error instanceof Error ? error : new Error(String(error));
+      }
+    }
+    if (response.status === 429 || (response.status >= 502 && response.status <= 504)) {
+      const text = await response.text().catch(() => '');
+      return new Error(`Revyl stop_screen_recording answered ${response.status}: ${text.slice(0, 300).trim()}`);
+    }
+    const body = await json(response, 'stop_screen_recording');
+    if (body.success !== false) throw new Error('Revyl stopped the recording without returning a video');
+    const reason = typeof body.error === 'string' ? body.error : 'no reason given';
+    if (reason.includes('recording retained')) return new Error(`Revyl refused stop_screen_recording: ${reason}`);
+    if (reason.includes('No active screen recording')) {
+      throw new Error(`Revyl no longer holds recording ${recordingId}, so it has no video to return: ${reason}`);
+    }
+    throw new Error(`Revyl refused stop_screen_recording: ${reason}`);
   }
 
   /** A GET's JSON object, asked again after a rate limit, a gateway error, or a dropped connection, none of which change anything. */
@@ -96,7 +137,7 @@ export class RevylDeviceClient {
     }
   }
 
-  #request(method: 'GET' | 'POST', path: string, body: unknown, signal: AbortSignal): Promise<Response> {
+  #request(method: 'GET' | 'POST', path: string, body: unknown, signal: AbortSignal, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
     return fetch(`${this.#apiUrl}${path}`, {
       method,
       headers: {
@@ -105,7 +146,7 @@ export class RevylDeviceClient {
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
     });
   }
 }

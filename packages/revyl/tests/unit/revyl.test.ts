@@ -6,7 +6,7 @@
  * tested there.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DeviceLease, DeviceReleaseContext, DeviceRequest } from '@e2e-dev/mobile';
@@ -234,12 +234,82 @@ describe('revyl()', () => {
       expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
     });
 
-    it('stops once: a stop the engine repeats gets the first outcome, since the worker hands the video back only once', async () => {
+    const stops = () => calls.filter((call) => call.url.endsWith('/stop_screen_recording'));
+    const video = () => new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]), { headers: { 'content-type': 'video/mp4' } });
+    const answers = (...responses: (() => Response)[]) => {
+      routes['POST /api/v1/execution/device-proxy/run-9/stop_screen_recording'] = () => responses.shift()!();
+    };
+
+    it('stops once after a stop that wrote the video: a stop the engine repeats reuses it', async () => {
       const recording = await revyl(options).record!(lease, recordContext);
       const stop = { dir, signal: new AbortController().signal };
       await expect(recording.stop(stop)).resolves.toEqual({ file: 'recording.mp4' });
       await expect(recording.stop(stop)).resolves.toEqual({ file: 'recording.mp4' });
-      expect(calls.filter((call) => call.url.endsWith('/stop_screen_recording'))).toHaveLength(1);
+      expect(stops()).toHaveLength(1);
+    });
+
+    it('stops with a 5 minute bound, since the worker finalizes and streams the whole video in the answer', async () => {
+      const timeout = vi.spyOn(AbortSignal, 'timeout');
+      const recording = await revyl(options).record!(lease, recordContext);
+      timeout.mockClear();
+      await recording.stop({ dir, signal: new AbortController().signal });
+      expect(timeout.mock.calls).toEqual([[300_000]]);
+      timeout.mockRestore();
+    });
+
+    it('asks the stop again after a dropped connection, a gateway error, and a worker that kept the recording, and writes the video the next answer carries', async () => {
+      answers(
+        () => {
+          throw new TypeError('fetch failed');
+        },
+        () => json({ detail: 'gateway timeout' }, 504),
+        () => json({ success: false, error: 'Screen recording finalize failed; recording retained; retry stop_screen_recording' }),
+        video,
+      );
+      const recording = await revyl(options).record!(lease, recordContext);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).rejects.toThrow('recording retained');
+      expect(stops()).toHaveLength(3);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual({ file: 'recording.mp4' });
+      expect(stops()).toHaveLength(4);
+      expect(stops().map((call) => call.body)).toEqual(Array.from({ length: 4 }, () => ({ recording_id: 'rec-1' })));
+      expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+    });
+
+    it('sends a stop again on the next call after one whose signal aborted', async () => {
+      const recording = await revyl(options).record!(lease, recordContext);
+      await expect(recording.stop({ dir, signal: AbortSignal.abort() })).rejects.toThrow();
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual({ file: 'recording.mp4' });
+      expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+    });
+
+    it('asks the stop again after a download that breaks partway, leaving only the whole video', async () => {
+      answers(
+        () =>
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(new Uint8Array([9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9]));
+                controller.error(new TypeError('terminated'));
+              },
+            }),
+            { headers: { 'content-type': 'video/mp4' } },
+          ),
+        video,
+      );
+      const recording = await revyl(options).record!(lease, recordContext);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual({ file: 'recording.mp4' });
+      expect(stops()).toHaveLength(2);
+      expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+    });
+
+    it('fails a stop for good, without asking again, once the worker no longer holds the recording', async () => {
+      answers(() => json({ success: false, error: 'No active screen recording has this recording_id' }));
+      const recording = await revyl(options).record!(lease, recordContext);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).rejects.toThrow(
+        'Revyl no longer holds recording rec-1, so it has no video to return: No active screen recording has this recording_id',
+      );
+      expect(stops()).toHaveLength(1);
+      expect(existsSync(join(dir, 'recording.mp4'))).toBe(false);
     });
 
     it('looks the session up again after a gateway error, and starts recording once', async () => {
