@@ -1,4 +1,4 @@
-import { existsSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from '@e2e-dev/electron';
@@ -144,7 +144,7 @@ test.describe('controls page', () => {
     await expect(screen.getByTestId('tip')).toHaveText('Tip shown');
   });
 
-  test('saves a download in the attempt\'s own directory, never the user\'s', async ({ screen, electron }) => {
+  test('saves a download in the attempt\'s own directory, never the user\'s', async ({ app, screen, electron }) => {
     const downloads = await electron.evaluate(({ app: main }) => main.getPath('downloads'));
     const userData = await electron.evaluate(({ app: main }) => main.getPath('userData'));
     expect(realpathSync(path.dirname(downloads))).toBe(realpathSync(userData));
@@ -153,6 +153,14 @@ test.describe('controls page', () => {
     // A second file of the same name is kept beside the first, not over it.
     await screen.getByRole('link', 'Download note').tap();
     await expect.poll(() => existsSync(path.join(downloads, 'note (1).txt'))).toBe(true);
+    // Names are compared without case, as macOS and Windows store them: NOTE.txt is note.txt.
+    await screen.getByRole('link', 'Download shouting note').tap();
+    await expect.poll(() => readdirSync(downloads)).toContain('NOTE (2).txt');
+    // A relaunch in the same attempt keeps what the last launch saved, and numbers past it.
+    await app.restart();
+    await electron.evaluate(() => (globalThis as unknown as { testbedOpen: (page: string) => Promise<void> }).testbedOpen('controls.html'));
+    await screen.getByRole('link', 'Download note').tap();
+    await expect.poll(() => readdirSync(downloads)).toContain('note (3).txt');
   });
 
   test('finds text that inline markup splits, and text under aria-hidden or inert, as web() does', async ({ screen }) => {
