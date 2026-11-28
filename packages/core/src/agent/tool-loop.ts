@@ -26,8 +26,6 @@ import {
   isForcedToolCallSkipped,
   isForcedToolChoiceDowngraded,
   isForcedToolChoiceRejected,
-  withFilteredToolChoiceWarnings,
-  withoutFilteredToolChoiceWarnings,
 } from './model/tool-choice.ts';
 import { missingCredentialError, withMissingCredentialNamed } from './model/missing-credential.ts';
 import { withStallGuard } from './model/stall.ts';
@@ -295,6 +293,8 @@ class LoopRun {
   private toolChoice: ToolChoiceMode;
   /** The last turn that ran, for continuing after a reply without tool calls. */
   private lastStep: StepResult<ToolSet> | undefined;
+  /** Whether the turn's response carried a forced-choice downgrade, which `wrapGenerate` took out of the warnings the SDK logs. */
+  private downgraded = false;
   /** `model` as the loop sends requests to it: each one bounded, so a stalled response is sent again. */
   private readonly requestModel: SdkLanguageModel;
   /** The tool calls of the current turn's reply, in the order the model sent them; empty before the reply. */
@@ -327,7 +327,12 @@ class LoopRun {
           const result = await doGenerate();
           this.sentCalls = result.content.flatMap((part) =>
             part.type === 'tool-call' && part.providerExecuted !== true ? [{ toolCallId: part.toolCallId, toolName: part.toolName }] : []);
-          return result;
+          // The SDK logs exactly the warnings returned here, so a downgrade the
+          // loop handles is taken out before it prints; every other warning,
+          // and every call a custom tool makes, reaches the logger as before.
+          if (!result.warnings.some(isForcedToolChoiceDowngraded)) return result;
+          this.downgraded = true;
+          return { ...result, warnings: result.warnings.filter((warning) => !isForcedToolChoiceDowngraded(warning)) };
         },
         transformParams: async ({ params }) => ({
           ...params,
@@ -373,22 +378,20 @@ class LoopRun {
       // change between a refused request and its retry.
       const loop = this.buildLoop(tools);
       try {
-        const result = await withFilteredToolChoiceWarnings(() =>
-          loop.generate({
-            prompt,
-            abortSignal: this.context.signal,
-            // The whole loop, retries included, ends with the step's clock; the
-            // judgment adapter bounds its calls the same way.
-            timeout: Math.max(1, this.context.budgets.remainingMs()),
-            onStepStart: tracker.onStepStart,
-            onStepEnd: (step) => {
-              this.lastStep = step;
-              this.recordTurn(step);
-              tracker.onStepEnd(step);
-              this.noticeToolChoiceDowngrade(step);
-            },
-          }),
-        );
+        const result = await loop.generate({
+          prompt,
+          abortSignal: this.context.signal,
+          // The whole loop, retries included, ends with the step's clock; the
+          // judgment adapter bounds its calls the same way.
+          timeout: Math.max(1, this.context.budgets.remainingMs()),
+          onStepStart: tracker.onStepStart,
+          onStepEnd: (step) => {
+            this.lastStep = step;
+            this.recordTurn(step);
+            tracker.onStepEnd(step);
+            this.noticeToolChoiceDowngrade();
+          },
+        });
         if (result.finishReason === 'content-filter' && !this.conclusion.concluded()) {
           throw modelRefusalError({ provider: this.model.provider, id: this.model.modelId }, result.rawFinishReason);
         }
@@ -482,8 +485,7 @@ class LoopRun {
           let result: unknown;
           try {
             // Read per call: a handler replaced after the tools were built is the one that runs.
-            // Exit the warning filter context so AI SDK calls inside custom tools retain their warnings.
-            result = withoutFilteredToolChoiceWarnings(() => tool.execute!(input, options));
+            result = tool.execute!(input, options);
           } catch (error) {
             this.ranCalls.set(options.toolCallId, Promise.resolve('failed'));
             throw error;
@@ -669,8 +671,10 @@ class LoopRun {
    * tool-calls-only rule, and the model is remembered, so later steps start
    * in that mode.
    */
-  private noticeToolChoiceDowngrade(step: StepResult<ToolSet>): void {
-    if (this.toolChoice === 'auto' || step.warnings?.some(isForcedToolChoiceDowngraded) !== true) return;
+  private noticeToolChoiceDowngrade(): void {
+    const downgraded = this.downgraded;
+    this.downgraded = false;
+    if (!downgraded || this.toolChoice === 'auto') return;
     this.toolChoice = 'auto';
     FREE_TOOL_CHOICE_MODELS.add(this.model);
     this.note(`the provider sent auto in place of a forced tool choice on turn ${String(this.turnsUsed)}: continuing with auto`);
