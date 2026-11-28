@@ -1050,6 +1050,16 @@ describe('desktop fixture: windows', () => {
     expect([runs, await controls.title()]).toEqual([1, 'Controls']);
   });
 
+  it('counts the read of the windows before the trigger toward the timeout', async () => {
+    const stalled = failure('APP_UNRESPONSIVE', 'not_delivered', 'the app did not answer its window list in time', { retryable: true });
+    const alone = windows(() => [mine]);
+    const { surface } = await launched({ listWindows: [alone, alone, { ...stalled, sleepMs: 500 }, alone] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const started = Date.now();
+    await expect(desktop.waitForWindow(() => Promise.resolve(), { timeout: 800 })).rejects.toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/^no window opened within 800ms/) });
+    expect(Date.now() - started).toBeLessThan(1_100);
+  });
+
   it('runs a trigger, waits for the window it opens, and makes that window active', async () => {
     const alone = windows(() => [mine]);
     let opened = false;

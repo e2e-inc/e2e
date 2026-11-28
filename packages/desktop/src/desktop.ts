@@ -51,8 +51,9 @@ export interface Desktop {
    * Runs a trigger and waits for the window it opens, then resolves with that
    * window once it is the active one. Rejects with `ACTION_FAILED` when no
    * window opens within `timeout` milliseconds, or else the action timeout.
-   * The time the trigger takes counts toward it, and a trigger that took all
-   * of it still gets one look at the windows.
+   * The time the trigger, and the read of the windows before it, take counts
+   * toward it, and a trigger that took all of it still gets one look at the
+   * windows.
    */
   waitForWindow(trigger: () => Promise<void>, options?: { readonly timeout?: number }): Promise<DesktopWindow>;
   /**
@@ -143,6 +144,8 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
       if (typeof trigger !== 'function') throw new ConfigurationError('INVALID_ARGUMENT', 'desktop.waitForWindow() takes the function that opens the window');
       const operation = context.operation(stepTimeout(options?.timeout, 'desktop.waitForWindow'));
       const waitMs = operation.timeoutMs;
+      // The whole call counts toward the timeout: the read before the trigger, which waits for an app that does not answer, too.
+      const begun = Date.now();
       // The windows open before the trigger, read until the app answers: the trigger runs once, after a list it can be told from.
       const before = new Set((await listed(operation)).map((window) => window.id));
       const started = Date.now();
@@ -153,7 +156,7 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
         // Not a dialog macOS put over the app, which `screen` never reads on its own either.
         (windows) => windows.find((window) => window.readable && !before.has(window.id)),
         operation,
-        waitMs - triggerMs,
+        waitMs - (Date.now() - begun),
         () => `no window opened within ${waitMs}ms; the trigger resolved after ${triggerMs}ms`,
       );
       await surface.activateWindow(opened.id, operation);
