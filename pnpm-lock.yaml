@@ -1053,6 +1053,47 @@ importers:
       vitest:
         specifier: 5.1.2
         version: 5.1.2(@types/node@26.6.11)(vite@8.3.8(@types/node@26.6.11)(esbuild@0.28.2)(jiti@1.21.7)(terser@5.51.2)(tsx@4.23.14)(yaml@2.9.1))
+    optionalDependencies:
+      '@e2e-dev/util-darwin-arm64':
+        specifier: workspace:*
+        version: link:npm/darwin-arm64
+      '@e2e-dev/util-darwin-x64':
+        specifier: workspace:*
+        version: link:npm/darwin-x64
+      '@e2e-dev/util-linux-arm64-gnu':
+        specifier: workspace:*
+        version: link:npm/linux-arm64-gnu
+      '@e2e-dev/util-linux-arm64-musl':
+        specifier: workspace:*
+        version: link:npm/linux-arm64-musl
+      '@e2e-dev/util-linux-x64-gnu':
+        specifier: workspace:*
+        version: link:npm/linux-x64-gnu
+      '@e2e-dev/util-linux-x64-musl':
+        specifier: workspace:*
+        version: link:npm/linux-x64-musl
+      '@e2e-dev/util-win32-arm64-msvc':
+        specifier: workspace:*
+        version: link:npm/win32-arm64-msvc
+      '@e2e-dev/util-win32-x64-msvc':
+        specifier: workspace:*
+        version: link:npm/win32-x64-msvc
+
+  packages/util/npm/darwin-arm64: {}
+
+  packages/util/npm/darwin-x64: {}
+
+  packages/util/npm/linux-arm64-gnu: {}
+
+  packages/util/npm/linux-arm64-musl: {}
+
+  packages/util/npm/linux-x64-gnu: {}
+
+  packages/util/npm/linux-x64-musl: {}
+
+  packages/util/npm/win32-arm64-msvc: {}
+
+  packages/util/npm/win32-x64-msvc: {}
 
   packages/web:
     dependencies:

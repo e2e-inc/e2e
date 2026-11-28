@@ -67,36 +67,7 @@ export interface Binding {
   processPngToPng(bytes: Uint8Array, steps: ProcessSteps): Promise<Buffer>;
 }
 
-/** The addon could not be loaded on this machine. */
-export class NativeUtilUnavailableError extends Error {
-  override readonly name = 'NativeUtilUnavailableError';
-  /** The platform package that holds this machine's build; undefined when no build exists for it. */
-  readonly packageName: string | undefined;
-  /** `<platform>-<arch>[-<abi>]`, as NAPI-RS names it. */
-  readonly platform: string;
-  /** Whether the platform package is simply not installed, as npm leaves it with `--omit=optional`; false when it is there and fails to load. */
-  readonly notInstalled: boolean;
-
-  constructor(message: string, details: { packageName: string | undefined; platform: string; notInstalled: boolean }, options?: ErrorOptions) {
-    super(message, options);
-    this.packageName = details.packageName;
-    this.platform = details.platform;
-    this.notInstalled = details.notInstalled;
-  }
-}
-
-/** NAPI-RS's name for this machine's platform; undefined where no addon is built. */
-function platformName(): string {
-  const { platform, arch } = process;
-  if (platform === 'linux') {
-    const report = process.report.getReport() as { header?: { glibcVersionRuntime?: string } };
-    return `linux-${arch}-${report.header?.glibcVersionRuntime === undefined ? 'musl' : 'gnu'}`;
-  }
-  if (platform === 'win32') return `win32-${arch}-msvc`;
-  return `${platform}-${arch}`;
-}
-
-/** The platform names a package is published for. */
+/** The platforms a build is published for, each as `@e2e-dev/util-<platform>` (`packages/util/npm/<platform>`). */
 const PLATFORMS: ReadonlySet<string> = new Set([
   'darwin-arm64',
   'darwin-x64',
@@ -107,6 +78,37 @@ const PLATFORMS: ReadonlySet<string> = new Set([
   'win32-x64-msvc',
   'win32-arm64-msvc',
 ]);
+
+/** The addon could not be loaded on this machine. */
+export class NativeUtilUnavailableError extends Error {
+  override readonly name = 'NativeUtilUnavailableError';
+  /** The platform package that holds this machine's build; undefined when no build exists for it. */
+  readonly packageName: string | undefined;
+  /** `<platform>-<arch>[-<abi>]`, as NAPI-RS names it. */
+  readonly platform: string;
+  /** Whether the platform package is simply not installed, as npm leaves it with `--omit=optional`; false when it is there and fails to load. */
+  readonly notInstalled: boolean;
+  /** The platforms a build is published for, in the form of `platform`. */
+  readonly supported: readonly string[] = [...PLATFORMS];
+
+  constructor(message: string, details: { packageName: string | undefined; platform: string; notInstalled: boolean }, options?: ErrorOptions) {
+    super(message, options);
+    this.packageName = details.packageName;
+    this.platform = details.platform;
+    this.notInstalled = details.notInstalled;
+  }
+}
+
+/** NAPI-RS's name for this machine's platform, which may be one no addon is built for. */
+function platformName(): string {
+  const { platform, arch } = process;
+  if (platform === 'linux') {
+    const report = process.report.getReport() as { header?: { glibcVersionRuntime?: string } };
+    return `linux-${arch}-${report.header?.glibcVersionRuntime === undefined ? 'musl' : 'gnu'}`;
+  }
+  if (platform === 'win32') return `win32-${arch}-msvc`;
+  return `${platform}-${arch}`;
+}
 
 let loaded: Binding | undefined;
 
@@ -132,7 +134,7 @@ export function binding(): Binding {
     }
   }
   const message = packageName === undefined
-    ? `@e2e-dev/util has no native build for ${platform}`
+    ? `@e2e-dev/util has no native build for ${platform}; it has one for ${[...PLATFORMS].join(', ')}`
     : `@e2e-dev/util could not load its native build for ${platform}; install ${packageName}, which npm installs with @e2e-dev/util on this platform unless it runs with --omit=optional or from a lockfile written on another platform (npm/cli#4828)`;
   throw new NativeUtilUnavailableError(`${message} (${failures.join('; ')})`, { packageName, platform, notInstalled: packageName !== undefined && notInstalled }, { cause });
 }

@@ -1,0 +1,17 @@
+# How the Node addons in crates/ link their C runtime on the targets where the default does not fit an addon.
+
+# musl defaults to a static C runtime, with which rustc drops a cdylib; the addon links the musl that the Node
+# process loading it already has.
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]
+
+[target.aarch64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]
+
+# MSVC defaults to the C runtime DLLs of the Visual C++ Redistributable, which a Windows machine with Node may not
+# have; the addon carries its own.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

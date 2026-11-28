@@ -32,16 +32,26 @@
   },
   "files": [
     "dist",
-    "NOTICE",
-    "util.*.node"
+    "NOTICE"
   ],
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc --project tsconfig.build.json && node ../../scripts/stamp-dist.ts",
     "build:native": "node ../../scripts/native/build-native.ts util",
+    "licenses:native": "node ../../scripts/native/native-licenses.ts util",
     "prepublishOnly": "node ../../scripts/check-dist.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "bench": "node bench/run.ts"
+  },
+  "optionalDependencies": {
+    "@e2e-dev/util-darwin-arm64": "workspace:*",
+    "@e2e-dev/util-darwin-x64": "workspace:*",
+    "@e2e-dev/util-linux-arm64-gnu": "workspace:*",
+    "@e2e-dev/util-linux-arm64-musl": "workspace:*",
+    "@e2e-dev/util-linux-x64-gnu": "workspace:*",
+    "@e2e-dev/util-linux-x64-musl": "workspace:*",
+    "@e2e-dev/util-win32-arm64-msvc": "workspace:*",
+    "@e2e-dev/util-win32-x64-msvc": "workspace:*"
   },
   "devDependencies": {
     "@napi-rs/image": "1.16.0",

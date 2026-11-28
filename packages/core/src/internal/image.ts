@@ -43,7 +43,7 @@ function codecError(cause: unknown): unknown {
   if (!(cause instanceof util.NativeUtilUnavailableError)) return cause;
   const reason = cause.cause instanceof Error ? cause.cause.message.split('\n', 1)[0] : cause.message;
   const fix = cause.packageName === undefined
-    ? `it has no native build for ${cause.platform}`
+    ? `it has no native build for ${cause.platform}, only for ${cause.supported.join(', ')}`
     : cause.notInstalled
       ? `its native build for ${cause.platform} (${cause.packageName}) is not installed. npm skips it with --omit=optional, or when package-lock.json was written on another platform (npm/cli#4828): install again without --omit=optional, or delete package-lock.json and node_modules and run npm install`
       : `it could not be loaded (${reason})`;
