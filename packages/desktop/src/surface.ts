@@ -602,8 +602,6 @@ export class DesktopSurface {
       this.followStep = step;
       if (active === undefined || step === undefined) return active;
     }
-    // A list that came back empty (the app quit) is no evidence of a window the agent opened next.
-    if (windows.length === 0) return this.followed ?? active;
     const listed = new Set(windows.map((window) => window.id));
     if (this.followed !== undefined && !listed.has(this.followed)) this.followed = undefined;
     const seen = this.agentSeen;
