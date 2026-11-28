@@ -431,7 +431,7 @@ an example test.
 | `page.waitForEvent('close')` | `await expect.poll(() => window.isClosed()).toBe(true)` |
 | `expect(page).toHaveTitle(title)` | `await expect.poll(() => window.title()).toBe(title)` |
 | `page.getByRole`, `getByLabel`, `getByTestId`, `locator(css)` | `screen.getByRole`, `getByLabel`, `getByTestId`, and `electron.locator(css)`, which takes CSS only: no `text=`, `:has-text()`, `:visible`, or `>>`. Use `.filter({ hasText })` and `.filter({ has })` |
-| A query for an element behind an open modal | `getByText`, `getByTestId`, or `electron.locator(css)`: the page behind a modal is `inert`, and `getByRole` and `getByLabel` leave an inert subtree out. It can be read, not acted on |
+| A query for an element behind an open modal | `getByText`, `getByTestId`, or `electron.locator(css)`: the page behind a modal is `inert`, and `getByRole` and `getByLabel` leave an inert subtree out. It can be read, and `tap()` or `fill()` on it fails |
 | `page.on('console')`, `electronApp.on('console')` | Recorded in the test's trace under App log, main-process lines prefixed `[main]`. A test cannot read them |
 | `electronApp.close()` | Nothing: every test ends with the app quit |
 
