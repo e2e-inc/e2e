@@ -238,12 +238,12 @@ that applies, each as its own test with its own arrange steps.
   negative input where a value is required.
 - **A rule that compares records** ("already exists", "at most N"): break it
   with a record the test created, not only with seeded data.
-- **A row action:** unless the requirement is about position 1, add three
-  rows where the list allows and act on the middle one shown ("Act on the
-  second item shown"), checking the rows above and below it stay unchanged.
-  Repeat each row action (tick, edit, delete) with each view control
-  (filter, sort, search) switched on, on the second row shown after one the
-  control hides or moves.
+- **A row action:** keep the two-item minimum from "Act on the second item
+  shown" (unless the requirement is about position 1), adding a third row
+  where the list allows when both neighbors need checking. Repeat each row
+  action (tick, edit, delete) with each view control (filter, sort, search)
+  switched on, acting on the second row shown after the control hides or
+  moves an earlier row.
 - **A reversible action** (tick, favorite, lock): one test does it, another
   starts from the done state and undoes it.
 - **A sum, count, or progress line:** at least three counted items with
@@ -263,8 +263,9 @@ that applies, each as its own test with its own arrange steps.
 - **A fixed set** (the seeded items, the options of a select): compare the
   whole rendered list (`toHaveText([...])` when order is promised, or
   sorted copies when only membership is promised), and run one test per
-  member with `test.each` when each member has behavior to exercise, never
-  only the first two.
+  member with `test.each` when each member has behavior to exercise (array
+  rows spread only when every row is an array; otherwise each row arrives
+  whole), never only the first two.
 
 ## Review: before the suite is done
 
@@ -282,9 +283,9 @@ Reread every file as its reviewer and fix what you find.
   removal.
 - **A rejection checked by its message or a count alone:** also check the
   state the refusal protects, reopening afresh to check the unchanged rows
-  with list-form `toHaveText` and literal values when no persisted write is
-  promised, or checking that protected content stays gated after a failed
-  sign-in.
+  with literal values (list-form `toHaveText` when order is promised, or
+  sorted copies when order can vary) when no persisted write is promised,
+  or checking that protected content stays gated after a failed sign-in.
 - **A persisted change checked only on the screen that made it:** add a
   test that waits for confirmation, reloads or reopens afresh, and checks
   the saved state.
