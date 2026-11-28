@@ -51,6 +51,9 @@ struct Candidate<E> {
     /// Whether the item, and every menu and submenu item above it, is enabled: an item under a disabled one is not
     /// one the app takes.
     enabled: bool,
+    /// The menu bar item and every submenu item above it, each with what a missing `AXEnabled` reads as. The watch
+    /// before the press reads them again with the item, since AppKit validates them as late as the item itself.
+    above: Vec<(E, bool)>,
     /// How deep it sits: 1 in a menu of the menu bar, 2 in a submenu of one.
     depth: usize,
     title: String,
@@ -92,32 +95,53 @@ pub fn back(pid: i32, input_id: Option<u32>, deadline: Instant) -> Outcome<Press
         let Some(bar) = bar else {
             return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "the app has no menu bar, so it has no Back command to press"));
         };
-        let candidates = back_candidates(&bar, deadline)?;
-        let (item, enabled) = match choose(&candidates) {
-            Ok(item) => (item, true),
-            Err(Some(item)) => (item, false),
-            Err(None) => {
-                return Err(Failure::refused(
-                    codes::ACTION_NOT_SUPPORTED,
-                    "the app's menu bar has no Back command (an item titled Back or Go Back, or one with the shortcut Command-[), so nothing was pressed",
-                ));
-            }
-        };
-        let window = watch_window(deadline.saturating_duration_since(Instant::now()).saturating_sub(super::ANSWER_MARGIN))?;
-        let read = || match item.element.attribute("AXEnabled") {
-            Ok(value) => Ok(value.boolean().unwrap_or(false)),
-            Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT | ax::AX_API_DISABLED)) => Err(unread(error, "read whether Back is enabled")),
-            Err(_) => Ok(false),
-        };
-        if !revalidated(enabled, window, REVALIDATION_POLL, read, sleep)? {
+        press_back(&bar, deadline, sleep)
+    })
+}
+
+/// Finds Back in `bar`, watches its enabled state through one validation (`pause` waits between reads), and presses
+/// it only when it, and every menu above it, is enabled at the end.
+fn press_back<E: Accessible>(bar: &E, deadline: Instant, pause: impl FnMut(Duration)) -> Outcome<Pressed> {
+    let candidates = back_candidates(bar, deadline)?;
+    let (item, enabled) = match choose(&candidates) {
+        Ok(item) => (item, true),
+        Err(Some(item)) => (item, false),
+        Err(None) => {
             return Err(Failure::refused(
-                codes::ACTION_FAILED,
-                format!("{} in the {} menu is disabled: the app has nothing to go back to now, so nothing was pressed", item.title, item.menu),
+                codes::ACTION_NOT_SUPPORTED,
+                "the app's menu bar has no Back command (an item titled Back or Go Back, or one with the shortcut Command-[), so nothing was pressed",
             ));
         }
-        perform(&item.element, "AXPress", &format!("press {} in the {} menu", item.title, item.menu))?;
-        Ok(Pressed { title: item.title.clone(), menu: item.menu.clone() })
-    })
+    };
+    let window = watch_window(deadline.saturating_duration_since(Instant::now()).saturating_sub(super::ANSWER_MARGIN))?;
+    if !revalidated(enabled, window, REVALIDATION_POLL, || item.enabled_now(), pause)? {
+        return Err(Failure::refused(
+            codes::ACTION_FAILED,
+            format!("{} in the {} menu is disabled: the app has nothing to go back to now, so nothing was pressed", item.title, item.menu),
+        ));
+    }
+    perform(&item.element, "AXPress", &format!("press {} in the {} menu", item.title, item.menu))?;
+    Ok(Pressed { title: item.title.clone(), menu: item.menu.clone() })
+}
+
+impl<E: Accessible> Candidate<E> {
+    /// Whether the item, and every menu and submenu item above it, is enabled now. A stall or a gone element fails;
+    /// any other failure reads as what a missing value means for that element.
+    fn enabled_now(&self) -> Outcome<bool> {
+        for (element, missing) in self.above.iter().chain(std::iter::once(&(self.element.clone(), false))) {
+            let enabled = match element.attribute("AXEnabled") {
+                Ok(value) => value.boolean().unwrap_or(*missing),
+                Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT | ax::AX_API_DISABLED)) => {
+                    return Err(unread(error, "read whether Back is enabled"));
+                }
+                Err(_) => *missing,
+            };
+            if !enabled {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
 }
 
 /// How long Back's enabled state is watched before the press: the whole validation, or a refusal when the budget left
@@ -153,24 +177,28 @@ fn back_candidates<E: Accessible>(bar: &E, deadline: Instant) -> Outcome<Vec<Can
         let menu = top.text("AXTitle").unwrap_or_default();
         // A menu the app disabled as a whole (no window to act on) disables every item in it.
         let enabled = top.attribute("AXEnabled").ok().and_then(|value| value.boolean()).unwrap_or(true);
+        let path = Path { menu, depth: 1, enabled, above: vec![(top.clone(), true)] };
         for list in children(&top, "read a menu")? {
-            collect(&list, &menu, 1, enabled, deadline, &mut seen, &mut candidates)?;
+            collect(&list, &path, deadline, &mut seen, &mut candidates)?;
         }
     }
     Ok(candidates)
 }
 
-/// The items of one menu (`AXMenu`), and those of their submenus down to `MAX_MENU_DEPTH`, that match Back.
-/// `enabled_above` says whether the menu bar item and every item whose submenu holds `list` are enabled.
-fn collect<E: Accessible>(
-    list: &E,
-    menu: &str,
+/// Where a menu sits below the menu bar.
+struct Path<E> {
+    /// The title of the menu bar item it is under.
+    menu: String,
+    /// 1 for a menu of the menu bar, 2 for a submenu of one.
     depth: usize,
-    enabled_above: bool,
-    deadline: Instant,
-    seen: &mut usize,
-    found: &mut Vec<Candidate<E>>,
-) -> Outcome<()> {
+    /// Whether the menu bar item and every item whose submenu holds it read as enabled.
+    enabled: bool,
+    /// Those items, each with what a missing `AXEnabled` reads as.
+    above: Vec<(E, bool)>,
+}
+
+/// The items of one menu (`AXMenu`) at `path`, and those of their submenus down to `MAX_MENU_DEPTH`, that match Back.
+fn collect<E: Accessible>(list: &E, path: &Path<E>, deadline: Instant, seen: &mut usize, found: &mut Vec<Candidate<E>>) -> Outcome<()> {
     for item in children(list, "read a menu")? {
         if Instant::now() >= deadline {
             return Err(Failure::timeout("reading the app's menu bar"));
@@ -188,14 +216,18 @@ fn collect<E: Accessible>(
         let title = values[0].as_ref().and_then(|value| value.text().map(str::to_owned));
         let key = values[1].as_ref().and_then(|value| value.text().map(str::to_owned));
         let modifiers = values[2].as_ref().and_then(|value| if let ax::Value::Number(number) = value { Some(*number as i64) } else { None });
-        let enabled = enabled_above && values[3].as_ref().and_then(ax::Value::boolean).unwrap_or(false);
+        let enabled = path.enabled && values[3].as_ref().and_then(ax::Value::boolean).unwrap_or(false);
         if let Some(kind) = back_match(title.as_deref(), key.as_deref(), modifiers) {
             let title = title.filter(|title| !title.trim().is_empty()).unwrap_or_else(|| "Command-[".into());
-            found.push(Candidate { element: item.clone(), found: kind, enabled, depth, title, menu: menu.to_owned() });
+            let above = path.above.clone();
+            found.push(Candidate { element: item.clone(), found: kind, enabled, above, depth: path.depth, title, menu: path.menu.clone() });
         }
-        if depth < MAX_MENU_DEPTH {
+        if path.depth < MAX_MENU_DEPTH {
+            let mut above = path.above.clone();
+            above.push((item.clone(), false));
+            let below = Path { menu: path.menu.clone(), depth: path.depth + 1, enabled, above };
             for submenu in children(&item, "read a submenu")? {
-                collect(&submenu, menu, depth + 1, enabled, deadline, seen, found)?;
+                collect(&submenu, &below, deadline, seen, found)?;
             }
         }
     }
@@ -214,7 +246,7 @@ fn children<E: Accessible>(element: &E, what: &str) -> Outcome<Vec<E>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BackMatch, Candidate, back_candidates, back_match, choose, revalidated};
+    use super::{BackMatch, Candidate, back_candidates, back_match, choose, press_back, revalidated};
     use crate::ax::{self, Value};
     use crate::failure::{Failure, codes};
     use crate::fake::Fake;
@@ -222,7 +254,7 @@ mod tests {
     use std::time::Instant;
 
     fn item(id: u32, found: BackMatch, enabled: bool) -> Candidate<u32> {
-        Candidate { element: id, found, enabled, depth: 1, title: format!("item {id}"), menu: "Go".into() }
+        Candidate { element: id, found, enabled, above: Vec::new(), depth: 1, title: format!("item {id}"), menu: "Go".into() }
     }
 
     #[test]
@@ -360,5 +392,51 @@ mod tests {
         assert_eq!(choose(&items).err().flatten().map(|disabled| disabled.element), Some(2));
         let none: [Candidate<u32>; 0] = [];
         assert!(matches!(choose(&none), Err(None)));
+    }
+
+    /// `press_back` on `bar` with a minute left; `validate` runs at each pause, as AppKit validates the menus.
+    fn press(bar: &Fake, mut validate: impl FnMut()) -> Result<(String, String), Failure> {
+        press_back(bar, Instant::now() + Duration::from_secs(60), |_| validate()).map(|pressed| (pressed.menu, pressed.title))
+    }
+
+    #[test]
+    fn never_presses_a_back_its_menu_keeps_disabled() {
+        // Go is disabled as a whole while its Back reads enabled: the watch reads Go again and never presses.
+        let back = menu_item("Back", None, true);
+        let go = top("Go", vec![back.clone()]).with("AXEnabled", Value::Bool(false));
+        let refused = press(&Fake::new("AXMenuBar").children(vec![go]), || ()).expect_err("refused");
+        assert_eq!(refused.code, codes::ACTION_FAILED);
+        assert!(back.sent().is_empty(), "nothing was pressed");
+        // The same under a disabled submenu item: File > Open Recent > Back.
+        let back = menu_item("Back", None, true);
+        let open_recent = menu_item("Open Recent", None, false).children(vec![Fake::new("AXMenu").children(vec![back.clone()])]);
+        let refused = press(&Fake::new("AXMenuBar").children(vec![top("File", vec![open_recent])]), || ()).expect_err("refused");
+        assert_eq!(refused.code, codes::ACTION_FAILED);
+        assert!(back.sent().is_empty(), "nothing was pressed");
+    }
+
+    #[test]
+    fn presses_a_back_once_its_menu_and_itself_are_validated_enabled() {
+        // Go and its Back both read disabled, then AppKit enables Go and Back: the press goes out.
+        let back = menu_item("Back", None, false);
+        let go = top("Go", vec![back.clone()]).with("AXEnabled", Value::Bool(false));
+        let bar = Fake::new("AXMenuBar").children(vec![go.clone()]);
+        let pressed = press(&bar, || {
+            go.set("AXEnabled", Ok(Value::Bool(true)));
+            back.set("AXEnabled", Ok(Value::Bool(true)));
+        });
+        assert_eq!(pressed.expect("pressed"), ("Go".to_owned(), "Back".to_owned()));
+        assert_eq!(back.sent(), ["perform AXPress"]);
+    }
+
+    #[test]
+    fn refuses_a_back_appkit_disables_during_the_watch() {
+        let back = menu_item("Back", None, true);
+        let bar = Fake::new("AXMenuBar").children(vec![top("Go", vec![back.clone()])]);
+        let refused = press(&bar, || back.set("AXEnabled", Ok(Value::Bool(false)))).expect_err("refused");
+        assert_eq!(refused.code, codes::ACTION_FAILED);
+        assert!(back.sent().is_empty(), "nothing was pressed");
+        let none = press(&Fake::new("AXMenuBar").children(vec![top("Edit", vec![menu_item("Undo", Some("z"), true)])]), || ()).expect_err("none");
+        assert_eq!(none.code, codes::ACTION_NOT_SUPPORTED);
     }
 }
