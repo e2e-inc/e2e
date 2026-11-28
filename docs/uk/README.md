@@ -125,7 +125,7 @@ the end of the line above it, but it cannot detect a silently dropped sentence.
 | test, test suite | тест, набір тестів |
 | end-to-end test | end-to-end тест (E2E) |
 | agent, agentic | агент, агентний |
-| agent step | крок агента |
+| agent step | дія агента, виклик агента |
 | agent turn | хід агента |
 | deterministic | детермінований |
 | engine | рушій |

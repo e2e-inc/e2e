@@ -18,7 +18,9 @@
     "Migrate": "Міграція",
     "Test API": "API тестів",
     "Project": "Проєкт",
-    "Web": "Web",
-    "Mobile": "Mobile"
+    "Browsers": "Браузери",
+    "Devices": "Пристрої",
+    "Browsers and devices": "Браузери та пристрої",
+    "Ecosystem": "Екосистема"
   }
 }
