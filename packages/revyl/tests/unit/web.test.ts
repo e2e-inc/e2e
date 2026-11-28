@@ -204,6 +204,19 @@ describe('revylBrowsers()', () => {
     expect(markers()).toEqual([]);
   });
 
+  it('keeps the marker of a session whose release failed to stop it, so the sweep stops it', async () => {
+    const provider = revylBrowsers(options);
+    const lease = await provider.acquire(request());
+    routes['POST /api/v1/execution/device/sessions/'] = () => json({ detail: 'internal' }, 500);
+
+    await expect(provider.release(lease, context())).rejects.toThrow(/answered 500: internal/);
+    expect(markers()).toEqual([lease.id]);
+
+    routes['POST /api/v1/execution/device/sessions/'] = () => json({ ok: true });
+    await expect(provider.sweep!(context())).resolves.toEqual([lease.id]);
+    expect(markers()).toEqual([]);
+  });
+
   it('mints the CDP URL again after a gateway error, before the session is given up', async () => {
     let answers = 0;
     const minted = routes['POST /api/v1/execution/device-proxy/run-1/cdp']!;
@@ -294,7 +307,7 @@ describe('revylBrowsers()', () => {
 
       const failed = await failure(provider.sweep!(context()));
 
-      expect(failed.message).toBe(`stopped ${first!.id}; could not stop ${second!.id} (Revyl /api/v1/execution/device/sessions/:id/stop answered 500: internal), so Revyl ends it after 600 s idle`);
+      expect(failed.message).toBe(`stopped ${first!.id}; could not stop ${second!.id} (Revyl /api/v1/execution/device/sessions/:id/stop answered 500: internal), so Revyl ends each after 600 s idle`);
       expect(markers()).toEqual([second!.id]);
       routes['POST /api/v1/execution/device/sessions/'] = () => json({ ok: true });
       await expect(provider.sweep!(context())).resolves.toEqual([second!.id]);

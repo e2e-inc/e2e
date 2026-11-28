@@ -121,7 +121,7 @@ export function revylBrowsers(options: RevylBrowsersOptions): BrowserProvider {
       await prune(context.runId, context.targetName);
       if (failed.length > 0) {
         const notStopped = failed.map(({ id, reason }) => `${id} (${reason})`).join(', ');
-        throw new Error(`stopped ${released.length === 0 ? 'none' : released.join(', ')}; could not stop ${notStopped}, so Revyl ends it after ${idleTimeoutSeconds} s idle`);
+        throw new Error(`stopped ${released.length === 0 ? 'none' : released.join(', ')}; could not stop ${notStopped}, so Revyl ends each after ${idleTimeoutSeconds} s idle`);
       }
       return released;
     },
