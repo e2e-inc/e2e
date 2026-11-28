@@ -239,9 +239,9 @@ takes over from the current screen when the app no longer matches.
 - A step that changes nothing on screen or in the route records nothing
   and runs live every run.
 - A cached tap, hover, or drag at a point recorded inside a control waits
-  for that control while it is late or still hidden. A drag whose source
-  the recorded point has to pick out of same-named controls stops if one of
-  them disappears meanwhile.
+  for that control while it is late, hidden, or outside the viewport. A drag
+  whose source the recorded point has to pick out of same-named controls
+  stops if one of them disappears meanwhile.
 - While you fix a test, keep the cache on so confirmed goals replay (topic
   `debugging`, "Rerunning a test while you fix it"). Use `--no-cache` to
   rule out a stale replay (topic `debugging`, "Tools") and for one live run

@@ -529,6 +529,26 @@ describe('replayTrace: bare-point taps', () => {
     expect(stuck.looks.length).toBeGreaterThan(2);
   });
 
+  it('waits for a node that lies outside the viewport, where the point verb would act on the viewport edge instead', async () => {
+    const within = { target: { role: 'img', name: 'Map' }, fx: 0.5, fy: 0.5 };
+    const map = (x: number): SemanticNode => ({ ref: { id: 'm', revision: 'r1' }, role: 'img', name: 'Map', rect: { x, y: 0, width: 200, height: 200 } });
+    const points: unknown[] = [];
+    const host = makeHost({ onAction: (name, detail) => void (name === 'tapAt' && points.push(detail)) });
+    // Past the right edge of the 1280-wide viewport at first, then scrolled into view.
+    host.capture = async () => screen([map(host.looks.length < 3 ? 1300 : 200)]);
+    expect(await replayTrace(host, trace([{ ...pin, within }]))).toMatchObject({ completed: true, executed: 1 });
+    expect(points).toEqual([{ x: 300, y: 100 }]);
+
+    const away = makeHost({ nodes: [map(1300)] });
+    expect(await replayTrace(away, trace([{ ...pin, within }]))).toMatchObject({ completed: false, executed: 0, stopReason: 'target-not-found' });
+    expect(away.calls).toEqual([]);
+
+    // A node that straddles the edge still holds the point the verb keeps inside the viewport.
+    const straddling = makeHost({ nodes: [map(1150)], onAction: (name, detail) => void (name === 'tapAt' && points.push(detail)) });
+    expect(await replayTrace(straddling, trace([{ ...pin, within: { ...within, fx: 0.9 } }]))).toMatchObject({ completed: true, executed: 1 });
+    expect(points).toEqual([{ x: 300, y: 100 }, { x: 1330, y: 100 }]);
+  });
+
   it('never places the point from an earlier look once the node turns up hidden', async () => {
     // Recorded as the first of two maps. Three show at first, the point inside the first; then two are left and the first is hidden.
     const within = { target: { role: 'img', name: 'Map', position: { index: 0, of: 2 } }, fx: 0.5, fy: 0.5 };
@@ -906,6 +926,22 @@ describe('replayTrace: bare-point drags', () => {
       {
         label: 'waits for a source that is listed but hidden',
         looks: [[hidden(at(card, 300)), lane], [card, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'waits for a destination that lies outside the viewport',
+        looks: [[card, at(lane, 1300)], [card, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'stops without a drag when the destination stays outside the viewport',
+        looks: [[card, twin, at(lane, 1300)]],
+        stops: 'target-not-found',
+        waitsOut: true,
+      },
+      {
+        label: 'waits for a source that lies outside the viewport',
+        looks: [[at(card, 1300), lane], [card, lane]],
         dragsFrom: { x: 100, y: 50 },
       },
       {
