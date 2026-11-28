@@ -283,7 +283,7 @@ it('keeps a module in its load and its graph when a resolver registered after th
   const dir = mkdtempSync(path.join(tmpdir(), 'e2e-loader-later-resolver-'));
   try {
     mkdirSync(path.join(dir, 'real'));
-    symlinkSync(path.join(dir, 'real'), path.join(dir, 'alias'));
+    symlinkSync(path.join(dir, 'real'), path.join(dir, 'alias'), 'junction');
     writeFileSync(path.join(dir, 'real', 'entry.mjs'), "export const importChild = (specifier = './child.mjs') => import(specifier);");
     writeFileSync(path.join(dir, 'real', 'helper.mjs'), "export const importChild = () => import('./child.mjs');");
     writeFileSync(path.join(dir, 'real', 'child.mjs'), 'export const url = import.meta.url;');
