@@ -163,8 +163,9 @@ export async function checkFixture(device: Device) {
   // Core's addon, reached the way core reaches it: through e2e, then core, since pnpm links neither at the top.
   writeFileSync(join(project, 'util-addon.mjs'), `
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 const core = createRequire(createRequire(import.meta.url).resolve('e2e')).resolve('@e2e-dev/core');
-const util = await import(createRequire(core).resolve('@e2e-dev/util'));
+const util = await import(pathToFileURL(createRequire(core).resolve('@e2e-dev/util')).href);
 const back = await util.decodePng(await util.NativeImage.fromRgba(new Uint8Array(16).fill(200), 2, 2).encode());
 if (back.width !== 2 || back.pixels()[0] !== 200) throw new Error('the installed addon changed a PNG round trip');
 `);
