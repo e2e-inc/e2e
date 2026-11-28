@@ -7,7 +7,9 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  expressionSelectors,
   resolveExpression,
+  shownText,
   type LocatorExpression,
   type SemanticNode,
   type SemanticQuery,
@@ -87,6 +89,23 @@ describe('resolveExpression', () => {
     );
   });
 
+  it('matches a text query against what a node shows, and against its name only when it shows nothing', () => {
+    const pair = [
+      node('label', { role: 'text', name: 'Words', text: 'Words' }),
+      node('count', { role: 'text', name: 'Words', text: '5' }),
+      node('omitted', { role: 'button', name: 'Close' }),
+      node('empty', { role: 'button', name: 'Close', text: '' }),
+      node('blank', { role: 'button', name: 'Close', text: ' \n\t' }),
+    ];
+    expect(ids(query('text', 'Words'), pair)).toEqual(['label']);
+    expect(ids(query('text', '5'), pair)).toEqual(['count']);
+    expect(ids(query('label', 'Words'), pair)).toEqual(['label', 'count']);
+    expect(ids(query('text', 'Close'), pair)).toEqual(['omitted', 'empty', 'blank']);
+    expect(pair.map(shownText)).toEqual(['Words', '5', 'Close', 'Close', 'Close']);
+    // `hasText` reads the name too, so it keeps the value a text query for its label skips.
+    expect(ids({ kind: 'filter', source: query('role', 'text'), hasText: exact('Words') }, pair)).toEqual(['label', 'count']);
+  });
+
   it('drops hidden nodes from any query kind when it says visible', () => {
     expect(ids(query('text', 'Hidden'))).toEqual(['hidden']);
     expect(ids(query('text', 'Hidden', { visible: true }))).toEqual([]);
@@ -121,6 +140,24 @@ describe('resolveExpression', () => {
     const nodes = [node('named', { role: 'button', name: 'Save' }), node('texted', { text: 'Save' }), node('other', { name: 'Cancel' })];
     expect(ids(query('text', 'Save'), nodes)).toEqual(['named', 'texted']);
     expect(ids(query('label', 'Save'), nodes)).toEqual(['named']);
+  });
+
+  it('reads text from the visible text alone when the engine asks, as a browser does', () => {
+    const nodes = [node('label', { text: 'Email' }), node('field', { role: 'textbox', name: 'Email' }), node('button', { role: 'button', name: 'Email', text: 'Email' })];
+    expect(resolveExpression(query('text', 'Email'), nodes, { textQuery: 'text' }).map((found) => found.ref.id)).toEqual(['label', 'button']);
+    expect(resolveExpression(query('label', 'Email'), nodes, { textQuery: 'text' }).map((found) => found.ref.id)).toEqual(['field', 'button']);
+  });
+
+  it('answers a scoped text query with the scope itself when the text is its own, only when the engine asks', () => {
+    const nodes = [node('toast', { testId: 'toast', text: 'Saved' }), node('card', { testId: 'card', text: 'Saved', children: [node('line', { text: 'Saved' })] })];
+    const scoped = (testId: string): LocatorExpression => ({ kind: 'query', query: { kind: 'text', value: { kind: 'string', value: 'Saved', exact: true } }, scope: query('testId', testId) });
+    expect(resolveExpression(scoped('toast'), nodes, { textQuery: 'text' }).map((found) => found.ref.id)).toEqual(['toast']);
+    expect(resolveExpression(scoped('card'), nodes, { textQuery: 'text' }).map((found) => found.ref.id)).toEqual(['line']);
+    expect(resolveExpression(scoped('toast'), nodes)).toEqual([]);
+    // Only a text query: a label names what is inside the scope, never the scope by its own name.
+    const named = [node('group', { testId: 'group', name: 'Saved', text: 'Saved' })];
+    const labelled: LocatorExpression = { kind: 'query', query: { kind: 'label', value: { kind: 'string', value: 'Saved', exact: true } }, scope: query('testId', 'group') };
+    expect(resolveExpression(labelled, named, { textQuery: 'text' })).toEqual([]);
   });
 
   it('scopes, filters, and indexes', () => {
@@ -259,5 +296,26 @@ describe('resolveExpression', () => {
     expect(() => ids({ kind: 'frame', selector: 'iframe', source: query('role', 'button') })).toThrowError(
       expect.objectContaining({ code: 'FRAME_NOT_FOUND', retryable: false }),
     );
+  });
+});
+
+describe('expressionSelectors', () => {
+  it('lists every selector an expression names, once, in the order the resolve meets them', () => {
+    const expression: LocatorExpression = {
+      kind: 'union',
+      left: {
+        kind: 'index',
+        source: { kind: 'filter', source: { kind: 'query', query: { kind: 'role', value: { kind: 'string', value: 'button', exact: true } }, scope: { kind: 'selector', selector: '#form' } }, has: { kind: 'selector', selector: '.icon' }, hasNot: { kind: 'selector', selector: '.spinner' } },
+        index: 'first',
+      },
+      right: { kind: 'selector', selector: 'button.primary' },
+    };
+    expect(expressionSelectors(expression)).toEqual(['#form', '.icon', '.spinner', 'button.primary']);
+    // A selector named twice is listed once.
+    expect(expressionSelectors({ kind: 'union', left: { kind: 'selector', selector: '#form' }, right: { kind: 'selector', selector: '#form' } })).toEqual(['#form']);
+  });
+
+  it('leaves out a frame, which the resolve refuses', () => {
+    expect(expressionSelectors({ kind: 'frame', selector: 'iframe', source: { kind: 'selector', selector: 'button' } })).toEqual([]);
   });
 });
