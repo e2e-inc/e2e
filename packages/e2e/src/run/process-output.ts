@@ -8,11 +8,14 @@
  * fails.
  */
 
-import { StreamRedactor, type SecretLedger } from '@e2e-dev/core/lib/internal/redact';
+import { StreamRedactor, type SecretLedger, type StreamBoundary } from '@e2e-dev/core/lib/internal/redact';
 import { AsyncLocalStorage, AsyncResource } from 'node:async_hooks';
 import { writeSync } from 'node:fs';
 import { realmSlot } from '@e2e-dev/core/lib/internal/realm-slot';
 import { inHeldTestToolCall } from './worker/held-test-tool-scope.ts';
+
+/** Called when a write completes */
+type WriteCallback = (error?: Error | null) => void;
 
 export type OutputStream = 'stdout' | 'stderr';
 
@@ -249,6 +252,7 @@ export class RunnerOutput {
   private readonly printRedactors: Readonly<Record<OutputStream, StreamRedactor>>;
   private readonly loadHold = new ConfigLoadHold();
   private view: OutputView | undefined;
+  private viewBoundaries: Partial<Record<OutputStream, StreamBoundary>> = {};
   /** How the writes of an async context reach the terminal, past the config hold and the view: see `passThrough`, `asWritten`, and `asDocument`. */
   private readonly passing = new AsyncLocalStorage<'redacted' | 'printed' | 'written' | 'document' | false>();
   /** The terminal stream user stdout lands on: stderr once a run left stdout to its reporters. */
@@ -269,7 +273,7 @@ export class RunnerOutput {
    * could complete into a value waits for it, or for `end`. Held while a
    * config loads. Answers what the terminal did.
    */
-  write(stream: OutputStream, chunk: string | Uint8Array, callback?: () => void): boolean {
+  write(stream: OutputStream, chunk: string | Uint8Array, callback?: WriteCallback): boolean {
     const passing = this.passing.getStore();
     if (passing === 'redacted') return this.handed(stream, this.passRedactors[stream].push(chunk), callback);
     if (passing === 'printed') return this.reporterPrint(stream, this.printRedactors[stream].push(chunk), callback);
@@ -279,7 +283,23 @@ export class RunnerOutput {
       if (callback !== undefined) process.nextTick(callback);
       return true;
     }
-    return this.emit(stream, this.redactors[stream].push(chunk), callback);
+    return this.send(stream, chunk, callback);
+  }
+
+  /**
+   * Redacts and routes output to the terminal or reporter and flushes the redactor
+   * if no chunk is provided.
+   */
+  private send(stream: OutputStream, chunk?: string | Uint8Array, done?: WriteCallback): boolean {
+    const cursor = this.viewBoundaries[stream];
+    const redactor = this.redactors[stream];
+    const text = chunk === undefined ? redactor.flush(cursor) : redactor.push(chunk, cursor);
+    const prefixLength = cursor?.outputPrefixLength ?? 0;
+    if (cursor?.pendingInputLength === 0) delete this.viewBoundaries[stream];
+    if (prefixLength === 0) return this.emit(stream, text, done);
+    const drained = this.toTerminal(stream, text.slice(0, prefixLength), done);
+    if (prefixLength < text.length) this.emit(stream, text.slice(prefixLength));
+    return drained;
   }
 
   /**
@@ -307,6 +327,7 @@ export class RunnerOutput {
       this.view.end();
     }
     this.view = view;
+    this.viewBoundaries = view === undefined ? {} : { stdout: { outputPrefixLength: 0 }, stderr: { outputPrefixLength: 0 } };
   }
 
   /**
@@ -403,8 +424,8 @@ export class RunnerOutput {
   }
 
   private release(): void {
-    this.emit('stdout', this.redactors.stdout.flush());
-    this.emit('stderr', this.redactors.stderr.flush());
+    this.send('stdout');
+    this.send('stderr');
     this.handed('stdout', this.passRedactors.stdout.flush());
     this.handed('stderr', this.passRedactors.stderr.flush());
     this.reporterPrint('stdout', this.printRedactors.stdout.flush());

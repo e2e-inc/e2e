@@ -18,6 +18,7 @@ import { type ResolvedConfig, type ResolvedCredential, type ResolvedTarget } fro
 import { resolveConfig } from '../config/resolve-run.ts';
 import { launchesPinnedApp } from '@e2e-dev/core/lib/config/targets';
 import { ConfigurationError } from '@e2e-dev/core/lib/internal/errors';
+import { builtinId } from '../report/builtin-id.ts';
 import type { ReportExplore } from '../report/build.ts';
 import { validateChangedSince } from '../run/changes.ts';
 import type { RunEventSink } from '../run/events.ts';
@@ -137,12 +138,18 @@ export async function explore(options: ExploreOptions = {}): Promise<ExploreOutc
     timeoutMs: resolveBounded(options.timeoutMs, TIMEOUT_BOUNDS, 'timeout'),
   };
 
+  // Reserve stdout for reporters before loading the config to match the behavior in run.
+  if (options.quiet !== true) options.processOutput?.leaveStdout();
   // The config's secrets are known to the process before what its top-level
   // code printed is released, as `run` loads its config.
   const loadConfig = async (): Promise<{ raw: E2EConfig; projectRoot: string; resolved: ResolvedConfig }> => {
     const { raw, projectRoot } = await loadRawConfig(options, cwd);
     const resolved = resolveConfig(raw, { projectRoot, env, cli: options.agent === undefined ? {} : { agents: [options.agent] } });
     registerStaticSecrets(resolved.allSecrets);
+    // Keep stdout free of diagnostics when using a JSON reporter in quiet mode.
+    if (options.quiet === true && resolved.reporters.some((reporter) => builtinId(reporter) === 'json')) {
+      options.processOutput?.leaveStdout();
+    }
     return { raw, projectRoot, resolved };
   };
   const { raw, projectRoot, resolved } = await (options.processOutput === undefined

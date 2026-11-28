@@ -417,6 +417,69 @@ test('second', () => { console.log('test log'); });
   });
 });
 
+function exploreConfig(log: string, settings: string): string {
+  return `import { json } from 'e2e/reporters';
+import { extracted, installFakeModel } from '../../helpers/fake-model.ts';
+import { installFakeLoopModel } from '../../helpers/fake-loop-model.ts';
+${log}
+let plans = 0;
+` + fakeConfig('{}', `
+  agents: { default: {
+    model: installFakeLoopModel(() => [{ toolName: 'complete_step', input: { status: 'passed', summary: 'Checked the app.' } }]),
+    judge: installFakeModel(() => extracted(++plans === 1
+      ? { decision: 'step', title: 'Home', instruction: 'Check the home screen', summary: '' }
+      : { decision: 'finish', title: '', instruction: '', summary: 'The home screen passed its check.' })),
+  } },
+  ${settings}
+`);
+}
+
+it.each([
+  { source: 'CLI', configured: "'list'", flags: ['--reporter', 'json'] },
+  { source: 'config', configured: 'json()', flags: [] },
+])('writes only the JSON report to stdout during explore ($source reporter selection)', ({ configured, flags }) => {
+  const config = exploreConfig(
+    "console.log('loading config: fixture-token');",
+    `secrets: { token: 'fixture-token' },
+    reporters: [${configured}, { name: 'audit', onSummary() { console.log('audit summary'); } }],`,
+  );
+  const { exitCode, stdout, stderr } = cli({ 'e2e.config.ts': config }, ['explore', 'Check the app', ...flags]);
+  expect(exitCode, stderr).toBe(0);
+  const report = JSON.parse(stdout) as Report1Document;
+  assertValidReport(report);
+  expect(report.run.explore?.ended).toBe('finished');
+  expect(stderr).toMatch(/^loading config: <secret:token>$/mu);
+  expect(stderr).toMatch(/^audit summary$/mu);
+  expect(stdout + stderr).not.toContain('fixture-token');
+});
+
+it.each(['run', 'explore'])('keeps buffered config diagnostics on stderr during %s', (command) => {
+  const log = `console.error('CONFIG-DIAGNOSTIC');
+process.stdout.write('config tail: fi');
+setImmediate(() => process.stdout.write('xture alpha beta\\nLIVE-ONLY\\n'));`;
+  const settings = `secrets: { short: 'fixture', token: 'fixture alpha beta' },
+  reporters: [
+    'json',
+    { name: 'viewer', interactive: true, received: '',
+      onEvent(event) { if (event.type === 'output') this.received += event.text; },
+      onSummary() { console.error('viewer received: ' + JSON.stringify(this.received)); },
+    },
+  ],`;
+  const config = command === 'explore' ? exploreConfig(log, settings) : `${log}\n${fakeConfig('{}', settings)}`;
+  const args = command === 'run' ? ['run', '--pass-with-no-tests'] : ['explore', 'Check the app'];
+  const { exitCode, stdout, stderr } = cli({ 'e2e.config.ts': config }, args);
+  expect(exitCode, stderr).toBe(0);
+  const report = JSON.parse(stdout) as Report1Document;
+  assertValidReport(report);
+  if (command === 'explore') expect(report.run.explore?.ended).toBe('finished');
+  expect(stderr).toContain('CONFIG-DIAGNOSTIC\n');
+  expect(stderr).toContain('config tail: <secret:token>');
+  expect(stderr).toContain('viewer received: "\\nLIVE-ONLY\\n"');
+  expect(stdout).not.toMatch(/CONFIG-DIAGNOSTIC|config tail|LIVE-ONLY/);
+  expect(stderr.match(/LIVE-ONLY/g)).toHaveLength(1);
+  expect(stdout + stderr).not.toMatch(/tail: fi|fixture al|xture alpha| alpha beta/);
+});
+
 describe('fixture rules through the CLI', () => {
   const SUPPORT = `import { test as base } from 'e2e';
 

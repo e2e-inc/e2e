@@ -29,6 +29,7 @@ interface Compiled {
   readonly redact: (text: string) => string;
   /** `redact` for text cut short at a length limit; see `SecretLedger.redactCut`. */
   readonly redactCut: (text: string) => string;
+  readonly safeRedactionBoundary: (text: string, offset: number) => number;
   /** `redact` that also rewrites fragments of values; see `SecretLedger.redactFragments`. */
   readonly redactFragments: (text: string) => string;
   /** Every occurrence of every value, leftmost first and never overlapping: the matches `redact` rewrites. Absent with no values. */
@@ -68,6 +69,7 @@ function compile(values: readonly (readonly [string, string])[], wholeOnly: Read
     return {
       redact: (text) => text,
       redactCut: (text) => text,
+      safeRedactionBoundary: (_text, offset) => offset,
       redactFragments: (text) => text,
       pattern: undefined,
       maxFormLength: 0,
@@ -92,6 +94,26 @@ function compile(values: readonly (readonly [string, string])[], wholeOnly: Read
     text.includes(MARKER_OPEN)
       ? text.split(known).map((piece, index) => (index % 2 === 1 ? piece : rewrite(piece))).join('')
       : rewrite(text);
+
+  // Move the boundary to the end of any secret match or marker it intersects.
+  const safeRedactionBoundary = (text: string, offset: number): number => {
+    let start = 0;
+    const pieces = text.includes(MARKER_OPEN) ? text.split(known) : [text];
+    for (const [index, piece] of pieces.entries()) {
+      const end = start + piece.length;
+      if (start < offset && offset < end) {
+        if (index % 2 === 1) return end;
+        pattern.lastIndex = 0;
+        for (let match = pattern.exec(piece); match !== null && start + match.index < offset; match = pattern.exec(piece)) {
+          const after = start + match.index + match[0].length;
+          if (after > offset) return after;
+        }
+        break;
+      }
+      start = end;
+    }
+    return offset;
+  };
   const valueKeys = entries.map(([, value]) => readingKey(value).key);
   // A reader trims a value's leading whitespace as it trims any text's, so a cut part may begin past it.
   const leadingForms = entries.map(([, value], index) => {
@@ -136,6 +158,7 @@ function compile(values: readonly (readonly [string, string])[], wholeOnly: Read
   return {
     redact,
     redactCut,
+    safeRedactionBoundary,
     redactFragments,
     pattern,
     maxFormLength: Math.max(...patterns.map(({ maxLength }) => maxLength)),
@@ -761,6 +784,10 @@ export class SecretLedger {
     return cut;
   }
 
+  safeRedactionBoundary(text: string, offset: number): number {
+    return this.compile().safeRedactionBoundary(text, offset);
+  }
+
   private compile(): Compiled {
     this.sync();
     // A provider key that is also a secret of the run comes after it here, so the run's name and its fragments win.
@@ -786,6 +813,16 @@ export class SecretLedger {
 }
 
 /**
+ * Tracks a boundary between successive writes.
+ * Create it with `{ outputPrefixLength: 0 }` and pass it to subsequent
+ * `push` and `flush` calls until the output reaches the boundary.
+ */
+export interface StreamBoundary {
+  outputPrefixLength: number;
+  pendingInputLength?: number;
+}
+
+/**
  * Redaction for text that arrives in pieces, as a stream writes it, so a
  * value split across two writes is still caught. Each `push` returns what is
  * safe to pass on and holds back the rest: the tail a later piece could
@@ -802,19 +839,104 @@ export class StreamRedactor {
 
   constructor(private readonly ledger: SecretLedger) {}
 
-  /** Redacts and returns what `chunk` completes; the rest waits for the next piece or `flush`. */
-  push(chunk: string | Uint8Array): string {
+  /**
+   * Returns the redacted text that is safe to release and updates the boundary
+   * if provided.
+   */
+  push(chunk: string | Uint8Array, boundary?: StreamBoundary): string {
+    if (boundary) boundary.outputPrefixLength = 0;
     if (chunk.length === 0) return '';
-    const text = this.held + (typeof chunk === 'string' ? this.decoder.end() + chunk : this.decoder.write(chunk));
-    const cut = this.ledger.holdFrom(text);
+
+    const firstWriteAfterBoundary =
+      boundary !== undefined && boundary.pendingInputLength === undefined;
+    const endsPendingSequence =
+      typeof chunk === 'string' ||
+        (firstWriteAfterBoundary && (chunk[0]! & 0xc0) !== 0x80);
+    const decoderTail = endsPendingSequence ? this.decoder.end() : '';
+
+    if (boundary) boundary.pendingInputLength ??= this.held.length + decoderTail.length;
+
+    const text =
+      this.held + decoderTail +
+        (typeof chunk === 'string' ? chunk : this.decoder.write(chunk));
+    const cut = this.safeCutoff(text, boundary);
+
     this.held = text.slice(cut);
-    return this.ledger.redact(text.slice(0, cut));
+    return this.release(text.slice(0, cut), boundary);
   }
 
-  /** Redacts and returns whatever is held, an unfinished character included; nothing more will follow. */
-  flush(): string {
+  /**
+   * Redacts and returns the remaining buffered text
+   */
+  flush(boundary?: StreamBoundary): string {
     const text = this.held + this.decoder.end();
     this.held = '';
-    return this.ledger.redact(text);
+    return this.release(text, boundary);
   }
+
+  /**
+   * Determines how much text can be safely released without splitting
+   * a character at the boundary.
+   */
+  private safeCutoff(text: string, boundary?: StreamBoundary): number {
+    const cut = this.ledger.holdFrom(text);
+
+    const splitsCharacterAtBoundary =
+      boundary !== undefined &&
+      cut === boundary.pendingInputLength &&
+      splitsCharacter(text, cut);
+
+    if (splitsCharacterAtBoundary) {
+      const firstHalf = text[cut - 1]!;
+      const redactedPrefix = this.ledger.redact(text.slice(0, cut));
+
+      // If the first half was redacted, the prefix would end in '>'.
+      if (redactedPrefix.endsWith(firstHalf)) {
+        return cut - 1;
+      }
+    }
+
+    return cut;
+  }
+
+  /**
+   * Redacts text that is safe to release and updates the boundary if provided.
+   */
+  private release(text: string, boundary: StreamBoundary | undefined): string {
+    if (!boundary) return this.ledger.redact(text);
+
+    boundary.outputPrefixLength = 0;
+    boundary.pendingInputLength ??= text.length;
+
+    const boundaryOffset = boundary.pendingInputLength;
+    if (boundaryOffset === 0) return this.ledger.redact(text);
+
+    boundary.pendingInputLength = Math.max(0, boundaryOffset - text.length);
+
+    if (boundaryOffset >= text.length) {
+      const redactedText = this.ledger.redact(text);
+      boundary.outputPrefixLength = redactedText.length;
+      return redactedText;
+    }
+
+    let splitOffset = this.ledger.safeRedactionBoundary(text, boundaryOffset);
+
+    const splitsCharacterAtBoundary =
+      splitOffset === boundaryOffset &&
+      splitsCharacter(text, boundaryOffset);
+
+    if (splitsCharacterAtBoundary) {
+      splitOffset = this.ledger.safeRedactionBoundary(text, boundaryOffset - 1);
+    }
+
+    const redactedPrefix = this.ledger.redact(text.slice(0, splitOffset));
+    boundary.outputPrefixLength = redactedPrefix.length;
+
+    return redactedPrefix + this.ledger.redact(text.slice(splitOffset));
+  }
+}
+
+/** Checks whether the offset falls between the two halves of a character. */
+function splitsCharacter(text: string, offset: number): boolean {
+  return (text.codePointAt(offset - 1) ?? 0) > 0xffff;
 }
