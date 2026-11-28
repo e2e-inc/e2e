@@ -356,10 +356,10 @@ export function nodeOp<K extends keyof NodeOps>(node: Node, name: K, args: Param
       if (TYPEAHEAD_ROLES.has(active.getAttribute('role') ?? '')) return true;
       // A date or time input takes typed digits; a range or color picker takes none.
       if (active instanceof HTMLInputElement) return (TEXT_INPUT_TYPES.has(typeOf(active)) || TYPED_PICKER_TYPES.has(typeOf(active))) && !active.readOnly && !active.disabled;
-      // Keys to the page itself, a select, a button, or a link are lost or click. Any other element the app made
+      // Keys to the page itself, a select, a button, or a link (HTML or SVG) are lost or click. Any other element the app made
       // focusable (a canvas, a widget with a tabindex and key handlers of its own) opted into keys, as on the web.
       if (active === active.ownerDocument.body || active === active.ownerDocument.documentElement) return false;
-      return !(active instanceof HTMLSelectElement || active instanceof HTMLButtonElement || active instanceof HTMLAnchorElement);
+      return !(active instanceof HTMLSelectElement || active instanceof HTMLButtonElement || active instanceof HTMLAnchorElement || active instanceof SVGAElement);
     },
   };
   // TypeScript cannot tie `args` to the method `name` picks; `NodeOps` holds the two together for callers.

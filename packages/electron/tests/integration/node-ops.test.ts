@@ -199,10 +199,11 @@ describe('nodeOp', () => {
   });
 
   it('lets a focusable element with key handlers of its own take keys, as a canvas editor does, and not the page or a link', async () => {
-    await window.setContent(`<canvas id="canvas" tabindex="0"></canvas><div id="widget" tabindex="0"></div><a id="link" href="#x">L</a><select id="pick"><option>A</option></select>`);
+    await window.setContent(`<canvas id="canvas" tabindex="0"></canvas><div id="widget" tabindex="0"></div><a id="link" href="#x">L</a><svg><a id="svg-link" href="#y"><text y="10">S</text></a></svg><select id="pick"><option>A</option></select>`);
     expect(await run(await element('#canvas'), 'takesText')).toBe(true);
     expect(await run(await element('#widget'), 'takesText')).toBe(true);
     expect(await run(await element('#link'), 'takesText')).toBe(false);
+    expect(await run(await element('#svg-link'), 'takesText')).toBe(false);
     expect(await run(await element('#pick'), 'takesText')).toBe(false);
     expect(await run(await element('body'), 'takesText')).toBe(false);
   });
