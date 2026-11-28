@@ -93,6 +93,11 @@ fn go(what: &str) -> Outcome<()> {
     })
 }
 
+/// The last moment a wait that ends in a refusal may run to in the running action: its deadline less `ANSWER_MARGIN`.
+fn refuse_at() -> Option<Instant> {
+    CURRENT.with(|current| current.borrow().as_ref().map(|(_, deadline)| deadline.checked_sub(ANSWER_MARGIN).unwrap_or(*deadline)))
+}
+
 /// Whether the caller cancelled the running action. Unlike `go`, a deadline that passed does not count: cleanup such as
 /// closing a menu runs past it, but never past a cancel, after which the caller has moved on.
 fn cancelled() -> bool {
@@ -319,7 +324,9 @@ pub fn raise(pid: i32, window: &Element) -> Outcome<()> {
     let _ = window.perform("AXRaise");
     go("bring the window forward")?;
     let _ = window.set_bool("AXMain", true);
-    let deadline = Instant::now() + Duration::from_millis(1_500);
+    // A window that does not come forward is refused before the action's deadline, not cut off at it.
+    let soon = Instant::now() + Duration::from_millis(1_500);
+    let deadline = refuse_at().map_or(soon, |at| at.min(soon));
     let mut last = Ok(false);
     until(deadline, || {
         last = forward(&app, window);
@@ -643,7 +650,8 @@ pub fn close_window(pid: i32, window: u32, input_id: Option<u32>, deadline: Inst
         }
         // A press that closes its own window may answer with an error: the window lists tell whether it closed.
         let pressed = perform(&button, "AXPress", "close the window");
-        if until(deadline, || windows::closed(pid, window)) {
+        // A press the button refused is answered before the deadline, not cut off at it.
+        if until(refuse_at().unwrap_or(deadline), || windows::closed(pid, window)) {
             return Ok(());
         }
         pressed?;
