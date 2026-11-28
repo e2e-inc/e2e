@@ -103,6 +103,8 @@ export interface DesktopDriver {
   processStarted(pid: number): number | null;
   /** Every process that carries the launch `token`, in its environment or its arguments; null when the processes cannot be listed. */
   processesCarrying(token: string): Promise<readonly number[] | null>;
+  /** The bundles LaunchServices registered with this bundle id, as paths, and the processes running one. */
+  bundleCopies(bundleId: string): Promise<Envelope<{ readonly registered: readonly string[]; readonly running: readonly { readonly pid: number; readonly path?: string }[] }>>;
   /** Drops the refs of a process that quit. */
   forgetProcess(pid: number): void;
   launch(options: {
@@ -129,6 +131,12 @@ export interface DesktopDriver {
   cancelInput(inputId: number): void;
   /** `inputId` names the press, so `cancelInput` can stop it before it sends the key. */
   press(options: { pid: number; windowId: string; combo: string; physical: boolean; inputId?: number; timeoutMs: number; focusedRef?: string }): Promise<Envelope<unknown>>;
+  /**
+   * Presses the app's Back menu item through accessibility: the item titled Back or Go Back, else the one whose
+   * shortcut is Command-[. Refuses, pressing nothing, when the menu bar has none (`ACTION_NOT_SUPPORTED`) or the item is
+   * disabled (`ACTION_FAILED`). `inputId` names the press, so `cancelInput` can stop it before it presses the item.
+   */
+  pressBack(options: { pid: number; inputId?: number; timeoutMs: number }): Promise<Envelope<{ readonly title: string; readonly menu: string }>>;
   /** Fails as `press` would for a combo this Mac's keyboard layout cannot type, and sends nothing. */
   checkCombo(combo: string): Promise<Envelope<unknown>>;
   /** `inputId` names the call, so `cancelInput` stops it before it changes the focus. */
@@ -142,6 +150,13 @@ export interface DesktopDriver {
    */
   pointer(x: number, y: number, kind: string, inputId?: number, timeoutMs?: number, target?: PointerTarget): Promise<Envelope<unknown>>;
   screenshot(options: { windowId: string; path: string; timeoutMs: number }): Promise<Envelope<{ readonly scale_factor?: number }>>;
+  /**
+   * Starts recording one window into an MPEG-4 file through ScreenCaptureKit: the recording follows the window as it
+   * moves and shows nothing that covers it. Refused (`ACTION_NOT_SUPPORTED`) before macOS 15.
+   */
+  startVideo(options: { windowId: string; path: string; timeoutMs: number }): Promise<Envelope<{ readonly id: number; readonly width: number; readonly height: number }>>;
+  /** Stops a recording and waits, within `timeoutMs`, for its file to be finished. */
+  stopVideo(id: number, timeoutMs: number): Promise<Envelope<{ readonly bytes: number }>>;
 }
 
 /** The npm package that ships the driver built for each platform. */

@@ -2,12 +2,13 @@
 //! `nodes.ts` projects: a node per element, a ref for every control, and the
 //! tree cut where the depth limit, the node budget, or the deadline stops it.
 
-use crate::ax::{self, Element, Value};
+use crate::ax::{self, Accessible, Element, Value};
 use crate::failure::{Failure, Outcome, codes};
 use crate::refs::{self, Entry};
 use crate::roles;
 use crate::windows::{self, Rect};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::time::Instant;
 
 /// The most nodes one snapshot reads; a window with more is read in part (`truncated`).
@@ -81,6 +82,39 @@ pub struct RawNode {
     children_count: Option<usize>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     children: Vec<RawNode>,
+    /// On a `folded` node only, which stands in for rows of a list, table, or outline that a scroll area holds wholly out
+    /// of view: how many consecutive rows it stands for. Their frames were read, and nothing else of them.
+    #[serde(skip_serializing_if = "is_zero")]
+    folded: usize,
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
+}
+
+impl RawNode {
+    /// The node that stands in for one row folded out of view.
+    fn folded() -> Self {
+        RawNode {
+            ref_id: None,
+            role: "folded",
+            name: None,
+            value: None,
+            description: None,
+            hint: None,
+            level: None,
+            placeholder: None,
+            native_id: None,
+            states: Vec::new(),
+            available_actions: Vec::new(),
+            scroll_axes: Vec::new(),
+            bounds: None,
+            subtree_truncated: false,
+            children_count: None,
+            children: Vec::new(),
+            folded: 1,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -121,19 +155,37 @@ pub struct Request {
     pub deadline: Instant,
 }
 
-struct Walk {
-    pid: i32,
+/// How one tree is read: the snapshot's id, the window's id (for messages), the depth limit, whether only controls are
+/// kept, and the deadline.
+struct Settings {
+    snapshot: String,
     window: u32,
+    max_depth: usize,
+    interactive: bool,
+    deadline: Instant,
+}
+
+/// One window's tree as the walk read it, before its refs are registered: `snapshot` names them for the process.
+struct Tree<E> {
+    tree: RawNode,
+    complete: bool,
+    timed_out: bool,
+    root_unread: bool,
+    truncated: bool,
+    refs: Vec<(String, E)>,
+}
+
+struct Walk<E> {
     snapshot: String,
     max_depth: usize,
     interactive: bool,
     deadline: Instant,
-    focused: Option<Element>,
+    focused: Option<E>,
     /// The app did not answer which element holds its focus in time: no node reads as focused, and the read is
     /// incomplete, never filled in from each element's own `AXFocused` (a table's cells report the table's focus).
     focus_unknown: bool,
     /// The window's own title-bar buttons, as it names them (`AXCloseButton`, ...); `None` when it names none.
-    chrome: Option<Vec<Element>>,
+    chrome: Option<Vec<E>>,
     nodes: usize,
     complete: bool,
     /// Whether the deadline stopped the read.
@@ -143,10 +195,17 @@ struct Walk {
     /// How many reads of an element that still exists failed; a parent whose subtree lost one is truncated.
     lost: usize,
     truncated: bool,
-    refs: Vec<(String, Entry)>,
+    refs: Vec<(String, E)>,
     /// The text of every text node read so far, in reading order, pruned ones too: a row or cell with no name of its
     /// own takes it from the text inside it.
     content: Vec<String>,
+    /// Every element read so far. An element listed under two parents is read once, where it is first found: a SwiftUI
+    /// toolbar `Menu` lists its open menu both as the button's child and as the button's sibling, and the two are one
+    /// element, so its items would match a locator twice.
+    seen: HashSet<E>,
+    /// The focused element and every element above it: a row that holds the focus is never folded, so the field being
+    /// typed into stays in the tree when its list scrolls.
+    focus_path: HashSet<E>,
 }
 
 /// Whether a failed read leaves a hole: the app did not answer in time (it stalled), so an element that is there was
@@ -161,13 +220,13 @@ fn label(value: Option<String>) -> Option<String> {
 }
 
 /// What a node's attributes say, read in one request.
-struct Read {
+struct Read<E> {
     role: &'static str,
     ax_role: String,
     subrole: Option<String>,
     title: Option<String>,
     description: Option<String>,
-    value: Option<Value>,
+    value: Option<Value<E>>,
     identifier: Option<String>,
     enabled: Option<bool>,
     focused: Option<bool>,
@@ -176,7 +235,7 @@ struct Read {
     bounds: Option<Rect>,
     placeholder: Option<String>,
     help: Option<String>,
-    title_element: Option<Element>,
+    title_element: Option<E>,
     /// A vertical scroll bar, listed as an attribute.
     vertical_bar: bool,
     /// A horizontal scroll bar, listed as an attribute.
@@ -184,7 +243,7 @@ struct Read {
     heading_level: Option<u32>,
 }
 
-fn read(element: &Element) -> Result<Read, ax::AXError> {
+fn read<E: Accessible>(element: &E) -> Result<Read<E>, ax::AXError> {
     let mut values = element.attributes(&ATTRIBUTES)?;
     let mut take = |index: usize| values[index].take();
     let ax_role = take(0).and_then(|value| value.text().map(str::to_owned)).unwrap_or_default();
@@ -232,7 +291,7 @@ fn read(element: &Element) -> Result<Read, ax::AXError> {
 }
 
 /// A heading level an app answered: a whole number from 1 up. Anything else is no level.
-fn level_of(value: Option<Value>) -> Option<u32> {
+fn level_of<E>(value: Option<Value<E>>) -> Option<u32> {
     match value {
         Some(Value::Number(number)) if number.fract() == 0.0 && (1.0..=f64::from(u32::MAX)).contains(&number) => Some(number as u32),
         _ => None,
@@ -241,7 +300,7 @@ fn level_of(value: Option<Value>) -> Option<u32> {
 
 /// The text of the element that labels another (`AXTitleUIElement`).
 /// `Err` for a read the app did not answer in time: a name it may have had.
-pub(crate) fn label_of(element: &Element) -> Result<Option<String>, ax::AXError> {
+pub(crate) fn label_of<E: Accessible>(element: &E) -> Result<Option<String>, ax::AXError> {
     let values = match element.attributes(&["AXValue", "AXTitle"]) {
         Ok(values) => values,
         Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
@@ -280,7 +339,7 @@ fn selected(role: &str, selected: Option<bool>, toggle: Option<u8>) -> bool {
 }
 
 /// The state a box's value shows: off, on, or mixed, from a number, a boolean, or the words toolkits use.
-pub(crate) fn parse_toggle(value: Option<&Value>) -> Option<u8> {
+pub(crate) fn parse_toggle<E>(value: Option<&Value<E>>) -> Option<u8> {
     match value? {
         Value::Number(number) => Some(*number as u8),
         Value::Bool(value) => Some(*value as u8),
@@ -323,7 +382,7 @@ pub(crate) enum Placement {
 /// scroll area it is in, up to a menu or popover, which floats above the window. A minimized window shows nothing,
 /// whatever its frames say. An element with no frame has no place to judge, and shows. `Err` when the app did not
 /// answer in time, or with `AX_INVALID_ELEMENT` when the element or an ancestor is gone: a gone element shows nowhere.
-pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
+pub(crate) fn placement<E: Accessible>(element: &E) -> Result<Placement, ax::AXError> {
     // Every frame is read so that a stall fails the placement: a frame the app did not answer is no proof it shows.
     let frame = element.read_frame()?;
     if let Some((_, _, width, height)) = frame
@@ -342,7 +401,7 @@ pub(crate) fn placement(element: &Element) -> Result<Placement, ax::AXError> {
     let mut clip: Option<Rect> = None;
     // A parent the app did not answer in time may be a scroll area that hides the element: a stall fails, never ends
     // the walk as if the window were reached.
-    let parent_of = |element: &Element| match element.attribute("AXParent") {
+    let parent_of = |element: &E| match element.attribute("AXParent") {
         Ok(Value::Element(parent)) => Ok(Some(parent)),
         Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => Err(error),
         _ => Ok(None),
@@ -403,7 +462,7 @@ fn push(actions: &mut Vec<&'static str>, action: &'static str) {
     }
 }
 
-impl Walk {
+impl<E: Accessible> Walk<E> {
     fn expired(&self) -> bool {
         Instant::now() >= self.deadline
     }
@@ -416,7 +475,7 @@ impl Walk {
 
     /// Whether an attribute can be set. A stall leaves a hole in the read: a field the app did not answer about is not
     /// read-only.
-    fn settable(&mut self, element: &Element, name: &str) -> bool {
+    fn settable(&mut self, element: &E, name: &str) -> bool {
         element.settable(name).unwrap_or_else(|error| {
             if missed(error) {
                 self.lose();
@@ -426,7 +485,7 @@ impl Walk {
     }
 
     /// The actions a control takes, in the raw vocabulary, and the axes it scrolls along when it takes `Scroll`.
-    fn actions(&mut self, element: &Element, read: &Read) -> (Vec<&'static str>, Vec<&'static str>) {
+    fn actions(&mut self, element: &E, read: &Read<E>) -> (Vec<&'static str>, Vec<&'static str>) {
         let mut out = Vec::new();
         let role = read.role;
         let names = if roles::inert(role) {
@@ -502,7 +561,7 @@ impl Walk {
     }
 
     /// The children of an element, at most `MAX_CHILDREN`, and how many it has.
-    fn children(&mut self, element: &Element, role: &str) -> (Vec<Element>, usize) {
+    fn children(&mut self, element: &E, role: &str) -> (Vec<E>, usize) {
         if roles::large(role) {
             let count = match element.count("AXChildren") {
                 Ok(count) => count,
@@ -541,9 +600,14 @@ impl Walk {
 
     /// Reads one node and the levels under it. `None` for a node an interactive read leaves out, or one that is gone.
     /// `clip` is the part of the screen the node can show in: the window, cut by every scroll area above it.
-    fn node(&mut self, element: &Element, level: usize, root: bool, clip: Option<Rect>) -> Option<RawNode> {
+    /// `rows` says the element is a child of a list, table, or outline: a row, which is folded when it lies wholly out of
+    /// `clip`.
+    fn node(&mut self, element: &E, level: usize, root: bool, clip: Option<Rect>, rows: bool) -> Option<RawNode> {
         if self.nodes >= MAX_NODES {
             self.truncated = true;
+            return None;
+        }
+        if !self.seen.insert(element.clone()) {
             return None;
         }
         self.nodes += 1;
@@ -596,6 +660,20 @@ impl Walk {
             return None;
         }
         let role = if root && read.role == "unknown" { "window" } else { read.role };
+        // A row a scroll area holds wholly out of view is folded: one request read its frame, and nothing else of it is
+        // read. A 200-row list costs what its visible rows cost, and a locator or an agent reads those rows, as a
+        // virtualized list on a phone shows them. A scroll brings a folded row into view, where it is read whole. A
+        // selected row is read wherever it is, as a focused one is: `getByRole('row', { selected: true })` after a
+        // `selectOption` finds the row it chose, as a browser's selected option is found out of view.
+        if rows
+            && role != "scrollbar"
+            && let (Some(bounds), Some(clip)) = (read.bounds, clip)
+            && outside(bounds, clip)
+            && !self.focus_path.contains(element)
+            && read.selected != Some(true)
+        {
+            return Some(RawNode::folded());
+        }
         let secure = read.subrole.as_deref() == Some("AXSecureTextField") || read.ax_role == "AXSecureTextField";
         let (actions, scroll_axes) = self.actions(element, &read);
 
@@ -672,7 +750,7 @@ impl Walk {
                     .any(|action| matches!(*action, "Click" | "SetValue" | "Select" | "Scroll" | "RightClick" | "TypeText" | "Expand" | "ScrollTo")))
         {
             let reference = format!("@{}:e{}", self.snapshot, self.refs.len() + 1);
-            self.refs.push((reference.clone(), Entry { element: element.clone(), pid: self.pid, window: self.window }));
+            self.refs.push((reference.clone(), element.clone()));
             Some(reference)
         } else {
             None
@@ -695,6 +773,7 @@ impl Walk {
             subtree_truncated: false,
             children_count: None,
             children: Vec::new(),
+            folded: 0,
         };
 
         let inner = inner_clip(role, read.bounds, clip);
@@ -738,8 +817,12 @@ impl Walk {
                     node.subtree_truncated = true;
                     break;
                 }
-                if let Some(child) = self.node(child, level + 1, false, inner) {
-                    node.children.push(child);
+                if let Some(child) = self.node(child, level + 1, false, inner, roles::large(role)) {
+                    // Consecutive folded rows are one node, which counts them.
+                    match node.children.last_mut() {
+                        Some(last) if last.folded > 0 && child.folded > 0 => last.folded += child.folded,
+                        _ => node.children.push(child),
+                    }
                 }
             }
             if self.lost > lost {
@@ -776,33 +859,42 @@ pub(crate) fn content_name(texts: &[String]) -> Option<String> {
 }
 
 /// The title-bar buttons a window names as its own; `None` when it names none, so the walk falls back to their subrole.
-fn window_chrome(window: &Element) -> Option<Vec<Element>> {
-    let buttons: Vec<Element> =
-        ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"].iter().filter_map(|name| window.element(name)).collect();
+fn window_chrome<E: Accessible>(window: &E) -> Option<Vec<E>> {
+    let buttons: Vec<E> = ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"].iter().filter_map(|name| window.element(name)).collect();
     (!buttons.is_empty()).then_some(buttons)
 }
 
-/// Reads one window of a process.
-pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
-    let window = windows::find(request.pid, request.window)?;
-    let app = Element::application(request.pid);
+/// `element` and every element above it, up to `window` or as far as the app answers.
+fn ancestors<E: Accessible>(element: &E, window: &E) -> HashSet<E> {
+    let mut path = HashSet::new();
+    let mut next = Some(element.clone());
+    while let Some(element) = next {
+        if path.len() >= MAX_ANCESTORS || &element == window || !path.insert(element.clone()) {
+            break;
+        }
+        next = element.element("AXParent");
+    }
+    path
+}
+
+/// Reads one window's tree: `app` is its app, which names the focused element. `Err` when the window does not answer
+/// (closed, its app hung, or no permission), or closed while it was read.
+fn read_tree<E: Accessible>(window: &E, app: &E, settings: Settings) -> Outcome<Tree<E>> {
     let (focused, focus_unknown) = match app.attribute("AXFocusedUIElement") {
         Ok(Value::Element(focused)) => (Some(focused), false),
         Err(ax::AX_CANNOT_COMPLETE) => (None, true),
         _ => (None, false),
     };
     let window_bounds = window.frame().map(|(x, y, width, height)| Rect { x, y, width, height });
-    let title = window.text("AXTitle");
+    let focus_path = focused.as_ref().map(|focused| ancestors(focused, window)).unwrap_or_default();
     let mut walk = Walk {
-        pid: request.pid,
-        window: request.window,
-        snapshot: refs::snapshot_id(),
-        max_depth: request.max_depth.max(1),
-        interactive: request.interactive,
-        deadline: request.deadline,
+        snapshot: settings.snapshot.clone(),
+        max_depth: settings.max_depth.max(1),
+        interactive: settings.interactive,
+        deadline: settings.deadline,
         focused,
         focus_unknown,
-        chrome: window_chrome(&window),
+        chrome: window_chrome(window),
         nodes: 0,
         complete: !focus_unknown,
         timed_out: false,
@@ -811,11 +903,13 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         truncated: false,
         refs: Vec::new(),
         content: Vec::new(),
+        seen: HashSet::new(),
+        focus_path,
     };
     // The window must answer: one that does not is gone, or its app is.
     match window.attribute("AXRole") {
         Ok(_) => {}
-        Err(ax::AX_INVALID_ELEMENT) => return Err(Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {} closed", request.window))),
+        Err(ax::AX_INVALID_ELEMENT) => return Err(Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {} closed", settings.window))),
         Err(ax::AX_CANNOT_COMPLETE) => {
             return Err(Failure::refused(codes::APP_UNRESPONSIVE, "the app did not answer in time").with_details(serde_json::json!({ "retryable": true })));
         }
@@ -823,105 +917,44 @@ pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
         Err(_) => {}
     }
     let tree = walk
-        .node(&window, 1, true, window_bounds)
-        .ok_or_else(|| Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {} could not be read", request.window)));
+        .node(window, 1, true, window_bounds, false)
+        .ok_or_else(|| Failure::refused(codes::WINDOW_NOT_FOUND, format!("window {} could not be read", settings.window)))?;
+    Ok(Tree { tree, complete: walk.complete, timed_out: walk.timed_out, root_unread: walk.root_unread, truncated: walk.truncated, refs: walk.refs })
+}
+
+/// Reads one window of a process.
+pub fn snapshot(request: Request) -> Outcome<RawSnapshot> {
+    let window = windows::find(request.pid, request.window)?;
+    let app = Element::application(request.pid);
+    let title = window.text("AXTitle");
+    let settings = Settings {
+        snapshot: refs::snapshot_id(),
+        window: request.window,
+        max_depth: request.max_depth,
+        interactive: request.interactive,
+        deadline: request.deadline,
+    };
+    let snapshot_id = settings.snapshot.clone();
+    let read = read_tree(&window, &app, settings);
     // Accessibility permission taken away during the walk answers every read with an error the walk takes for an
     // element's own answer, and leaves it out: the tree would read as complete, and empty where it was not read.
     if !ax::trusted() {
         return Err(Failure::refused(codes::PERM_DENIED, "this process lost its Accessibility permission while it read the window"));
     }
-    let tree = tree?;
-    let ref_count = walk.refs.len();
-    refs::insert_all(std::mem::take(&mut walk.refs));
+    let read = read?;
+    let ref_count = read.refs.len();
+    refs::insert_all(read.refs.into_iter().map(|(reference, element)| (reference, Entry { element, pid: request.pid, window: request.window })).collect());
     Ok(RawSnapshot {
-        snapshot_id: walk.snapshot,
-        complete: walk.complete,
-        timed_out: walk.timed_out,
-        root_unread: walk.root_unread,
-        truncated: walk.truncated,
+        snapshot_id,
+        complete: read.complete,
+        timed_out: read.timed_out,
+        root_unread: read.root_unread,
+        truncated: read.truncated,
         ref_count,
-        tree,
+        tree: read.tree,
         window: WindowRef { id: request.window.to_string(), title },
     })
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{content_name, expanded, inner_clip, level_of, missed, outside, selected};
-    use crate::ax;
-    use crate::windows::Rect;
-
-    #[test]
-    fn names_a_row_from_the_text_inside_it() {
-        let texts = |items: &[&str]| items.iter().map(|text| (*text).to_owned()).collect::<Vec<_>>();
-        assert_eq!(content_name(&texts(&["Item 1"])).as_deref(), Some("Item 1"));
-        assert_eq!(content_name(&texts(&["Invoice 42", " ", "Paid "])).as_deref(), Some("Invoice 42 Paid"));
-        assert_eq!(content_name(&texts(&[])), None);
-        assert_eq!(content_name(&texts(&["  "])), None);
-    }
-
-    const WINDOW: Rect = Rect { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
-
-    #[test]
-    fn reads_a_heading_level_only_from_a_whole_number_from_one() {
-        assert_eq!(level_of(Some(ax::Value::Number(2.0))), Some(2));
-        for value in [Some(ax::Value::Number(0.0)), Some(ax::Value::Number(1.5)), Some(ax::Value::Number(-1.0)), Some(ax::Value::Bool(true)), None] {
-            assert_eq!(level_of(value), None);
-        }
-    }
-
-    #[test]
-    fn reads_a_node_past_the_clip_as_outside() {
-        assert!(outside(Rect { x: 0.0, y: 700.0, width: 100.0, height: 20.0 }, WINDOW));
-        assert!(!outside(Rect { x: 10.0, y: 10.0, width: 100.0, height: 20.0 }, WINDOW));
-    }
-
-    #[test]
-    fn counts_only_a_stall_as_a_hole_in_the_read() {
-        assert!(missed(ax::AX_CANNOT_COMPLETE));
-        for error in [ax::AX_INVALID_ELEMENT, ax::AX_NO_VALUE, ax::AX_ATTRIBUTE_UNSUPPORTED, ax::AX_FAILURE, ax::AX_NOT_IMPLEMENTED] {
-            assert!(!missed(error), "{error}");
-        }
-    }
-
-    #[test]
-    fn reads_a_disclosure_triangle_by_its_value_and_no_menu_item_as_selected() {
-        assert!(expanded("disclosure", None, Some(1)));
-        assert!(!expanded("disclosure", None, Some(0)));
-        assert!(!expanded("checkbox", None, Some(1)));
-        assert!(expanded("treeitem", Some(true), None));
-        assert!(!selected("menuitem", Some(true), None));
-        assert!(selected("row", Some(true), None));
-        // An AppKit tab is the active one by its value, and no other role is selected by it.
-        assert!(selected("tab", None, Some(1)));
-        assert!(!selected("tab", None, Some(0)));
-        assert!(!selected("radiobutton", None, Some(1)));
-    }
-
-    #[test]
-    fn leaves_a_popover_or_menu_past_the_window_unclipped() {
-        // A SwiftUI popover hangs off its window: its text sits above the window's top edge.
-        let above = Rect { x: 10.0, y: -37.0, width: 100.0, height: 20.0 };
-        assert!(outside(above, inner_clip("group", None, Some(WINDOW)).expect("the window's clip")));
-        assert_eq!(inner_clip("popover", None, Some(WINDOW)), None);
-        assert_eq!(inner_clip("menu", None, Some(WINDOW)), None);
-    }
-
-    #[test]
-    fn reads_a_box_state_from_a_number_a_boolean_or_a_word() {
-        use super::parse_toggle;
-        use crate::ax::Value;
-        assert_eq!(parse_toggle(Some(&Value::Text("on".into()))), Some(1));
-        assert_eq!(parse_toggle(Some(&Value::Text("off".into()))), Some(0));
-        assert_eq!(parse_toggle(Some(&Value::Text("mixed".into()))), Some(2));
-        assert_eq!(parse_toggle(Some(&Value::Number(1.0))), Some(1));
-        assert_eq!(parse_toggle(Some(&Value::Bool(false))), Some(0));
-        assert_eq!(parse_toggle(Some(&Value::Text("maybe".into()))), None);
-    }
-
-    #[test]
-    fn never_reads_a_zero_size_node_as_outside() {
-        // An open context menu on macOS 27: its `AXMenu` is 0x0 at the screen's corner, its items are in the window.
-        assert!(!outside(Rect { x: 0.0, y: 1080.0, width: 0.0, height: 0.0 }, WINDOW));
-    }
-}
+mod tests;

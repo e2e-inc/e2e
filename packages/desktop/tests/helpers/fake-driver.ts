@@ -29,7 +29,7 @@ export interface Answer {
 export type Scripted = Answer | ((fake: FakeDriver, args: readonly unknown[]) => Answer);
 
 /** The async methods a scenario scripts. */
-type AsyncMethod = 'launch' | 'listWindows' | 'snapshot' | 'act' | 'press' | 'focusWindow' | 'closeWindow' | 'pointer' | 'screenshot';
+type AsyncMethod = 'launch' | 'listWindows' | 'snapshot' | 'act' | 'press' | 'pressBack' | 'focusWindow' | 'closeWindow' | 'pointer' | 'screenshot' | 'startVideo' | 'stopVideo';
 
 export type Scenario = Partial<Record<AsyncMethod, readonly Scripted[]>>;
 
@@ -138,6 +138,14 @@ export class FakeDriver implements DesktopDriver {
     return Promise.resolve([...this.carriers].filter(([pid, carried]) => carried === token && alive(pid)).map(([pid]) => pid));
   }
 
+  /** What `bundleCopies` answers: no other copy unless a test says so. */
+  copies: { registered: string[]; running: { pid: number; path?: string }[] } = { registered: [], running: [] };
+
+  bundleCopies(bundleId: string): Promise<Envelope<{ readonly registered: readonly string[]; readonly running: readonly { readonly pid: number; readonly path?: string }[] }>> {
+    this.calls.push({ method: 'bundleCopies', args: [bundleId] });
+    return Promise.resolve({ ok: true, data: this.copies });
+  }
+
   forgetProcess(pid: number): void {
     this.calls.push({ method: 'forgetProcess', args: [pid] });
   }
@@ -180,6 +188,10 @@ export class FakeDriver implements DesktopDriver {
     return this.answer('press', [options], ok({}));
   }
 
+  pressBack(options: Parameters<DesktopDriver['pressBack']>[0]): Promise<Envelope<{ readonly title: string; readonly menu: string }>> {
+    return this.answer('pressBack', [options], ok({ title: 'Back', menu: 'Go' }));
+  }
+
   /** The input id and budget of each `focusWindow` call, in order. */
   readonly focusOptions: { readonly inputId: number | undefined; readonly timeoutMs: number | undefined }[] = [];
 
@@ -202,6 +214,27 @@ export class FakeDriver implements DesktopDriver {
 
   screenshot(options: Parameters<DesktopDriver['screenshot']>[0]): Promise<Envelope<{ readonly scale_factor?: number }>> {
     return this.answer('screenshot', [options], ok({ scale_factor: 1 }));
+  }
+
+  /** Recordings started and not stopped, by id: the file each writes. */
+  readonly videos = new Map<number, string>();
+  private lastVideo = 0;
+
+  /** Starts a recording that writes a few bytes to its file at once, as the driver's first frame does. */
+  startVideo(options: Parameters<DesktopDriver['startVideo']>[0]): Promise<Envelope<{ readonly id: number; readonly width: number; readonly height: number }>> {
+    return this.answer('startVideo', [options], (fake) => {
+      const id = (fake.lastVideo += 1);
+      fake.videos.set(id, options.path);
+      writeFileSync(options.path, 'mp4');
+      return ok({ id, width: 840, height: 584 });
+    });
+  }
+
+  stopVideo(id: number, timeoutMs: number): Promise<Envelope<{ readonly bytes: number }>> {
+    return this.answer('stopVideo', [id, timeoutMs], (fake) => {
+      fake.videos.delete(id);
+      return ok({ bytes: 3 });
+    });
   }
 
   private async answer<T>(method: AsyncMethod, args: readonly unknown[], fallback: Scripted): Promise<Envelope<T>> {

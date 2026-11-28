@@ -98,6 +98,7 @@ const NATIVE_FUNCTIONS = [
   'processStarted',
   'processesCarrying',
   'forgetProcess',
+  'bundleCopies',
   'launch',
   'listWindows',
   'snapshot',
@@ -105,11 +106,14 @@ const NATIVE_FUNCTIONS = [
   'inputId',
   'cancelInput',
   'press',
+  'pressBack',
   'checkCombo',
   'focusWindow',
   'closeWindow',
   'pointer',
   'screenshot',
+  'startVideo',
+  'stopVideo',
 ] as const satisfies readonly Exclude<keyof DesktopDriver, 'version'>[];
 type Missing = Exclude<Exclude<keyof DesktopDriver, 'version'>, (typeof NATIVE_FUNCTIONS)[number]>;
 const everyFunction: [Missing] extends [never] ? true : Missing = true;

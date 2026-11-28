@@ -79,8 +79,18 @@ test('signs in', async ({ app, screen }) => {
   hands it to the app under test through the Accessibility API; no helper
   process sees it. A secure field reports no value, and screenshots paint over its
   bounds; when a secure field has no bounds, the screenshot is withheld.
-- Not supported yet: the menu bar, and web content (a browser window, an
-  Electron app, a web view).
+- `app.back()` presses the app's Back menu item (titled Back or Go Back, or
+  the one with the shortcut Command-[) through accessibility; an app with no
+  Back, or a disabled one, refuses and is sent nothing.
+- `app.clearState()` and `test.setup` sessions work only for an `appPath`
+  build, never an installed app, and refuse while macOS knows another copy of
+  the build's bundle id, since every copy shares one defaults domain. See
+  the docs page for what a reset clears.
+- Video (`video: 'on'`, `app.startRecording()`) records the window the
+  engine reads through ScreenCaptureKit, on macOS 15 or later: it follows the
+  window as it moves, records nothing that covers it, and masks nothing.
+- Not supported yet: reading the menu bar in `screen`, and web content (a
+  browser window, an Electron app, a web view).
 - One worker per target: its workers would share one screen. Two desktop
   targets run at the same time. With `physicalInput: true` they would share the
   pointer and keyboard too, so set the run's `workers: 1`.

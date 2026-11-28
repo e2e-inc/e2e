@@ -8,7 +8,10 @@
 
 mod actions;
 mod ax;
+mod bundles;
 mod failure;
+#[cfg(test)]
+mod fake;
 mod input;
 mod launch;
 mod layout;
@@ -16,6 +19,7 @@ mod refs;
 mod roles;
 mod snapshot;
 mod system;
+mod video;
 mod windows;
 
 mod process;
@@ -274,6 +278,28 @@ pub async fn press(options: PressOptions) -> Value {
     .await
 }
 
+/// The copies of an app LaunchServices knows by bundle id: the bundles it registered, and the processes running one.
+#[napi(ts_return_type = "Promise<NativeEnvelope<{ registered: string[]; running: { pid: number; path?: string }[] }>>")]
+pub async fn bundle_copies(bundle_id: String) -> Value {
+    blocking(move || data(bundles::copies(&bundle_id))).await
+}
+
+#[napi(object)]
+pub struct BackOptions {
+    pub pid: i32,
+    /// Names this press, so `cancelInput` can stop it before it presses the item.
+    pub input_id: Option<u32>,
+    pub timeout_ms: f64,
+}
+
+/// Presses the app's Back menu item through accessibility: the item titled Back or Go Back, else the one whose
+/// shortcut is Command-[. Refuses, pressing nothing, when the app's menu bar has none or it is disabled.
+#[napi(ts_return_type = "Promise<NativeEnvelope<{ title: string; menu: string }>>")]
+pub async fn press_back(options: BackOptions) -> Value {
+    let deadline = deadline(options.timeout_ms);
+    blocking(move || data(actions::back(options.pid, options.input_id, deadline)?)).await
+}
+
 /// Brings a window and its app forward. `inputId` names it, so `cancelInput` stops it before it changes the focus.
 #[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
 pub async fn focus_window(pid: i32, window_id_text: String, input_id: Option<u32>, timeout_ms: Option<f64>) -> Value {
@@ -351,4 +377,27 @@ pub async fn screenshot(options: ScreenshotOptions) -> Value {
         Ok(serde_json::json!({ "scale_factor": scale }))
     })
     .await
+}
+
+#[napi(object)]
+pub struct VideoStartOptions {
+    pub window_id: String,
+    /// The MPEG-4 file to write.
+    pub path: String,
+    pub timeout_ms: f64,
+}
+
+/// Starts recording one window into an MPEG-4 file through ScreenCaptureKit; answers the recording's id and the frame
+/// size. The recording follows the window wherever it moves, and records nothing that covers it.
+#[napi(ts_return_type = "Promise<NativeEnvelope<{ id: number; width: number; height: number }>>")]
+pub async fn start_video(options: VideoStartOptions) -> Value {
+    let deadline = deadline(options.timeout_ms);
+    blocking(move || data(video::start(window_id(&options.window_id)?, &options.path, deadline)?)).await
+}
+
+/// Stops a recording and waits, within `timeoutMs`, for its file to be finished; answers the file's size.
+#[napi(ts_return_type = "Promise<NativeEnvelope<{ bytes: number }>>")]
+pub async fn stop_video(id: u32, timeout_ms: f64) -> Value {
+    let deadline = deadline(timeout_ms);
+    blocking(move || data(video::stop(id, deadline)?)).await
 }

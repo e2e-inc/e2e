@@ -4,7 +4,7 @@ use super::*;
 
 /// The first of `options` (the items of one title) that is enabled, waited for within the action's budget, as
 /// `enabled` waits for one control; refused, naming the option, when none is enabled in time.
-pub(super) fn enabled_of(options: &[Element], deadline: Instant, label: &str) -> Outcome<Element> {
+pub(super) fn enabled_of<E: Accessible>(options: &[E], deadline: Instant, label: &str) -> Outcome<E> {
     let refuse_at = deadline.checked_sub(ANSWER_MARGIN).unwrap_or(deadline);
     loop {
         // An option the menu dropped since the scan is skipped: a live one of the title may still be enabled. With every
@@ -36,7 +36,7 @@ pub(super) const ROW_TEXT_DEPTH: usize = 50;
 
 /// The name a list's row shows, as the snapshot names it: its own title or description (a text item's value), else,
 /// with none, every text inside it in reading order, joined by spaces.
-pub(super) fn row_label(element: &Element) -> Result<Option<String>, AXError> {
+pub(super) fn row_label<E: Accessible>(element: &E) -> Result<Option<String>, AXError> {
     if let Some(own) = own_label(element)? {
         return Ok(Some(own));
     }
@@ -46,31 +46,33 @@ pub(super) fn row_label(element: &Element) -> Result<Option<String>, AXError> {
 }
 
 /// An element's own name, as the snapshot gives it: its title, else the text of the element that labels it
-/// (`AXTitleUIElement`), else its description, else, for a text, its value.
-pub(super) fn own_label(element: &Element) -> Result<Option<String>, AXError> {
+/// (`AXTitleUIElement`), else its description, else, for a text, its value as it shows: a number formatter's cell
+/// holds a number, which the snapshot names the row by too (`Value::display`).
+pub(super) fn own_label<E: Accessible>(element: &E) -> Result<Option<String>, AXError> {
     let values = match element.attributes(&["AXRole", "AXTitle", "AXDescription", "AXValue", "AXTitleUIElement"]) {
         Ok(values) => values,
         Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
         Err(_) => return Ok(None),
     };
     let text = |index: usize| values[index].as_ref().and_then(Value::text).map(str::to_owned).filter(|text| !text.trim().is_empty());
+    let shown = || values[3].as_ref().and_then(Value::display).filter(|text| !text.trim().is_empty());
     let role = values[0].as_ref().and_then(Value::text).unwrap_or_default();
     let labelled = match &values[4] {
         Some(Value::Element(label)) => crate::snapshot::label_of(label)?,
         _ => None,
     };
-    Ok(text(1).or(labelled).or_else(|| text(2)).or_else(|| if roles::text(roles::role(role, None)) { text(3) } else { None }))
+    Ok(text(1).or(labelled).or_else(|| text(2)).or_else(|| if roles::text(roles::role(role, None)) { shown() } else { None }))
 }
 
 /// The texts inside an element, in reading order, as the snapshot gathers a row's name from them.
-pub(super) fn row_texts(element: &Element, depth: usize, texts: &mut Vec<String>) -> Result<(), AXError> {
+pub(super) fn row_texts<E: Accessible>(element: &E, depth: usize, texts: &mut Vec<String>) -> Result<(), AXError> {
     // Every child is read, as the snapshot reads them: a label cut short could match a prefix of the one asked for.
-    let children = |element: &Element| match element.elements("AXChildren", crate::snapshot::MAX_CHILDREN) {
+    let children = |element: &E| match element.elements("AXChildren", crate::snapshot::MAX_CHILDREN) {
         Ok(children) => Ok(children),
         Err(ax::AX_CANNOT_COMPLETE) => Err(ax::AX_CANNOT_COMPLETE),
         Err(_) => Ok(Vec::new()),
     };
-    let role = |element: &Element| match element.attribute("AXRole") {
+    let role = |element: &E| match element.attribute("AXRole") {
         Ok(value) => Ok(roles::role(value.text().unwrap_or_default(), None)),
         Err(ax::AX_CANNOT_COMPLETE) => Err(ax::AX_CANNOT_COMPLETE),
         Err(_) => Ok(roles::role("", None)),
@@ -110,7 +112,7 @@ pub(super) fn gather_texts<T>(
 
 /// The pop-up button's menu, if it is already open.
 /// `Err` when the app did not answer in time: a stall is no proof the menu is closed.
-pub(super) fn current_menu(button: &Element) -> Result<Option<Element>, AXError> {
+pub(super) fn current_menu<E: Accessible>(button: &E) -> Result<Option<E>, AXError> {
     let children = match button.elements("AXChildren", 4) {
         Ok(children) => children,
         Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
@@ -127,7 +129,7 @@ pub(super) fn current_menu(button: &Element) -> Result<Option<Element>, AXError>
 }
 
 /// The open menu of a pop-up button, once it shows.
-pub(super) fn open_menu(button: &Element, deadline: Instant) -> Option<Element> {
+pub(super) fn open_menu<E: Accessible>(button: &E, deadline: Instant) -> Option<E> {
     let mut menu = None;
     until(deadline, || {
         menu = current_menu(button).ok().flatten();
@@ -275,50 +277,56 @@ pub(super) fn select(entry: &Entry, label: &str, deadline: Instant) -> Outcome<(
         ));
     }
     if roles::collection(role) {
-        let rows = match all(element, "AXRows", "read the list's rows")? {
-            rows if rows.is_empty() => all(element, "AXChildren", "read the list's rows")?,
-            rows => rows,
-        };
-        // A row the app did not answer in time may be the option asked for: that is no proof it is missing.
-        // Two rows that show the label leave the choice open: neither is selected, as no handler of the wrong one may run.
-        let (found, stalled) = scan(rows, "read the list's rows", 2, |candidate| row_label(candidate).map(|text| text.as_deref() == Some(label)))?;
-        if found.len() > 1 {
-            return Err(Failure::refused(codes::ACTION_FAILED, format!("more than one option of the list is \"{label}\"; select it another way")));
-        }
-        // A row whose label could not be read may show the label too: one match is no proof it is the only one.
-        if stalled {
-            return Err(unread(ax::AX_CANNOT_COMPLETE, "read the list's rows"));
-        }
-        let Some(row) = found.into_iter().next() else {
-            return Err(Failure::refused(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\"")));
-        };
-        let (_, row_role) = role_of(&row, "select")?;
-        if matches!(row_role, "radiobutton" | "tab") {
-            // An app can refuse the choice (an NSTabViewDelegate's shouldSelect) while the press itself succeeds: the
-            // option must show it is the selected one.
-            let selected = || row.boolean("AXSelected") == Some(true) || toggle_state(&row) == Some(1);
-            if !selected() {
-                // A disabled option takes the press and ignores it.
-                enabled(&row, deadline, "select")?;
-                perform(&row, "AXPress", "choose the option")?;
-                if !until(deadline, selected) {
-                    return Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("\"{label}\" did not become selected")));
-                }
-            }
-            return Ok(());
-        }
-        if choose_row(Some(element), &row, deadline, &format!("\"{label}\" did not become selected"))? {
-            return Ok(());
-        }
-        return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "the list takes no selection through accessibility"));
+        return select_row(element, label, deadline);
     }
     Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("a {role} has no options to select")))
+}
+
+/// Selects the row of a list, table, or outline that shows `label`, as the snapshot names it. Two rows that show it
+/// leave the choice open, and a row whose label the app did not answer in time may show it too: neither is selected.
+pub(super) fn select_row<E: Accessible>(element: &E, label: &str, deadline: Instant) -> Outcome<()> {
+    let rows = match all(element, "AXRows", "read the list's rows")? {
+        rows if rows.is_empty() => all(element, "AXChildren", "read the list's rows")?,
+        rows => rows,
+    };
+    // A row the app did not answer in time may be the option asked for: that is no proof it is missing.
+    // Two rows that show the label leave the choice open: neither is selected, as no handler of the wrong one may run.
+    let (found, stalled) = scan(rows, "read the list's rows", 2, |candidate| row_label(candidate).map(|text| text.as_deref() == Some(label)))?;
+    if found.len() > 1 {
+        return Err(Failure::refused(codes::ACTION_FAILED, format!("more than one option of the list is \"{label}\"; select it another way")));
+    }
+    // A row whose label could not be read may show the label too: one match is no proof it is the only one.
+    if stalled {
+        return Err(unread(ax::AX_CANNOT_COMPLETE, "read the list's rows"));
+    }
+    let Some(row) = found.into_iter().next() else {
+        return Err(Failure::refused(codes::ELEMENT_NOT_FOUND, format!("the list has no option \"{label}\"")));
+    };
+    let (_, row_role) = role_of(&row, "select")?;
+    if matches!(row_role, "radiobutton" | "tab") {
+        // An app can refuse the choice (an NSTabViewDelegate's shouldSelect) while the press itself succeeds: the
+        // option must show it is the selected one.
+        let selected = || row.boolean("AXSelected") == Some(true) || toggle_state(&row) == Some(1);
+        if !selected() {
+            // A disabled option takes the press and ignores it.
+            enabled(&row, deadline, "select")?;
+            perform(&row, "AXPress", "choose the option")?;
+            if !until(deadline, selected) {
+                return Err(Failure::unconfirmed(codes::ACTION_FAILED, format!("\"{label}\" did not become selected")));
+            }
+        }
+        return Ok(());
+    }
+    if choose_row(Some(element), &row, deadline, &format!("\"{label}\" did not become selected"))? {
+        return Ok(());
+    }
+    Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "the list takes no selection through accessibility"))
 }
 
 /// Selects `row`, through `list`'s `AXSelectedRows` when the list takes it, else through the row's own `AXSelected`, and
 /// waits for the row to show it is selected (`unselected` when it does not). `Ok(false)` when neither can be written:
 /// nothing was sent.
-pub(super) fn choose_row(list: Option<&Element>, row: &Element, deadline: Instant, unselected: &str) -> Outcome<bool> {
+pub(super) fn choose_row<E: Accessible>(list: Option<&E>, row: &E, deadline: Instant, unselected: &str) -> Outcome<bool> {
     let by_rows = match list {
         Some(list) => settable(list, "AXSelectedRows", "select")?,
         None => false,
@@ -337,4 +345,21 @@ pub(super) fn choose_row(list: Option<&Element>, row: &Element, deadline: Instan
         return Ok(true);
     }
     Err(Failure::unconfirmed(codes::ACTION_FAILED, unselected))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::row_label;
+    use crate::ax::Value;
+    use crate::fake::Fake;
+
+    #[test]
+    fn names_a_row_by_a_numeric_cell_as_the_snapshot_does() {
+        // An `NSNumberFormatter` cell's static text holds a number, not a string: the snapshot shows it as "2".
+        let row = Fake::new("AXRow").children(vec![
+            Fake::new("AXCell").children(vec![Fake::new("AXStaticText").text("AXValue", "Plan")]),
+            Fake::new("AXCell").children(vec![Fake::new("AXStaticText").with("AXValue", Value::Number(2.0))]),
+        ]);
+        assert_eq!(row_label(&row).unwrap().as_deref(), Some("Plan 2"));
+    }
 }

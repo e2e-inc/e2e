@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { resolveExpression, type SemanticNode } from '@e2e-dev/core/engine';
+import { type LocatorExpression, resolveExpression, type SemanticNode } from '@e2e-dev/core/engine';
 import { describe, expect, it } from 'vitest';
-import { projectSnapshot, type RawSnapshot } from '../../src/nodes.ts';
+import { locatable, projectSnapshot, type RawSnapshot } from '../../src/nodes.ts';
 
 function load(name: string): RawSnapshot {
   return JSON.parse(readFileSync(new URL(`../fixtures/snapshots/${name}.json`, import.meta.url), 'utf8')) as RawSnapshot;
@@ -313,6 +313,107 @@ describe('projectSnapshot', () => {
   it('counts a node with children it did not list as a cut-short tree', () => {
     const screen = projectSnapshot({ snapshot_id: 's', complete: true, tree: { role: 'window', name: 'W', children: [{ role: 'group', name: 'Deep', children_count: 3 }] } }, minter());
     expect(screen.truncated).toBe(true);
+  });
+
+  it('reads an open menu as on screen when the button that opened it scrolled out of view', () => {
+    const screen = projectSnapshot(
+      {
+        snapshot_id: 's',
+        complete: true,
+        tree: {
+          role: 'window',
+          name: 'W',
+          children: [
+            {
+              role: 'scrollarea',
+              ref_id: '@s:area',
+              children: [
+                {
+                  role: 'menubutton',
+                  name: 'Sort',
+                  ref_id: '@s:sort',
+                  states: ['offscreen'],
+                  children: [{ role: 'menu', ref_id: '@s:menu', children: [{ role: 'menuitem', name: 'By Priority', ref_id: '@s:item', available_actions: ['Click'] }] }],
+                },
+                { role: 'group', name: 'Pane', ref_id: '@s:pane', states: ['offscreen'], children: [{ role: 'button', name: 'Inside', ref_id: '@s:inside' }] },
+              ],
+            },
+          ],
+        },
+      },
+      minter(),
+    );
+    const named = (name: string) => all(screen.root).find((node) => node.name === name);
+    expect(named('Sort')?.states?.hidden).toBe(true);
+    expect(named('By Priority')?.states?.hidden).toBeUndefined();
+    // Anything else under a node scrolled out of view is out of view with it.
+    expect(named('Inside')?.states?.hidden).toBe(true);
+  });
+
+  describe('rows folded out of view', () => {
+    const row = (title: string, y: number) => ({
+      role: 'treeitem',
+      name: 'Low',
+      ref_id: `@s:${title}`,
+      bounds: { x: 0, y, width: 300, height: 24 },
+      children: [{ role: 'checkbox', name: title, ref_id: `@s:${title}-box`, bounds: { x: 4, y, width: 200, height: 24 } }],
+    });
+    const list = (rows: readonly unknown[], beside: readonly unknown[] = []): RawSnapshot =>
+      ({
+        snapshot_id: 's',
+        complete: true,
+        window: { id: '7' },
+        tree: { role: 'window', name: 'W', bounds: { x: 0, y: 0, width: 400, height: 300 }, children: [...beside, { role: 'scrollarea', ref_id: '@s:area', bounds: { x: 0, y: 0, width: 400, height: 300 }, children: [{ role: 'outline', name: 'Tasks', ref_id: '@s:list', children: rows }] }] },
+      }) as RawSnapshot;
+    const query = (kind: 'role' | 'text', value: string, name?: string, exact = true): LocatorExpression => ({
+      kind: 'query',
+      query: { kind, value: { kind: 'string', value, exact }, ...(name === undefined ? {} : { name: { kind: 'string', value: name, exact: true } }) },
+    });
+
+    it('reads a run of folded rows as one hidden line that counts them, which nothing acts on', () => {
+      const screen = projectSnapshot(list([{ role: 'folded', folded: 3 }, row('Task 4', 0), row('Task 5', 24), { role: 'folded', folded: 1 }]), minter());
+      const tasks = all(screen.root).find((node) => node.name === 'Tasks')!;
+      expect(tasks.children?.map((child) => child.text ?? child.name)).toEqual(['3 rows out of view', 'Low', 'Low', '1 row out of view']);
+      const marker = tasks.children![0]!;
+      expect(marker.role).toBeUndefined();
+      expect(marker.states).toEqual({ hidden: true });
+      expect(screen.bindings.get(marker.ref.id)).toMatchObject({ actions: [], stable: false });
+      expect(screen.bindings.get(marker.ref.id)?.ref).toBeUndefined();
+      // A fold is no cut: the read is whole, so a locator counts its matches.
+      expect(screen.truncated).toBe(false);
+      expect(screen.cutShort).toBe(false);
+    });
+
+    it('finds the rows in view and none folded out of it, by any query', () => {
+      const screen = projectSnapshot(list([row('Task 1', 0), row('Task 2', 24), { role: 'folded', folded: 198 }]), minter());
+      const root = locatable(screen);
+      expect(resolveExpression(query('role', 'checkbox', 'Task 2'), [root])).toHaveLength(1);
+      expect(resolveExpression(query('role', 'checkbox', 'Task 200'), [root])).toHaveLength(0);
+      expect(resolveExpression(query('text', 'Task 200'), [root])).toHaveLength(0);
+    });
+
+    it('never matches the fold line itself, so a loose text query stays unique', () => {
+      const view = { role: 'button', name: 'View', ref_id: '@s:view', bounds: { x: 0, y: 0, width: 60, height: 20 } };
+      const screen = projectSnapshot(list([row('Task 1', 0), { role: 'folded', folded: 182 }], [view]), minter());
+      const loose = (text: string) => resolveExpression(query('text', text, undefined, false), [locatable(screen)]);
+      expect(loose('View')).toHaveLength(1);
+      expect(loose('rows')).toHaveLength(0);
+      expect(loose('182')).toHaveLength(0);
+      // A reader still sees it.
+      expect(all(screen.root).some((node) => node.text === '182 rows out of view')).toBe(true);
+    });
+
+    it('gives no row beside a fold an id the next read keeps, since a folded row may be its twin', () => {
+      const ids = minter();
+      const first = projectSnapshot(list([row('Task 1', 0), { role: 'folded', folded: 5 }]), ids);
+      const second = projectSnapshot(list([row('Task 1', 0), { role: 'folded', folded: 5 }]), ids);
+      const box = (screen: typeof first) => all(screen.root).find((node) => node.name === 'Task 1')!;
+      expect(box(first).ref.id).not.toBe(box(second).ref.id);
+      expect(first.bindings.get(box(first).ref.id)?.stable).toBe(false);
+      // The list itself keeps its id.
+      const tasks = (screen: typeof first) => all(screen.root).find((node) => node.name === 'Tasks')!;
+      expect(tasks(first).ref.id).toBe(tasks(second).ref.id);
+    });
   });
 
   it('reads a placeholder from its own field, not from a hint', () => {

@@ -27,6 +27,7 @@ import {
   type EngineObserveOptions,
   type EnginePrepareResult,
   type EngineSnapshot,
+  type EngineState,
   type LocatorAction,
   type LocatorExpression,
   type NodeRef,
@@ -35,6 +36,7 @@ import {
   type PointerAction,
   type SelectOption,
   type SemanticNode,
+  type VideoSegment,
   type ViewportPoint,
 } from '@e2e-dev/core/engine';
 import { call, DriverFailure, loadNativeDriver, translate, type DesktopDriver, type Envelope, type Launched, type RawWindow } from './driver.ts';
@@ -43,9 +45,11 @@ import { abandon, alive, APP_FILE, checkBundle, inheritedEnv, killed, OWNER_FILE
 import { launchArgumentList } from './launch-arguments.ts';
 import { handOffClause, type WindowsRead } from './launch-report.ts';
 import { LAUNCH_READY_MS, QUIT, windowReadable } from './launch-wait.ts';
-import { ROOT_ID, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
+import { ROOT_ID, locatable, projectSnapshot, type NodeBinding, type ProjectedScreen, type RawSnapshot, type Rect } from './nodes.ts';
 import type { DesktopPlatform, ResolvedDesktopOptions } from './options.ts';
 import { describeCapture, encodePng, windowImage } from './png.ts';
+import { AppState, installedApp, nativeStateHost, type OwnedBuild, type StateHost } from './state.ts';
+import { WindowVideo } from './video.ts';
 
 /** How long a quit waits for a launch whose outcome was unknown to report the process it started. */
 const PENDING_SETTLE_MS = 3_000;
@@ -240,11 +244,12 @@ export class DesktopSurface {
   /** The run's environment cut to `INHERITED_ENV`: all the app is given of it. */
   private appEnv: Readonly<Record<string, string>> = {};
 
-  /** `loadDriver` is how the native driver is loaded; tests pass a scripted one. */
+  /** `loadDriver` is how the native driver is loaded, and `stateHost` what the state commands ask of the machine; tests pass scripted ones. */
   constructor(
     readonly options: ResolvedDesktopOptions,
     readonly platform: DesktopPlatform,
     private readonly loadDriver: () => DesktopDriver = loadNativeDriver,
+    private readonly stateHost: (driver: () => DesktopDriver) => StateHost = nativeStateHost,
   ) {}
 
   // --- lifecycle ---
@@ -314,6 +319,7 @@ export class DesktopSurface {
    * engine keeps the process as its own, so `dispose` tries again.
    */
   async endAttempt(context: EngineCleanupContext): Promise<void> {
+    await this.video.abandon({ ...context, runId: '', attemptId: '', origin: 'test' });
     this.attempt = undefined;
     this.forget();
     await this.quit(context.signal, context.timeoutMs);
@@ -377,7 +383,9 @@ export class DesktopSurface {
   async restart(context: OperationContext): Promise<void> {
     // The budget counts from the call, so time spent waiting for another launch or quit is part of it.
     const operation = withDeadline(context);
+    await this.video.follow(undefined, operation);
     await this.serially(() => this.launchFresh(operation));
+    await this.followVideo(operation);
   }
 
   /** `restart` once no other launch or quit of this surface is running. */
@@ -481,6 +489,8 @@ export class DesktopSurface {
     this.chosenWindow = id;
     // A point taken in the window read before is not in this one's coordinates: the next point action measures from the window now in use.
     this.pointWindow = undefined;
+    // The video records what `screen` reads, from now on, not from the next read.
+    await this.video.follow(id, { ...operation, runId: '', attemptId: '', origin: 'test' });
   }
 
   /**
@@ -529,6 +539,7 @@ export class DesktopSurface {
 
   /** `desktop.closeApp()`: the app quit, as at the end of every test. */
   async closeApp(signal: AbortSignal, timeoutMs: number): Promise<void> {
+    await this.video.follow(undefined, { signal, timeoutMs, runId: '', attemptId: '', origin: 'test' });
     await this.quit(signal, timeoutMs);
   }
 
@@ -851,6 +862,7 @@ export class DesktopSurface {
       return undefined;
     }) : undefined;
     this.pointWindow = pointIn(screen);
+    await this.video.follow(this.pointWindow?.id, operation);
     // Pixels withheld for their secure fields still report the regions masked, none, so the harness reads masking it could not prove (MASKING_UNPROVEN), not a missing screenshot.
     return {
       ...this.snapshotOf(screen),
@@ -896,8 +908,9 @@ export class DesktopSurface {
         { retryable: true },
       );
     }
-    const matches = resolveExpression(expression, [screen.root]);
+    const matches = resolveExpression(expression, [locatable(screen)]);
     this.pointWindow = pointIn(screen);
+    await this.video.follow(this.pointWindow?.id, operation);
     this.remember(matches.flatMap((match) => screen.bindings.get(match.ref.id) ?? []));
     return matches;
   }
@@ -1300,6 +1313,136 @@ export class DesktopSurface {
     await this.sendKey(combo, window.id, `press ${key}`, operation);
     // As after every other agent action: the app reacts to the key before the agent reads the screen again.
     await this.settle(operation);
+  }
+
+  // --- video ---
+
+  private readonly video = new WindowVideo(() => this.requireDriver());
+
+  /** Records the window the engine reads from now on; see `video.ts`. Before the app has a window, its first one starts it. */
+  async startVideo(context: OperationContext): Promise<void> {
+    const attempt = this.attempt;
+    if (attempt === undefined) throw invalidState('startVideo outside an attempt');
+    const operation = withDeadline(context);
+    const window = await this.ownWindow(operation).catch(() => undefined);
+    await this.video.begin(attempt.artifactsDir, window?.id, operation);
+  }
+
+  /** Stops the video and answers one file per window the attempt showed, in order. */
+  async stopVideo(context: OperationContext): Promise<readonly VideoSegment[]> {
+    if (this.attempt === undefined) throw invalidState('stopVideo outside an attempt');
+    return await this.video.end(withDeadline(context));
+  }
+
+  /** Moves the video to the window a fresh launch shows. */
+  private async followVideo(operation: OperationContext): Promise<void> {
+    if (!this.video.recording) return;
+    const window = await this.ownWindow(operation).catch(() => undefined);
+    await this.video.follow(window?.id, operation);
+  }
+
+  // --- saved state ---
+
+  private appState: AppState | undefined;
+
+  /**
+   * The build whose saved state the engine may replace, once macOS is shown
+   * to know no other copy of its bundle id; an installed app (a `bundleId`
+   * target) is refused. See `state.ts` for what is covered.
+   */
+  private async ownedBuild(what: string, signal: AbortSignal): Promise<{ build: OwnedBuild; state: AppState }> {
+    const target = this.launchTarget;
+    // An `appPath` target's label is the bundle id its Info.plist declares (`resolveLaunchTarget`).
+    if (target === undefined || !('path' in target)) throw installedApp(what, this.app.bundleId);
+    const state = (this.appState ??= new AppState(this.stateHost(() => this.requireDriver())));
+    const build = { path: target.path, bundleId: target.label };
+    await state.requireSole(build, what, signal, this.pid);
+    return { build, state };
+  }
+
+  /** `app.clearState()`: quits the app, clears what macOS keeps of it by its bundle id, and launches it again. */
+  async reset(context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    const { build, state } = await this.ownedBuild('app.clearState()', operation.signal);
+    await this.video.follow(undefined, operation);
+    await this.serially(async () => {
+      // Quit first: a running app would write its defaults back from memory.
+      await this.quitNow(operation.signal, operation.timeoutMs, false);
+      await state.reset(build.bundleId, operation.signal);
+      await this.launchFresh(operation);
+    });
+    await this.followVideo(operation);
+  }
+
+  /** Saves a `test.setup` session: the build's defaults domain. */
+  async captureState(context: OperationContext): Promise<EngineState> {
+    const { build, state } = await this.ownedBuild('saving a session', context.signal);
+    return await state.capture(build.bundleId, context.signal);
+  }
+
+  /** Restores a session before the test opens the app: the app is quit and reset, and the session's defaults written. */
+  async restoreState(saved: EngineState, context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    const { build, state } = await this.ownedBuild('restoring a session', operation.signal);
+    await this.serially(async () => {
+      await this.quitNow(operation.signal, operation.timeoutMs, false);
+      await state.restore(build.bundleId, saved, operation.signal);
+    });
+  }
+
+  /**
+   * `app.back()`: presses the app's Back menu item through accessibility, the
+   * item titled Back or Go Back, else the one whose shortcut is Command-[. It
+   * is never a key sent on a guess: an app whose menu bar has no Back refuses
+   * with `UNSUPPORTED_CAPABILITY`, and one whose Back is disabled (nothing to
+   * go back to) with `NOT_ACTIONABLE`, and neither is sent anything.
+   */
+  async back(context: OperationContext): Promise<void> {
+    const operation = withDeadline(context);
+    const { pid } = this;
+    if (pid === undefined) throw invalidState('the app is not running; open it with app.open()');
+    await this.requireRunning();
+    await this.keyWindowForMenu(pid, 'app.back()', operation);
+    // As for `tryRef`: a press still unsent once the call is given up is never sent.
+    const inputId = this.requireDriver().inputId();
+    try {
+      await this.input((driver, timeoutMs) => driver.pressBack({ pid, inputId, timeoutMs }), {
+        label: 'app.back()',
+        input: true,
+        signal: operation.signal,
+        timeoutMs: operation.timeoutMs,
+        onCutOff: () => this.driver?.cancelInput(inputId),
+      });
+    } catch (cause) {
+      throw translate(cause, 'app.back()', true);
+    }
+    await this.settle(operation);
+  }
+
+  /**
+   * Makes sure a menu bar command goes to the window `screen` reads: the menu bar acts on the app's key window, so with
+   * an active window that is not the key window, the command would act on another one. Without `physicalInput` that is
+   * refused, nothing sent, as a key to a window that is not the key window is; with it, the active window comes forward
+   * first. With no window active, `screen` reads the focused window, which is the key window.
+   */
+  private async keyWindowForMenu(pid: number, label: string, operation: OperationContext): Promise<void> {
+    const windows = await this.ownWindows(operation);
+    const active = this.activeChoice(windows);
+    if (active === undefined || windows.find((window) => window.id === active)?.is_focused === true) return;
+    if (!this.options.physicalInput) {
+      throw notActionable(`${label}: the active window is not the app's key window, and the menu bar acts on the key window, so nothing was pressed; activate the key window, or set desktop({ physicalInput: true }) to bring the active one forward`);
+    }
+    const focusId = this.requireDriver().inputId();
+    await this.input((driver, timeoutMs) => driver.focusWindow(pid, active, focusId, timeoutMs), {
+      label: 'focus window',
+      input: true,
+      signal: operation.signal,
+      timeoutMs: operation.timeoutMs,
+      onCutOff: () => this.driver?.cancelInput(focusId),
+    }).catch((cause: unknown) => Promise.reject(translate(cause, 'focus window', true)));
+    if ((await this.ownWindows(operation)).find((window) => window.id === active)?.is_focused !== true) {
+      throw notActionable(`${label}: the active window did not become the app's key window as it was brought forward, so nothing was pressed`);
+    }
   }
 
   /**

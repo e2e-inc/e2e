@@ -81,9 +81,21 @@ export function desktop(options: DesktopOptions = {}): DesktopEngine<'macos', 'a
     // with `restart`, a fresh launch of the target's app.
     session: {
       restart: (operation) => surface.restart(operation),
+      // The app's Back menu item, pressed through accessibility; an app without one refuses.
+      back: (operation) => surface.back(operation),
+      // Only for an `app.appPath` build that no other copy of its bundle id shares; an installed app is refused.
+      reset: (operation) => surface.reset(operation),
+    },
+    // Sessions: the build's defaults domain, under the same rule as `reset`.
+    state: {
+      capture: (operation) => surface.captureState(operation),
+      restore: (saved, operation) => surface.restoreState(saved, operation),
     },
     artifacts: {
       screenshot: (label, operation) => surface.screenshot(label, operation),
+      // The window the engine reads, through ScreenCaptureKit, one file per window; macOS 15 or later.
+      startVideo: (operation) => surface.startVideo(operation),
+      stopVideo: (operation) => surface.stopVideo(operation),
     },
     fixtures: {
       desktop: (context) => createDesktopFixture(surface, context),

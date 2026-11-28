@@ -8,7 +8,7 @@ pub(super) fn clears_only_by_another(role: &str, wanted: bool, shown: Option<u8>
     role == "radiobutton" && !wanted && shown == Some(1)
 }
 
-pub(super) fn check(element: &Element, wanted: bool, deadline: Instant) -> Outcome<()> {
+pub(super) fn check<E: Accessible>(element: &E, wanted: bool, deadline: Instant) -> Outcome<()> {
     // A press on anything but a box would run its handler (a submit, a delete) before the check could fail.
     let (_, role) = role_of(element, "check")?;
     if !roles::toggleable(role) {
@@ -216,7 +216,7 @@ pub(super) fn step_to(
 /// The number a stepper shows, from its `AXValue` read. A read the app did not answer in time, or of an element that
 /// is gone, is no proof the stepper shows no number: it fails before anything is sent, a stall as one a retry may get
 /// past. A value that is no number is `None`.
-pub(super) fn shown_number(read: Result<Value, AXError>, what: &str) -> Outcome<Option<f64>> {
+pub(super) fn shown_number<E>(read: Result<Value<E>, AXError>, what: &str) -> Outcome<Option<f64>> {
     match read {
         Ok(Value::Number(number)) => Ok(Some(number)),
         Err(error @ (ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT)) => Err(unread(error, what)),
@@ -235,7 +235,7 @@ pub(super) fn finite(text: &str) -> Result<f64, ()> {
     text.trim().parse::<f64>().ok().filter(|number| number.is_finite()).ok_or(())
 }
 
-pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Outcome<()> {
+pub(super) fn set_value<E: Accessible>(element: &E, text: &str, deadline: Instant) -> Outcome<()> {
     // A disabled field takes no value: wait for it to be enabled, as a fill's actionability wait does.
     enabled(element, deadline, "set value")?;
     let (ax_role, role) = role_of(element, "set value")?;
@@ -324,7 +324,7 @@ pub(super) fn set_value(element: &Element, text: &str, deadline: Instant) -> Out
 /// What a secure field's character count answers: `Ok(None)` for a field that counts none, which is taken at the write's
 /// word. `Err` for a read the app did not answer in time, or for a field gone since the write (a change handler that
 /// replaced it): neither is proof the field counts none, so the fill is not confirmed by it, as a plain field's is not.
-pub(super) fn secure_count(answer: Result<Value, AXError>) -> Result<Option<usize>, ()> {
+pub(super) fn secure_count<E>(answer: Result<Value<E>, AXError>) -> Result<Option<usize>, ()> {
     match answer {
         Ok(Value::Number(count)) => Ok(Some(count as usize)),
         Err(ax::AX_CANNOT_COMPLETE | ax::AX_INVALID_ELEMENT) => Err(()),
@@ -334,7 +334,7 @@ pub(super) fn secure_count(answer: Result<Value, AXError>) -> Result<Option<usiz
 
 /// Selects all the text of a field through accessibility. A select-all key (Cmd+A) sent to an app in the background
 /// goes to its menu bar, not the field, so the delete after it would remove one character.
-pub(super) fn select_all(element: &Element, deadline: Instant) -> Outcome<()> {
+pub(super) fn select_all<E: Accessible>(element: &E, deadline: Instant) -> Outcome<()> {
     if !settable(element, "AXSelectedTextRange", "select all")? {
         return Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, "select all: the field's selection cannot be set"));
     }

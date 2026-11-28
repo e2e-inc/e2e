@@ -38,6 +38,12 @@ export interface RawNode {
   /** How many children the element has, when the read stopped at the depth limit and listed none of them. */
   readonly children_count?: number;
   readonly children?: readonly RawNode[];
+  /**
+   * On a `folded` node: how many consecutive rows of its list, table, or outline it stands for, rows a scroll area
+   * holds wholly out of view, which the driver did not read. A fold is no cut: the same rows fold the same way
+   * until the list scrolls.
+   */
+  readonly folded?: number;
 }
 
 /** The `data` of a driver `snapshot`. */
@@ -109,6 +115,8 @@ export interface ProjectedScreen {
   readonly timedOut: boolean;
   /** The app did not answer for the window itself (`root_unread`). */
   readonly rootUnread: boolean;
+  /** The ids of the lines that stand for folded rows: a reader sees them, a locator never matches one (`locatable`). */
+  readonly folds?: ReadonlySet<string>;
   readonly windowId?: string;
   /** Set by the surface: the sheet on the window that held its focus when the window was read (see `sheetKey`). */
   readonly sheet?: string;
@@ -194,6 +202,9 @@ const CHECKABLE_ROLES = new Set(['checkbox', 'switch', 'radiobutton']);
 /** Roles whose name labels what they hold, so it is never their text. */
 const INPUT_ROLES = new Set(['textfield', 'combobox', 'slider', 'incrementor', 'datefield', 'timefield', 'colorwell']);
 
+/** Roles that float above their window, as the driver reads them: an open menu and a popover, never cut by a scroll area. */
+const FLOATING_ROLES = new Set(['menu', 'popover']);
+
 /** Roles the driver reads text into `value`, which the contract calls `text`. */
 const TEXT_ROLES = new Set(['statictext', 'heading']);
 
@@ -264,6 +275,7 @@ export function projectSnapshot(
 ): ProjectedScreen {
   const window = raw.tree.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
   const bindings = new Map<string, NodeBinding>();
+  const folds = new Set<string>();
   const secureRects: Rect[] = [];
   let unmaskable = false;
   const scrollTargets: { vertical?: string; horizontal?: string } = {};
@@ -271,6 +283,7 @@ export function projectSnapshot(
   // `hiddenAbove`: an ancestor is hidden, a wrapper left out included, so nothing under it is on screen; the resolver reads each node's own state only. `scrolled` when a scroll area is all that hides it, which a scroll into view of the node can undo, else `other`.
   // `prior`: the id the node held before, which a cut gave it a fresh one in place of; look-alikes under it are reported against that id, which their identities are kept under.
   const project = (node: RawNode, id: string, stable: boolean, likeness: string, hiddenAbove: false | 'scrolled' | 'other', prior: string | undefined): SemanticNode => {
+    if (node.folded !== undefined && node.folded > 0) return fold(node.folded, id, likeness);
     const rawStates = new Set(node.states ?? []);
     const role = ROLE_MAP[node.role] ?? (node.role === 'unknown' ? undefined : node.role);
     const secure = rawStates.has('secure');
@@ -364,8 +377,8 @@ export function projectSnapshot(
     // look-alike that still matches has no identity: if the first of two
     // "Delete" buttons goes, the second must not take over its id, so each
     // look-alike gets a new id every snapshot.
-    // A node whose children the read cut off lists only some of them: one that looks unique may have a twin the read did not reach, so none takes an id.
-    const cut = childrenCut(node) || wrapperCut;
+    // A node whose children the read cut off lists only some of them: one that looks unique may have a twin the read did not reach, so none takes an id. So does a list with folded rows, whose names were not read.
+    const cut = childrenCut(node) || wrapperCut || kept.some((child) => (child.folded ?? 0) > 0);
     const children = kept.map((child) => {
       const seen = plain.get(identityOf(child)) === 1 ? identityOf(child) : named.get(identityOf(child, true)) === 1 ? identityOf(child, true) : undefined;
       const identity = cut ? undefined : seen;
@@ -376,7 +389,9 @@ export function projectSnapshot(
       const childStable = stable && identity !== undefined;
       const childId = idFor(childStable ? `${id}/${identity}` : undefined);
       const childPrior = childStable ? childId : prior !== undefined && seen !== undefined ? priorIdOf?.(`${prior}/${seen}`) : undefined;
-      return project(child, childId, childStable, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, states.hidden === true ? (scrolledOut ? 'scrolled' : 'other') : (underHidden.get(child) ?? false), childPrior);
+      const above = states.hidden === true ? (scrolledOut ? 'scrolled' : 'other') : (underHidden.get(child) ?? false);
+      // An open menu or popover floats above the window, so a scroll that took its trigger out of view does not hide it (the driver reads it as on screen).
+      return project(child, childId, childStable, `${likeness}/${plain.get(identityOf(child)) ?? 1}`, above === 'scrolled' && FLOATING_ROLES.has(child.role) ? false : above, childPrior);
     });
     return {
       ref: { id, revision: '' },
@@ -394,6 +409,17 @@ export function projectSnapshot(
     };
   };
 
+  /**
+   * The node a run of folded rows becomes: a hidden line that says how many rows the list holds out of view, so a
+   * reader knows to scroll. It has no role or ref, and nothing acts on it; it never stands for the rows themselves.
+   */
+  const fold = (count: number, id: string, likeness: string): SemanticNode => {
+    const states = { hidden: true };
+    folds.add(id);
+    bindings.set(id, { id, states, actions: [], ...(raw.window === undefined ? {} : { windowId: raw.window.id }), stable: false, likeness, interactive });
+    return { ref: { id, revision: '' }, text: `${count} ${count === 1 ? 'row' : 'rows'} out of view`, states };
+  };
+
   const root = project(raw.tree, ROOT_ID, true, '', false, ROOT_ID);
   const title = label(raw.tree.name) ?? label(raw.window?.title);
   return {
@@ -406,11 +432,26 @@ export function projectSnapshot(
     cutShort: raw.complete === false || raw.truncated === true,
     timedOut: raw.timed_out === true,
     rootUnread: raw.root_unread === true,
+    ...(folds.size === 0 ? {} : { folds }),
     ...(raw.window === undefined ? {} : { windowId: raw.window.id }),
     // The window's accessibility root carries its title; the window server's is the app's name without Screen Recording permission.
     ...(title === undefined ? {} : { title }),
     ...(scrollTargets.vertical === undefined && scrollTargets.horizontal === undefined ? {} : { scrollTargets }),
   };
+}
+
+/**
+ * The tree a locator matches on: the screen's, without the lines that stand
+ * for folded rows. Their text is the engine's own (`182 rows out of view`),
+ * so `getByText('rows')` or a non-exact `getByText('View')` would otherwise
+ * find one, and a strict action fail as ambiguous.
+ */
+export function locatable(screen: ProjectedScreen): SemanticNode {
+  const folds = screen.folds;
+  if (folds === undefined) return screen.root;
+  const prune = (node: SemanticNode): SemanticNode =>
+    node.children === undefined ? node : { ...node, children: node.children.filter((child) => !folds.has(child.ref.id)).map(prune) };
+  return prune(screen.root);
 }
 
 /** A heading's level: the one the app reports, else one its description names (`heading level 2`). */
