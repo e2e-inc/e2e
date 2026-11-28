@@ -1083,6 +1083,8 @@ describe('replayTrace: the recorded control is gone and a twin is left', () => {
 
     expect(await replayTrace(host, trace([drag]))).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
     expect(host.calls).toEqual([]);
+    // The refusal holds on the looks that show the destination, not only on the first.
+    expect(host.looks.length).toBeGreaterThan(1);
   });
 
   it('keeps a drag end refused while it looks again for the test id: a second look-alike does not end the wait', async () => {
