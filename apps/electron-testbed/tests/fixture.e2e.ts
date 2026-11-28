@@ -245,14 +245,37 @@ test.describe('expect(electron) and the fixture\'s waits', () => {
     expect(Date.now() - started).toBeLessThan(5000);
   });
 
-  test('says a crashed window\'s title cannot be read, at once', async ({ electron }) => {
+  test('says a crashed window\'s title cannot be read, and reads it again once the app reloads it', async ({ electron }) => {
     const started = Date.now();
-    const waiting = failure(expect(electron).not.toHaveTitle('Sign In', { timeout: 10_000 }));
+    const waiting = failure(expect(electron).not.toHaveTitle('Sign In', { timeout: 20_000 }));
     await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer());
-    // The crash ends the wait that was running, and one that starts after it.
+    // The crash ends the wait that was running, and one that starts after it, each after a moment for a reload.
     expect(await waiting).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('renderer crashed') });
-    expect(await failure(expect(electron).toHaveTitle('Sign In', { timeout: 10_000 }))).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('renderer crashed') });
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(await failure(expect(electron).toHaveTitle('Sign In', { timeout: 20_000 }))).toMatchObject({ code: 'APP_NOT_OPEN', message: expect.stringContaining('renderer crashed') });
+    expect(Date.now() - started).toBeLessThan(10_000);
+    // Reloaded, as the error says to: the wait goes on to the page that loads.
+    await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.reload());
+    await expect(electron).toHaveTitle('Sign In', { timeout: 5000 });
+  });
+
+  test('fails on a dialog that opens while the title is read', async ({ electron }) => {
+    await electron.activeWindow().evaluate(() => {
+      const page = globalThis as unknown as { document: object; Document: { prototype: object }; confirm(message: string): boolean };
+      const real = Object.getOwnPropertyDescriptor(page.Document.prototype, 'title');
+      let asked = false;
+      Object.defineProperty(page.document, 'title', {
+        configurable: true,
+        get() {
+          if (!asked) {
+            asked = true;
+            page.confirm('During title read?');
+          }
+          return real?.get?.call(page.document) as string;
+        },
+      });
+    });
+    // The title is the one asked for, and the dialog its read opened is still this step's failure.
+    expect(String(await failure(expect(electron).toHaveTitle('Sign In')))).toContain('unhandled confirm dialog: During title read?');
   });
 
   test('ends a wait at once when the app quits under it', async ({ electron }) => {

@@ -536,26 +536,42 @@ export class ElectronSurface {
   /**
    * The title `expect(electron).toHaveTitle` polls: the document's, read
    * within the operation so a read the deadline cuts off is a timeout and
-   * never another title, else the OS window's for a document with none.
+   * never another title, else the OS window's for a document with none. A
+   * window whose renderer crashed is waited on as `readShown` waits on it:
+   * briefly, for the app to load it again, and then said to have crashed.
    */
   async currentTitle(window: AppWindow, operation: OperationContext): Promise<string> {
-    // A crashed renderer answers nothing: said at once, as a screen read says it, not waited out.
-    if (this.windowList.isCrashed(window)) throw crashed();
-    let stopWaiting: () => void = () => undefined;
-    const crash = new Promise<never>((_resolve, reject) => {
-      stopWaiting = window.page.on('crash', () => reject(crashed()));
+    const { page } = window;
+    const read = async (): Promise<string> => {
+      const document = await page.title();
+      return document !== '' ? document : ((await this.app.windowTitle(page)) ?? '');
+    };
+    return await withBudget(operation, 'window title', async (budget) => {
+      for (;;) {
+        if (this.windowList.isCrashed(window)) {
+          let stopListening: () => void = () => undefined;
+          const loadedOrClosed = new Promise<void>((resolve) => {
+            const stops = [page.on('load', resolve), page.on('close', resolve)];
+            stopListening = () => stops.forEach((stop) => stop());
+          });
+          await answerWithin(loadedOrClosed, Math.min(CRASH_RELOAD_WAIT_MS, budget.waits.remaining()));
+          stopListening();
+          if (page.isClosed()) throw invalidState('the window closed');
+          if (this.windowList.isCrashed(window)) throw crashed();
+        }
+        // A read the renderer's crash leaves pending would never settle: the crash ends it, and the next pass waits.
+        let stopWaiting: () => void = () => undefined;
+        const crash = new Promise<'crashed'>((resolve) => {
+          stopWaiting = page.on('crash', () => resolve('crashed'));
+        });
+        try {
+          const title = await Promise.race([read(), crash]);
+          if (title !== 'crashed' || !this.windowList.isCrashed(window)) return title;
+        } finally {
+          stopWaiting();
+        }
+      }
     });
-    crash.catch(() => undefined);
-    try {
-      const read = async (): Promise<string> => {
-        const document = await window.page.title();
-        return document !== '' ? document : ((await this.app.windowTitle(window.page)) ?? '');
-      };
-      // A read the renderer's crash leaves pending would never settle: the crash ends it, the fallback too.
-      return await withBudget(operation, 'window title', () => Promise.race([read(), crash]));
-    } finally {
-      stopWaiting();
-    }
   }
 
   /** Whether the shown window's renderer crashed: a wait on the window ends with that, where a closing window is waited through. */
