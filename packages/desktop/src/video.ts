@@ -92,8 +92,9 @@ export class WindowVideo {
    * new one starts. Undefined ends the current file with nothing after it,
    * as before the app quits. Nothing happens while no video was asked for,
    * and a window that cannot be recorded leaves a gap, never a failure of
-   * the read or launch that called it: it is not tried again while the
-   * screen stays on it. The first such failure is kept for `end`.
+   * the read or launch that called it: it is not tried again for the rest
+   * of the video, even after the screen leaves it and comes back. The first
+   * such failure is kept for `end`.
    */
   async follow(windowId: string | undefined, operation: OperationContext): Promise<void> {
     const target = windowId !== undefined && this.refused.has(windowId) ? undefined : windowId;
