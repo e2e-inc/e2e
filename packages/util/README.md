@@ -13,8 +13,11 @@ e2e depends on this package. You do not need to install it yourself.
 - The logic is the `e2e-util` crate (`crates/e2e-util`), plain Rust with no
   binding dependency. The Node addon is `crates/e2e-util-napi`, built with
   NAPI-RS.
-- Every call that touches pixels returns a Promise. The work runs on a
-  blocking thread of NAPI-RS's tokio runtime, at most one call per core.
+- Decoding, encoding, resizing, cropping, painting, and comparing return a
+  Promise. The work runs on a blocking thread of NAPI-RS's tokio runtime, at
+  most one call per core. Two calls copy a whole image on the JavaScript
+  thread: `NativeImage.fromRgba` copies its input, and `pixels()` copies the
+  image out.
 - A decoded image stays on the native side as a `NativeImage`. V8 is told
   how much memory it holds, so many images in a row press the garbage
   collector as their memory does.
