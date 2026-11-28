@@ -139,7 +139,10 @@ model calls:
 1. **Check the starting screen** to make sure the app is on the same route.
 2. **Replay each recorded action**, matching controls by role, name, test
    ID, and surrounding context. e2e waits for controls to appear and stops
-   if a match is ambiguous.
+   if a match is ambiguous. A tap, hover, or drag at a point recorded inside
+   a control waits for that control while it is late, hidden, or outside the
+   viewport. A drag whose source the recorded point has to pick out of
+   same-named controls stops if one of them disappears meanwhile.
 3. **Check the end state** (final route plus the controls that appeared,
    disappeared, or changed state).
 4. **Finish with zero model calls**, or hand off to the live agent with a
@@ -202,7 +205,7 @@ also says so on the step's line, on every run until the step changes:
 | `invalid-entry` | Recording is unreadable, too large, or from an incompatible schema. | Run `npx e2e cache clear`. |
 | `truncated` | Recording hit a size or action limit ([see below](#limits-and-gaps)). | Split the step into smaller goals, or pass secrets as `Secret` handles. |
 | `wrong-context` | App started on a different route than recorded. | Open the same screen before the step. |
-| `target-not-found` | A recorded control didn't appear within 15 seconds. | If the UI changed, the next passing run updates the cache. Give unnamed controls labels or put them in named containers. |
+| `target-not-found` | A recorded control didn't appear within 15 seconds. For a tap, hover, or drag at a recorded point, that includes a control that stayed hidden or outside the viewport. | If the UI changed, the next passing run updates the cache. Give unnamed controls labels or put them in named containers. |
 | `target-ambiguous` | Multiple controls matched where the recording expected one (or the count of matching controls changed). | Give repeated controls distinct names or use unique test data. |
 | `gap` | An action can't be replayed safely ([see below](#limits-and-gaps)). | Let the agent handle it live, or pass stable values via `params`. |
 | `action-failed` | The app rejected a replayed action. | Check the app. |

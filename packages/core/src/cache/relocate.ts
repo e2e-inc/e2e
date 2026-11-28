@@ -308,6 +308,22 @@ function tierMatches(tier: DescriptorTier, candidates: readonly DescribedNode[])
 }
 
 /**
+ * A counter of the group a descriptor matched on `nodes`: how many nodes of
+ * a later observation the tier that matched here still matches, even when a
+ * stronger or weaker tier matches there. The caller defines which nodes
+ * count. Nothing when no tier matches.
+ */
+export function relocationGroupCounter(
+  descriptor: TraceTargetDescriptor,
+  nodes: ReadonlyMap<string, RedactedNode>,
+  eligible: (node: RedactedNode | undefined) => boolean,
+): ((current: ReadonlyMap<string, RedactedNode>) => number) | undefined {
+  const { tier } = matchingIds(descriptor, nodes);
+  if (tier === undefined) return undefined;
+  return (current) => tierMatches(tier, candidatesWithin(descriptor.within, current)).filter((id) => eligible(current.get(id))).length;
+}
+
+/**
  * Whether a node its test id tells apart has twins once the test id is set
  * aside: other controls in its container that its semantic tier
  * (`descriptorTiers`) also matches on the screen it was acted on. Replay

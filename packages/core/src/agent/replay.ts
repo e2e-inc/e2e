@@ -12,7 +12,7 @@
  * divergence.
  */
 
-import { isRelocatableDescriptor, MAIN_LIST_SHARE, relocateDescriptor, type RelocationFailure, type RelocationResult } from '../cache/relocate.ts';
+import { isRelocatableDescriptor, MAIN_LIST_SHARE, relocateDescriptor, relocationGroupCounter, type RelocationFailure, type RelocationResult } from '../cache/relocate.ts';
 import {
   isNodeAction,
   isTapActionName,
@@ -440,11 +440,17 @@ const END_WAIT_POLL_MS = 1_000;
 /** Step clock kept back from that wait, so a hand-off still has room to act. */
 const END_WAIT_RESERVE_MS = 20_000;
 
-/** Relocates one descriptor against the settling screen, looking again while `retryable` says the failure may pass. */
+/**
+ * Relocates one descriptor against the settling screen, looking again while
+ * `retryable` says the failure may pass. A caller that needs more of the
+ * node than its id says so in `usable` (a point needs a place in the node's
+ * box, `placePoint`): a node listed before it is usable is still loading.
+ */
 async function relocate(
   host: ReplayHost,
   descriptor: TraceTargetDescriptor,
   look: Look,
+  usable: (found: Found) => boolean = () => true,
 ): Promise<Relocated> {
   let last: Relocated = { kind: 'failed', failure: 'target-not-found' };
   let refused = false;
@@ -460,12 +466,20 @@ async function relocate(
       return retryable(failed, descriptor) ? undefined : last;
     }
     const node = screen.nodes.get(result.id);
-    return node === undefined ? undefined : { ...result, node };
+    const found = node === undefined ? undefined : { ...result, node, screen };
+    if (found !== undefined && usable(found)) return found;
+    // The look-alikes of an earlier look no longer stand for a node this one found.
+    if (!refused) last = { kind: 'failed', failure: 'target-not-found' };
+    return undefined;
   }, look);
   return settled ?? last;
 }
 
-/** Both ends of a drag as one look found them, and whether an end refused as a twin is still not found on it. */
+/**
+ * Both ends of a drag as one look found them, and whether an end refused as
+ * a twin is still not found on it. A source refused because its group lost
+ * a control leaves its slot empty.
+ */
 interface Ends {
   readonly screen: SemanticScreen;
   readonly ends: readonly [Relocated | undefined, Relocated | undefined];
@@ -480,38 +494,89 @@ interface Ends {
  * the next. An end with no descriptor (a bare point) needs no finding. Waits
  * like `relocate` does, judging the source first as main did, so a source
  * still loading is waited for whatever the destination shows. Each end keeps
- * its twin refusal on later looks, as `relocate` does. Returns the last look
- * judged; nothing when no look could be read.
+ * its twin refusal on later looks, as `relocate` does.
+ *
+ * A drag between points passes `places`, which says whether an end's point
+ * has a place in what a look found of it (`placeWithin`). An end listed
+ * before its point can be placed (mounted hidden, with no box yet, or
+ * outside the viewport) is still loading, whichever look it turns up on,
+ * and is waited for like one that is not listed. A source whose look-alikes
+ * its point settles on this look lets such a destination wait. If that
+ * source loses a candidate during the wait, or is re-found where its point
+ * cannot be placed, the drag stops.
+ *
+ * That guard is a count of the source's visible look-alikes, compared with
+ * the look before, as the `twinLeft` refusal is a count: an engine may
+ * renumber its nodes between looks, so nothing else tells them apart. It
+ * stops on purpose when the group grows and drops back (2, 3, 2) and when
+ * a twin stays listed but goes hidden: a control left, and it may have been
+ * the source. It cannot see a source and a twin that swap places at the
+ * same count; the recorded point then picks the twin, as it does among
+ * look-alikes on a single look (`placeWithin`).
+ * Returns the last look judged; nothing when no look could be read.
  */
 async function relocateEnds(
   host: ReplayHost,
   source: TraceTargetDescriptor | undefined,
   destination: TraceTargetDescriptor | undefined,
   look: Look,
+  places?: { readonly source: (relocated: Relocated) => boolean; readonly destination: (relocated: Relocated) => boolean },
 ): Promise<Ends | undefined> {
   const refused = new Set<TraceTargetDescriptor>();
   let latest: Ends | undefined;
+  let countSources: ReturnType<typeof relocationGroupCounter>;
+  let sourceCount = 0;
   const judge = (descriptor: TraceTargetDescriptor, screen: SemanticScreen): { readonly relocated: Relocated; readonly wait: boolean } => {
     const result = relocateDescriptor(descriptor, screen.nodes);
     if (result.kind === 'found') {
       const node = screen.nodes.get(result.id);
-      return node === undefined ? { relocated: { kind: 'failed', failure: 'target-not-found' }, wait: true } : { relocated: { ...result, node }, wait: false };
+      if (node === undefined) return { relocated: { kind: 'failed', failure: 'target-not-found' }, wait: true };
+      return { relocated: { ...result, node, screen }, wait: false };
     }
     if (result.failure === 'target-ambiguous' && result.twinLeft === true) refused.add(descriptor);
     const marked = refused.has(descriptor) && result.failure === 'target-ambiguous' ? { ...result, twinLeft: true as const } : result;
     return { relocated: marked.failure === 'target-ambiguous' ? { ...marked, screen } : marked, wait: retryable(marked, descriptor) };
   };
-  const settled = await pollSettled(host, (screen) => {
-    const from = source === undefined ? undefined : judge(source, screen);
-    const to = destination === undefined ? undefined : judge(destination, screen);
+  const unplaced = (judged: ReturnType<typeof judge> | undefined, placed: ((relocated: Relocated) => boolean) | undefined) =>
+    placed !== undefined && judged?.relocated.kind === 'found' && !placed(judged.relocated);
+  const settled = await pollSettled<Ends>(host, (screen) => {
+    const listedSource = source === undefined ? undefined : judge(source, screen);
+    const listedDestination = destination === undefined ? undefined : judge(destination, screen);
+    const from = unplaced(listedSource, places?.source) ? STILL_LOADING : listedSource;
+    const to = unplaced(listedDestination, places?.destination) ? STILL_LOADING : listedDestination;
+    if (countSources !== undefined) {
+      const count = countSources(screen.nodes);
+      if (count < sourceCount || unplaced(listedSource, places?.source)) {
+        // The source slot stays empty: `refused` names the failure, and a
+        // source left in the slot would be placed and dragged.
+        return { screen, ends: [undefined, to?.relocated], refused: true };
+      }
+      sourceCount = count;
+    }
     const unresolved = (descriptor: TraceTargetDescriptor | undefined, judged: typeof from) =>
       descriptor !== undefined && refused.has(descriptor) && judged?.relocated.kind === 'failed';
     latest = { screen, ends: [from?.relocated, to?.relocated], refused: unresolved(source, from) || unresolved(destination, to) };
-    const first = [from, to].find((judged) => judged?.relocated.kind === 'failed');
-    return first?.wait === true ? undefined : latest;
+    if (from?.relocated.kind === 'failed') {
+      const waitingForDestination = to?.wait === true && places?.source(from.relocated) === true && !places.destination(to.relocated);
+      if (from.wait || waitingForDestination) {
+        // A recorded position already says which twin the source is once the
+        // count catches up (`retryable`), so its group is not held to a count.
+        if (waitingForDestination && countSources === undefined && source !== undefined
+          && source.position === undefined && from.relocated.failure === 'target-ambiguous') {
+          countSources = relocationGroupCounter(source, screen.nodes, (node) => visibleBox(node) !== undefined);
+          sourceCount = countSources?.(screen.nodes) ?? 0;
+        }
+        return undefined;
+      }
+      return latest;
+    }
+    return to?.wait === true ? undefined : latest;
   }, look);
   return settled ?? latest;
 }
+
+/** An end a look lists but cannot place a point in yet: not found on this look, and worth another. */
+const STILL_LOADING = { relocated: { kind: 'failed', failure: 'target-not-found' }, wait: true } as const;
 
 /** Why a drag's ends could not both be found: a twin refusal while its end is still missing, else the first end that failed. */
 function endsFailure(ends: Ends | undefined): RelocationFailure {
@@ -537,9 +602,12 @@ function retryable(result: Extract<RelocationResult, { kind: 'failed' }>, descri
   return result.twinLeft === true || descriptor.position !== undefined;
 }
 
+/** A relocation with the node it found and the screen that lists it. */
+type Found = Extract<RelocationResult, { kind: 'found' }> & { readonly node: RedactedNode; readonly screen: SemanticScreen };
+
 /** A relocation with the node it found, or with the screen its look-alikes are on, for a replay that needs boxes. */
 type Relocated =
-  | (Extract<RelocationResult, { kind: 'found' }> & { readonly node: RedactedNode })
+  | Found
   | Extract<RelocationResult, { failure: 'target-not-found' }>
   | (Extract<RelocationResult, { failure: 'target-ambiguous' }> & { readonly screen: SemanticScreen });
 
@@ -569,8 +637,9 @@ async function placePoint(
     }
     return { kind: 'placed', point: end.point };
   }
-  const relocated = await relocate(host, end.within.descriptor, look);
-  const at = placeWithin(relocated, { ...end.within, point: end.point, viewport });
+  const planned = { ...end.within, point: end.point, viewport };
+  const relocated = await relocate(host, end.within.descriptor, look, (found) => placeWithin(found, planned) !== undefined);
+  const at = placeWithin(relocated, planned);
   if (at === undefined) return { kind: 'failed', failure: relocated.kind === 'failed' ? relocated.failure : 'target-not-found' };
   return { kind: 'placed', point: at };
 }
@@ -590,7 +659,12 @@ async function placePoints(
   | { readonly kind: 'placed'; readonly from: ViewportPoint; readonly to: ViewportPoint }
   | { readonly kind: 'failed'; readonly failure: ReplayHandOffReason; readonly why?: string }
 > {
-  const ends = await relocateEnds(host, from.within?.descriptor, to.within?.descriptor, look);
+  const place = (end: PointEnd, relocated: Relocated | undefined): ViewportPoint | undefined =>
+    end.within === undefined || relocated === undefined ? undefined : placeWithin(relocated, { ...end.within, point: end.point, viewport });
+  const ends = await relocateEnds(host, from.within?.descriptor, to.within?.descriptor, look, {
+    source: (relocated) => place(from, relocated) !== undefined,
+    destination: (relocated) => place(to, relocated) !== undefined,
+  });
   if (ends === undefined) return { kind: 'failed', failure: from.within === undefined ? 'action-failed' : 'target-not-found' };
   const { width, height } = ends.screen.viewport;
   const points: ViewportPoint[] = [];
@@ -603,7 +677,7 @@ async function placePoints(
       continue;
     }
     const relocated = ends.ends[index];
-    const at = relocated === undefined ? undefined : placeWithin(relocated, { ...end.within, point: end.point, viewport });
+    const at = place(end, relocated);
     if (at === undefined) return { kind: 'failed', failure: ends.refused ? 'target-ambiguous' : relocated?.kind === 'failed' ? relocated.failure : 'target-not-found' };
     points.push(at);
   }
@@ -613,20 +687,28 @@ async function placePoints(
 
 /**
  * Where a recorded point lands on the live screen: its place inside the
- * re-found node's box, or among the visible look-alikes inside the one that
- * contains the recorded point on a viewport of the recorded size, as the hit
- * test that recorded it skipped
- * hidden nodes. Undefined when the node is gone or has no box, or the point
- * settles nothing: tapping the bare point could press whatever now sits there.
+ * re-found node's visible box, or among the visible look-alikes inside the
+ * one that contains the recorded point on a viewport of the recorded size.
+ * Only a visible box holds a point, as the hit test that recorded it
+ * (`hitTest`) skipped hidden nodes. The point verbs keep a point inside the
+ * viewport (`clampToViewport`), so a box holds a point only where the kept
+ * point still lies in it: a node wholly outside the viewport would be acted
+ * on at the viewport's edge. Undefined when the node is gone, hidden, has
+ * no box or lies outside the viewport, or the point settles nothing:
+ * tapping the bare point could press whatever now sits there.
  */
 function placeWithin(
   relocated: Relocated,
   planned: { readonly fx: number; readonly fy: number; readonly point: ViewportPoint; readonly viewport: TraceViewport },
 ): ViewportPoint | undefined {
-  const inside = (box: Box): ViewportPoint => ({ x: box.x + planned.fx * box.width, y: box.y + planned.fy * box.height });
+  const inside = (box: Box, live: TraceViewport): ViewportPoint | undefined => {
+    const at = { x: box.x + planned.fx * box.width, y: box.y + planned.fy * box.height };
+    const kept = { x: Math.min(Math.max(at.x, 0), Math.max(0, live.width - 1)), y: Math.min(Math.max(at.y, 0), Math.max(0, live.height - 1)) };
+    return containsPoint(box, kept) ? at : undefined;
+  };
   if (relocated.kind === 'found') {
-    const box = usableBox(relocated.node.rect);
-    return box === undefined ? undefined : inside(box);
+    const box = visibleBox(relocated.node);
+    return box === undefined ? undefined : inside(box, relocated.screen.viewport);
   }
   // A named match refused as a twin of the recorded node is no choice to
   // settle: the point may sit on the twin.
@@ -634,11 +716,9 @@ function placeWithin(
   const { viewport, nodes } = relocated.screen;
   if (viewport.width !== planned.viewport.width || viewport.height !== planned.viewport.height) return undefined;
   const containing = relocated.candidates
-    .map((id) => nodes.get(id))
-    .filter((node): node is RedactedNode => node !== undefined && node.states?.hidden !== true)
-    .map((node) => usableBox(node.rect))
+    .map((id) => visibleBox(nodes.get(id)))
     .filter((box): box is Box => box !== undefined && containsPoint(box, planned.point));
-  if (containing.length === 1) return inside(containing[0]!);
+  if (containing.length === 1) return inside(containing[0]!, viewport);
   // Several look-alikes hold the point and nest: a host view and the view
   // inside it, a group inside a group, an anonymous container among its
   // kind. Whichever of them is the recorded node, the recorded point on a
@@ -662,6 +742,11 @@ function containsBox(outer: Box, inner: Box): boolean {
     inner.x + inner.width <= outer.x + outer.width &&
     inner.y + inner.height <= outer.y + outer.height
   );
+}
+
+/** The box a recorded point can land in: the node's own, while the node shows. */
+function visibleBox(node: RedactedNode | undefined): Box | undefined {
+  return node?.states?.hidden === true ? undefined : usableBox(node?.rect);
 }
 
 function usableBox(rect: SemanticNode['rect']): Box | undefined {

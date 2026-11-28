@@ -512,6 +512,53 @@ describe('replayTrace: bare-point taps', () => {
     expect(flat.calls).toEqual([]);
   });
 
+  it('waits for the node the point was placed in while it is listed but hidden, as the hit test that recorded the point skipped hidden nodes', async () => {
+    const within = { target: { role: 'img', name: 'Map' }, fx: 0.5, fy: 0.5 };
+    const shown: SemanticNode = { ref: { id: 'm', revision: 'r1' }, role: 'img', name: 'Map', rect: { x: 200, y: 0, width: 200, height: 200 } };
+    const covered: SemanticNode = { ...shown, rect: { x: 600, y: 0, width: 200, height: 200 }, states: { hidden: true } };
+    const points: unknown[] = [];
+    const host = makeHost({ onAction: (name, detail) => void (name === 'tapAt' && points.push(detail)) });
+    host.capture = async () => screen(host.looks.length < 3 ? [covered] : [shown]);
+    expect(await replayTrace(host, trace([{ ...pin, within }]))).toMatchObject({ completed: true, executed: 1 });
+    // Never the middle of the hidden box at (700, 100).
+    expect(points).toEqual([{ x: 300, y: 100 }]);
+
+    const stuck = makeHost({ nodes: [covered] });
+    expect(await replayTrace(stuck, trace([{ ...pin, within }]))).toMatchObject({ completed: false, executed: 0, stopReason: 'target-not-found' });
+    expect(stuck.calls).toEqual([]);
+    expect(stuck.looks.length).toBeGreaterThan(2);
+  });
+
+  it('waits for a node that lies outside the viewport, where the point verb would act on the viewport edge instead', async () => {
+    const within = { target: { role: 'img', name: 'Map' }, fx: 0.5, fy: 0.5 };
+    const map = (x: number): SemanticNode => ({ ref: { id: 'm', revision: 'r1' }, role: 'img', name: 'Map', rect: { x, y: 0, width: 200, height: 200 } });
+    const points: unknown[] = [];
+    const host = makeHost({ onAction: (name, detail) => void (name === 'tapAt' && points.push(detail)) });
+    // Past the right edge of the 1280-wide viewport at first, then scrolled into view.
+    host.capture = async () => screen([map(host.looks.length < 3 ? 1300 : 200)]);
+    expect(await replayTrace(host, trace([{ ...pin, within }]))).toMatchObject({ completed: true, executed: 1 });
+    expect(points).toEqual([{ x: 300, y: 100 }]);
+
+    const away = makeHost({ nodes: [map(1300)] });
+    expect(await replayTrace(away, trace([{ ...pin, within }]))).toMatchObject({ completed: false, executed: 0, stopReason: 'target-not-found' });
+    expect(away.calls).toEqual([]);
+
+    // A node that straddles the edge still holds the point the verb keeps inside the viewport.
+    const straddling = makeHost({ nodes: [map(1150)], onAction: (name, detail) => void (name === 'tapAt' && points.push(detail)) });
+    expect(await replayTrace(straddling, trace([{ ...pin, within: { ...within, fx: 0.9 } }]))).toMatchObject({ completed: true, executed: 1 });
+    expect(points).toEqual([{ x: 300, y: 100 }, { x: 1330, y: 100 }]);
+  });
+
+  it('never places the point from an earlier look once the node turns up hidden', async () => {
+    // Recorded as the first of two maps. Three show at first, the point inside the first; then two are left and the first is hidden.
+    const within = { target: { role: 'img', name: 'Map', position: { index: 0, of: 2 } }, fx: 0.5, fy: 0.5 };
+    const map = (id: string, x: number): SemanticNode => ({ ref: { id, revision: 'r1' }, role: 'img', name: 'Map', rect: { x, y: 0, width: 200, height: 200 } });
+    const host = makeHost({});
+    host.capture = async () => screen(host.looks.length === 1 ? [map('a', 200), map('b', 500), map('c', 800)] : [{ ...map('a', 200), states: { hidden: true } }, map('b', 500)]);
+    expect(await replayTrace(host, trace([{ ...pin, within }]))).toMatchObject({ completed: false, executed: 0, stopReason: 'target-not-found' });
+    expect(host.calls).toEqual([]);
+  });
+
   it('lets the recorded point pick among look-alikes when it lies inside exactly one of them', async () => {
     const left: SemanticNode = { ref: { id: 'a', revision: 'r1' }, role: 'img', name: 'Map', rect: { x: 0, y: 0, width: 200, height: 200 } };
     const right: SemanticNode = { ref: { id: 'b', revision: 'r1' }, role: 'img', name: 'Map', rect: { x: 200, y: 0, width: 200, height: 200 } };
@@ -715,6 +762,241 @@ describe('replayTrace: bare-point drags', () => {
       expect(drags, waits).toEqual([{ from: { x: 100, y: 350 }, to: { x: 500, y: 200 } }]);
     }
   });
+
+  it('uses the current observation when both drag points already identify a control', async () => {
+    const node = (id: string, role: string, name: string, x: number): SemanticNode => ({
+      ref: { id, revision: 'r1' }, role, name, rect: { x, y: 0, width: 150, height: 100 },
+    });
+    const card = node('card', 'button', 'Card', 25);
+    const twin = node('twin', 'button', 'Card', 225);
+    const lane = node('lane', 'region', 'Done', 425);
+    const other = node('other', 'region', 'Done', 645);
+    const extra = node('extra', 'region', 'Done', 865);
+    const drag: RecordedAction = {
+      name: 'dragAt',
+      summary: 'drag Card to Done',
+      from: { point: { x: 100, y: 50 }, within: { target: { role: 'button', name: 'Card' }, fx: 0.5, fy: 0.5 } },
+      to: { point: { x: 500, y: 50 }, within: { target: { role: 'region', name: 'Done', position: { index: 0, of: 2 } }, fx: 0.5, fy: 0.5 } },
+      viewport: VIEWPORT,
+    };
+    const drags: unknown[] = [];
+    const host = makeHost({ onAction: (name, detail) => void (name === 'dragAt' && drags.push(detail)) });
+    host.capture = async () => host.looks.length === 1
+      ? screen([card, twin, lane, other, extra])
+      : screen([card, twin, other, extra]);
+
+    expect(await replayTrace(host, trace([drag]))).toMatchObject({ completed: true, executed: 1 });
+    expect(drags).toEqual([{ from: { x: 100, y: 50 }, to: { x: 500, y: 50 } }]);
+  });
+
+  describe('a drag between points whose destination is late', () => {
+    const card: SemanticNode = { ref: { id: 'c', revision: 'r1' }, role: 'button', name: 'Card', rect: { x: 0, y: 0, width: 200, height: 100 } };
+    const lane: SemanticNode = { ref: { id: 'l', revision: 'r1' }, role: 'region', name: 'Done', rect: { x: 450, y: 0, width: 200, height: 100 } };
+    /** The node under another id, as an engine lists a second control of the same kind. */
+    const as = (node: SemanticNode, id: string): SemanticNode => ({ ...node, ref: { id, revision: 'r1' } });
+    const at = (node: SemanticNode, x: number): SemanticNode => ({ ...node, rect: { x, y: 0, width: 200, height: 100 } });
+    const hidden = (node: SemanticNode): SemanticNode => ({ ...node, states: { hidden: true } });
+    const withTestId = (node: SemanticNode, testId: string): SemanticNode => ({ ...node, testId });
+    const twin = at(as(card, 'twin'), 220);
+    const third = at(as(card, 'third'), 700);
+    /** The card 25 pixels to the right, where a drag from its middle starts at x 125. */
+    const moved = at(card, 25);
+    /** The twin where the card was recorded, under the recorded point. */
+    const twinInPlace = as(card, 'twin');
+    const firstOfTwo = { position: { index: 0, of: 2 } };
+    const primary = { testId: 'card-primary' };
+
+    interface WaitCase {
+      readonly label: string;
+      /** What the recording kept of the source beside its role and name. */
+      readonly source?: Pick<TraceTargetDescriptor, 'position' | 'testId'>;
+      /** What each look shows, in order. */
+      readonly looks: readonly (readonly SemanticNode[])[];
+      /** Where the drag starts when the replay sends one. */
+      readonly dragsFrom?: { readonly x: number; readonly y: number };
+      /** Why the replay stops when it sends none. */
+      readonly stops?: 'target-ambiguous' | 'target-not-found';
+      /** The last look repeats until the wait runs out. */
+      readonly waitsOut?: true;
+    }
+
+    it.each<WaitCase>([
+      {
+        label: 'waits for the destination when the source point resolves same-named candidates',
+        looks: [[card, twin], [moved, twin, lane]],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'stops when same-named sources overlap at the recorded point',
+        looks: [[card, at(twin, 25)]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'refuses the remaining twin when the source leaves while waiting for the destination',
+        looks: [[card, twin], [twin, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'refuses a twin that moves into the recorded point',
+        looks: [[card, twin], [twinInPlace, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'stops when only the unrelated twin leaves',
+        looks: [[card, twin], [moved, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'stops when the source count drops from three to two',
+        looks: [[card, twin, third], [moved, twin, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'drags a positioned source once the group settles to its recorded count while the destination loads',
+        source: firstOfTwo,
+        looks: [[card, twin, third], [moved, twin, lane]],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'picks a positioned source by order, whichever control left',
+        source: firstOfTwo,
+        looks: [[card, twin, third], [twinInPlace, third, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'stops when the source group grows to three and drops back to two',
+        looks: [[card, twin], [card, twin, third], [moved, twin, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'stops when a twin stays listed but goes hidden',
+        looks: [[card, twin], [moved, hidden(twin), lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'drags the control under the recorded point when the source and its twin swap places',
+        looks: [[card, twin], [at(as(card, 'twin'), 0), at(as(card, 'c'), 220), lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'keeps waiting for a positioned source when its destination is already visible',
+        source: firstOfTwo,
+        looks: [[card, twin, third, lane], [moved, twin, lane]],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'uses a recovered test ID when the same source group remains',
+        source: primary,
+        looks: [[card, twin], [withTestId(moved, 'card-primary'), twin, lane]],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'stops when the source no longer shares the originally matched test ID',
+        source: primary,
+        looks: [
+          [withTestId(card, 'card-primary'), withTestId(twin, 'card-primary')],
+          [withTestId(moved, 'updated-card-id'), withTestId(twin, 'card-primary'), lane],
+        ],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'drags when the originally matched test ID group stays intact',
+        source: primary,
+        looks: [
+          [withTestId(card, 'card-primary'), withTestId(twin, 'card-primary')],
+          [withTestId(moved, 'card-primary'), withTestId(twin, 'card-primary'), lane],
+        ],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'waits for a late destination that appears hidden and then shows',
+        looks: [[card, twin], [moved, twin, hidden(lane)], [moved, twin, lane]],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'waits for a destination that is hidden on the first look',
+        looks: [[card, twin, hidden(at(lane, 900))], [card, twin, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'waits for a hidden destination when the source has no twin',
+        looks: [[card], [card, hidden(at(lane, 900))], [card, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'waits for a source that is listed but hidden',
+        looks: [[hidden(at(card, 300)), lane], [card, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'waits for a destination that lies outside the viewport',
+        looks: [[card, at(lane, 1300)], [card, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'stops without a drag when the destination stays outside the viewport',
+        looks: [[card, twin, at(lane, 1300)]],
+        stops: 'target-not-found',
+        waitsOut: true,
+      },
+      {
+        label: 'waits for a source that lies outside the viewport',
+        looks: [[at(card, 1300), lane], [card, lane]],
+        dragsFrom: { x: 100, y: 50 },
+      },
+      {
+        label: 'stops without a drag when the source stays hidden',
+        looks: [[hidden(card), lane]],
+        stops: 'target-not-found',
+        waitsOut: true,
+      },
+      {
+        label: 'stops without a drag when the destination stays hidden',
+        looks: [[card, twin], [moved, twin, hidden(lane)]],
+        stops: 'target-not-found',
+        waitsOut: true,
+      },
+      {
+        label: 'refuses a recovered test ID on a hidden source',
+        source: primary,
+        looks: [[card, twin], [card, twin, hidden(withTestId(third, 'card-primary')), lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'stops when the source becomes hidden and its twin moves into the point',
+        looks: [[card, twin], [hidden(card), twinInPlace, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'stops when the source loses its box and its twin moves into the point',
+        looks: [[card, twin], [{ ref: card.ref, role: 'button', name: 'Card' }, twinInPlace, lane]],
+        stops: 'target-ambiguous',
+      },
+    ])('$label', async ({ source, looks, dragsFrom, stops, waitsOut }) => {
+      const drag: RecordedAction = {
+        name: 'dragAt',
+        summary: 'drag Card to Done',
+        from: { point: { x: 100, y: 50 }, within: { target: { role: 'button', name: 'Card', ...source }, fx: 0.5, fy: 0.5 } },
+        to: { point: { x: 550, y: 50 }, within: { target: { role: 'region', name: 'Done' }, fx: 0.5, fy: 0.5 } },
+        viewport: VIEWPORT,
+      };
+      const drags: unknown[] = [];
+      const host = makeHost({ onAction: (name, detail) => void (name === 'dragAt' && drags.push(detail)) });
+      host.capture = async () => screen(looks[Math.min(host.looks.length, looks.length) - 1]!);
+
+      const outcome = await replayTrace(host, trace([drag]));
+      if (stops === undefined) {
+        expect(outcome).toMatchObject({ completed: true, executed: 1 });
+        expect(drags).toEqual([{ from: dragsFrom, to: { x: 550, y: 50 } }]);
+      } else {
+        expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: stops });
+        expect(drags).toEqual([]);
+      }
+      // A case ends on the last look it lists, unless it waits that look out.
+      if (waitsOut === true) expect(host.looks.length).toBeGreaterThan(looks.length + 1);
+      else expect(host.looks).toEqual(['held-still', ...looks.slice(1).map(() => 'raw')]);
+    });
+  });
 });
 
 describe('replayTrace: the recorded control is gone and a twin is left', () => {
@@ -820,6 +1102,25 @@ describe('replayTrace: the recorded control is gone and a twin is left', () => {
     const outcome = await replayTrace(host, trace([{ name: 'drag', summary: 'drag', target: flagged, destination: { role: 'textbox', name: 'Email' } }]));
     expect(outcome).toMatchObject({ completed: true, executed: 1 });
     expect(drops).toEqual([{ source: { id: 'a' }, destination: { id: 'n2' } }]);
+  });
+
+  it('refuses a coordinate drag when a replacement sits under the recorded source point', async () => {
+    const twin = setUp('b', { x: 0, y: 0, width: 200, height: 200 }, 'setup-secondary');
+    const destination = { ...email, rect: { x: 250, y: 0, width: 100, height: 200 } };
+    const host = makeHost({});
+    host.capture = async () => screen(host.looks.length === 1 ? [twin] : [twin, destination]);
+    const drag: RecordedAction = {
+      name: 'dragAt',
+      summary: 'drag Set up to Email',
+      from: { point: { x: 100, y: 100 }, within: { target: flagged, fx: 0.5, fy: 0.5 } },
+      to: { point: { x: 300, y: 100 }, within: { target: { role: 'textbox', name: 'Email' }, fx: 0.5, fy: 0.5 } },
+      viewport: VIEWPORT,
+    };
+
+    expect(await replayTrace(host, trace([drag]))).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
+    expect(host.calls).toEqual([]);
+    // The refusal holds on the looks that show the destination, not only on the first.
+    expect(host.looks.length).toBeGreaterThan(1);
   });
 
   it('keeps a drag end refused while it looks again for the test id: a second look-alike does not end the wait', async () => {
