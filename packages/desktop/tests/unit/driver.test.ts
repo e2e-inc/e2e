@@ -107,6 +107,7 @@ const NATIVE_FUNCTIONS = [
   'press',
   'checkCombo',
   'focusWindow',
+  'closeWindow',
   'pointer',
   'screenshot',
 ] as const satisfies readonly Exclude<keyof DesktopDriver, 'version'>[];
@@ -117,11 +118,12 @@ describe('loadNativeDriver', () => {
   it('lists every function of the driver interface', () => expect(everyFunction).toBe(true));
 
   // Skipped wherever no addon was built, but never in CI's `native` job, which sets REQUIRE_DESKTOP_NATIVE once it built one.
-  it.skipIf(process.env.REQUIRE_DESKTOP_NATIVE !== '1' && (process.platform !== 'darwin' || !existsSync(new URL(`../../native/desktop.darwin-${process.arch}.node`, import.meta.url))))(
+  // It runs only on a checkout build, which the loader must take before a platform package a canary left behind.
+  it.skipIf(process.env.REQUIRE_DESKTOP_NATIVE !== '1' && (process.platform !== 'darwin' || !existsSync(new URL(`../../desktop.darwin-${process.arch}.node`, import.meta.url))))(
     'names the build it loaded and keeps every native function callable',
     () => {
       const driver = loadNativeDriver();
-      expect(['checkout build', expect.stringMatching(/^\d+\.\d+\.\d+/)]).toContainEqual(driver.version);
+      expect(driver.version).toBe('checkout build');
       expect(typeof driver.status().accessibility).toBe('boolean');
       // The loader casts the addon to the interface unchecked: a renamed export would fail only on a real app.
       for (const name of NATIVE_FUNCTIONS) expect(typeof driver[name], name).toBe('function');

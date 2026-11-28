@@ -30,7 +30,7 @@ export interface DesktopOptions {
    * show a window, keys and typing go through the real keyboard, and the
    * engine also offers `doubleTap`, `hover`, and point-addressed taps.
    */
-  readonly headed?: boolean | undefined;
+  readonly physicalInput?: boolean | undefined;
   /**
    * How long the engine waits after an action the agent took before the agent
    * observes again, in milliseconds; `false` skips the wait. A test's own
@@ -46,12 +46,12 @@ export interface DesktopOptions {
   readonly maxDepth?: number | undefined;
 }
 
-const OPTION_KEYS = Object.keys({ snapshot: true, headed: true, settle: true, maxDepth: true } satisfies Record<keyof DesktopOptions, true>);
+const OPTION_KEYS = Object.keys({ snapshot: true, physicalInput: true, settle: true, maxDepth: true } satisfies Record<keyof DesktopOptions, true>);
 
 /** The options with defaults applied, checked once at config load. */
 export interface ResolvedDesktopOptions {
   readonly interactiveOnly: boolean;
-  readonly headed: boolean;
+  readonly physicalInput: boolean;
   readonly settleMs: number;
   readonly maxDepth: number;
 }
@@ -70,12 +70,12 @@ export function resolveOptions(options: DesktopOptions | undefined): ResolvedDes
   const bag: DesktopOptions = options === undefined ? {} : options;
   if (typeof bag !== 'object' || bag === null) throw new ConfigurationError('INVALID_CONFIG', 'desktop() options must be an object');
   rejectUnknownKeys('desktop() options', bag, OPTION_KEYS);
-  const { snapshot, headed, settle, maxDepth } = bag;
+  const { snapshot, physicalInput, settle, maxDepth } = bag;
   if (snapshot !== undefined && snapshot !== 'full' && snapshot !== 'interactive') {
     throw new ConfigurationError('INVALID_CONFIG', `desktop({ snapshot }) must be 'full' or 'interactive', got ${JSON.stringify(snapshot)}`);
   }
-  if (headed !== undefined && typeof headed !== 'boolean') {
-    throw new ConfigurationError('INVALID_CONFIG', 'desktop({ headed }) must be a boolean');
+  if (physicalInput !== undefined && typeof physicalInput !== 'boolean') {
+    throw new ConfigurationError('INVALID_CONFIG', 'desktop({ physicalInput }) must be a boolean');
   }
   if (settle !== undefined && settle !== false && (!Number.isInteger(settle) || settle < 0)) {
     throw new ConfigurationError('INVALID_CONFIG', 'desktop({ settle }) must be a whole number of milliseconds, or false');
@@ -85,7 +85,7 @@ export function resolveOptions(options: DesktopOptions | undefined): ResolvedDes
   }
   return {
     interactiveOnly: snapshot === 'interactive',
-    headed: headed === true,
+    physicalInput: physicalInput === true,
     settleMs: settle === false ? 0 : (settle ?? DEFAULT_SETTLE_MS),
     maxDepth: maxDepth ?? DEFAULT_MAX_DEPTH,
   };

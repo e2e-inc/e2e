@@ -11,10 +11,42 @@ import { frontmost, TESTBED_APP } from './frontmost.ts';
 test.describe('controls window', () => {
   test.beforeEach(async ({ app, screen, desktop }) => {
     await app.open();
-    await screen.getByRole('button', 'Controls…').tap();
-    await expect.poll(async () => (await desktop.windows()).map((window) => window.title).toSorted()).toEqual(['Controls', 'Sign In']);
-    const controls = (await desktop.windows()).find((window) => window.title === 'Controls');
-    await desktop.useWindow(controls);
+    await desktop.waitForWindow(() => screen.getByRole('button', 'Controls…').tap());
+  });
+
+  test('reads the window the trigger opened as the active one, and switches back by title', async ({ screen, desktop }) => {
+    const signIn = await desktop.window({ title: /^Sign/ });
+    const controls = await desktop.window({ title: 'Controls' });
+    expect(await desktop.windows()).toHaveLength(2);
+    expect([await controls.isActive(), await signIn.isActive(), await controls.isClosed()]).toEqual([true, false, false]);
+    await signIn.activate();
+    expect([await controls.isActive(), await signIn.isActive()]).toEqual([false, true]);
+    await expect(screen.getByRole('button', 'Sign in')).toBeVisible();
+    const missing = await desktop.window({ title: 'Settings' }, { timeout: 500 }).then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    expect(String(missing)).toMatch(/no window has the title "Settings"; open: /);
+  });
+
+  test('closes the active window, and reads the focused one again', async ({ screen, desktop }) => {
+    const controls = await desktop.window({ title: 'Controls' });
+    await controls.close();
+    expect(await controls.isClosed()).toBe(true);
+    const refused = await controls.activate().then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    expect(refused).toMatchObject({ code: 'ACTION_FAILED', message: expect.stringMatching(/the window has closed/) });
+    await expect(screen.getByRole('button', 'Sign in')).toBeVisible();
+    expect(await desktop.windows()).toHaveLength(1);
+  });
+
+  test('types into the focused field through the desktop keyboard', async ({ screen, desktop }) => {
+    const note = screen.getByRole('textbox', 'Note');
+    await note.focus();
+    await desktop.keyboard.type('ada');
+    await expect(note).toHaveValue('ada');
   });
 
   test('scrolls a list until an item shows, and selects it', async ({ screen }) => {
@@ -71,6 +103,28 @@ test.describe('controls window', () => {
     expect(frontmost()).not.toBe(TESTBED_APP);
   });
 
+  test('presses a key into a look-alike field that grows as it takes the keyboard', async ({ screen }) => {
+    // Nothing names the two Tag fields apart, and the press focuses the first, which makes it wider than it was read.
+    const tag = screen.getByRole('textbox', 'Tag').first();
+    await tag.press('x');
+    await expect(tag).toHaveValue('x');
+    await tag.press('Enter');
+    await expect(screen.getByTestId('controls-status')).toHaveText('Submitted: x');
+  });
+
+  test('sends no key to a field that gave the keyboard away as it was focused', async ({ screen }) => {
+    // The field hands focus to Note: the key must not follow it there.
+    const refused = await screen
+      .getByRole('textbox', 'Hands off')
+      .press('x')
+      .then(
+        () => undefined,
+        (cause: unknown) => cause,
+      );
+    expect(String(refused)).toMatch(/did not take keyboard focus|lost keyboard focus/);
+    await expect(screen.getByRole('textbox', 'Note')).toHaveValue('');
+  });
+
   test('stops typing when a key opens another window, so the rest of the text does not follow the keyboard there', async ({ screen, desktop }) => {
     const opener = screen.getByRole('textbox', 'Opener');
     // The first character opens the Popup window and moves the keyboard into its field.
@@ -80,8 +134,8 @@ test.describe('controls window', () => {
     );
     expect(String(failure)).toMatch(/typing stopped/);
     await expect(opener).toHaveValue('x');
-    const popup = (await desktop.windows()).find((window) => window.title === 'Popup');
-    await desktop.useWindow(popup);
+    const popup = await desktop.window({ title: 'Popup' });
+    await popup.activate();
     await expect(screen.getByRole('textbox', 'Popup field')).toHaveValue('');
   });
 
@@ -96,8 +150,8 @@ test.describe('controls window', () => {
       );
     expect(String(failure)).toMatch(/typing stopped/);
     await expect(screen.getByRole('textbox', 'Opener')).toHaveValue('x');
-    const popup = (await desktop.windows()).find((window) => window.title === 'Popup');
-    await desktop.useWindow(popup);
+    const popup = await desktop.window({ title: 'Popup' });
+    await popup.activate();
     await expect(screen.getByRole('textbox', 'Popup field')).toHaveValue('');
   });
 
@@ -146,6 +200,20 @@ test.describe('controls window', () => {
       );
     expect(String(refused)).toMatch(/disabled/);
   });
+
+  for (const [button, effect] of [
+    ['Cancel', 'Kept the draft'],
+    ['Delete', 'Deleted the draft'],
+  ] as const) {
+    test(`taps ${button} in a SwiftUI alert, which closes it`, async ({ screen }) => {
+      await screen.getByRole('button', 'Delete draft…').tap();
+      await expect(screen.getByText('Delete draft?')).toBeVisible();
+      // SwiftUI answers the press with an error once it closed the alert: the tap still passes, as it landed.
+      await screen.getByRole('button', button).tap();
+      await expect(screen.getByTestId('controls-status')).toHaveText(effect);
+      await expect(screen.getByText('Delete draft?')).toBeHidden();
+    });
+  }
 
   test('waits for a disabled list to be enabled before it selects an option', async ({ screen }) => {
     await expect(screen.getByRole('combobox', 'Size')).toBeDisabled();

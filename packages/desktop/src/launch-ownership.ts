@@ -20,9 +20,6 @@ const execFileAsync = promisify(execFile);
 /** How often a launch checks whether the app's window can be read yet. */
 export const LAUNCH_POLL_MS = 100;
 
-/** The environment variable that carries a launch's token into the process it starts. */
-export const LAUNCH_TOKEN = 'E2E_DESKTOP_LAUNCH';
-
 /** The prefix of every worker's private state directory, which a later run sweeps once its worker is gone. */
 export const STATE_PREFIX = 'e2e-desktop-worker-';
 
@@ -120,7 +117,7 @@ export async function sweepStateDirectories(driver: DesktopDriver): Promise<void
     const owned: number[] = [];
     let known = true;
     if (typeof launched.token === 'string' && launched.token !== '') {
-      const carriers = await driver.processesCarrying(`${LAUNCH_TOKEN}=${launched.token}`);
+      const carriers = await driver.processesCarrying(launched.token);
       if (carriers === null) known = false;
       else owned.push(...carriers);
     }

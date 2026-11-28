@@ -21,8 +21,8 @@ import { DesktopSurface } from './surface.ts';
 const ACTIONS: readonly LocatorActionKind[] = ['tap', 'secondaryTap', 'fill', 'clear', 'check', 'uncheck', 'focus', 'scrollIntoView', 'selectOption', 'swipe', 'press'];
 
 /** What physical input adds: a double click and the pointer over a control, which need the real pointer, and taps at a point. */
-const HEADED_ACTIONS: readonly LocatorActionKind[] = [...ACTIONS, 'doubleTap', 'hover'];
-const HEADED_POINTER_ACTIONS: readonly PointerActionKind[] = ['tap', 'doubleTap', 'secondaryTap', 'hover'];
+const PHYSICAL_ACTIONS: readonly LocatorActionKind[] = [...ACTIONS, 'doubleTap', 'hover'];
+const PHYSICAL_POINTER_ACTIONS: readonly PointerActionKind[] = ['tap', 'doubleTap', 'secondaryTap', 'hover'];
 
 /**
  * The handle `desktop()` returns. Declared here so a config's inferred type
@@ -43,7 +43,7 @@ export function desktop(options: DesktopOptions = {}): DesktopEngine<'macos', 'a
   const resolved = resolveOptions(options);
   const platform = 'macos';
   const surface = new DesktopSurface(resolved, platform);
-  const headed = resolved.headed;
+  const physical = resolved.physicalInput;
   return defineEngine<DesktopFixtures, 'macos', 'attempt'>({
     name: 'desktop',
     version: ownVersion(),
@@ -67,11 +67,11 @@ export function desktop(options: DesktopOptions = {}): DesktopEngine<'macos', 'a
     observe: (operation, observeOptions) => surface.observe(operation, observeOptions),
     locate: (expression, operation) => surface.locate(expression, operation),
     perform: (ref, action, operation) => surface.perform(ref, action, operation),
-    actions: headed ? HEADED_ACTIONS : ACTIONS,
-    ...(headed
-      ? { performAt: (point, action, operation) => surface.performAt(point, action, operation), pointerActions: HEADED_POINTER_ACTIONS }
+    actions: physical ? PHYSICAL_ACTIONS : ACTIONS,
+    ...(physical
+      ? { performAt: (point, action, operation) => surface.performAt(point, action, operation), pointerActions: PHYSICAL_POINTER_ACTIONS }
       : {}),
-    // Keystrokes into whatever has focus: into the app's event queue, or with `headed` through the real keyboard.
+    // Keystrokes into whatever has focus: into the app's event queue, or with `physicalInput` through the real keyboard.
     keyboard: {
       type: (text, keyboardOptions, operation) => surface.typeText(text, keyboardOptions, operation),
       press: (key, operation) => surface.pressKey(key, operation),

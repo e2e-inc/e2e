@@ -76,7 +76,10 @@ A role query never matches a node hidden from the accessibility tree: one
 that does not render, or one under `aria-hidden`. On the other query kinds,
 `visible: true` keeps only nodes that render, the same check `toBeVisible()`
 makes, so an `aria-hidden` node that still paints counts as visible. See
-[Hidden duplicates](#hidden-duplicates).
+[Hidden duplicates](#hidden-duplicates). On a device or a desktop app a role
+query skips every node the engine marks hidden, which can include one
+scrolled out of view: see [mobile](/reference/mobile#visibility) and
+[desktop](/desktop#what-differs-from-the-web) for what each marks.
 </Note>
 
 ##### `img` alias

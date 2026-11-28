@@ -535,7 +535,7 @@ export interface SwipePathOptions {
   from: ScreenPoint;
   /** Where it lifts. */
   to: ScreenPoint;
-  /** Gesture duration in milliseconds; omitted = the engine's default. */
+  /** Gesture duration, an integer from 16 through 10000 ms; omitted = the engine's default. */
   duration?: number;
   direction?: never;
   momentum?: never;
@@ -1244,7 +1244,7 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
  * not a boolean, is `INVALID_ARGUMENT` before the first read.
  */
 export interface AsyncExpectation {
-  /** Inverts the matcher. A negated matcher passes after 1000 ms of continuous truth. */
+  /** Inverts the matcher. A negated matcher passes on the first read that satisfies the negation. */
   readonly not: AsyncExpectation;
   /** Waits for visibility; `visible: false` waits for hidden or absent state, as `toBeHidden`. */
   toBeVisible(options?: { visible?: boolean; timeout?: number }): Promise<void>;
@@ -1453,7 +1453,7 @@ export type SoftValueExpectation<T> = Omit<ValueExpectation<T>, 'toMatchSchema' 
 };
 
 export interface PollOptions {
-  /** Deadline in milliseconds. Default 5000. */
+  /** Deadline in milliseconds. Default `config.assertionTimeout` in an e2e test, suite hook, or `openHost()` session, else 5000. */
   timeout?: number;
   /**
    * Pause between reads in milliseconds.
@@ -1467,9 +1467,17 @@ export interface PollOptions {
 }
 
 export type PassOptions = {
-  /** Timeout in milliseconds. By default, only the phase deadline applies. */
+  /**
+   * Timeout in milliseconds. In `config.toPass` it defaults to 0: only the test, hook, or session deadline applies.
+   * On a call it defaults to the configured value when an e2e test, suite hook, or `openHost()` session
+   * supplies it, else 0. With none of them active, 0 is `INVALID_CONFIG`.
+   */
   timeout?: number;
-  /** Pauses between tries in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
+  /**
+   * Pauses between tries in milliseconds. The last pause is repeated. In `config.toPass` they default to
+   * [100, 250, 500, 1000]. On a call they default to the configured value when an e2e test, suite hook,
+   * or `openHost()` session supplies it, else [100, 250, 500, 1000].
+   */
   intervals?: readonly number[];
 };
 
@@ -1724,9 +1732,10 @@ export interface TargetApp<Services = Readonly<Record<string, unknown>>> {
    * `grant` only and holds it on every page of the attempt; what it leaves
    * out is the browser's default, which headless Chromium refuses. The
    * engine checks the names its platform knows. `'all'` grants every
-   * permission the engine can grant on its platform.
+   * permission the engine can grant on its platform. An `undefined` value is
+   * the permission left out.
    */
-  permissions?: Readonly<Record<string, AppPermissionState>> | 'all' | undefined;
+  permissions?: Readonly<Record<string, AppPermissionState | undefined>> | 'all' | undefined;
   /**
    * Process the runner starts before the first test and stops at the end of
    * the run (a dev server, Metro for a debug build). Structured, never
@@ -1954,7 +1963,7 @@ export interface AgentOptions {
   /**
    * What the app calls things, told to every model call this agent makes,
    * act turns and judgments alike: the names of screens and menus, where a
-   * feature lives, which button submits a form. At most 16384 bytes.
+   * feature lives, which button submits a form. At most `maxContextBytes`.
    */
   context?: string;
   /** Committed actions per agent call, 1 through 100; default 25. */
@@ -1967,12 +1976,15 @@ export interface AgentOptions {
   maxObservationBytes?: number;
   /** Input tokens per model request, 1 through 1000000; default 64000. A dense screen is cut to fit under it. */
   maxInputTokens?: number;
+  /** Bytes `context` may take, 1024 through 65536; default 16384. */
+  maxContextBytes?: number;
   /**
    * Provider options every model call carries, e.g. a reasoning effort.
    * OpenAI and Azure OpenAI Responses calls also carry `store: false` and a
-   * prompt cache key unless set here.
+   * prompt cache key unless set here. An `undefined` entry is the provider
+   * left out.
    */
-  providerOptions?: ProviderOptions;
+  providerOptions?: Readonly<Record<string, ProviderOptions[string] | undefined>>;
   /** Never set: an entry is not itself a `StepExecutor`; a custom brain goes under `executor`. */
   runStep?: never;
 }
@@ -1994,8 +2006,8 @@ export type AgentConfig = AgentOptions &
          * verdict.
          */
         system?: string;
-        /** Project tools from `defineTool`, offered beside the built-in toolset. */
-        tools?: Readonly<Record<string, AgentTool>>;
+        /** Project tools from `defineTool`, offered beside the built-in toolset. An `undefined` entry is the tool left out. */
+        tools?: Readonly<Record<string, AgentTool | undefined>>;
       }
     | {
         /**
@@ -2088,9 +2100,10 @@ export interface ProjectConfig<Services = Readonly<Record<string, unknown>>> {
    * with; `e2e run --agent <name>` runs them with another. Every agent starts
    * from the built-in defaults: none inherits another's values. Agents never
    * cross a process boundary: workers re-resolve the config module and
-   * construct their own, exactly like model instances.
+   * construct their own, exactly like model instances. An `undefined` entry
+   * is the agent left out.
    */
-  agents?: Readonly<Record<string, AgentConfig>>;
+  agents?: Readonly<Record<string, AgentConfig | undefined>>;
   /**
    * The adaptive replay cache. Opt-out: unset means
    * `read-write`, and `'off'` disables it, as does the `--no-cache` flag,
@@ -2104,13 +2117,16 @@ export interface ProjectConfig<Services = Readonly<Record<string, unknown>>> {
    * Named accounts. `credentials.user(name).password` is the handle of a
    * credential's password, a secret named `<name>.password`; `secrets.get()`
    * never returns it, so a credential and a secret may share a name.
+   * An `undefined` entry takes its username and password from
+   * `E2E_USER_<NAME>_USERNAME` and `E2E_USER_<NAME>_PASSWORD`.
    */
-  credentials?: Readonly<Record<string, CredentialConfig>>;
+  credentials?: Readonly<Record<string, CredentialConfig | undefined>>;
   /**
    * Named values the model must never see: API keys, tokens, anything sourced
    * from the environment. `secrets.get(name)` hands a test the opaque handle;
    * the value is filled by the runner, masked in every observation, and
-   * redacted from logs and the report.
+   * redacted from logs and the report. An `undefined` entry takes its value
+   * from `E2E_SECRET_<NAME>`.
    */
-  secrets?: Readonly<Record<string, SecretConfig>>;
+  secrets?: Readonly<Record<string, SecretConfig | undefined>>;
 }

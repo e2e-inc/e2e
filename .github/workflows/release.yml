@@ -64,30 +64,31 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Rust toolchain
-        run: |
-          if ! command -v rustup >/dev/null; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          fi
+      - uses: ./.github/actions/rust-toolchain
       # build-native.ts is TypeScript run directly, which needs a Node newer than a runner image may ship.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
       - name: Build the driver
         run: |
-          node packages/desktop/scripts/build-native.ts --target aarch64-apple-darwin
-          node packages/desktop/scripts/build-native.ts --target x86_64-apple-darwin
-      # Only an Intel Mac could load the x64 build; reading its architecture catches a wrong or cut-short build here.
+          node scripts/native/build-native.ts desktop --target aarch64-apple-darwin
+          node scripts/native/build-native.ts desktop --target x86_64-apple-darwin
       - name: Check each build's architecture
-        working-directory: packages/desktop/native
+        working-directory: packages/desktop
         run: |
           test "$(lipo -archs desktop.darwin-arm64.node)" = arm64
           test "$(lipo -archs desktop.darwin-x64.node)" = x86_64
+      # Neither build is uploaded unless both load: the arm64 one natively, the x64 one in an x86_64 Node under Rosetta.
+      - name: Load the arm64 addon
+        working-directory: packages/desktop
+        run: node -e "const status = require('./desktop.darwin-arm64.node').status(); if (typeof status.accessibility !== 'boolean') process.exit(1)"
+      - uses: ./.github/actions/load-x64-addon
+        with:
+          addon: packages/desktop/desktop.darwin-x64.node
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-native
-          path: packages/desktop/native/desktop.darwin-*.node
+          path: packages/desktop/desktop.darwin-*.node
           if-no-files-found: error
           retention-days: 1
 
@@ -130,7 +131,7 @@ jobs:
           # Outside the checkout: changesets/action commits every untracked file into the version pull request.
           path: ${{ runner.temp }}/desktop-native
       - name: Place the desktop driver
-        run: node packages/desktop/scripts/place-native.ts "$RUNNER_TEMP/desktop-native"
+        run: node scripts/native/place-native.ts desktop "$RUNNER_TEMP/desktop-native"
 
       # Opens or updates a release PR while changesets are pending; publishes
       # once that PR is merged and no changesets remain.
@@ -235,7 +236,7 @@ jobs:
           path: ${{ runner.temp }}/desktop-native
       # After the version step, so the stamp names the snapshot version.
       - name: Place the desktop driver
-        run: node packages/desktop/scripts/place-native.ts "$RUNNER_TEMP/desktop-native"
+        run: node scripts/native/place-native.ts desktop "$RUNNER_TEMP/desktop-native"
 
       - name: Publish to the nightly tag
         run: pnpm exec changeset publish --tag nightly --no-git-tag

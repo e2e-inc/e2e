@@ -1,5 +1,5 @@
 /**
- * The native driver: the engine's Rust code (`native/`), loaded into this
+ * The native driver: the engine's Rust code (`crates/e2e-desktop-napi`), loaded into this
  * process through NAPI-RS. Each call that talks to another process runs on
  * a thread of its own and resolves with an envelope, `{ ok, data }` or
  * `{ ok, error }`; `call` bounds it by the operation's budget and signal and
@@ -88,19 +88,21 @@ export interface Launched {
   readonly bundle_id?: string;
   /** When the process started, in microseconds since the epoch, read as the driver claimed it. */
   readonly started?: number;
+  /** The copies of the app that ran before the launch, which the launch never claims. */
+  readonly running_before: readonly number[];
 }
 
 /** What the driver can do: one function per native call. */
 export interface DesktopDriver {
-  /** The version of the package the driver came from, or `checkout build` for one built in this package's `native/`. */
+  /** The version of the package the driver came from, or `checkout build` for one built into this package's directory. */
   readonly version: string;
   status(): { readonly accessibility: boolean; readonly screenRecording: boolean };
   /** Whether the screen is locked; null when that cannot be told. */
   screenLocked(): boolean | null;
   /** When a process started, in microseconds since the epoch; null when it is not running. */
   processStarted(pid: number): number | null;
-  /** Every process whose environment holds `marker` (`NAME=value`); null when the processes cannot be listed. */
-  processesCarrying(marker: string): Promise<readonly number[] | null>;
+  /** Every process that carries the launch `token`, in its environment or its arguments; null when the processes cannot be listed. */
+  processesCarrying(token: string): Promise<readonly number[] | null>;
   /** Drops the refs of a process that quit. */
   forgetProcess(pid: number): void;
   launch(options: {
@@ -131,6 +133,8 @@ export interface DesktopDriver {
   checkCombo(combo: string): Promise<Envelope<unknown>>;
   /** `inputId` names the call, so `cancelInput` stops it before it changes the focus. */
   focusWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
+  /** Closes a window as its close button does, and answers once it left the app's windows. `inputId` names the call, so `cancelInput` stops it before the button is pressed. */
+  closeWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
   /**
    * `inputId` names the pointer input, so `cancelInput` stops what it has yet to send. With `target`, the window the
    * point was taken in, no click goes once another window or app took the focus from it, or its sheet changed: `sheet`
@@ -150,7 +154,7 @@ const ownRequire = createRequire(import.meta.url);
 
 /**
  * Loads the driver built for this machine: a build in this package's
- * `native/` directory (`pnpm build:native` in a checkout), else the
+ * directory (`pnpm build:native` in a checkout), else the
  * platform package npm installed beside this one. Throws
  * `UNSUPPORTED_CAPABILITY` on a platform no driver is built for, and
  * `ENGINE_FAILURE` naming what is missing on one that has a driver.
@@ -162,10 +166,10 @@ export function loadNativeDriver(): DesktopDriver {
     throw new EngineError('UNSUPPORTED_CAPABILITY', `@e2e-dev/desktop has no native driver for ${process.platform} on ${process.arch}: it drives macOS apps only`, { retryable: false });
   }
   const failures: string[] = [];
-  // A build in `native/` exists only in a checkout (the package ships `dist` alone), and is the one just built there:
+  // A build in the package directory exists only in a checkout (the package ships `dist` alone), and is the one just built there:
   // a platform package placed by a canary build stays in the checkout, and must not hide it.
   const builds: readonly [string, () => string][] = [
-    [path.join(import.meta.dirname, '..', 'native', `desktop.${platform}.node`), () => 'checkout build'],
+    [path.join(import.meta.dirname, '..', `desktop.${platform}.node`), () => 'checkout build'],
     [packageName, () => (ownRequire(`${packageName}/package.json`) as { version: string }).version],
   ];
   for (const [specifier, version] of builds) {
@@ -191,6 +195,12 @@ export class DriverFailure extends Error {
     this.code = failure.code;
     this.notDelivered = failure.disposition?.delivery === 'not_delivered';
     this.details = failure.details ?? {};
+  }
+
+  /** The copies of the app a failed launch says ran before it; none when it names none. */
+  get runningBefore(): readonly number[] {
+    const before = this.details.running_before;
+    return Array.isArray(before) ? before.filter((pid): pid is number => typeof pid === 'number') : [];
   }
 }
 
