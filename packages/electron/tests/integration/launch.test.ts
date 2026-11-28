@@ -551,7 +551,7 @@ describe('pixels', () => {
 
   it('captures the whole page, one image pixel per CSS pixel, on a dense display, and says how far it is scrolled', async () => {
     const page = `<body style="margin:0;overflow-x:hidden"><div style="height:2000px;background:rgb(255,0,0)"></div><div style="height:2000px;background:rgb(0,128,0)"></div></body>`;
-    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL('data:text/html,${page}'));`, ['--force-device-scale-factor=2']);
+    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=2']);
     await launch();
     const window = windows.require();
     await window.page.evaluate(() => scrollTo(0, 2500));
@@ -638,7 +638,7 @@ describe('pixels', () => {
 
   it('cuts a whole-page screenshot to a clip in the page, and refuses one with nothing of the page inside it', async () => {
     const page = `<body style="margin:0;overflow-x:hidden"><div style="height:1000px;background:rgb(255,0,0)"></div><div style="height:1000px;background:rgb(0,128,0)"></div></body>`;
-    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,${page}'));`, ['--force-device-scale-factor=1']);
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=1']);
     await launch();
     const window = windows.require();
     const relative = await screenshotFile(new DevTools(), window, directory, 'clip.png', () => undefined, { fullPage: true, clip: { x: 10, y: 1500, width: 50, height: 40 } });

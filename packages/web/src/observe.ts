@@ -42,13 +42,9 @@ export function maskOptions(masks: readonly Locator[]): Partial<{ mask: Locator[
   return masks.length === 0 ? {} : { mask: [...masks], maskColor: MASK_COLOR };
 }
 
-/** The whole page's width, measured the way Playwright sizes a full-page screenshot, and how far it is scrolled, in CSS pixels. */
-function pageGeometry(page: Page): Promise<{ width: number; scroll: { x: number; y: number } }> {
-  return page.evaluate(() => {
-    const widths = [document.documentElement, document.body as HTMLElement | null]
-      .flatMap((element) => (element === null ? [] : [element.scrollWidth, element.offsetWidth, element.clientWidth]));
-    return { width: Math.max(...widths), scroll: { x: window.scrollX, y: window.scrollY } };
-  });
+/** How far the page is scrolled, in CSS pixels. */
+function pageScroll(page: Page): Promise<{ x: number; y: number }> {
+  return page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
 }
 
 export interface PixelCapture {
@@ -84,7 +80,7 @@ export async function capturePixels(
     // A frame that detaches mid-sweep contributes nothing to the count, which can
     // only push the observation toward withholding the image.
     const counts = await scope.read(() => Promise.allSettled(masks.map((mask) => mask.count())));
-    const whole = fullPage ? await scope.read(() => pageGeometry(page)) : undefined;
+    const scroll = fullPage ? await scope.read(() => pageScroll(page)) : undefined;
     // The adopted stylesheet hides the caret where Playwright's own option would write an inline style a hydrating framework flags.
     const image = await scope.read(() => withHiddenCaret(page, () => page.screenshot({
       type: 'png',
@@ -97,19 +93,20 @@ export async function capturePixels(
     })));
     const data = new Uint8Array(image);
     // The bytes are the authority on their own size. `scale: 'css'` is asked for
-    // precisely so one image pixel is one CSS pixel, but the ratio is measured
-    // rather than assumed: if a capture ever comes back at device scale, reporting
-    // the viewport instead would displace every coordinate the model reads off it.
+    // precisely so one image pixel is one CSS pixel, but on the viewport the ratio
+    // is measured rather than assumed: if a capture ever comes back at device scale,
+    // reporting the viewport instead would displace every coordinate the model reads
+    // off it. A whole page has no width measured at the same moment as the capture
+    // (Playwright stops animations first), so there the asked-for scale stands.
     const size = readPngSize(data) ?? { width: viewport.width, height: viewport.height };
-    const width = whole?.width ?? viewport.width;
     return {
       pixels: {
         data,
         mediaType: 'image/png',
         width: size.width,
         height: size.height,
-        scale: width > 0 ? size.width / width : 1,
-        ...(whole === undefined ? {} : { scroll: whole.scroll }),
+        scale: scroll !== undefined || viewport.width <= 0 ? 1 : size.width / viewport.width,
+        ...(scroll === undefined ? {} : { scroll }),
       },
       maskedRegionCount: counts.reduce((total, count) => total + (count.status === 'fulfilled' ? count.value : 0), 0),
       maskingProven: masks.length > 0 && counts.every((count) => count.status === 'fulfilled'),
