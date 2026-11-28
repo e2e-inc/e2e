@@ -399,8 +399,8 @@ test('buys a ticket', async ({ screen }) => {
 - When the function throws, the step is failed and the error goes on to the
   test. Catch it to continue.
 - Call it in a test body, a `beforeEach` or `afterEach` hook, or a fixture.
-  In a `beforeAll` or `afterAll` hook the function runs, but no report has
-  the step.
+  In a `beforeAll` or `afterAll` hook, a worker fixture, or an `openHost()`
+  session the function runs, but no report has the step.
 - In a fixture, call it before or after `use()`. A `test.step` around
   `use()` fails the test with `STEP_NOT_AWAITED`.
 - A failed [`expect.soft`](/reference/expect#soft-assertions) inside it does not
@@ -412,7 +412,8 @@ test('buys a ticket', async ({ screen }) => {
 | Throws | When |
 | --- | --- |
 | `INVALID_ARGUMENT` | A title that is not a non-empty string, or no function. |
-| `COLLECTION_ERROR` | A call outside a running test, hook, or fixture. |
+| `CANCELLED` | A call from work its phase left running, such as a body or hook past its timeout. |
+| `COLLECTION_ERROR` | Any other call outside a running test, hook, fixture, or `openHost()` session, such as one at collection. |
 
 #### `test.only`
 
