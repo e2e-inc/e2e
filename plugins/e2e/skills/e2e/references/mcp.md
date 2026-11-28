@@ -59,7 +59,7 @@ when the sandbox cannot, then open again. `e2e run` and
 writing tests (topic `setup`). No model is needed for the deterministic
 tools.
 
-Full reference: docs/mcp-server.mdx,
+Full reference: docs/coding-agents.mdx,
 docs/reference/mcp.mdx.
 
 ## Tools

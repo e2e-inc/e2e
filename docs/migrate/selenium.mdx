@@ -1,6 +1,6 @@
 ---
 title: From Selenium
-description: Rewrite Selenium flows in TypeScript with locators, retrying assertions, and agent goals.
+description: "Migrate from Selenium WebDriver to e2e by rewriting flows in TypeScript with locators, retrying assertions, and agent goals, with a map of each WebDriver call."
 "og:image": "https://e2e.com/docs/images/og/migrate/selenium.png?v=32737f50da"
 "twitter:image": "https://e2e.com/docs/images/og/migrate/selenium.png?v=32737f50da"
 ---
@@ -32,7 +32,7 @@ Python suite needs a rewrite, so run both suites and move one flow at a time.
 
 </SetupPrompt>
 
-For a migration that spans several sessions, the [`migrate-to-e2e` skill](/coding-agents#migrate-an-existing-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
+For a migration that spans several sessions, the [`migrate-to-e2e` skill](/migrate#let-an-agent-migrate-the-suite) records what moved in a progress file and keeps the old suite running until you retire each test.
 
 ## Port the config
 
@@ -43,7 +43,7 @@ For a migration that spans several sessions, the [`migrate-to-e2e` skill](/codin
 | The URL in every `driver.get` | `app: { url }` on the target, then relative paths |
 | Starting the app in a script | `app: { url, command }`, see [Starting your app](/web#starting-your-app) |
 | One driver per browser | One target per `web({ browser })` build, `chromium`, `firefox`, or `webkit`, not Chrome, Edge, or Safari |
-| Selenium Grid | `workers` for parallel runs, a [browser provider](/browser#hosted-browsers) for hosted Chromium |
+| Selenium Grid | `workers` for parallel runs, a [browser provider](/reference/web#hosted-browsers) for hosted Chromium |
 | Passwords from `System.getenv` | `credentials` or `secrets` in the config, see [Authentication](/authentication) |
 
 ## Rewrite one flow
@@ -111,7 +111,7 @@ e2e leaves it out on purpose.
 | `element.findElement(By.cssSelector)`, WebdriverIO `$('a').$('b')` | One `browser.locator('a >> b')` selector, or chained `getBy*` queries |
 | `ChromeOptions.addArguments`, `setBinary`, `Proxy`, `acceptInsecureCerts` | Start Chrome or Edge with the flags, then attach with `web({ connect })` |
 | `@BeforeSuite`, `@AfterSuite`, pytest session-scoped fixtures, WebdriverIO `onPrepare` | Once for the run: the script `app.command` starts, or a wrapper around `e2e run`. Once for a file: `beforeAll` and `afterAll`. Sign-in: a top-level `test.setup` that saves a session |
-| BrowserStack or Sauce Labs for web | Your own [browser provider](/browser#write-a-provider), if the vendor has a CDP endpoint |
+| BrowserStack or Sauce Labs for web | Your own [browser provider](/reference/web#write-a-provider), if the vendor has a CDP endpoint |
 | `manage().logs()`, request listeners, geolocation | Patch the page in `browser.addInitScript`, record requests in `browser.route` |
 | `setNetworkConditions` | For offline, [`browser.setNetwork('offline')`](/reference/web#setnetwork). No throttling or latency, keep those tests in Selenium |
 

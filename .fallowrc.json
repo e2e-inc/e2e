@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/fallow/schema.json",
   "entry": [
+    ".github/scripts/prepare-android-emulator.mjs",
     "apps/testbed/e2e.config.ts",
     "apps/testbed/e2e.*.config.ts",
     "apps/testbed/tests*/**/*.ts",
@@ -67,7 +68,7 @@
     "@expo/repack-app",
     "@oxc-project/runtime"
   ],
-  "ignoreBinaries": ["eas", "vhs", "valgrind", "lsappinfo"],
+  "ignoreBinaries": ["eas", "vhs", "valgrind", "lsappinfo", "adb"],
   "ignoreExports": [
     {
       "file": "packages/core/src/types.ts",

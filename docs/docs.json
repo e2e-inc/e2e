@@ -59,18 +59,18 @@
         "groups": [
           {
             "group": "Get started",
+            "icon": "rocket",
             "pages": [
               "index",
               "quickstart",
               "core-concepts",
-              "agentic-vs-deterministic",
               "coding-agents",
-              "mcp-server",
               "ci"
             ]
           },
           {
             "group": "Platforms",
+            "icon": "display",
             "pages": [
               "web",
               "mobile",
@@ -81,18 +81,31 @@
           },
           {
             "group": "Features",
+            "icon": "wand-magic-sparkles",
             "pages": [
               "cache",
               "explore",
               "visual-testing",
               "authentication",
-              "bug-bash",
+              "filters",
+              "debugging",
               "agents",
               "core"
             ]
           },
           {
+            "group": "Extend",
+            "icon": "puzzle-piece",
+            "pages": [
+              "tools",
+              "fixtures",
+              "services",
+              "executors"
+            ]
+          },
+          {
             "group": "Models and agents",
+            "icon": "brain",
             "pages": [
               "models",
               "decision-models",
@@ -101,6 +114,7 @@
           },
           {
             "group": "Run in CI",
+            "icon": "code-branch",
             "pages": [
               "ci/github-actions",
               "ci/vercel-previews",
@@ -114,54 +128,51 @@
           },
           {
             "group": "Frameworks",
+            "icon": "cube",
             "pages": [
               "frameworks/nextjs"
             ]
           },
           {
             "group": "Hosted browsers and devices",
+            "icon": "cloud",
             "pages": [
               "integrations/index",
-              "integrations/kernel",
-              "integrations/browser-run",
-              "integrations/notte",
-              "integrations/lightpanda",
-              "integrations/moli",
-              "integrations/eas",
-              "integrations/smol",
-              "integrations/limrun",
-              "integrations/testmu",
-              "integrations/browserstack",
-              "integrations/e2b",
-              "integrations/revyl"
-            ]
-          },
-          {
-            "group": "Extend",
-            "pages": [
-              "community-packages",
-              "tools",
-              "fixtures",
-              "services",
-              "executors",
-              "filters"
-            ]
-          },
-          {
-            "group": "Engines",
-            "pages": [
-              "engines",
-              "writing-an-engine",
-              "engine-servers"
+              {
+                "group": "Browsers",
+                "pages": [
+                  "integrations/kernel",
+                  "integrations/browser-run",
+                  "integrations/notte",
+                  "integrations/lightpanda",
+                  "integrations/moli",
+                  "integrations/smol"
+                ]
+              },
+              {
+                "group": "Devices",
+                "pages": [
+                  "integrations/eas",
+                  "integrations/limrun",
+                  "integrations/browserstack"
+                ]
+              },
+              {
+                "group": "Browsers and devices",
+                "pages": [
+                  "integrations/testmu",
+                  "integrations/e2b",
+                  "integrations/revyl"
+                ]
+              }
             ]
           },
           {
             "group": "Deep dive",
+            "icon": "lightbulb",
             "pages": [
-              "browser",
               "security",
               "telemetry",
-              "debugging",
               "agent-steps",
               "self-healing",
               "page-object-model"
@@ -169,6 +180,7 @@
           },
           {
             "group": "Migrate",
+            "icon": "right-left",
             "pages": [
               "migrate/index",
               "migrate/playwright",
@@ -179,6 +191,13 @@
               "migrate/maestro",
               "migrate/testerarmy"
             ]
+          },
+          {
+            "group": "Ecosystem",
+            "icon": "users",
+            "pages": [
+              "community-packages"
+            ]
           }
         ]
       },
@@ -188,6 +207,7 @@
         "groups": [
           {
             "group": "Test API",
+            "icon": "flask-vial",
             "pages": [
               "reference/test",
               "reference/expect",
@@ -199,6 +219,7 @@
           },
           {
             "group": "Project",
+            "icon": "gear",
             "pages": [
               "reference/config",
               "reference/cli",
@@ -212,20 +233,21 @@
             ]
           },
           {
-            "group": "Web",
+            "group": "Platforms",
+            "icon": "display",
             "pages": [
-              "reference/web"
-            ]
-          },
-          {
-            "group": "Mobile",
-            "pages": [
-              "reference/mobile"
+              "reference/web",
+              "reference/mobile",
+              "reference/desktop",
+              "reference/electron"
             ]
           },
           {
             "group": "Engines",
+            "icon": "gears",
             "pages": [
+              "engines",
+              "writing-an-engine",
               "reference/engine",
               "reference/engine-protocol"
             ]
@@ -333,6 +355,26 @@
     {
       "source": "/locators",
       "destination": "/core-concepts#locators"
+    },
+    {
+      "source": "/bug-bash",
+      "destination": "/explore#bug-bashes"
+    },
+    {
+      "source": "/mcp-server",
+      "destination": "/coding-agents#let-the-agent-use-the-app"
+    },
+    {
+      "source": "/browser",
+      "destination": "/reference/web"
+    },
+    {
+      "source": "/engine-servers",
+      "destination": "/reference/engine-protocol#engine-servers"
+    },
+    {
+      "source": "/agentic-vs-deterministic",
+      "destination": "/core-concepts"
     }
   ]
 }

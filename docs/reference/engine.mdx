@@ -1,15 +1,14 @@
 ---
 title: e2e/engine
-description: Build an engine with observations, actions, lifecycle hooks, and fixtures.
+description: "API reference for e2e/engine, the contract for building an engine, with defineEngine, observations, actions, lifecycle hooks, and fixtures."
 "og:image": "https://e2e.com/docs/images/og/reference/engine.png?v=d82cf186db"
 "twitter:image": "https://e2e.com/docs/images/og/reference/engine.png?v=d82cf186db"
 ---
 
 `e2e/engine` is the contract an engine implements to drive a user interface,
-such as a browser or simulator. An engine implements shared types for nodes,
-locators, actions, and errors. `defineEngine` validates and freezes the
-implementation, derives its capabilities, and returns a handle for `targets`
-in the config. The runner drives it over the
+such as a browser or simulator. [`defineEngine`](#defineengine) turns an
+implementation into a handle for `targets` in the config. The runner drives it
+over the
 [engine protocol](/reference/engine-protocol), in its own process; see
 [Engines](/engines). Use `test.extend` fixtures for resources outside the UI,
 such as APIs or databases. `@e2e-dev/core/engine` is the same module: a
@@ -75,13 +74,8 @@ export function defineEngine<
   Platform extends string = string,
   Isolation extends EngineIsolation = EngineIsolation,
 >(spec: Engine & { readonly platform?: Platform; readonly isolation?: Isolation }): EngineHandle<Fixtures, Platform, Isolation>;
-// With a fixture beside screen, app, and platform, `spec.fixtures` must have
-// a factory returning each one Fixtures names. If Platform is a literal
-// such as 'ios', `spec.platform` must be that value. If Isolation is
-// 'worker', `spec.isolation` must be 'worker'.
 export function isEngineHandle(value: unknown): value is EngineHandle;
 
-/** A validated engine: branded, frozen, capabilities computed. */
 export interface EngineHandle<
   Fixtures extends object = {},
   Platform extends string = string,
@@ -147,9 +141,8 @@ rules:
 | `fixtures` | Not an object, a fixture that is not a factory function, or a fixture name that is not a lower-camel identifier or shadows `agent`, `app`, `screen`, `platform`, `request`, `services`, or `session`. |
 
 <Note>
-`artifacts.startTrace` and `artifacts.stopTrace` were removed from the
-contract. An engine published before their removal that declares them still
-passes validation; the runner never calls them.
+`artifacts.startTrace` and `artifacts.stopTrace` are not part of the contract.
+An engine that declares them passes validation; the runner never calls them.
 </Note>
 
 ### Engine
@@ -187,252 +180,78 @@ The body of one target. Every member but `name`, `version`, and
 | [`prepare`, `finish`, `doctor`, `init`, `startAttempt`, `settleAttempt`, `endAttempt`, `dispose`](#lifecycle) | hooks |
 
 ```ts
-/** The body of one target: typed, model-free, capability-graded. */
 export interface Engine {
-  /** Engine name, for diagnostics. */
   readonly name: string;
-  /**
-   * Required implementation version, recorded in reports and sessions.
-   * A saved session never restores across engine versions; a cached trace
-   * replays across them and re-finds its nodes.
-   */
   readonly version: string;
-  /**
-   * Contract version literal. Additive optional members never bump it;
-   * changed required semantics do.
-   */
   readonly spiVersion: EngineSpiVersion;
-  /**
-   * Platform label this engine drives (`web`, `ios`, `android`, or a label of
-   * the engine's own). Tests filter on it through `platforms` and tool packs
-   * are scoped by it; the harness attaches no meaning to any value. A target
-   * inherits it; a target that names a platform of its own must agree with it.
-   */
   readonly platform?: string;
-  /**
-   * Maximum workers for this target, such as the number of devices in a
-   * pool. The scheduler applies this cap even when `config.workers` is
-   * higher. Omit when the engine has no concurrency limit.
-   */
   readonly workers?: number;
-  /** capability: observation. */
   observe?(context: OperationContext, options?: EngineObserveOptions): Promise<EngineSnapshot>;
-  /** capability: computed-style, requires observation. Read-only rendered properties of an observation ref. */
   readStyle?(ref: NodeRef, properties: readonly ComputedStyleProperty[], context: OperationContext): Promise<ComputedStyleValues>;
-  /** capability: viewport-intersection, requires location. How much of a located node is inside the viewport. */
   viewportIntersection?(ref: NodeRef, context: OperationContext): Promise<ViewportIntersection>;
-  /**
-   * Performs one action on a ref from the newest observation or `locate`,
-   * with the platform's actionability checks. Both agent tools and locator
-   * actions call this method. A `swipe` on the observation root swipes the
-   * viewport.
-   *
-   * For safe trace replay, throw a retryable
-   * `NODE_STALE`-coded error when a ref no longer binds, and an
-   * `ACTION_MAY_HAVE_COMMITTED`-coded error when input may have reached the
-   * app. The runner never repeats an action that may have committed.
-   */
   perform?(ref: NodeRef, action: LocatorAction, context: OperationContext): Promise<void>;
-  /**
-   * The action kinds `perform` honors, required with it. The harness offers
-   * the agent and the `screen` tier exactly these: a kind left out is never
-   * presented as a tool that can only decline, and `screen`/`Locator` methods
-   * for it fail with `UNSUPPORTED_CAPABILITY` before reaching the engine.
-   * `perform` still throws `UNSUPPORTED_CAPABILITY` for a declared kind one
-   * particular node cannot take (a `check` on a toggle whose state is unknown).
-   */
   readonly actions?: readonly LocatorActionKind[];
-  /**
-   * capability: location - requires observation. Deterministic locator
-   * resolution for the `screen`/`expect` tier: resolve one expression to the
-   * nodes it currently matches. The harness owns polling, strictness, and
-   * staleness; an engine resolves once, immediately.
-   */
   locate?(
     expression: LocatorExpression,
     context: OperationContext,
   ): Promise<readonly SemanticNode[]>;
-  /**
-   * capability: pointer - requires observation. Performs one pointer action
-   * at a viewport point, in the CSS pixels of `SemanticNode.rect`, with no
-   * node behind it: the agent's `tap_at`, `hover_at`, and `drag_at` verbs land
-   * here with the point the model named in a screenshot (a shape on a canvas, a pin on
-   * a map, a control in a system sheet or one the tree lists), and so do a test's
-   * `screen.tapAt`, `screen.swipe({ from, to })`, and `tap({ position })`.
-   * Dispatch the pointer at the point as given; the harness has clamped an
-   * agent's point to the viewport and validated a test's. Throw
-   * `UNSUPPORTED_CAPABILITY` for a declared kind the surface cannot deliver
-   * at this particular point.
-   */
   performAt?(point: ViewportPoint, action: PointerAction, context: OperationContext): Promise<void>;
-  /**
-   * The pointer action kinds `performAt` honors, required with it. The
-   * harness routes a point-addressed action to the engine only for a kind
-   * listed here; an undeclared kind fails with `UNSUPPORTED_CAPABILITY`
-   * before reaching the engine.
-   */
   readonly pointerActions?: readonly PointerActionKind[];
-  /**
-   * The surface honors `modifiers` on the `tap`, `doubleTap`, `multiTap`,
-   * and `secondaryTap` actions `perform` receives. Without it the harness fails
-   * an action that carries modifiers with `UNSUPPORTED_CAPABILITY` before it
-   * reaches the engine.
-   */
   readonly tapModifiers?: boolean;
-  /**
-   * `prepare` binds the target to the device `EnginePrepareInfo.device`
-   * names, for `e2e run --device`. Without it the runner refuses the flag
-   * for the target before anything is prepared.
-   */
   readonly selectsDevice?: boolean;
-  /**
-   * The engine grants `app.permissions: 'all'`, which reaches it as
-   * `EngineAppInfo.allPermissions`. Without it the harness refuses `'all'` at
-   * config load, so an engine that predates the value never receives it.
-   */
   readonly grantsAllPermissions?: boolean;
-  /**
-   * The engine reads the object form of `app.launchArguments` from
-   * `EngineAppInfo.launchArgumentValues`. Without it the harness refuses an
-   * object at config load.
-   */
   readonly launchArgumentValues?: boolean;
-  /**
-   * The engine opens an app whose `url` is a `file:` URL, reading the file
-   * from the disk of the machine the harness runs on. The harness checks
-   * every file navigation against that disk, so an engine whose surface
-   * may read another one must not declare this, or must refuse such a
-   * target in `validateApp` (`EngineAppCheckInfo.fileApp`). Without it the
-   * harness refuses a file `app.url` at config load.
-   */
   readonly fileApps?: boolean;
-  /** capability: keyboard - requires observation. Input to whatever holds focus; see `EngineKeyboard`. */
   readonly keyboard?: EngineKeyboard;
-  /**
-   * Named deterministic surfaces this engine contributes to TestFixtures
-   * (a device fixture, a document fixture - anything). Keys become fixture and
-   * capability names.
-   */
   readonly fixtures?: Readonly<Record<string, EngineFixtureFactory>>;
-  /**
-   * How long the state behind this engine's `fixtures`, `app`, and `screen`
-   * lives; see `EngineIsolation`. Defaults to `attempt`.
-   */
   readonly isolation?: EngineIsolation;
-  /** capability: state - opaque snapshot capture/restore for session reuse. */
   readonly state?: EngineStateCapability;
-  /** capability: artifacts - screenshots under the attempt directory, and videos there or at a provider. */
   readonly artifacts?: EngineArtifacts;
-  /**
-   * Checks the app a target declares against what this engine can drive, at
-   * config load, synchronously: throw `INVALID_CONFIG` naming
-   * `info.targetName` for a field the platform needs and the target left out
-   * (a URL, a bundle id) or one it cannot drive. The harness has already
-   * checked every field's shape.
-   */
   validateApp?(app: EngineAppDeclaration, info: EngineAppCheckInfo): void;
-  /**
-   * The `secrets.get()` handles the engine's options hold, such as a
-   * basic-auth password. The config load checks each names a configured
-   * secret (`INVALID_CONFIG` otherwise), and only these resolve through
-   * `EngineAttemptContext.resolveSecret`. The handles carry names only, so
-   * no value reaches the config digest.
-   */
   readonly secrets?: readonly Secret[];
-  /** Steering hooks: open, back, resize, restart, reset. */
   readonly session?: EngineSession;
-  /**
-   * Runs once per target in the runner, after collection and before workers,
-   * app commands, and the run's clock start. A run with nothing to run (the
-   * test filters left nothing, or `--pass-with-no-tests` on an empty
-   * selection) prepares no target, and so calls no `finish`. Download
-   * dependencies or boot devices here; report progress through `info.log`.
-   * No launch timeout applies. A failure ends the run as an infrastructure
-   * error.
-   * The result can lower the target's worker cap, for example after
-   * discovering how many devices are available.
-   */
   prepare?(info: EnginePrepareInfo): Promise<void | EnginePrepareResult>;
-  /**
-   * Once per run and target in the runner process, after every worker of the
-   * target is gone, on every exit path, whenever `prepare` was called.
-   * Release what `prepare` acquired for the run (a leased cloud device).
-   * Runs within the cleanup budget, never cancelled by an interrupt; a
-   * failure is a cleanup-phase run error.
-   */
   finish?(info: EngineFinishInfo): Promise<void>;
-  /**
-   * Checks this machine for what a run on the target needs, for
-   * `e2e doctor`. Read-only and quick: never install, launch, lease, or
-   * start anything a check could instead look up, and never call `prepare`.
-   * A check that cannot tell reports nothing rather than guess. A throw is
-   * reported as one failed check of the target.
-   */
   doctor?(info: EngineDoctorInfo): Promise<readonly EngineDoctorCheck[]>;
-  /**
-   * Once per worker, before the first step; boot devices here, not in a step
-   * budget. The same handle can be booted again after `dispose`: a config-held
-   * handle outlives an in-process worker, so init MUST work on a disposed
-   * engine as it does on a fresh one.
-   */
   init?(info: EngineInitInfo): Promise<void>;
-  /** Before each attempt: set up per-test isolation. */
   startAttempt?(context: EngineAttemptContext): Promise<void>;
-  /**
-   * After the body has settled, and again after teardown, before the verdict,
-   * within the cleanup budget: report a failure that landed on a path no step
-   * awaited (a callback the surface ran for the test: a request interceptor,
-   * a native dialog handler). Wait for one still running, then throw its
-   * error; the attempt fails with it the way a step would, an error already
-   * classified keeping its code. MUST report each failure once.
-   */
   settleAttempt?(context: EngineCleanupContext): Promise<void>;
-  /**
-   * After each attempt, within the cleanup budget: tear that isolation down.
-   * MUST be idempotent, and safe to call after a failed `startAttempt`.
-   */
   endAttempt?(context: EngineCleanupContext): Promise<void>;
-  /**
-   * Worker shutdown, within the cleanup budget; failure is a run error. Runs
-   * once `init` was called, even when it failed, so it MUST tolerate a
-   * partly initialized engine. A live
-   * `reuseSignal` permits preserving run-owned resources for a replacement,
-   * until that permission is revoked or this hook settles.
-   */
   dispose?(context: EngineDisposeContext): Promise<void>;
 }
 ```
 
+The members with no section of their own:
+
+| Member | Description |
+| --- | --- |
+| `name` | Shown in diagnostics. |
+| `version` | Recorded in reports and sessions. A saved session never restores across engine versions; a cached trace replays across them and re-finds its nodes. |
+| `spiVersion` | The contract version. Additive optional members never bump it; changed required semantics do. |
+| `platform` | The platform label: `web`, `ios`, `android`, or one of the engine's own. Tests filter on it through `platforms`, and tool packs are scoped by it; the harness attaches no meaning to any value. A target inherits it, and a target that names a platform of its own must agree with it. |
+| `workers` | The most workers the target gets, such as the number of devices in a pool. The cap applies even when `config.workers` is higher. Omit it when the engine has no concurrency limit. |
+| `locate` | Resolves one expression to the nodes it matches right now, once. The harness owns polling, strictness, and staleness. |
+
 #### `OperationContext`
 
+What every engine call carries: its budget, the run and attempt ids, and who
+is acting.
+
 ```ts
-/** What every engine call carries: budget, ids, and who is acting. */
 export interface OperationContext {
-  /**
-   * Aborts when the attempt, or the hook running the call, ends. It does not
-   * abort at `timeoutMs`: bound each call by that budget yourself.
-   */
   readonly signal: AbortSignal;
-  /**
-   * Remaining operation budget when the call starts. A waiting call's last
-   * locate or read can get more than its deadline leaves: as long as the
-   * slowest one it has seen.
-   */
   readonly timeoutMs: number;
-  /** The run id. */
   readonly runId: string;
-  /** The attempt id. */
   readonly attemptId: string;
-  /**
-   * Who asked: a test's own deterministic step, or the agent acting on a
-   * screen it observed. A deterministic step verifies its outcome with
-   * `expect`, so an engine may act as soon as the target holds still; an
-   * agent reads the screen right after acting, so an engine may wait for the
-   * transition to end first.
-   */
   readonly origin: 'test' | 'agent';
 }
 ```
+
+| Field | Description |
+| --- | --- |
+| `signal` | Aborts when the attempt, or the hook running the call, ends. It does not abort at `timeoutMs`: bound each call by that budget yourself. |
+| `timeoutMs` | The operation budget left when the call starts. A waiting call's last locate or read can get more than its deadline leaves: as long as the slowest one it has seen. |
+| `origin` | `'test'` for a test's own deterministic step, `'agent'` for the agent acting on a screen it observed. A deterministic step verifies its outcome with `expect`, so an engine may act as soon as the target holds still. An agent reads the screen right after acting, so an engine may wait for the transition to end first. |
 
 ### Capabilities
 
@@ -454,10 +273,10 @@ member. Two gaps end differently:
 | `locate` | `location` | `observe` | `screen`, `Locator`, `expect(locator)`. |
 | `viewportIntersection` | `viewport-intersection` | `locate` | `expect(locator).toBeInViewport()`. |
 | `tapModifiers: true` | - | `perform` | `modifiers` on `tap`, `doubleTap`, `multiTap`, and `secondaryTap`. |
-| `selectsDevice: true` | - | `prepare` | `e2e run --device`, the device `prepare` binds. |
-| `grantsAllPermissions: true` | - | - | `app.permissions: 'all'`, which the engine receives as `EngineAppInfo.allPermissions`. Without it, config load refuses `'all'`, so an engine released before it never receives the string. |
+| `selectsDevice: true` | - | `prepare` | `e2e run --device`, the device `prepare` binds. Without it, the runner refuses the flag for the target before anything is prepared. |
+| `grantsAllPermissions: true` | - | - | `app.permissions: 'all'`, which the engine receives as `EngineAppInfo.allPermissions`. Without it, config load refuses `'all'`. |
 | `launchArgumentValues: true` | - | - | The object form of `app.launchArguments`, in `EngineAppInfo.launchArgumentValues`. |
-| `fileApps: true` | - | - | A target whose `app.url` is a `file:` URL. `validateApp` is told with `fileApp: true`. |
+| `fileApps: true` | - | - | A target whose `app.url` is a `file:` URL, read from the disk of the machine the harness runs on. `validateApp` is told with `fileApp: true`. Without it, config load refuses a file `app.url`. |
 | `performAt` + `pointerActions` | `pointer` | `observe` | One pointer action at a viewport point, with no node behind it. |
 | `keyboard.{type,press,dismiss?}` | `keyboard` | `observe` | Input to whatever holds focus. |
 | `fixtures.<name>` | `<name>` | - | A contributed fixture. |
@@ -469,8 +288,8 @@ member. Two gaps end differently:
 #### Rendered node properties
 
 `readStyle(ref, properties, context)` returns computed CSS strings for the requested
-properties without changing app state. Its `computed-style` capability requires
-`observe`, and `ref` comes from the newest observation. Return a string for
+properties without changing app state. `ref` comes from the newest
+observation. Return a string for
 every requested property. Throw retryable `NODE_STALE` if the node no longer
 binds. The harness redacts values before returning them to tools.
 
@@ -497,16 +316,18 @@ clipping ancestor, such as a scroll container, `overflow: hidden`, or a frame.
 
 ```ts
 export interface ViewportIntersection {
-  /** Whether a positive area of the box is inside; false for a node with no box or an empty one. */
   readonly intersects: boolean;
-  /** The inside area's share of the whole box, from 0 to 1; absent where the platform reports only the visible part of a box. */
   readonly ratio?: number;
 }
 ```
 
-Omit `ratio` when the platform reports only the visible part of a box, as a
-device does. `toBeInViewport` with `ratio > 0` then fails with
-`UNSUPPORTED_CAPABILITY` instead of reading that part as the whole box. Throw
+`intersects` is whether a positive area of the box is inside: `false` for a
+node with no box or an empty one. `ratio` is the inside area's share of the
+whole box, from 0 to 1. Leave it out where the platform reports only the
+visible part of a box.
+
+Without `ratio`, `toBeInViewport` with `ratio > 0` fails with
+`UNSUPPORTED_CAPABILITY`. Throw
 retryable `NODE_STALE` if the node no longer binds, and
 `UNSUPPORTED_CAPABILITY` if the platform cannot report the node's bounds or
 screen position. A `ratio` is above `0` exactly when `intersects` is true. The
@@ -584,8 +405,7 @@ engine.
 
 #### `engine.capabilities`
 
-The computed `ReadonlySet` of capability names. Selection, the report, and
-`UNSUPPORTED_CAPABILITY` messages read it.
+The computed `ReadonlySet` of capability names.
 
 ```ts
 const engine = kiosk({ host: 'kiosk.local' });
@@ -593,14 +413,6 @@ engine.capabilities.has('location'); // true: the engine implements locate
 ```
 
 ```ts
-/**
- * Capability names: the closed harness capabilities plus one name per
- * contributed fixture. `actions` is `perform`; `location` is `locate`; both
- * require observation, because their refs live in the observation's id space.
- * `pointer` is `performAt`, an action addressed by a viewport point rather
- * than a node, and requires observation because the point is read off its
- * pixels.
- */
 export type EngineCapability =
   | 'observation'
   | 'computed-style'
@@ -617,44 +429,31 @@ export type EngineCapability =
 #### Keyboard
 
 ```ts
-/**
- * capability: keyboard - requires observation. Input to whatever holds focus,
- * with no node behind it: the agent's `type` and `press` without a target, and
- * the fallback of its point-addressed `type_at` and `press_at` when the point
- * lands on nothing the tree lists (a field drawn on a canvas, an input a
- * platform flattens out of its accessibility tree). Focus is the app's: the
- * harness tapped first, or the model said the field already has it.
- */
 export interface EngineKeyboard {
-  /**
-   * Types `text` into the focused field as a person typing would, through
-   * the platform's keyboard path: a browser dispatches the key events of each
-   * character, a device sends the text through its keyboard. Where the
-   * platform has key events the app must receive them; setting the value
-   * without keystrokes is not a compliant implementation, since
-   * `locator.pressSequentially` and the agent's `type` rely on the app
-   * reacting as it does to a user. With `replace`, clears the field first
-   * (select-all and delete on a keyboard surface; the platform's clear on a
-   * device). Throw `NOT_ACTIONABLE` when nothing that accepts text has focus,
-   * so the keystrokes are never silently discarded into the document body.
-   */
   type(text: string, options: { readonly replace: boolean }, context: OperationContext): Promise<void>;
-  /**
-   * Sends one key of the contract grammar (`Enter`, `Escape`, `Tab`,
-   * `Shift+Tab`, a character) to whatever holds focus. The harness has
-   * already validated the key's shape; refuse with `UNSUPPORTED_CAPABILITY`
-   * a key the surface cannot deliver.
-   */
   press(key: string, context: OperationContext): Promise<void>;
-  /** Hides an on-screen keyboard. Platforms without one leave it undefined. */
   dismiss?(context: OperationContext): Promise<void>;
 }
 ```
 
+Input to whatever holds focus, with no node behind it. Focus is the app's:
+the harness tapped first, or the model said the field already has it.
+
+| Member | Description |
+| --- | --- |
+| `type` | Types `text` into the focused field as a person typing would, through the platform's keyboard path. Where the platform has key events, the app must receive them: setting the value without keystrokes is not compliant, since `locator.pressSequentially` and the agent's `type` rely on the app reacting as it does to a user. With `replace`, clear the field first. |
+| `press` | Sends one key of the [key grammar](#keys) to whatever holds focus. The harness has already validated the key's shape. |
+| `dismiss` | Hides an on-screen keyboard. Leave it undefined on a platform without one. |
+
+| Throws | When |
+| --- | --- |
+| `NOT_ACTIONABLE` | `type` when nothing that accepts text has focus. |
+| `UNSUPPORTED_CAPABILITY` | `press` with a key the surface cannot deliver. |
+
 ### Lifecycle
 
 The hooks the runner calls around workers and attempts. Every hook is
-optional. The `Engine` declaration's JSDoc above states each hook's contract.
+optional. Each hook's entry below states its contract.
 
 `init` and `startAttempt` run within `launchTimeout`. `finish`,
 `settleAttempt`, `endAttempt`, and `dispose` run within `cleanupTimeout`.
@@ -686,6 +485,12 @@ async prepare(info) {
 },
 ```
 
+- Download dependencies or boot devices here, and report progress through
+  `info.log`.
+- A run with nothing to run (the test filters left nothing, or
+  `--pass-with-no-tests` on an empty selection) prepares no target, and so
+  calls no `finish`.
+
 A failure ends the run before any test:
 
 | Thrown | Becomes |
@@ -695,91 +500,50 @@ A failure ends the run before any test:
 | Any other `EngineError`, or a plain `Error` | Infrastructure `ENGINE_FAILURE`. |
 
 ```ts
-/**
- * What `prepare` learned that the run must honour. `workers` replaces the
- * engine's declared cap for this target and run: the surfaces the engine
- * actually provisioned, `1` to `info.slots`. Declared `workers` stays the
- * static answer for engines that know it up front.
- */
 export interface EnginePrepareResult {
-  /** Lowers the target's worker cap for this run, `1` to `info.slots`. */
   readonly workers?: number;
-  /**
-   * Variables every worker of this target is spawned with, on top of the
-   * run's environment: how a runner-side `prepare` hands what it provisioned
-   * (a device pool it discovered) to each worker's `init`. The run's own
-   * variables win on a clash.
-   */
   readonly env?: Readonly<Record<string, string>>;
 }
 
-/** Who holds a target, for the lifecycle hooks: `prepare`, `init`, `finish`. */
 export interface EngineHostIdentity {
-  /**
-   * Set when a `launch()` host holds the target: a token no other host has.
-   * Hosts name their targets alike, so an engine that names what it holds
-   * after the target (a device session) adds this to keep hosts apart.
-   */
   readonly hostId?: string | undefined;
 }
 
-/**
- * Facts handed to `prepare`, once per run and target in the runner process,
- * before any worker exists.
- */
 export interface EnginePrepareInfo extends EngineHostIdentity {
-  /** The run id. */
   readonly runId: string;
-  /** The target being prepared. */
   readonly targetName: string;
-  /** Directory relative paths in the config resolve against; see `EngineInitInfo.projectRoot`. */
   readonly projectRoot: string;
-  /** The app the target declares, as `init` receives it: what a device installs or warms up here. */
   readonly app: EngineAppInfo;
-  /**
-   * The worker slots the run will start for this target, `0` to `slots - 1`:
-   * the run's worker cap, the engine's declared `workers`, and the work units
-   * selected for the target, whichever is smallest; `0` when nothing runs on
-   * it while another target has work. A run with nothing to run prepares no
-   * target. Provision for exactly these slots (boot that many devices of a
-   * pool); `init` then finds them ready.
-   */
   readonly slots: number;
-  /**
-   * The run's environment: what every worker is started with. A host may hand
-   * the run an environment other than the runner process's own, so anything
-   * provisioned here that a worker later looks up by environment (a browser
-   * cache location) must be resolved and spawned against this, not
-   * `process.env`.
-   */
   readonly env: Readonly<Record<string, string | undefined>>;
-  /**
-   * Aborts on interrupt only. Provisioning has no budget: a first-run
-   * download is as long as the network makes it, and cutting it short would
-   * fail every test behind it.
-   */
   readonly signal: AbortSignal;
-  /** Whether the run asked for a visible surface (`--headed`), as `EngineInitInfo` declares it. */
   readonly headed: boolean;
-  /**
-   * The device `e2e run --device` names for this target, by name or id: the
-   * one to bind instead of the configured one. Only an engine that declares
-   * `selectsDevice` receives it.
-   */
   readonly device?: string;
-  /**
-   * Reports one line of progress. The runner streams it as a `notice` run
-   * event, so it reaches the reporter and every host sink instead of being
-   * written to a worker's stderr underneath the live status block.
-   */
   readonly log: (line: string) => void;
 }
 ```
 
+| Field | Description |
+| --- | --- |
+| `result.workers` | Lowers the target's worker cap for this run, from `1` to `info.slots`. |
+| `result.env` | Variables every worker of this target is spawned with, on top of the run's environment: how `prepare` hands what it provisioned to each worker's `init`. The run's own variables win on a clash. |
+| `info.hostId` | Set when a `launch()` host holds the target: a token no other host has. Hosts name their targets alike, so an engine that names what it holds after the target, such as a device session, adds this to keep hosts apart. `init` and `finish` receive it too. |
+| `info.projectRoot` | The directory relative paths in the config resolve against, as in [`init`](#init). |
+| `info.app` | The app the target declares, as `init` receives it: what a device installs or warms up here. |
+| `info.slots` | The worker slots the run will start for this target, `0` to `slots - 1`: the smallest of the run's worker cap, the engine's declared `workers`, and the work units selected for the target. `0` when nothing runs on it while another target has work. Provision for exactly these slots; `init` then finds them ready. |
+| `info.env` | The run's environment: what every worker is started with. A host may hand the run an environment other than the runner process's own, so resolve and spawn against this, not `process.env`. |
+| `info.signal` | Aborts on interrupt only. |
+| `info.headed` | Whether the run asked for a visible surface (`--headed`). |
+| `info.device` | The device `e2e run --device` names for this target, by name or id: the one to bind instead of the configured one. Only an engine that declares `selectsDevice` receives it. |
+| `info.log` | Reports one line of progress. The runner streams it as a `notice` run event to the reporter and every host sink. |
+
 #### `finish`
 
 Runs once per run and target in the runner process, after every worker of
-the target is gone. Release what `prepare` acquired for the run.
+the target is gone. Release what `prepare` acquired for the run, such as a
+leased cloud device. It runs on every exit path, whenever `prepare` was
+called, and an interrupt never cancels it. A failure is a cleanup-phase run
+error.
 
 ```ts
 async finish(info) {
@@ -790,18 +554,16 @@ async finish(info) {
 The `finish` hooks of all prepared targets share one `cleanupTimeout`.
 
 ```ts
-/** Handed to `finish`, once per run and target after the last worker is gone, with the cleanup budget of one hook. */
 export interface EngineFinishInfo extends EngineCleanupContext, EngineHostIdentity {
-  /** The run id. */
   readonly runId: string;
-  /** The target being finished. */
   readonly targetName: string;
-  /** The run's environment, the same `prepare` saw. */
   readonly env: Readonly<Record<string, string | undefined>>;
-  /** Reports one line of progress, streamed as a `notice` run event like `prepare`'s. */
   readonly log: (line: string) => void;
 }
 ```
+
+`info.env` is the run's environment, the same `prepare` saw. `info.log`
+reports one line of progress, streamed as `prepare`'s is.
 
 #### `doctor`
 
@@ -818,44 +580,45 @@ async doctor(info) {
 },
 ```
 
+Keep it read-only and quick: never install, launch, lease, or start anything
+a check could look up instead, and never call `prepare`. A check that cannot
+tell reports nothing rather than guess.
+
 `e2e doctor` gives the hook 30 seconds, starting a protocol engine's
 server included. A throw, a timeout, a finding that isn't an
 `EngineDoctorCheck`, or one with an id `e2e doctor` uses itself (`node`,
 `config`, `engine`, `model`) becomes an `engine` check with status `fail`.
+`info.signal` aborts at the 30 seconds, or when `e2e doctor` is interrupted.
+Return within 5 seconds of it; the connection closes then.
 
 ```ts
-/** Facts handed to `doctor`, once per target in the process `e2e doctor` runs in. */
 export interface EngineDoctorInfo {
-  /** The target being checked. */
   readonly targetName: string;
-  /** Directory relative paths in the config resolve against; see `EngineInitInfo.projectRoot`. */
   readonly projectRoot: string;
-  /** The app the target declares, as `prepare` receives it. */
   readonly app: EngineAppInfo;
-  /** The environment a run would start with. */
   readonly env: Readonly<Record<string, string | undefined>>;
-  /** Whether the run would show the surface (`--headed`), as `prepare` receives it. */
   readonly headed: boolean;
-  /** Aborts 30 seconds in, when the checks fail as timed out, or when `e2e doctor` is interrupted; return within 5 seconds of it, when the connection closes. */
   readonly signal: AbortSignal;
-  /** Reports one line of progress; `e2e doctor` prints it to stderr. */
   readonly log: (line: string) => void;
 }
 
-/** One finding of `doctor`. */
 export interface EngineDoctorCheck {
-  /** What was checked, in kebab case: `browser`, `toolchain`. */
   readonly id: string;
-  /**
-   * `pass`; `warn` for something a run handles on its own, slower (a
-   * first-run download); `fail` for something that stops a run; `skip` for
-   * a check that does not apply to this target.
-   */
   readonly status: 'pass' | 'warn' | 'fail' | 'skip';
-  /** One line: what was found and, unless it passed, what to do. */
   readonly message?: string;
 }
 ```
+
+| Field | Description |
+| --- | --- |
+| `info.projectRoot` | The directory relative paths in the config resolve against, as in [`init`](#init). |
+| `info.app` | The app the target declares, as `prepare` receives it. |
+| `info.env` | The environment a run would start with. |
+| `info.headed` | Whether the run would show the surface (`--headed`). |
+| `info.log` | Reports one line of progress; `e2e doctor` prints it to stderr. |
+| `id` | What was checked, in kebab case: `browser`, `toolchain`. |
+| `status` | `pass`; `warn` for something a run handles on its own, slower, such as a first-run download; `fail` for something that stops a run; `skip` for a check that does not apply to this target. |
+| `message` | One line: what was found and, unless it passed, what to do. |
 
 #### `init`
 
@@ -870,57 +633,32 @@ async init(info) {
 ```
 
 `init` never learns the app URL; URLs arrive through `session.open` only. A
-failure is an infrastructure error.
+failure is an infrastructure error. The same handle can be booted again after
+`dispose`, so `init` must work on a disposed engine as it does on a fresh one.
 
 ```ts
-/** Run identity and harness-resolved facts handed to `init`, once per worker before the first step. */
 export interface EngineInitInfo extends EngineHostIdentity {
-  /** The run id. */
   readonly runId: string;
-  /** The target this worker serves. */
   readonly targetName: string;
-  /**
-   * Directory relative paths in the config resolve against: the config file's
-   * directory, or the run's `cwd` for a programmatic config. An engine option
-   * naming a file (a build to install) resolves here, never against
-   * `process.cwd()`, which an in-process run does not change.
-   */
   readonly projectRoot: string;
-  /** The app the target declares: the origin and site policy of its URL, and what a device launches. */
   readonly app: EngineAppInfo;
-  /**
-   * This worker's environment: the run's, plus what this target's `prepare`
-   * returned in its result's `env`. Read what `prepare` provisioned from
-   * here, never from `process.env`: an in-process worker shares its process
-   * with the runner and every other target.
-   */
   readonly env: Readonly<Record<string, string | undefined>>;
-  /** Whether the run asked for a visible surface (`--headed`). */
   readonly headed: boolean;
-  /**
-   * This worker's 0-based slot among the target's workers: the lowest slot
-   * free when the worker was spawned, so a replacement worker takes over the
-   * slot of the one that exited. An engine with several devices hands each
-   * slot its own; `config.workers` bounds the slots a target can reach.
-   */
   readonly workerSlot: number;
-  /** Aborts on interrupt and when init exceeds the launch timeout; init must stop promptly. */
   readonly signal: AbortSignal;
-  /**
-   * Reports one line of progress. The runner streams it as a `notice` run
-   * event, prefixed with the target and worker slot, so it reaches the
-   * reporter and every host sink instead of being written to a worker's
-   * stderr underneath the live status block. This is where a fact that only
-   * exists once the worker is up belongs: the URL a hosted browser or device
-   * can be watched at, which simulator a slot got, a version it detected.
-   * Meant for `init` itself; a line logged later is still delivered while
-   * the worker lives and dropped once it has exited. The line is shown as is
-   * in reporters and host sinks, so keep tokens and other secrets out of it
-   * (a viewer URL without its credential).
-   */
   readonly log: (line: string) => void;
 }
 ```
+
+| Field | Description |
+| --- | --- |
+| `projectRoot` | The directory relative paths in the config resolve against: the config file's directory, or the run's `cwd` for a programmatic config. Resolve an engine option naming a file, such as a build to install, here and never against `process.cwd()`, which an in-process run does not change. |
+| `app` | The app the target declares; see [`EngineAppInfo`](#engineappinfo). |
+| `env` | This worker's environment: the run's, plus what this target's `prepare` returned in its result's `env`. Read what `prepare` provisioned from here, never from `process.env`: an in-process worker shares its process with the runner and every other target. |
+| `headed` | Whether the run asked for a visible surface (`--headed`). |
+| `workerSlot` | This worker's 0-based slot among the target's workers: the lowest slot free when the worker was spawned, so a replacement worker takes over the slot of the one that exited. An engine with several devices hands each slot its own. `config.workers` bounds the slots a target can reach. |
+| `signal` | Aborts on interrupt and when `init` exceeds the launch timeout; `init` must stop promptly. |
+| `log` | Reports one line of progress. The runner streams it as a `notice` run event, prefixed with the target and worker slot, to the reporter and every host sink. Use it for a fact that only exists once the worker is up, such as the URL a hosted browser can be watched at. A line logged after `init` is delivered while the worker lives and dropped once it has exited. The line is shown as is, so keep tokens and other secrets out of it. |
 
 #### `startAttempt`
 
@@ -937,6 +675,11 @@ async startAttempt(context) {
 
 On failure or timeout, `context.signal` aborts and `endAttempt` runs.
 
+List the `secrets.get()` handles the engine's options hold, such as a
+basic-auth password, in the spec's `secrets`. Config load checks that each
+names a configured secret and fails with `INVALID_CONFIG` otherwise. Only
+these resolve through `context.resolveSecret`.
+
 <Warning>
 A value from `resolveSecret` is protected as text only. Reports, logs, and
 observations redact it and the attempt's text downloads are rewritten, but
@@ -944,95 +687,52 @@ a page that shows it outside a secure field is not masked in screenshots.
 </Warning>
 
 ```ts
-/**
- * Per-attempt isolation context. An engine that must give each test a fresh
- * surface (a fresh isolated context per test, a reset device) sets it up in
- * `startAttempt` and tears it down in `endAttempt`.
- */
 export interface EngineAttemptContext {
-  /** The attempt id. */
   readonly attemptId: string;
-  /** Absolute directory every artifact of this attempt is written under. */
   readonly artifactsDir: string;
-  /**
-   * The plaintext of a secret the engine declared in `secrets`, for an
-   * option the engine hands the app itself (basic-auth credentials). A
-   * provider runs again on every call. The value, and every value
-   * `options.derived` computes from it, join the attempt's redaction before
-   * this resolves, so reports, logs, and every observation redact them, and
-   * the attempt's text downloads are rewritten. The protection is
-   * text only: a page that shows the value outside a secure field is not
-   * masked in screenshots.
-   * A secret the engine did not declare is `SECRET_UNAVAILABLE`.
-   */
   readonly resolveSecret: (secret: Secret, options?: ResolveSecretOptions) => Promise<string>;
-  /**
-   * Aborts with the attempt, and the moment `startAttempt` fails or exceeds
-   * the launch timeout: a hook still running then must stop, because the
-   * harness ends the attempt's isolation right behind it and may retry.
-   */
   readonly signal: AbortSignal;
-  /**
-   * Reports something the app did on its own while the attempt ran: a
-   * console line, an uncaught exception, a request that failed. The harness
-   * redacts the text, keeps it with the step that was running (from an event
-   * callback outside any step, the step that started last; before the first
-   * step, with none), and shows it on the trace page. Call it from the moment `startAttempt` begins until
-   * `endAttempt`; entries past a per-attempt cap are dropped.
-   */
   readonly appLog: (entry: AppLogEntry) => void;
-  /**
-   * Reports where the app went on its own, as one line (`navigated to
-   * /login`, `the app opened a new tab at /help`): a navigation the engine
-   * did not start, a tab, a frame. Shown under the step that was running.
-   */
   readonly navigation: (line: string) => void;
-  /**
-   * Hands the harness a screen for the trace: the capture a `locate`
-   * matched against, or one read right after an action. A read after an
-   * action is on the action's path, so bound it and skip it where it is
-   * expensive; it never fails the action. The trace page shows how each
-   * step's screen changed. Refs in it are not valid for `perform`. Absent
-   * when the attempt keeps no trace.
-   */
   readonly screen?: (snapshot: EngineSnapshot) => void;
-  /**
-   * What the attempt runs on, such as `{ browser: 'chromium 141.0' }` or
-   * `{ device: 'iPhone 16', os: 'iOS 26.0' }`, for the trace page. Later
-   * calls add to and overwrite earlier facts.
-   */
   readonly environment: (facts: Readonly<Record<string, string>>) => void;
 }
 
-/** One line of what the app did during an attempt, as `EngineAttemptContext.appLog` takes it. */
 export interface AppLogEntry {
-  /**
-   * Where it came from: the app's `console`, an `error` nothing caught, the
-   * `network`, or the `system` the app runs on (a crash, an OS log).
-   */
   readonly source: 'console' | 'error' | 'network' | 'system';
   readonly level: 'error' | 'warning' | 'info';
-  /** One line, such as `GET /api/todos 500` or `TypeError: x is undefined`; the harness clips it. */
   readonly text: string;
 }
 
-/** How `EngineAttemptContext.resolveSecret` treats what the engine makes of the value. */
 export interface ResolveSecretOptions {
-  /**
-   * The forms of the value the app sees instead of the value itself, for the
-   * same redaction under the secret's name: the base64 `user:password` an
-   * `Authorization: Basic` header carries, which a page echoing its request
-   * headers would otherwise show.
-   */
   readonly derived?: (plaintext: string) => readonly string[] | Promise<readonly string[]>;
 }
 ```
+
+| Field | Description |
+| --- | --- |
+| `artifactsDir` | The absolute directory every artifact of this attempt is written under. |
+| `resolveSecret` | Resolves the plaintext of a secret the engine declared in `secrets`, for an option the engine hands the app itself. A provider runs again on every call. The value, and every value `options.derived` computes from it, join the attempt's redaction before the call resolves. |
+| `options.derived` | Returns the forms of the value the app sees instead of the value itself, redacted under the secret's name: the base64 `user:password` of an `Authorization: Basic` header, which a page echoing its request headers would otherwise show. |
+| `signal` | Aborts with the attempt, and the moment `startAttempt` fails or exceeds the launch timeout: a hook still running then must stop. |
+| `appLog` | Reports something the app did on its own while the attempt ran: a console line, an uncaught exception, a failed request. The harness redacts the text and shows it on the trace page with the step that was running. Call it from the moment `startAttempt` begins until `endAttempt`. Entries past a per-attempt cap are dropped. |
+| `entry.source` | The app's `console`, an `error` nothing caught, the `network`, or the `system` the app runs on, such as a crash or an OS log. |
+| `entry.text` | One line, such as `GET /api/todos 500`; the harness clips it. |
+| `navigation` | Reports where the app went on its own, as one line such as `navigated to /login`: a navigation the engine did not start, a tab, a frame. Shown under the step that was running. |
+| `screen` | Hands the harness a screen for the trace: the capture a `locate` matched against, or one read right after an action. That read is on the action's path, so bound it and skip it where it is expensive; it never fails the action. Refs in it are not valid for `perform`. Absent when the attempt keeps no trace. |
+| `environment` | Reports what the attempt runs on, such as `{ device: 'iPhone 16', os: 'iOS 26.0' }`, for the trace page. Later calls add to and overwrite earlier facts. |
+
+| Throws | When |
+| --- | --- |
+| `SECRET_UNAVAILABLE` | `resolveSecret` gets a secret the engine did not declare. |
 
 #### `settleAttempt`
 
 Runs after the body has settled, and again after teardown, before the
 verdict. It reports a failure on a path no step awaited, such as a request
-interceptor or a native dialog handler.
+interceptor or a native dialog handler. Wait for one still running, then
+throw its error: the attempt fails with it the way a step would, and an error
+already classified keeps its code. Report each failure once.
 
 ```ts
 async settleAttempt() {
@@ -1045,7 +745,8 @@ async settleAttempt() {
 #### `endAttempt`
 
 Runs after each attempt and tears down what `startAttempt` set up. A failure
-marks cleanup failed; the test keeps its status.
+marks cleanup failed; the test keeps its status. It must be idempotent, and
+safe to call after a failed `startAttempt`.
 
 ```ts
 async endAttempt(context) {
@@ -1055,16 +756,20 @@ async endAttempt(context) {
 
 #### `dispose`
 
-Runs once per worker, including when `init` never ran.
+Runs once per worker, once `init` was called. It runs even when `init`
+failed, so it must tolerate a partly initialized engine. A worker that never
+called `init` gets no `dispose`. A failure is a run error.
 
-Missing or aborted `context.reuseSignal` requires final cleanup. A live
-signal permits keeping run-owned resources for a replacement worker.
-An engine that keeps resources must observe revocation until its hook settles.
-Final shutdown, a forced interrupt, or parent disconnect revokes that permission.
-The cleanup budget still uses `context.signal` and `context.timeoutMs`.
+A live `context.reuseSignal` permits keeping run-owned resources, the
+reusable ones `prepare` and `finish` own, for a replacement worker. A missing
+or aborted one requires final cleanup. Final shutdown, a forced
+interrupt, or parent disconnect revokes that permission; observe revocation
+until disposal settles. `reuseSignal` does not cancel cleanup, which stays
+bounded by `context.signal` and `context.timeoutMs`.
 
-Cleanup is best effort within that budget. The runner does not guarantee
-cleanup after a worker exits or after disposal settles with reuse permission.
+Cleanup is best effort within the cleanup budget. The runner does not
+guarantee cleanup after a worker exits or after disposal settles with reuse
+permission.
 
 ```ts
 async dispose(context) {
@@ -1073,29 +778,19 @@ async dispose(context) {
 ```
 
 ```ts
-/**
- * Budget of one cleanup hook (`settleAttempt`, `endAttempt`, `dispose`). `signal` aborts when
- * the budget is exhausted, so a hook that cannot finish in time stops instead
- * of running on into the next attempt's setup.
- */
 export interface EngineCleanupContext {
-  /** Aborts when the cleanup budget is spent. */
   readonly signal: AbortSignal;
-  /** Remaining cleanup budget when the call starts. */
   readonly timeoutMs: number;
 }
 
-/** Cleanup of one worker, with optional permission to leave run-owned resources for a replacement. */
 export interface EngineDisposeContext extends EngineCleanupContext {
-  /**
-   * A live signal permits reusable resources owned by `prepare` and `finish`
-   * to survive this worker. Missing or aborted permission requires final
-   * cleanup. Observe revocation until disposal settles. This signal does
-   * not cancel cleanup, which remains bounded by `signal` and `timeoutMs`.
-   */
   readonly reuseSignal?: AbortSignal;
 }
 ```
+
+`EngineCleanupContext` is the budget of one cleanup hook (`settleAttempt`,
+`endAttempt`, `dispose`): `signal` aborts when the cleanup budget is spent,
+and `timeoutMs` is the budget left when the call starts.
 
 ### Observation
 
@@ -1114,98 +809,60 @@ export interface EngineDisposeContext extends EngineCleanupContext {
 | `maskedRegionCount` | `number` |
 
 `tabs` reports the open tabs when there is more than one: `count`, and the
-zero-based place of the tab `root` reads, in the order the tabs opened. The
-harness names the tab in every screen header and tells the model when a
-tab opened or the screen moved to another tab. Omit it with one tab.
+zero-based place of the tab `root` reads, in the order the tabs opened. Omit
+it with one tab.
 
 Return the surface as it is right now. The runner mints the revision and
-stamps it onto every ref. When `pixels` are present, it checks that
-`maskedRegionCount` covers every `secure` node. An engine asked for pixels
-(`pixels: true`) that cannot mask every secure node on screen omits `pixels`
-and reports `maskedRegionCount` alone, the regions it could mask. A count with
-no `pixels` always reads as withheld, even when the tree holds no `secure`
-node, since a tree read only in part can leave one out. `toHaveScreenshot` then fails with
-`POLICY_DENIED`, and the agent reads `MASKING_UNPROVEN`, instead of waiting for
-a screenshot.
-A valid empty tree may have a childless root and include `pixels`.
+stamps it onto every ref; it also owns secret redaction and the observation
+byte budget. A valid empty tree may have a childless root and
+include `pixels`.
+
+`maskedRegionCount` is the number of regions masked in the screenshot; the
+harness checks that it covers every secure node. An engine asked for pixels
+that cannot mask every secure node on screen omits `pixels` and still reports
+the regions it could mask. A count with no `pixels` always reads as withheld,
+even when the tree holds no secure node, since a tree read only in part can
+leave one out: `toHaveScreenshot` fails with `POLICY_DENIED` and the agent
+reads `MASKING_UNPROVEN`, not a missing screenshot.
 
 ```ts
-/**
- * One fresh semantic snapshot of the surface under test. The harness owns
- * everything downstream: revision minting, secret redaction, and the
- * observation byte budget apply to every engine equally.
- */
 export interface EngineSnapshot {
-  /**
-   * Where the surface is, as an opaque address the platform understands: a
-   * URL on a document platform, the foreground screen or activity on a
-   * device, the front window on a desktop. The harness shows it to the model
-   * and to the report, anchors trace replay on it, and applies the origin
-   * policy to it only when it parses as a URL. Omit when the platform has no
-   * notion of a current location.
-   */
   readonly location?: string;
-  /**
-   * The observation tree under one root the engine minted. The root's id MUST
-   * be stable for the surface across observations: `perform(root, swipe)` is
-   * the viewport swipe, and the harness addresses it from an earlier
-   * observation, possibly one taken before a `restart` or `reset`, so the
-   * root swipe MUST NOT depend on a live handle from that observation. A
-   * platform with several top-level elements (a device's windows) wraps them
-   * in a root of its own.
-   */
   readonly root: SemanticNode;
-  /** The viewport `SemanticNode.rect` and `ViewportPoint` are measured in, in CSS pixels. */
   readonly viewport: ViewportSize;
-  /**
-   * True when `root` leaves out nodes that are on the surface: the engine
-   * stopped reading at a node cap or a depth limit, or could not enter a
-   * child document. The harness tells the model the listing is incomplete
-   * and never calls such a screen unchanged. Omit or set false for a tree
-   * read whole.
-   */
   readonly truncated?: boolean;
-  /**
-   * Whether an on-screen keyboard is showing, as the engine measured it apart
-   * from `root`. Set `false` when it measured none, and omit it only when the
-   * engine did not measure it.
-   */
   readonly keyboardVisible?: boolean;
-  /**
-   * The tabs the surface has open, when it has more than one, such as a
-   * browser with a tab the app opened. Omit with one tab.
-   */
   readonly tabs?: { readonly count: number; readonly active: number };
-  /** Semantic capture failed; only fresh, independently masked pixels are evidence. */
   readonly treeUnavailable?: true;
-  /** Masked pixels, when requested and producible; omitted otherwise. */
   readonly pixels?: ObservationPixels;
-  /**
-   * Regions masked in the screenshot; the harness checks it covers every secure
-   * node. An engine asked for pixels (`pixels: true`) that cannot mask every
-   * secure node on screen omits `pixels` and still reports the regions it
-   * could mask. A count with no `pixels` always reads as withheld, even when
-   * the tree holds no secure node, since a tree read only in part can leave
-   * one out: `toHaveScreenshot` fails with `POLICY_DENIED` and the agent reads
-   * `MASKING_UNPROVEN`, not a missing screenshot.
-   */
   readonly maskedRegionCount?: number;
 }
 
 export interface EngineObserveOptions {
-  /** Requests masked viewport pixels for the same revision as the tree. */
   readonly pixels?: boolean;
-  /** Permits independently masked pixels to replace a failed semantic capture. */
   readonly pixelFallback?: boolean;
-  /** The pixels are compared against a stored screenshot: hold system chrome (a status bar's clock and battery) in a fixed state where the platform can. */
   readonly comparable?: boolean;
 }
 ```
 
+| Field | Description |
+| --- | --- |
+| `location` | Where the surface is, as an opaque address the platform understands: a URL on a document platform, the foreground screen or activity on a device, the front window on a desktop. The harness shows it to the model and the report, anchors trace replay on it, and applies the origin policy to it only when it parses as a URL. Omit it when the platform has no notion of a current location. |
+| `root` | The tree under one root the engine minted. The root's id must be stable for the surface across observations: `perform(root, swipe)` is the viewport swipe, and the harness addresses it from an earlier observation, possibly one taken before a `restart` or `reset`. So the root swipe must not depend on a live handle from that observation. A platform with several top-level elements, such as a device's windows, wraps them in a root of its own. |
+| `viewport` | The viewport `SemanticNode.rect` and `ViewportPoint` are measured in, in CSS pixels. |
+| `keyboardVisible` | Whether an on-screen keyboard is showing, as the engine measured it apart from `root`. Set `false` when it measured none; omit it only when the engine did not measure it. |
+| `pixels` | Masked pixels, when requested and producible; omitted otherwise. |
+| `options.pixels` | Requests masked viewport pixels for the same revision as the tree. |
+| `options.pixelFallback` | Permits the [pixel fallback](#pixel-fallback). |
+| `options.comparable` | The pixels are compared against a stored screenshot: hold system chrome, such as a status bar's clock and battery, in a fixed state where the platform can. |
+
 #### Truncated trees
 
-Set `truncated` when a node limit or an inaccessible subtree leaves content
-out. The `truncated` JSDoc above says how the runner treats it.
+Set `truncated` when `root` leaves out nodes that are on the surface: the
+engine stopped reading at a node cap or a depth limit, or could not enter a
+child document. The harness tells the model the listing is incomplete and
+never calls such a screen unchanged. Omit it or set `false` for a tree read
+whole.
 
 #### Pixel fallback
 
@@ -1238,8 +895,7 @@ return {
 - Engines whose masks depend on their semantic capture cannot provide this
   fallback.
 
-`EngineSnapshot` is an extendable interface, so TypeScript can't enforce
-these rules. The runner checks the shape at the engine boundary, at runtime:
+The runner checks the shape at runtime:
 
 | Throws | When |
 | --- | --- |
@@ -1273,7 +929,7 @@ honors in `actions` and `pointerActions`.
 | `setInputFilePayloads` | `files` with `name`, `mimeType`, and `Uint8Array` `buffer`. An empty `files` array clears the input. The runner uses it to clear when the engine declares this action without `setInputFiles`. | yes | - |
 | `dragTo` | `target`: a `NodeRef` or a `ViewportPoint` | yes | yes |
 | `swipe` | `direction`, `momentum?` | yes | yes |
-| `scrollTo` | `edge`: `'top'`, `'bottom'`, `'left'`, or `'right'`. On a node, the node or its nearest ancestor that scrolls along that axis; on the root, the screen's main scrolling content. Resolves once nothing scrolls further toward `edge`, at once when nothing does, within the operation's budget. Not in SPI v1, so list it explicitly. | yes | - |
+| `scrollTo` | `edge`: `'top'`, `'bottom'`, `'left'`, or `'right'`. Not in SPI v1, so list it explicitly. | yes | - |
 | `swipeTo` | `target`, `durationMs?` | - | yes |
 
 The grammar is closed. Anything beyond it is an agent-side `defineTool`.
@@ -1294,22 +950,12 @@ async perform(ref, action, context) {
 ```
 
 ```ts
-/**
- * One deterministic action `perform` carries out on a node. The `swipe`
- * kind on the observation's root node is the viewport swipe: the agent's
- * `scroll` verb and `screen.swipe()` both arrive as `perform(root, swipe)`,
- * so a surface implements scrolling once.
- *
- * `press` takes one key in the `Key` grammar below.
- */
 export type LocatorAction =
   | {
       readonly kind: 'tap' | 'doubleTap' | 'secondaryTap';
-      /** Keys held for the click; only an engine that declares `tapModifiers` receives it. */
       readonly modifiers?: readonly KeyModifier[];
     }
   | {
-      /** `count` taps in a row (3 or more; 2 is `doubleTap`): one multi-click in a browser, presses at the device's cadence on a device. */
       readonly kind: 'multiTap';
       readonly count: number;
       readonly modifiers?: readonly KeyModifier[];
@@ -1331,7 +977,6 @@ export type LocatorAction =
   | { readonly kind: 'setInputFiles'; readonly paths: readonly string[] }
   | {
       readonly kind: 'setInputFilePayloads';
-      /** In-memory files; an empty array clears the input. The protocol encodes bytes only on the wire. */
       readonly files: readonly { readonly name: string; readonly mimeType: string; readonly buffer: Uint8Array }[];
     }
   | { readonly kind: 'dragTo'; readonly target: NodeRef }
@@ -1341,26 +986,12 @@ export type LocatorAction =
       readonly momentum?: Momentum;
     }
   | {
-      /**
-       * Scrolls a container to one of its edges, as far as it goes. On a
-       * node: the node when it scrolls along the edge's axis, else its
-       * nearest ancestor that does; an engine that cannot tell which node
-       * scrolls drags inside the node's own box. On the observation root:
-       * the screen's main scrolling content, else what is under the
-       * viewport's center. The engine
-       * resolves once the container cannot scroll further toward `edge`, at
-       * once when it is there already or nothing scrolls along that axis,
-       * and stops when the operation's budget runs out. Not a kind of SPI v1,
-       * so an engine lists it explicitly.
-       */
       readonly kind: 'scrollTo';
       readonly edge: ScrollEdge;
     };
 
-/** Every action kind; what an engine declares in `actions`. */
 export type LocatorActionKind = LocatorAction['kind'];
 
-/** The locator action kinds of SPI v1. List newer kinds explicitly. Use KNOWN_LOCATOR_ACTION_KINDS to check an action kind. */
 export const LOCATOR_ACTION_KINDS = [
   'tap',
   'doubleTap',
@@ -1380,9 +1011,33 @@ export const LOCATOR_ACTION_KINDS = [
   'swipe',
 ] as const satisfies readonly LocatorActionKind[];
 
-/** Every action kind understood by this version of core. */
 export const KNOWN_LOCATOR_ACTION_KINDS = [...LOCATOR_ACTION_KINDS, 'blur', 'setInputFilePayloads', 'multiTap', 'scrollTo'] as const satisfies readonly LocatorActionKind[];
 ```
+
+- `perform` acts on a ref from the newest observation or `locate`, with the
+  platform's actionability checks. Agent tools and locator actions both call
+  it.
+- A `swipe` on the observation root swipes the viewport. The agent's `scroll`
+  verb and `screen.swipe()` both arrive as `perform(root, swipe)`.
+- `multiTap` is `count` taps in a row: one multi-click in a browser, presses
+  at the device's cadence on a device. Two taps are a `doubleTap`.
+- `scrollTo` scrolls a container to one of its edges, as far as it goes. On a
+  node, that is the node when it scrolls along the edge's axis, else its
+  nearest ancestor that does; an engine that cannot tell which node scrolls
+  drags inside the node's own box. On the observation root, it is the
+  screen's main scrolling content, else what is under the viewport's center.
+  Resolve once the container cannot scroll further toward `edge`, at once
+  when it is there already or nothing scrolls along that axis, and stop when
+  the operation's budget runs out.
+- `LOCATOR_ACTION_KINDS` holds the kinds of SPI v1; list newer kinds
+  explicitly. `KNOWN_LOCATOR_ACTION_KINDS` holds every kind this version of
+  core understands: use it to check a kind.
+
+| Throws | When |
+| --- | --- |
+| `NODE_STALE`, retryable | The ref no longer binds. |
+| `ACTION_MAY_HAVE_COMMITTED` | Input may have reached the app. The runner never repeats such an action, which keeps trace replay safe. |
+| `UNSUPPORTED_CAPABILITY` | A declared kind this particular node cannot take, such as a `check` on a toggle whose state is unknown. |
 
 #### Pointer actions
 
@@ -1394,6 +1049,12 @@ Pointer actions use viewport coordinates when no semantic node is available.
   point to `target`, a touch swipe on a device and a pointer drag on a
   document platform. It differs from `dragTo`, where a platform holds before
   it drags.
+- The point is in the CSS pixels of `SemanticNode.rect`. Dispatch the pointer
+  at the point as given: the harness has clamped an agent's point to the
+  viewport and validated a test's.
+- Throw `UNSUPPORTED_CAPABILITY` for a declared kind the surface cannot
+  deliver at this particular point.
+- `POINTER_ACTION_KINDS` is the closed list of pointer kinds.
 
 ```ts
 export type PointerAction =
@@ -1411,10 +1072,8 @@ export type PointerAction =
       readonly durationMs?: number;
     };
 
-/** Every pointer action kind; what an engine declares in `pointerActions`. */
 export type PointerActionKind = PointerAction['kind'];
 
-/** The closed list of pointer action kinds, in contract order; the type is derived from it. */
 export const POINTER_ACTION_KINDS = [
   'tap',
   'doubleTap',
@@ -1438,21 +1097,6 @@ parseKey('Ctrl+a'); // undefined: Ctrl is not a modifier of the grammar
 ```
 
 ```ts
-/**
- * The key grammar of `press`, shared by every engine so a test's key names are
- * portable: zero or more modifiers and one key, joined by `+`.
- *
- * - Modifiers: `Shift`, `Control`, `Alt`, `Meta`, `ControlOrMeta` (Control on
- *   Windows and Linux, Meta on macOS).
- * - Named keys: those in `KEY_NAMES` (`Enter`, `Escape`, `Tab`, `Backspace`,
- *   `Delete`, `ArrowUp`..., `Home`, `End`, `PageUp`, `PageDown`, `Insert`,
- *   `Space`, `F1`..`F12`).
- * - Any single printable character (`a`, `A`, `1`, `$`), typed as itself.
- *
- * `Control+a`, `Shift+Tab`, `Enter`, `$`. A platform without a key maps it
- * or throws `UNSUPPORTED_CAPABILITY`; it never reinterprets the spelling.
- * `parseKey` is the one parser, exported so no engine carries its own.
- */
 export type Key = string;
 
 export const KEY_MODIFIERS = ['Shift', 'Control', 'Alt', 'Meta', 'ControlOrMeta'] as const;
@@ -1487,16 +1131,24 @@ export const KEY_NAMES = [
   'F12',
 ] as const;
 
-/** One parsed `press` key: its modifiers and either a named key or a single character. */
 export interface ParsedKey {
-  /** Modifiers, in the order written. */
   readonly modifiers: readonly KeyModifier[];
-  /** The key itself. */
   readonly key: { readonly kind: 'named'; readonly name: KeyName } | { readonly kind: 'char'; readonly char: string };
 }
 
 export function parseKey(key: string): ParsedKey | undefined;
 ```
+
+- A key is zero or more modifiers and one key, joined by `+`: `Control+a`,
+  `Shift+Tab`, `Enter`, `$`.
+- The modifiers are those in `KEY_MODIFIERS`. `ControlOrMeta` is Control on
+  Windows and Linux, Meta on macOS.
+- The key is a name in `KEY_NAMES` or any single printable character (`a`,
+  `A`, `1`, `$`), typed as itself.
+- A platform without a key maps it or throws `UNSUPPORTED_CAPABILITY`. It
+  never reinterprets the spelling.
+- `parseKey` is the one parser, so no engine carries its own.
+  `ParsedKey.modifiers` keeps the order written.
 
 ### App
 
@@ -1531,47 +1183,34 @@ validateApp(app, { targetName }) {
   declares no `app`.
 - `@e2e-dev/web` requires `url`; `@e2e-dev/mobile` requires `bundleId` or
   `appPath` and refuses `url`.
+- `info.fileApp` is set when the app's `url` names a file on the runner's
+  disk; only an engine that declares `fileApps` is handed one. The harness
+  checks every file navigation against that disk, so refuse here a surface
+  that cannot read it, such as a browser on another machine, or do not
+  declare `fileApps`.
 
 | Throws | When |
 | --- | --- |
 | `INVALID_CONFIG` | A field the platform needs is missing, or the engine cannot drive one. Name `info.targetName` in the message. |
 
 ```ts
-/**
- * The app a target declares, as its engine reads it at config load: what it
- * is and where it is served. `EngineAppInfo` (below) is what `prepare` and
- * `init` receive; the declaration adds the URL, which a surface never gets.
- */
 export type EngineAppDeclaration = EngineAppInfo & {
-  /** Base URL the target opens, as declared; see `TargetApp.url`. */
   readonly url?: string;
 };
 
-/** Handed to `Engine.validateApp` beside the declaration. */
 export interface EngineAppCheckInfo {
-  /** The target declaring the app, for the message of a refusal. */
   readonly targetName: string;
-  /**
-   * The app's `url` names a file on the runner's disk, as the harness reads
-   * the URL. Only an engine that declares `fileApps` is handed one. Refuse
-   * here what cannot read that disk, such as a browser on another machine.
-   */
   readonly fileApp?: boolean;
 }
 
-/** A permission's state when the app launches: held, refused, or not asked for yet, so the OS asks again. */
 export type AppPermissionState = 'grant' | 'deny' | 'reset';
 
-/** One value in the object form of `launchArguments`; the engine spells it for its platform. */
 export type LaunchArgumentValue = string | number | boolean | readonly string[];
 
-/** A target's launch arguments: the strings the launch command takes, or an object of argument name to value. */
 export type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumentValue | undefined>>;
 
-/** The object form after the shape check: the `undefined` entries are gone. */
 export type LaunchArgumentValues = Readonly<Record<string, LaunchArgumentValue>>;
 
-/** Launch arguments after the shape check: a list of strings, or the object form. */
 export type ResolvedLaunchArguments = readonly string[] | LaunchArgumentValues;
 ```
 
@@ -1587,67 +1226,40 @@ if (new URL(request.url).origin === info.app.origin) request.headers.set('x-api-
 ```
 
 ```ts
-/**
- * The app the harness resolved from the target's declaration, handed to
- * `prepare` and `init`: the origin and site policy for the decisions only a
- * surface can make (which requests carry injected credentials, which nested
- * documents enter an observation), and what a device launches.
- */
 export interface EngineAppInfo {
-  /**
-   * The app URL's origin on the run's port (`scheme://host:port`, as
-   * `URL.origin` serializes it): where injected request credentials go.
-   * Absent when the app has no URL or its URL is a file, and for a free port
-   * the run has not assigned (`e2e doctor`).
-   */
   readonly origin?: string;
-  /**
-   * The app URL's registrable domain, as read by `siteOf`. Use `sameSite`
-   * to scope observed child frames. Absent when the app has no URL or its
-   * URL is a file. The
-   * runner passes navigation URLs separately through `session.open`.
-   */
   readonly site?: string;
-  /** The installed app to launch, as the target declared it. */
   readonly bundleId?: string;
-  /** The build to install, as the target declared it; relative to `projectRoot`. */
   readonly appPath?: string;
-  /** Arguments every fresh launch passes the app, when the target declared them as a list of strings. */
   readonly launchArguments?: readonly string[];
-  /**
-   * Arguments every fresh launch passes the app, when the target declared
-   * them as an object; only an engine that declares `launchArgumentValues`
-   * receives one.
-   */
   readonly launchArgumentValues?: LaunchArgumentValues;
-  /** Permissions the app holds, by name; what each state means is the engine's (a device sets them before every fresh launch). */
   readonly permissions?: Readonly<Record<string, AppPermissionState>>;
-  /**
-   * `app.permissions: 'all'`: grant every permission the engine can grant,
-   * in place of `permissions`. Only an engine that declares
-   * `grantsAllPermissions` receives it; for any other, the config is refused.
-   */
   readonly allPermissions?: true;
 }
 ```
 
-A target declares `app.launchArguments` as a list of strings or as an object.
-A list arrives in `launchArguments`. An object arrives in
-`launchArgumentValues`, and only on an engine that declares
-`launchArgumentValues: true`; for any other engine it fails at config load
-with `INVALID_CONFIG`. The harness sets one of the two fields, never both, so
-an engine that takes both forms reads whichever is present and spells an
-object for its platform's launch command. An iOS or macOS engine spells it
-with `appleUserDefaults`:
+| Field | Description |
+| --- | --- |
+| `origin` | The app URL's origin on the run's port (`scheme://host:port`, as `URL.origin` serializes it). Absent when the app has no URL or its URL is a file, and for a free port the run has not assigned (`e2e doctor`). |
+| `site` | The app URL's registrable domain, as `siteOf` reads it. Absent when the app has no URL or its URL is a file. |
+| `bundleId` | The installed app to launch. |
+| `appPath` | The build to install, relative to `projectRoot`. |
+| `permissions` | The permissions the app holds, by name: `'grant'` for held, `'deny'` for refused, `'reset'` for not asked for yet, so the OS asks again. What each state means on the platform is the engine's; a device sets them before every fresh launch. |
+| `allPermissions` | `app.permissions: 'all'`: grant every permission the engine can grant, in place of `permissions`. |
+
+The harness sets one of `launchArguments` and `launchArgumentValues`, never
+both. An object on an engine without `launchArgumentValues: true` fails at
+config load with `INVALID_CONFIG`. An engine that takes both forms reads
+whichever is present and spells an object for its platform's launch command.
+An iOS or macOS engine spells it with
+[`appleUserDefaults`](#appleuserdefaults):
 
 ```ts
 const launchArguments = info.app.launchArgumentValues ?? info.app.launchArguments;
 const args = launchArguments === undefined ? [] : appleUserDefaults(launchArguments);
 ```
 
-An engine for another platform spells the object itself. `mobile()` on Android
-sends each entry as an `am start` extra of the value's type, such as
-`--ez e2e true` or `--es locale fr_FR`.
+An engine for another platform spells the object itself.
 
 ### Session
 
@@ -1657,11 +1269,11 @@ Steering hooks behind the universal `app` fixture and the agent's `navigate`,
 | Hook | Behind |
 | --- | --- |
 | `open(url)` | `app.open()`, the agent's `navigate` verb, the reopen after `restart` and `reset` |
-| `openLink(url)` | `app.open(path)` on a target with `app.linkBase`: the joined link, its scheme checked, opened in the app under test. A target can declare `linkBase` only when its engine has this hook. |
+| `openLink(url)` | `app.open(path)` on a target with `app.linkBase` |
 | `back()` | `app.back()`, the agent's `back` verb |
-| `resize(size)` | the agent's `resize_viewport` verb; `size` is `{ width, height }` in CSS pixels and holds for the rest of the attempt |
-| `switchTab(index)` | the agent's `switch_tab` verb; `index` is zero-based in the order the tabs opened, as [`tabs`](#observation) counts them. An index with no open tab is `ACTION_FAILED`. |
-| `closeTab(index)` | the agent's `close_tab` verb; `index` counts as for `switchTab`. Closing the tab shown shows another, such as the tab that opened it. An index with no open tab, or the last open tab, is `ACTION_FAILED`. |
+| `resize(size)` | the agent's `resize_viewport` verb |
+| `switchTab(index)` | the agent's `switch_tab` verb |
+| `closeTab(index)` | the agent's `close_tab` verb |
 | `restart()` | `app.restart()` |
 | `reset()` | `app.clearState()` |
 
@@ -1673,56 +1285,39 @@ session: {
 ```
 
 ```ts
-/**
- * Steering hooks behind the universal `app` fixture and the agent's
- * `navigate` verb. The app itself is the target's `app`, handed over as data;
- * node actions never live here, they are `perform`.
- *
- * `restart` and `reset` open nothing on an addressable surface: they end at
- * a fresh surface with no location shown, and the harness reopens the app
- * through `open` when the target has an address. A surface therefore never
- * needs to know the app's URL, and an unreachable app after a restart is
- * reported the same way as on first open. A surface without `open` (a
- * device with a pinned app) relaunches the app inside `restart` and `reset`
- * itself, since nothing else will.
- */
 export interface EngineSession {
-  /**
-   * Opens one URL the harness already resolved against the base URL and the
-   * origin policy. Absent on a surface without addressable locations.
-   */
   open?(url: string, context: OperationContext): Promise<void>;
-  /**
-   * Opens a link in the app under test, as a deep link or a universal link
-   * would: `app.open(path)` on a target that declares `app.linkBase` lands
-   * here with the link joined and its scheme checked. A device engine's hook;
-   * a target whose engine lacks it cannot declare `linkBase`.
-   */
   openLink?(url: string, context: OperationContext): Promise<void>;
-  /** Navigates back once in the surface's history. */
   back?(context: OperationContext): Promise<void>;
-  /** Sets the viewport to `size` in CSS pixels, for this page and every page the attempt opens after it. */
   resize?(size: ViewportSize, context: OperationContext): Promise<void>;
-  /**
-   * Shows the open tab at `index`, zero-based in the order the tabs opened,
-   * as `EngineSnapshot.tabs` counts them: every observation and action after
-   * it reads and acts on that tab. An index with no open tab is an
-   * `ACTION_FAILED` the model reads. Declare it with `tabs` in snapshots.
-   */
   switchTab?(index: number, context: OperationContext): Promise<void>;
-  /**
-   * Closes the open tab at `index`, counted as `switchTab` counts them. When
-   * it was the tab shown, the engine shows another, such as the tab that
-   * opened it. An index with no open tab, or the last open tab, is an
-   * `ACTION_FAILED` the model reads.
-   */
   closeTab?(index: number, context: OperationContext): Promise<void>;
-  /** Recreates the execution context, keeping persisted state. */
   restart?(context: OperationContext): Promise<void>;
-  /** Clears persisted client state and recreates the execution context. */
   reset?(context: OperationContext): Promise<void>;
 }
 ```
+
+| Hook | Description |
+| --- | --- |
+| `open` | Opens one URL the harness already resolved against the base URL and the origin policy. Leave it out on a surface without addressable locations. |
+| `openLink` | Opens a link in the app under test, as a deep link or a universal link would. The link arrives joined, with its scheme checked. A device engine's hook: a target whose engine lacks it cannot declare `linkBase`. |
+| `back` | Navigates back once in the surface's history. |
+| `resize` | Sets the viewport to `size` in CSS pixels, for this page and every page the attempt opens after it. |
+| `switchTab` | Shows the open tab at `index`, zero-based in the order the tabs opened, as `EngineSnapshot.tabs` counts them. Every observation and action after it reads and acts on that tab. Declare it with `tabs` in snapshots. |
+| `closeTab` | Closes the open tab at `index`, counted as `switchTab` counts them. When it was the tab shown, the engine shows another, such as the tab that opened it. |
+| `restart` | Recreates the execution context, keeping persisted state. |
+| `reset` | Clears persisted client state and recreates the execution context. |
+
+- `restart` and `reset` open nothing on an addressable surface. They end at a
+  fresh surface with no location shown, and the harness reopens the app
+  through `open` when the target has an address.
+- A surface without `open`, such as a device with a pinned app, relaunches
+  the app inside `restart` and `reset` itself.
+- Node actions never live here; they are `perform`.
+
+| Throws | When |
+| --- | --- |
+| `ACTION_FAILED`, which the model reads | `switchTab` or `closeTab` with an index that has no open tab, or `closeTab` on the last open tab. |
 
 ### Errors
 
@@ -1749,13 +1344,10 @@ throw new EngineError('NODE_STALE', `node ${ref.id} is gone`, { retryable: true 
 ```ts
 export class EngineError extends Error {
   constructor(code: EngineErrorCode, message: string, options: { retryable: boolean; cause?: unknown });
-  /** One of `ENGINE_ERROR_CODES`. */
   readonly code: EngineErrorCode;
-  /** Whether the runner may re-resolve and retry; only `RETRYABLE_ENGINE_ERROR_CODES` can be. */
   readonly retryable: boolean;
 }
 
-/** The closed engine error code set; the type is derived from it, so the two cannot drift. */
 export const ENGINE_ERROR_CODES = [
   'NODE_STALE',
   'FRAME_NOT_FOUND',
@@ -1769,19 +1361,18 @@ export const ENGINE_ERROR_CODES = [
   'ENGINE_FAILURE',
 ] as const;
 
-/** One of `ENGINE_ERROR_CODES`. */
 export type EngineErrorCode = (typeof ENGINE_ERROR_CODES)[number];
 
-/**
- * The only codes that may be retryable: both describe a repeatable read. Any
- * other retryable claim, from this module's class or a foreign copy of it, is
- * coerced to a non-retryable `ENGINE_FAILURE`.
- */
 export const RETRYABLE_ENGINE_ERROR_CODES: ReadonlySet<EngineErrorCode> = new Set([
   'NODE_STALE',
   'FRAME_NOT_FOUND',
 ]);
 ```
+
+`retryable` says whether the runner may re-resolve and retry. Only the codes
+in `RETRYABLE_ENGINE_ERROR_CODES` may be retryable, since both describe a
+repeatable read. Any other retryable claim is coerced to a non-retryable
+`ENGINE_FAILURE`.
 
 #### Timeouts at a deadline
 
@@ -1808,25 +1399,28 @@ error classes, exported from the same entry.
 throw new TestError('ASSERTION_FAILED', 'expected the receipt to print');
 ```
 
-`E2EError` itself is not exported; construct one of the three.
+`E2EError` itself is not exported; construct one of the three. Its `category`
+sets the exit code and its `code` names the cause.
+
+| Class | For |
+| --- | --- |
+| `TestError` | A test failure: `ASSERTION_FAILED`, `INVALID_LOCATOR`, `ACTION_FAILED`, and the like. |
+| `ConfigurationError` | `POLICY_DENIED`, `APP_URL_REQUIRED`, `UNSUPPORTED_CAPABILITY`, and the like. |
+| `InfrastructureError` | The surface itself failed: `BROWSER_INSTALL_FAILED` and the like. |
 
 ```ts
-/** The runner's error base: `category` sets the exit code, `code` names the cause. */
 declare class E2EError extends Error {
   readonly category: 'test' | 'configuration' | 'infrastructure' | 'internal' | 'interrupted';
   readonly code: string;
   readonly retryable: boolean;
 }
 
-/** A test failure: ASSERTION_FAILED, INVALID_LOCATOR, ACTION_FAILED, ... */
 export class TestError extends E2EError {
   constructor(code: string, message: string, options?: { retryable?: boolean; cause?: unknown });
 }
-/** POLICY_DENIED, APP_URL_REQUIRED, UNSUPPORTED_CAPABILITY, ... */
 export class ConfigurationError extends E2EError {
   constructor(code: string, message: string, options?: { cause?: unknown });
 }
-/** The surface itself failed: BROWSER_INSTALL_FAILED, ... */
 export class InfrastructureError extends E2EError {
   constructor(code: string, message: string, options?: { cause?: unknown });
 }
@@ -1834,13 +1428,14 @@ export class InfrastructureError extends E2EError {
 
 ### Shared semantics
 
-Helpers that keep behavior consistent across engines. Every engine
-reproduces these semantics; import them instead of carrying a copy.
+Helpers for semantics every engine reproduces. Import them instead of
+carrying a copy.
 
 | Export | Returns |
 | --- | --- |
 | [`matchesText`, `toTextPattern`, `describePattern`](#text-patterns) | `boolean`, `TextPattern`, `string` |
 | [`resolveExpression`, `expressionSelectors`](#resolveexpression) | `SemanticNode[]`, `readonly string[]` |
+| [`shownText`](#showntext) | `string \| undefined` |
 | [`urlMatches`](#urlmatches) | `boolean` |
 | [`siteOf`, `sameSite`](#site-helpers) | `string`, `boolean` |
 | [`isRefusedLinkScheme`](#isrefusedlinkscheme) | `boolean` |
@@ -1898,14 +1493,18 @@ async locate(expression) {
 },
 ```
 
+- `text` matches a node's `text`, or its `name` when `text` is omitted or
+  blank ([`shownText`](#showntext)); `label` matches the `name`.
+- A `filter`'s `hasText` reads `name`, `text`, and `value`, so it keeps a
+  node a `text` query skips.
 - `text` and `label` answer with the innermost match when a container echoes
   a descendant's text.
-- A `text` query matches a node's name or its text. With
-  `textQuery: 'text'` it matches the text alone, as a browser does, for a
-  tree that carries every element's text. A scoped text query then also
-  answers with the scope element when the text is its own.
-- An engine whose tree is the whole truth (a device) calls it; a browser
-  engine reproduces it.
+- With `textQuery: 'text'` a `text` query matches the `text` alone, as a
+  browser does, for a tree that carries every element's text. A scoped text
+  query then also answers with the scope element when the text is its own.
+- An engine whose tree is the whole truth (a device, a desktop app) calls
+  it. A browser engine answers with its own query engine, where `text` reads
+  text content and never an accessible name.
 - A `selector` expression needs the `selector` option, which answers
   synchronously. An engine whose selector language is asynchronous (a
   DevTools query, a device daemon) queries every selector
@@ -1913,6 +1512,23 @@ async locate(expression) {
   results.
 - A `frame` expression is `FRAME_NOT_FOUND`.
 - A `union` expression matches either branch in document order, without duplicate nodes.
+
+#### `shownText`
+
+The string a `text` query reads a node by: its `text`, or its `name` when
+`text` is omitted or blank.
+
+```ts
+export function shownText(node: Pick<SemanticNode, 'name' | 'text'>): string | undefined;
+```
+
+```ts
+shownText({ name: 'Words', text: '5' }); // '5'
+shownText({ name: 'Close' }); // 'Close'
+```
+
+An engine that matches text itself calls it, so its `getByText` agrees with
+`resolveExpression`.
 
 #### `urlMatches`
 
@@ -1985,8 +1601,7 @@ await pollCondition({
   (`context.operation(deadline.remaining())`). A read on the action timeout
   can outlast the assertion's own.
 - It reads at 0, 20, and 50 ms, then at every multiple of 100 ms from its
-  start. Each read starts at least 10 ms and at most 100 ms after the one
-  before ends. Actions and `waitFor` wait for their node the same way.
+  start. Actions and `waitFor` wait for their node the same way.
 - An `OPERATION_TIMEOUT` from an `evaluate` ends the poll under the rules in
   [Timeouts at a deadline](#timeouts-at-a-deadline). `onTimeout(cause)`
   builds the failure with it.
@@ -2200,46 +1815,31 @@ into the next attempt.
 </Warning>
 
 ```ts
-/**
- * An opaque, restorable snapshot of an engine's state. `data` is JSON the
- * harness never inspects - a document platform's storage state, a device's app state, a
- * desktop's window state all satisfy it identically. `format`/`version` let a
- * engine reject a snapshot it can no longer read.
- */
 export interface EngineState {
-  /** Engine-defined format name. */
   readonly format: string;
-  /** Format version, for rejecting a snapshot the engine can no longer read. */
   readonly version: number;
-  /** Opaque JSON the runner never inspects. */
   readonly data: unknown;
-  /** Earliest moment the state is known to be invalid, if the engine knows one. */
   readonly expiresAt?: string;
 }
 
-/**
- * Platform-neutral state capture and restore. A setup test captures a
- * snapshot; an ordinary test restores it at launch.
- *
- * Snapshots are credentials: cookies, tokens, and storage that authenticate
- * the app under test. The duties split at the seam. The harness owns the
- * snapshot from the moment `capture` returns: it encrypts it at rest with a
- * per-run AES-256-GCM key that never touches disk, stores it under the run's
- * private session directory, binds it to the run, target, engine, and app
- * identity, and deletes it when the run ends; it never logs it, reports it,
- * digests it, or sends it to a model. An engine MUST NOT persist, cache, or
- * log a snapshot on its own, MUST NOT echo snapshot contents in an error
- * message, and MUST treat `restore` as a replacement of the surface's whole
- * persisted state, never a merge, so a restored session cannot leak into the
- * next attempt.
- */
 export interface EngineStateCapability {
-  /** Captures the surface's persisted state. */
   capture(context: OperationContext): Promise<EngineState>;
-  /** Replaces the surface's persisted state with `state`. */
   restore(state: EngineState, context: OperationContext): Promise<void>;
 }
 ```
+
+A setup test captures a snapshot; an ordinary test restores it at launch. The
+harness owns the snapshot from the moment `capture` returns. It encrypts it at
+rest, binds it to the run, target, engine, and app identity, and deletes it
+when the run ends. It never logs it, reports it, digests it, or sends it to a
+model.
+
+| Field | Description |
+| --- | --- |
+| `format` | An engine-defined format name. |
+| `version` | The format version. With `format`, it lets an engine reject a snapshot it can no longer read. |
+| `data` | Opaque JSON the harness never inspects. |
+| `expiresAt` | The earliest moment the state is known to be invalid, if the engine knows one. |
 
 ### Artifacts
 
@@ -2252,7 +1852,10 @@ or at a provider.
 | [`startVideo(context)`](#videos) | `Promise<void>` |
 | [`stopVideo(context)`](#videos) | `Promise<readonly VideoSegment[]>` |
 
-`screenshot` is required and returns the path of the file it wrote.
+`screenshot` is required and returns the path of the file it wrote. The
+screenshot is redacted: mask secure fields at the source. Every path is
+relative to the attempt artifact directory the engine received in
+`startAttempt`.
 
 ```ts
 artifacts: {
@@ -2267,50 +1870,22 @@ artifacts: {
 ```
 
 ```ts
-/**
- * Evidence capture. Paths are relative to the attempt artifact directory the
- * engine received in `startAttempt`.
- */
 export interface EngineArtifacts {
-  /** Captures a redacted screenshot; secure fields are masked at the source. */
   screenshot(label: string | undefined, context: OperationContext): Promise<string>;
-  /**
-   * Starts recording the surface. Declared together with `stopVideo`. An
-   * attempt may start and stop more than once, never overlapping. A surface that has nothing to show yet (no page open) may
-   * defer the actual capture to the moment it does; the segments returned by
-   * `stopVideo` say when each one began.
-   */
   startVideo?(context: OperationContext): Promise<void>;
-  /**
-   * Stops recording and returns every segment written, in order. One segment
-   * is the common case; a surface whose recording is bound to a page returns
-   * one per page the attempt showed (a restart or a state reset opens a new
-   * one). An attempt that never showed anything returns none.
-   */
   stopVideo?(context: OperationContext): Promise<readonly VideoSegment[]>;
 }
 
-/**
- * One recorded video of an attempt: a file the engine wrote into the attempt
- * artifact directory, or a recording a hosted service keeps and links to.
- */
 export type VideoSegment = VideoFile | VideoLink;
 
-/** A video file in the attempt artifact directory. */
 export interface VideoFile {
-  /** Path relative to the attempt artifact directory. */
   readonly path: string;
-  /** When the segment started recording, as an ISO timestamp; its first frame is at or just after it. */
   readonly startedAt: string;
 }
 
-/** A recording a hosted service keeps, by URL: the report links to it and the runner never downloads it. */
 export interface VideoLink {
-  /** `http(s)` URL of the recording. */
   readonly url: string;
-  /** Media type of what the URL serves: `video/mp4`, or `text/html` for a player page. */
   readonly mediaType: string;
-  /** When the recording started, as an ISO timestamp; its first frame is at or just after it. */
   readonly startedAt: string;
 }
 ```
@@ -2320,8 +1895,8 @@ export interface VideoLink {
 The runner calls `startVideo` for an attempt whose
 [video mode](/reference/config#video) records, and for each
 [`app.startRecording()`](/reference/app#startrecording), so one attempt may
-start and stop several times. It moves the files a stop returns before the
-next start, and never starts while a recording runs.
+start and stop several times, never overlapping. It moves the files a stop
+returns before the next start.
 
 - `startVideo` runs after `startAttempt` and any session restore, within the
   launch budget.
@@ -2331,15 +1906,27 @@ next start, and never starts while a recording runs.
   failure of either drops the video quietly.
 - The runner decides which recordings are kept and deletes a file an attempt
   does not keep.
+- A surface that has nothing to show yet, such as one with no page open, may
+  defer the capture until it does. Each segment says when it began.
+- `stopVideo` returns every segment written, in order. One segment is the
+  common case. A surface whose recording is bound to a page returns one per
+  page the attempt showed, since a restart or a state reset opens a new one.
+  An attempt that never showed anything returns none.
+
+| Segment field | Description |
+| --- | --- |
+| `path` | A `VideoFile`'s path, relative to the attempt artifact directory. |
+| `url` | A `VideoLink`'s `http(s)` URL, for a recording a hosted service keeps. The report links to it and the runner never downloads it. |
+| `mediaType` | The media type of what the URL serves: `video/mp4`, or `text/html` for a player page. |
+| `startedAt` | When the segment started recording, as an ISO timestamp. Its first frame is at or just after it. |
 
 #### Provider recordings
 
 An engine that leases its browser or device from a hosted service can let the
-service record the attempt in place of its own capture. That is how
-[`BrowserProvider.record`](/browser#recording-on-the-provider) and
-[`DeviceProvider.record`](/mobile#hosted-devices) work. `e2e/engine` exports
-the shared shape and `stopProviderRecording`, so every engine turns a
-provider's recording into a `VideoSegment` the same way.
+service record the attempt in place of its own capture, as
+[`BrowserProvider.record`](/reference/web#recording-on-the-provider) and
+[`DeviceProvider.record`](/mobile#hosted-devices) do. `stopProviderRecording`
+turns a provider's recording into a `VideoSegment`.
 
 ```ts
 async stopVideo(context) {
@@ -2364,38 +1951,24 @@ async stopVideo(context) {
 | `ENGINE_FAILURE` | `stop` throws or returns anything else. The message names the provider and the lease. |
 
 ```ts
-/** Handed to a provider's `record`, once per attempt that records video. */
 export interface ProviderRecordContext {
   readonly runId: string;
   readonly targetName: string;
-  /** The attempt the recording covers. */
   readonly attemptId: string;
-  /** The run's environment, the same the provider's `acquire` saw. */
   readonly env: Readonly<Record<string, string | undefined>>;
-  /** Aborts when the attempt is cancelled or its launch budget is spent. */
   readonly signal: AbortSignal;
 }
 
-/** A recording a provider's service makes of the browser or device it leased, as `record` started it. */
 export interface ProviderRecording {
-  /** When the recording started, as an ISO timestamp; its first frame is at or just after it. */
   readonly startedAt: string;
   stop(context: ProviderRecordingStopContext): Promise<ProviderRecordingResult>;
 }
 
-/** Handed to `ProviderRecording.stop`, once per recording. */
 export interface ProviderRecordingStopContext {
-  /** Absolute directory, already created, a recording written as a file goes into. */
   readonly dir: string;
-  /** Aborts when the cleanup budget is spent. */
   readonly signal: AbortSignal;
 }
 
-/**
- * What a stopped recording became: a file the provider wrote into the
- * directory it was given, by name, or a recording its service keeps, by
- * `http(s)` URL and media type.
- */
 export type ProviderRecordingResult =
   | { readonly file: string }
   | { readonly url: string; readonly mediaType: string };
@@ -2405,23 +1978,28 @@ export function isProviderRecording(value: unknown): value is ProviderRecording;
 export function stopProviderRecording(
   recording: ProviderRecording,
   target: {
-    /** Absolute attempt artifact directory; a file recording goes into its `video` directory. */
     readonly artifactsDir: string;
-    /** The provider as error messages name it: `browser provider "kernel"`. */
     readonly provider: string;
-    /** The lease the recording covers, named in error messages. */
     readonly leaseId: string;
     readonly signal: AbortSignal;
   },
 ): Promise<VideoSegment>;
 ```
 
+| Field | Description |
+| --- | --- |
+| `ProviderRecordContext` | Handed to a provider's `record`, once per attempt that records video. Its `env` is the run's environment, the same the provider's `acquire` saw. Its `signal` aborts when the attempt is cancelled or its launch budget is spent. |
+| `ProviderRecording.startedAt` | When the recording started, as an ISO timestamp. Its first frame is at or just after it. |
+| `ProviderRecordingStopContext` | Handed to `stop`, once per recording. `dir` is an absolute directory, already created, that a recording written as a file goes into. `signal` aborts when the cleanup budget is spent. |
+| `target.artifactsDir` | The absolute attempt artifact directory. |
+| `target.provider` | The provider as error messages name it: `browser provider "kernel"`. |
+
 #### Redaction
 
 - Videos are unmasked and carry `redaction: 'incomplete'`.
 - A `download` an engine attaches is the app's bytes. When the session knows
   a secret value, the runner rewrites a text one (`.txt`, `.csv`, `.json`,
-  `.html`) through the ledger and labels it `complete`.
+  `.html`) and labels it `complete`.
 - Every other download keeps its bytes and carries
   `redaction: 'incomplete'`.
 
@@ -2462,14 +2040,14 @@ The factory runs once per attempt with an `EngineFixtureContext`:
 | --- | --- |
 | `targetName` | The target the fixture serves. |
 | [`fixture(name, surface, operations)`](#declaring-operations) | Declares which methods are recorded steps. |
-| `app` | The resolved app, plus `resolveUrl(url)`. |
+| `app` | The resolved app, plus `resolveUrl(url)`, which resolves a navigation target against the base URL. |
 | `timeouts` | The `test`, `action`, and `assertion` budgets. |
-| `signal` | The running phase's signal. Read it per call. |
-| `operation(timeoutMs?)` | A per-call `OperationContext`. |
-| `attachArtifact(kind, relativePath)` | Registers a file the current step produced. |
+| `signal` | The running phase's signal: the attempt's through `beforeEach` and the body, then a fresh one per `afterEach` hook, so teardown can still drive the app after a body timeout. Read it per call; a factory that captures it once keeps a signal that is dead by teardown. |
+| `operation(timeoutMs?)` | A per-call `OperationContext`: the action timeout, or the one passed, plus the attempt signal. |
+| `attachArtifact(kind, relativePath)` | Registers a file the current step produced under the attempt artifact directory. |
 | `attachViewport(viewport)` | Records the viewport the current step established. |
-| `locator(expression)` | Mints a public locator from a raw expression. |
-| `screen(scope)` | Mints a screen scope. |
+| `locator(expression)` | Mints a public locator from a raw expression, such as a platform selector. |
+| `screen(scope)` | Mints a screen scope whose every query is wrapped by `scope`, such as a nested document. |
 | [`expectable(target, factory)`](#expectations) | Makes `expect(fixture)` return matchers. |
 
 | Throws | When |
@@ -2479,60 +2057,28 @@ The factory runs once per attempt with an `EngineFixtureContext`:
 | `POLICY_DENIED` | `app.resolveUrl` with any scheme but `http:` and `https:` (`about:blank` aside). |
 
 ```ts
-/**
- * A contributed fixture: any record of async methods, sync accessors, and
- * nested namespaces, declared through context.fixture so its metadata controls
- * labels, deadlines and verification. The factory must return the declared
- * surface; a plain one is rejected with INVALID_CONFIG.
- */
 export type EngineFixtureFactory = (context: EngineFixtureContext) => object;
 
-/** Context handed to a contributed fixture factory, once per attempt. */
 export interface EngineFixtureContext {
-  /** The target the fixture serves. */
   readonly targetName: string;
-  /** Records the declared operations before invoking them; undeclared accessors retain their identity. */
   fixture<T extends object>(name: string, surface: T, operations: FixtureOperations<T>): T;
   readonly app: EngineAppInfo & {
-    /**
-     * Resolves a navigation target against the base URL. Throws
-     * `APP_URL_REQUIRED` when the target declares no URL and `POLICY_DENIED`
-     * for any scheme but `http:` and `https:` (`about:blank` aside), so a
-     * fixture never re-implements the rule the harness owns.
-     */
     resolveUrl(url: string): string;
   };
-  /** Harness budgets, for fixtures that poll or navigate. */
   readonly timeouts: {
     readonly test: number;
     readonly action: number;
     readonly assertion: number;
   };
-  /**
-   * The running phase's signal: the attempt's through `beforeEach` and the
-   * body, then a fresh one per `afterEach` hook so teardown can still drive
-   * the app after a body timeout. Read it per call; a fixture factory that
-   * captures it once keeps a signal that is dead by teardown.
-   */
   readonly signal: AbortSignal;
-  /** Per-call operation budget: the action timeout (or an explicit one) plus the attempt signal. */
   operation(timeoutMs?: number): OperationContext;
-  /** Registers a file the current step produced under the attempt artifact directory. */
   attachArtifact(
     kind: 'screenshot' | 'video' | 'download' | 'log',
     relativePath: string,
   ): void;
-  /** Records the viewport the current step established. */
   attachViewport(viewport: { width: number; height: number; scale: number }): void;
-  /** Mints a public locator from a raw expression (a platform selector, say). */
   locator(expression: LocatorExpression): Locator;
-  /** Mints a screen scope whose every query is wrapped by `scope` (a nested document, say). */
   screen(scope: (expression: LocatorExpression) => LocatorExpression): Screen;
-  /**
-   * Attaches an expectation surface to a fixture object so `expect(fixture)`
-   * returns it. The harness records every matcher call as an assertion step
-   * named `expect.<matcher>`; the factory only decides what the matchers mean.
-   */
   expectable<T extends object, E extends object>(target: T, factory: () => E): T & Expectable<E>;
 }
 ```
@@ -2563,15 +2109,6 @@ defineEngine({ name: 'device', /* ... */ isolation: 'worker' });
   without those built-in fixtures. See [`beforeAll`](/reference/test#beforeall).
 
 ```ts
-/**
- * What one attempt on an engine leaves for the next. `attempt`: nothing,
- * `startAttempt` gives each attempt a fresh surface (a browser context), so
- * the engine's fixtures, `app`, and `screen` are test fixtures, and a suite
- * hook cannot use them. `worker`: what an attempt does stays (a device keeps
- * permissions, keychain, and installed apps), so they are worker fixtures,
- * which `beforeAll`, `afterAll`, and worker-scoped `test.extend()` fixtures
- * see; a suite hook runs in a short attempt of its own for them.
- */
 export type EngineIsolation = 'attempt' | 'worker';
 ```
 
@@ -2587,6 +2124,10 @@ recorded steps. Each operation takes:
 | `timeout` | milliseconds, a function of the arguments, or `false` when the method owns its deadline | `actionTimeout` |
 | `verifies` | `boolean` | `true` for assertions |
 
+- Only declared async methods are recorded. Sync accessors pass through
+  unchanged and keep their identity.
+- Arguments enter reports only through `label`.
+- A wait may set `verifies` as well.
 - Nested maps describe namespaces.
 - Recording decorates the object in place, so create a fresh surface in each
   factory invocation.
@@ -2596,17 +2137,13 @@ recorded steps. Each operation takes:
 - Type the fixture with `test.extend<{ name: Type }>()`.
 
 ```ts
-/** Explicit recording policy for one async fixture method. Arguments enter reports only through label. */
 export interface FixtureOperation<Args extends unknown[] = unknown[]> {
   readonly kind: 'resource' | 'assertion';
   readonly label?: (...args: Args) => string;
-  /** Action timeout by default; false when the method owns its assertion/navigation deadline. */
   readonly timeout?: number | false | ((...args: Args) => number | undefined);
-  /** Assertions verify by default; waits may opt in as well. */
   readonly verifies?: boolean;
 }
 
-/** Only declared async methods are recorded. Sync accessors pass through unchanged. */
 export type FixtureOperations<T extends object> = {
   readonly [Key in keyof T]?: T[Key] extends (...args: infer Args) => Promise<unknown>
     ? FixtureOperation<Args>
@@ -2618,7 +2155,8 @@ export type FixtureOperations<T extends object> = {
 
 `expectable` attaches an expectation surface so `expect(fixture)` returns it.
 Declare matcher recording with `context.fixture('expect', matchers,
-operations)`.
+operations)`. The harness records every matcher call as an assertion step
+named `expect.<matcher>`; the factory only decides what the matchers mean.
 
 ```ts
 const printer = context.expectable(surface, () =>
@@ -2650,51 +2188,15 @@ exported from `e2e/engine`. So are the [engine protocol](/reference/engine-proto
 ### `SemanticNode`
 
 ```ts
-/** One node of an observation tree. */
 export interface SemanticNode {
-  /** Node reference, valid against the observation it came from. */
   readonly ref: NodeRef;
-  /** Semantic role. */
   readonly role?: string;
-  /** Accessible name, cut at `OBSERVED_NAME_LIMIT`. */
   readonly name?: string;
-  /** Visible text, cut at `OBSERVED_TEXT_LIMIT`. */
   readonly text?: string;
-  /** Current input value; never reported for a secure field. */
   readonly value?: string;
-  /**
-   * Text selected inside the node, for the focused field or editing host
-   * whose selection the platform reports; absent when the selection is
-   * collapsed, and never reported for a secure field. Cut at `OBSERVED_TEXT_LIMIT`.
-   */
   readonly selection?: string;
-  /**
-   * The node's test id, when the platform gives it one: the value of the
-   * project's test-id attribute on a document platform, an accessibility
-   * identifier on iOS, a resource id on Android, an automation id on a
-   * desktop. The `testId` query resolves against this field, so the harness
-   * never knows where a platform keeps it. An engine may also match the id
-   * without its platform's namespacing.
-   */
   readonly testId?: string;
-  /** What a field takes, deciding which secrets may fill it. */
   readonly inputPurpose?: 'username' | 'password' | 'one-time-code' | 'generic-secret' | 'none';
-  /**
-   * Boolean states the platform reports. `pressed` is a toggle button's
-   * pressed state; `secure` marks a field whose value is never observed.
-   * `readonly` is present only on a node that has a read-only state, as
-   * Playwright's `getReadonly` decides on the web (an input, textarea, or
-   * select by its `readonly` attribute, an element whose ARIA role takes
-   * `aria-readonly` by that attribute, any other editing host `false`), and
-   * only where the platform knows, as Android does: absent means the node has
-   * no read-only state to read, not `false`. `empty` is whether the node
-   * holds nothing, as Playwright's `toBeEmpty` reads it on the web (an input or
-   * textarea by its raw value, any other element by its trimmed text content),
-   * and on a device a text field by its value, any other node by the text
-   * and values in its subtree. An engine reports it on the nodes `locate`
-   * returns, never in an observation, and never on a secure field: absent
-   * means the engine does not say.
-   */
   readonly states?: Readonly<
     Partial<
       Record<
@@ -2712,51 +2214,38 @@ export interface SemanticNode {
       >
     >
   >;
-  /** Heading level of a heading node (`1` through `6` on a document platform); absent elsewhere. */
   readonly level?: number;
-  /** Platform attributes, what `getAttribute` reads. */
   readonly attributes?: Readonly<Record<string, string>>;
-  /**
-   * The node's box in the top-level viewport's CSS pixels (`ViewportPoint`
-   * space), for every node, including those inside nested documents: an
-   * engine that measures a child document against its own viewport shifts
-   * the boxes by the boundary element's before reporting them.
-   */
   readonly rect?: {
     readonly x: number;
     readonly y: number;
     readonly width: number;
     readonly height: number;
   };
-  /**
-   * The point an offset into the node is measured from, in `rect`'s space,
-   * when it is not `rect`'s top-left corner: a document element's padding
-   * box, inside its border, or the corner of a box a frame clipped `rect`
-   * from. `tap({ position })` adds the offset to it.
-   */
   readonly origin?: ViewportPoint;
-  /**
-   * Platform selector that addresses this node within its own document, when
-   * the platform has one. It is structural, not semantic: it survives the
-   * content changes that rename a node, and a runner may store it to re-find
-   * the node cheaply on a later run. It is never part of the node's identity,
-   * so whatever it resolves to is still checked before it is used.
-   *
-   * It SHOULD be anchored on an attribute naming the node or one of its
-   * ancestors, and SHOULD be absent rather than positional all the way to the
-   * document root: such a path is shifted by anything inserted above the node,
-   * so it does not survive to the later run it exists for.
-   */
   readonly selector?: string;
-  /**
-   * Enclosing nested-document chain as selectors of each boundary node,
-   * outermost first. Absent for nodes in the main document.
-   */
   readonly framePath?: readonly string[];
-  /** Child nodes. */
   readonly children?: readonly SemanticNode[];
 }
 ```
+
+| Field | Description |
+| --- | --- |
+| `ref` | Valid against the observation it came from. |
+| `value` | The current input value. Never reported for a secure field. |
+| `selection` | The text selected inside the node, for the focused field or editing host whose selection the platform reports. Absent when the selection is collapsed, and never reported for a secure field. |
+| `testId` | The node's test id, when the platform gives it one: the value of the project's test-id attribute on a document platform, an accessibility identifier on iOS, a resource id on Android, an automation id on a desktop. The `testId` query resolves against this field. An engine may also match the id without its platform's namespacing. |
+| `inputPurpose` | What a field takes, deciding which secrets may fill it. |
+| `states.pressed` | A toggle button's pressed state. |
+| `states.secure` | Marks a field whose value is never observed. |
+| `states.readonly` | Present only on a node that has a read-only state, and only where the platform knows, as Android does: absent means there is no read-only state to read, not `false`. On the web it is what Playwright's `getReadonly` decides: an input, textarea, or select by its `readonly` attribute, an element whose ARIA role takes `aria-readonly` by that attribute, any other editing host `false`. |
+| `states.empty` | Whether the node holds nothing. On the web it is what Playwright's `toBeEmpty` reads: an input or textarea by its raw value, any other element by its trimmed text content. On a device it is a text field by its value, any other node by the text and values in its subtree. Report it on the nodes `locate` returns, never in an observation, and never on a secure field: absent means the engine does not say. |
+| `level` | A heading node's level, `1` through `6` on a document platform. Absent elsewhere. |
+| `attributes` | Platform attributes: what `getAttribute` reads. |
+| `rect` | The node's box in the top-level viewport's CSS pixels, the space of `ViewportPoint`, for every node. An engine that measures a child document against its own viewport shifts the boxes by the boundary element's before reporting them. |
+| `origin` | The point an offset into the node is measured from, in `rect`'s space, when it is not `rect`'s top-left corner: a document element's padding box, inside its border, or the corner of a box a frame clipped `rect` from. `tap({ position })` adds the offset to it. |
+| `selector` | A platform selector that addresses the node within its own document, when the platform has one. It is structural, not semantic: it survives the content changes that rename a node, and a runner may store it to re-find the node on a later run. It is never part of the node's identity, so what it resolves to is still checked before use. Anchor it on an attribute naming the node or one of its ancestors. Leave it out rather than make it positional all the way to the document root, since anything inserted above the node shifts such a path. |
+| `framePath` | The enclosing nested-document chain, as the selector of each boundary node, outermost first. Absent for nodes in the main document. |
 
 ### Observed field limits
 
@@ -2768,9 +2257,7 @@ export interface SemanticNode {
 - An engine that cuts an observed field cuts it at exactly its limit. A field
   exactly at its limit may have been cut; a shorter one, or a longer one the
   engine left whole, is complete.
-- Keep the start and cut the end: the runner redacts the leading part of a
-  secret that a field exactly at its limit ends with, which a whole-value
-  match cannot see.
+- Keep the start and cut the end.
 - Single-node reads are unbounded and always carry the full value.
 
 ### Queries
@@ -2779,7 +2266,6 @@ The `selector` expression kind carries a platform-native selector string;
 `frame` scopes a query into a nested document.
 
 ```ts
-/** The `screen` query kinds. */
 export type QueryKind = 'role' | 'label' | 'placeholder' | 'text' | 'displayValue' | 'testId';
 ```
 
@@ -2793,8 +2279,8 @@ scope, filter, or index too.
 
 [Engines](/engines) compares the ways to build one.
 [Writing an engine](/writing-an-engine) walks through `defineEngine`, and
-[Engine servers](/engine-servers) runs an engine in another process,
-machine, or language.
+an [engine server](/reference/engine-protocol#engine-servers) runs an engine
+in another process, machine, or language.
 `@e2e-dev/web` ([reference](/reference/web)) and `@e2e-dev/mobile`
 ([reference](/reference/mobile)) implement this contract with the same
 public `defineEngine`.

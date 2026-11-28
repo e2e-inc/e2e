@@ -158,7 +158,7 @@ function loopTools(
   tools: Readonly<Record<string, AgentTool>> = {},
 ): ToolSet {
   return {
-    ...guardedTools(helpers, projectTools(context, tools)),
+    ...guardedTools(helpers, createProjectTools(context, tools)),
     ...grammarTools(context, { guard: helpers.guard, screen: presenterFor(context), secretsListedByCaller: true }),
   };
 }
@@ -236,7 +236,7 @@ function formatReplayedPrefix(prefix: ReplayedPrefix): string {
  * Failures propagate: the model loop turns them into text through its guard,
  * and a host outside the loop reports them its own way.
  */
-export function projectTools(
+export function createProjectTools(
   context: StepExecutorContext,
   tools: Readonly<Record<string, AgentTool>>,
 ): ToolSet {

@@ -113,11 +113,20 @@ export async function withPixels(devtools: DevTools, raw: RawRead, snapshot: Eng
 /**
  * `app.screenshot(label)`: the window with its masks painted over, written
  * under the attempt's artifacts as `screenshots/<n>-<label>.png`. Refused
- * with `POLICY_DENIED` when the capture is withheld.
+ * with `POLICY_DENIED` when the capture is withheld, when `refused` says why
+ * the window is not one to capture, or when the window loaded another
+ * document while the capture waited its turn: the pixels are of the document
+ * `refused` approved, or none are kept.
  */
-export async function screenshotFile(devtools: DevTools, window: AppWindow, artifactsDir: string, name: string): Promise<string> {
+export async function screenshotFile(devtools: DevTools, window: AppWindow, artifactsDir: string, name: string, refused: () => string | undefined): Promise<string> {
+  const before = refused();
+  if (before !== undefined) throw new ConfigurationError('POLICY_DENIED', before);
+  const generation = window.page.generation;
   const capture = await maskedCapture(devtools, window, await unmaskable(devtools, window), 'device');
   if ('withheld' in capture) throw new ConfigurationError('POLICY_DENIED', capture.withheld);
+  if (window.page.generation !== generation) throw new ConfigurationError('POLICY_DENIED', 'the window loaded another document while the screenshot was taken, so the screenshot is withheld');
+  const after = refused();
+  if (after !== undefined) throw new ConfigurationError('POLICY_DENIED', after);
   const relative = path.posix.join('screenshots', name);
   const absolute = path.join(artifactsDir, relative);
   mkdirSync(path.dirname(absolute), { recursive: true });

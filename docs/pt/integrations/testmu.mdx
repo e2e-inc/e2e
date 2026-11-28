@@ -10,7 +10,7 @@ description: Rode alvos mobile em emuladores, simuladores e dispositivos reais d
 [TestMu AI](https://www.lambdatest.com) (antigo LambdaTest). `testmu()` é um
 [provedor de dispositivos](/mobile#hosted-devices) para emuladores Android,
 simuladores iOS e dispositivos reais. `testmuBrowsers()` de
-`@e2e-dev/testmu/web` é um [provedor de navegadores](/browser#hosted-browsers)
+`@e2e-dev/testmu/web` é um [provedor de navegadores](/reference/web)
 para Chrome e Edge hospedados. Os testes continuam os mesmos.
 
 ## Autentique-se
@@ -237,10 +237,13 @@ Uma tentativa que grava [vídeo](/reference/config#video) recebe:
   minutos depois do último comando.
 - **Uma liberação não confirmada faz a execução falhar.** Uma liberação faz a
   execução falhar quando o agent-device não consegue confirmar que encerrou a
-  sessão do dispositivo, mesmo quando todos os testes passaram: uma parada
-  forçada do daemon, um relatório de encerramento perdido ou um daemon que
-  terminou durante a execução. Encontre a sessão no dashboard pelos valores de
-  `build` e `sessionName`.
+  sessão do dispositivo, mesmo quando todos os testes passaram. Isso acontece
+  quando a limpeza da sessão do TestMu AI falha (com mais de 20 segundos de
+  `cleanupTimeout` restantes) ou fica sem confirmação durante a parada do
+  daemon, ou quando o daemon termina durante a execução. No Windows, encerrar a
+  sessão antes da parada do daemon também exige mais de 20 segundos de
+  `cleanupTimeout` restantes (mantenha o padrão de 30 segundos). Encontre a
+  sessão no dashboard pelos valores de `build` e `sessionName`.
 - **Configurações e logs do dispositivo.** Configurações do dispositivo
   (permissões, localização, rede, aparência), alertas do sistema, gravação e
   logs do dispositivo pelo agent-device, e redirecionamento reverso de portas
@@ -265,7 +268,7 @@ Uma tentativa que grava [vídeo](/reference/config#video) recebe:
   <Card title="Dispositivos hospedados" icon="mobile" href="/mobile#hosted-devices">
     Como um provedor de dispositivos reserva dispositivos.
   </Card>
-  <Card title="Navegadores hospedados" icon="globe" href="/browser#hosted-browsers">
+  <Card title="Navegadores hospedados" icon="globe" href="/reference/web">
     Como um provedor de navegadores reserva navegadores.
   </Card>
 </CardGroup>

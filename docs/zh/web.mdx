@@ -5,7 +5,7 @@ description: 将网页端引擎指向你的应用或让运行器启动应用，�
 "twitter:image": "https://e2e.com/docs/images/og/web.png?v=e860636537"
 ---
 
-`@e2e-dev/web` 在浏览器中针对应用的 URL 运行测试。关于路由、Cookie、对话框和下载，参阅[操作浏览器](/browser)。
+`@e2e-dev/web` 在浏览器中针对应用的 URL 运行测试。关于路由、Cookie、对话框和下载，参阅[操作浏览器](/reference/web)。
 
 ## 启动应用
 
@@ -50,7 +50,7 @@ export default {
 
 | 选项 | 用途 |
 | --- | --- |
-| `reuseExisting: true` | 使用已在运行的服务器，例如 [MCP 会话](/mcp-server#run-tests-next-to-a-session)启动的服务器。在 CI 中，e2e 会忽略此选项，已响应的服务器会触发 `APP_ALREADY_RUNNING`。 |
+| `reuseExisting: true` | 使用已在运行的服务器，例如 [MCP 会话](/coding-agents)启动的服务器。在 CI 中，e2e 会忽略此选项，已响应的服务器会触发 `APP_ALREADY_RUNNING`。 |
 | `log` | 将应用的标准输出和标准错误保存到项目相对路径的文件中。启动错误或 `e2e run` 期间意外退出时，会引用自命令启动以来任何进程追加到该文件的行。日志不超过 40 行且在 8 KiB 内时完整引用；否则最多保留开头和结尾各 20 行，中间插入 `[startup output omitted]`；对于超过 8 KiB 的日志，这些行来自首尾各 4 KiB。引用中会对长度至少为四个字符的 `command.env` 和 `inheritEnv` 值脱敏。文件本身不会脱敏。 |
 | `env` | 应用的环境变量。 |
 | `inheritEnv` | 按名称或前缀传入已设置的主机变量：`['DATABASE_URL', 'STRIPE_*']`。`env` 的优先级更高。 |
@@ -210,7 +210,7 @@ test('the sidebar stays open', async ({ app, screen, browser }) => {
 
 ### 限制
 
-窄视口只测试响应式布局。浏览器仍然是桌面浏览器：缩放因子为 1，使用桌面指针和通常的用户代理，不模拟触摸。要在模拟器上测试，请使用[移动端引擎](/mobile)。深色模式和减少动态效果见[模拟深色模式和减少动态效果](/browser#emulate-dark-mode-and-reduced-motion)。
+窄视口只测试响应式布局。浏览器仍然是桌面浏览器：缩放因子为 1，使用桌面指针和通常的用户代理，不模拟触摸。要在模拟器上测试，请使用[移动端引擎](/mobile)。深色模式和减少动态效果见[模拟深色模式和减少动态效果](/reference/web)。
 
 视频会保持录制开始时的页面尺寸。设置 `web({ screencast: { size } })` 可使用固定尺寸。支持录制的浏览器提供方，例如 [Kernel](/integrations/kernel#recordings)，则会录制整个屏幕。
 
@@ -235,9 +235,6 @@ test('the sidebar stays open', async ({ app, screen, browser }) => {
 ## 下一步
 
 <CardGroup cols={2}>
-  <Card title="操作浏览器" icon="globe" href="/browser">
-    模拟路由、设置 Cookie、处理对话框和下载文件。
-  </Card>
   <Card title="网页端引擎参考" icon="masks-theater" href="/reference/web">
     所有 `web()` 选项和 `browser` 方法。
   </Card>

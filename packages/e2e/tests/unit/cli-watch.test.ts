@@ -576,6 +576,65 @@ describe('watchSession', () => {
     expect(stdin.setRawMode).toHaveBeenLastCalledWith(false);
   });
 
+  it('t reads a title pattern as --grep does: bare or /pattern/flags, refused when it does not compile', async () => {
+    const stdin = fakeStdin();
+    const runs: RunOptions[] = [];
+    const run = async (options: RunOptions): Promise<RunOutcome> => {
+      runs.push(options);
+      return passed(0);
+    };
+    const written: string[] = [];
+    const session = watchSession({
+      base: { files: [], configPath: undefined },
+      cwd: root,
+      signals: new SignalLadder(),
+      run,
+      stdin,
+      write: (text) => written.push(text),
+      writeError: (text) => written.push(text),
+      pc,
+      clear: false,
+      watch: fakeWatch(new Map()),
+    });
+    await settle();
+
+    textMock.mockResolvedValueOnce('/refund/i');
+    stdin.write('t');
+    await settle();
+    const { validate } = textMock.mock.calls[0]![0] as { validate: (value: string | undefined) => string | undefined };
+    expect(validate('/refund/i')).toBeUndefined();
+    expect(validate('checkout')).toBeUndefined();
+    expect(validate('')).toBeUndefined();
+    expect(validate('/api/users')).toContain('Invalid flags');
+    // The answer is read trimmed, so it is checked trimmed.
+    expect(validate(' /api/users ')).toContain('Invalid flags');
+    expect(validate('//')).toBe('must be a regular expression');
+    expect(validate('(checkout')).toContain('Invalid regular expression');
+    expect(runs[1]!.grep).toEqual([/refund/i]);
+    expect(written.join('')).toContain(' RERUN  current pattern (title: /refund/i) x2');
+
+    // The next prompt starts from the pattern as it was typed, flags included.
+    textMock.mockResolvedValueOnce('checkout');
+    stdin.write('t');
+    await settle();
+    expect(textMock.mock.calls[1]![0]).toMatchObject({ initialValue: '/refund/i' });
+    expect(runs[2]!.grep).toEqual([/checkout/]);
+    expect(written.join('')).toContain(' RERUN  current pattern (title: checkout) x3');
+
+    // A pattern with space at an end keeps its slashes, so reading the prompt back trimmed does not drop the space.
+    textMock.mockResolvedValueOnce('/refund /');
+    stdin.write('t');
+    await settle();
+    expect(runs[3]!.grep).toEqual([/refund /]);
+    textMock.mockResolvedValueOnce('');
+    stdin.write('t');
+    await settle();
+    expect(textMock.mock.calls[3]![0]).toMatchObject({ initialValue: '/refund /' });
+
+    stdin.write('\x03');
+    await expect(session).resolves.toBe(0);
+  });
+
   it('a cancelled prompt keeps the filters; a change during the prompt runs after it; a signal during the prompt ends the session', async () => {
     const stdin = fakeStdin();
     const listeners = new Map<string, (event: string, filename: string | null) => void>();

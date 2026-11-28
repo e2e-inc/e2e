@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   expressionSelectors,
   resolveExpression,
+  shownText,
   type LocatorExpression,
   type SemanticNode,
   type SemanticQuery,
@@ -86,6 +87,23 @@ describe('resolveExpression', () => {
     expect(() => ids({ kind: 'query', query: { kind: 'role', value: { kind: 'regexp', source: 'but', flags: '' } } })).toThrowError(
       expect.objectContaining({ code: 'ENGINE_FAILURE' }),
     );
+  });
+
+  it('matches a text query against what a node shows, and against its name only when it shows nothing', () => {
+    const pair = [
+      node('label', { role: 'text', name: 'Words', text: 'Words' }),
+      node('count', { role: 'text', name: 'Words', text: '5' }),
+      node('omitted', { role: 'button', name: 'Close' }),
+      node('empty', { role: 'button', name: 'Close', text: '' }),
+      node('blank', { role: 'button', name: 'Close', text: ' \n\t' }),
+    ];
+    expect(ids(query('text', 'Words'), pair)).toEqual(['label']);
+    expect(ids(query('text', '5'), pair)).toEqual(['count']);
+    expect(ids(query('label', 'Words'), pair)).toEqual(['label', 'count']);
+    expect(ids(query('text', 'Close'), pair)).toEqual(['omitted', 'empty', 'blank']);
+    expect(pair.map(shownText)).toEqual(['Words', '5', 'Close', 'Close', 'Close']);
+    // `hasText` reads the name too, so it keeps the value a text query for its label skips.
+    expect(ids({ kind: 'filter', source: query('role', 'text'), hasText: exact('Words') }, pair)).toEqual(['label', 'count']);
   });
 
   it('drops hidden nodes from any query kind when it says visible', () => {

@@ -91,7 +91,7 @@ In a checkout, `pnpm --filter @e2e-dev/desktop build:native` builds the
 driver (`crates/e2e-desktop-napi`, a Rust crate in the repository's Cargo
 workspace) with `cargo` for this Mac into this package's directory, and the
 engine loads it from there. It needs a Rust toolchain from
-[rustup](https://rustup.rs).
+[rustup](https://rustup.rs) and the workspace installed (`pnpm install`).
 
 ## License
 

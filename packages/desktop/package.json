@@ -43,7 +43,7 @@
   ],
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc --project tsconfig.build.json && node ../../scripts/stamp-dist.ts",
-    "build:native": "node ../../scripts/native/build-native.ts desktop",
+    "build:native": "node ../../scripts/native/build-native.ts desktop --types",
     "licenses:native": "node ../../scripts/native/native-licenses.ts desktop",
     "prepublishOnly": "node ../../scripts/check-dist.ts",
     "typecheck": "tsc --noEmit",
@@ -59,8 +59,8 @@
     "@e2e-dev/desktop-darwin-x64": "workspace:*"
   },
   "peerDependencies": {
-    "@e2e-dev/core": ">=0.25.1 <1",
-    "e2e": ">=0.25.1 <1"
+    "@e2e-dev/core": ">=0.26.0 <1",
+    "e2e": ">=0.26.0 <1"
   },
   "peerDependenciesMeta": {
     "e2e": {

@@ -1,6 +1,7 @@
 ---
 title: Desktop
-description: Test a native desktop app on macOS through its accessibility tree.
+description: "Test a native macOS desktop app with @e2e-dev/desktop, which reads and drives the app through the accessibility tree with the same APIs as web tests."
+keywords: [macOS, Mac, native app]
 ---
 
 `@e2e-dev/desktop` runs tests on native desktop apps. It reads and drives
@@ -70,14 +71,10 @@ bundle id must be `bundleId`. `app.launchArguments` go to every launch. An
 object entry becomes `-name value`, as on iOS, so
 `{ AppleLanguages: ['fr'] }` opens the app in French.
 
-The launched app gets only a minimal environment (`HOME`, `USER`, `LOGNAME`,
-`SHELL`, `PATH`, `TMPDIR`, `LANG`, `LC_*`, `__CF_USER_TEXT_ENCODING`, plus
-`E2E_DESKTOP_LAUNCH` for process tracking), so your secrets, model keys, and
-CI tokens never leak into it. macOS hides that variable in its own apps,
-in Apple's App Store apps (Numbers, Pages, Xcode), and in builds signed
-with the `restrict` flag, so those also get `-E2EDesktopLaunch=<token>` as
-their last launch argument. The engine tells App Store apps by their
-signature, so every Mac App Store app gets that argument.
+The launched app gets only a minimal environment, so your secrets, model
+keys, and CI tokens never leak into it. The reference lists
+[the variables it gets](/reference/desktop#environment) and the launch
+argument some apps get with them.
 
 ```ts title="e2e.config.ts"
 import type { E2EConfig } from 'e2e';
@@ -125,29 +122,19 @@ test('signs in', async ({ app, screen }) => {
 ```
 
 Roles use the names the web uses: `textbox`, `checkbox`, `combobox`,
-`button`. The tree lists static text as `text`, which is not a `getByRole`
-role: find it with `getByText`. A control's name is the one macOS
-accessibility gives it: its title, or its accessibility label. A button's
-title is its name and its text, so `getByText('Sign in')` finds the button
-as well as any static text that reads the same;
-`getByRole('button', 'Sign in')` finds only the button.
-`getByPlaceholder` is not supported: the engine names a field with no label
-by its placeholder, so find that field with
-`getByRole('textbox', 'Username')`. `getByTestId` finds the control's
-`AXIdentifier` (`accessibilityIdentifier` in AppKit, SwiftUI's
-`.accessibilityIdentifier`).
+`button`. Find static text with `getByText`, and a field with no label by
+its placeholder: `getByRole('textbox', 'Username')`. `getByTestId` finds the
+control's `AXIdentifier` (`accessibilityIdentifier` in AppKit and SwiftUI).
+See [Roles and names](/reference/desktop#roles-and-names) for how macOS
+elements map to roles.
 
 ## The desktop fixture
 
-| Method | What it does |
-| --- | --- |
-| `windows()` | The app's open windows |
-| `waitForWindow(trigger, { timeout }?)` | Runs `trigger`, waits for the window it opens, and makes that window active |
-| `window({ title }, { timeout }?)` | Waits for a window by title and returns it, without making it active |
-| `keyboard.press(key)` | Presses a key or a combo such as `ControlOrMeta+2` into the active window, for an app with no control that takes keyboard focus |
-| `keyboard.type(text)` | Types text into the focused field |
-| `closeApp()` | Quits the app. `app.open()` launches it again |
-| `platform` | The OS the app runs on, `'macos'` |
+`desktop` is what a test asks of the desktop itself: list and switch windows
+with `windows()`, `waitForWindow()`, and `window()`, send keys with
+`keyboard.press()` and `keyboard.type()`, and quit the app with `closeApp()`.
+The [desktop engine reference](/reference/desktop#the-desktop-fixture) lists
+every member with its parameters, defaults, and errors.
 
 ## Work with several windows
 
@@ -169,60 +156,39 @@ await settings.close();
 ```
 
 A window has `title()`, `isActive()`, `isClosed()`, `activate()`, and
-`close()`. Each one asks macOS, so `await` them all. `close()` presses the
-window's close button, so it fails on a window that stays open to ask about
-unsaved changes. `title` takes an exact string or a
-`RegExp`. Use `desktop.window()` for a window the app opens by itself.
+`close()`. Each one asks macOS, so `await` them all. `title` takes an exact
+string or a `RegExp`. Use `desktop.window()` for a window the app opens by
+itself. See
+[Windows and the active window](/reference/desktop#windows-and-the-active-window)
+for which window `screen` reads when a test picked none.
 
 ## What differs from the web
 
 | Area | On a desktop target |
 | --- | --- |
-| Input | The app runs in the background. Actions use the macOS Accessibility API and keys go into the app's own event queue, so your mouse and keyboard stay free. Apps that don't open a window in the background (like document-based apps) need `--headed` or `physicalInput: true`. A tap, `doubleTap`, `secondaryTap`, `check`, `uncheck`, `fill`, `clear`, or `selectOption` on a disabled control waits within the action's timeout for the app to enable it, then fails with `ACTION_FAILED` (refused, so nothing was sent); a box that already shows the state `check` or `uncheck` asks for is left alone. |
-| Physical input | `doubleTap`, `hover`, and coordinate taps require `desktop({ physicalInput: true })`, which brings the app forward and uses the real pointer. Keys and typing then use the real keyboard. A click is refused when another window, of the app or any other, or a control inside the element (a row's button or text field) is under the pointer, before the move or after it; a tap at a point, or a hover, is refused when another window is on top there. A double-click is one gesture, as a person's is: once its first click goes, the second follows at once, whatever the first opened. Watch out for floating windows overlapping the target area. |
-| Keys | `press` and typing send keys only to the focused control in the app's key window; without `physicalInput`, a window made active with `activate()` that is not the key window gets none. It supports named keys, letters, digits, and ``, . / ; ' [ ] \ - = ` `` (other characters like `!` or `é` are rejected), and blocks system shortcuts like `ControlOrMeta+q` (use `desktop.closeApp()` instead). A shortcut's letter is the one on the Mac's keyboard layout, so `ControlOrMeta+a` is Select All on AZERTY too. A shortcut with a digit or punctuation needs a layout that types it without Shift: on AZERTY, `ControlOrMeta+2` fails as unsupported. Without `physicalInput`, a `ControlOrMeta` shortcut reaches only the app's menu bar: a menu item's shortcut works, but one that the focused control or the key window handles (Copy, Paste, Select All, a SwiftUI button's `.keyboardShortcut`) does nothing, and `press` still succeeds. Use `physicalInput: true` for those. A locator's `press` needs a control that takes keyboard focus; for an app with none (like Calculator), use `desktop.keyboard.press()`. |
-| Select | `selectOption` matches by option label, not index. A table row's label is all the text it shows, cell by cell, as its accessible name is; a label that two rows show is refused. On a pop-up button it checks that the button shows the chosen option. A disabled option waits within the action's timeout for the app to enable it, then fails with `ACTION_FAILED` naming the option, and the menu closes; of two options with one title, the select chooses an enabled one from the menu, and a pop-up that already shows the title is left as it is, since a closed pop-up shows no item to tell them apart. For editable combo boxes, use `fill()` instead; a combo box that takes no typed value is refused, so tap it and then the option. |
-| Windows | `screen` reads the [active window](#work-with-several-windows): the one a test made active, otherwise the focused window, otherwise the app's main window, otherwise the first visible window. The Siri dialog macOS 27 can put over an app is read only when a test makes it active. A window with a sheet open counts as focused. Sheets and open context or pop-up menus are included, so `getByRole('menuitem', 'Copy')` finds a menu's items; window chrome (Close/Minimize/Zoom) is excluded. Minimized windows and rows scrolled out of their list read as hidden, so `getByRole` skips them. `getByText` and `getByTestId` still match hidden nodes. Each finds the node that carries the text or the identifier, so `getByText('Item 40')` finds a row's label, not the row. A tap, secondary tap, `check`, or `uncheck` on a hidden node scrolls it into view first, or is refused, and a failure after that scroll fails with `ACTION_FAILED` as an action that may have taken effect, never retried, since the list moved. Windows on another macOS Space stay readable. |
-| Reading | Only an app with no open windows reads as empty. If the screen is locked, the window tree is deeper than `maxDepth`, or the window holds more than the 8,000 elements a read takes, locators keep retrying until timeout instead of returning false negatives, and screenshots of that window are refused. `app.open()` fails on a locked screen. |
+| Input | The app runs in the background. Actions use the macOS Accessibility API, so your mouse and keyboard stay free. Apps that don't open a window in the background, like document-based apps, need `--headed` or `physicalInput: true`. See [Input](/reference/desktop#input) |
+| Physical input | `doubleTap`, `hover`, and coordinate taps require `desktop({ physicalInput: true })`, which brings the app forward and uses the real pointer and keyboard. See [Physical input](/reference/desktop#physical-input) |
+| Keys | `press` and typing reach only the focused control in the app's key window, and system shortcuts like `ControlOrMeta+q` are blocked: use `desktop.closeApp()`. Without `physicalInput`, a `ControlOrMeta` shortcut reaches only the app's menu bar. For an app with no control that takes keyboard focus, like Calculator, use `desktop.keyboard.press()`. See [Keys](/reference/desktop#keys) |
+| Select | `selectOption` matches by option label, not index. For editable combo boxes, use `fill()` instead. See [Select](/reference/desktop#select) |
+| Windows | `screen` reads the [active window](#work-with-several-windows), with its sheets and open menus. Minimized windows and rows scrolled out of their list read as hidden, so `getByRole` skips them. See [Visibility](/reference/desktop#visibility) |
+| Reading | If the screen is locked or the window is too deep or too large to read whole, locators keep retrying until timeout instead of returning false negatives. See [Reading a window](/reference/desktop#reading-a-window) |
 | Menu bar | The app's menu bar isn't readable yet; trigger menu items with a key shortcut (`press`). |
 | Web content | Browser windows, Electron apps, and web views aren't supported. Use `@e2e-dev/web` for web apps and [`@e2e-dev/electron`](/electron) for Electron apps. |
 | Workers | Limited to one worker per desktop target. If you run two desktop targets with `physicalInput: true`, set `workers: 1` so they don't fight over the cursor and keyboard. |
-| Scrolling | `scrollTo(edge)` isn't supported and fails with `UNSUPPORTED_CAPABILITY`. Use `scrollUntilVisible` instead. |
-| State | `app.clearState()` and `app.back()` aren't supported yet. A `test.setup` session and `video: 'on'` are refused when tests are collected, since the engine saves no state and records no video. |
+| Scrolling | `scrollTo(edge)` isn't supported. Use `scrollUntilVisible` instead. |
+| State | `app.clearState()` and `app.back()` aren't supported yet, and neither are a `test.setup` session or `video: 'on'`. |
 | Not supported | `getByPlaceholder`, `toBeInViewport`, `toBeEmpty`, `blur`, `longPress`, `dragTo`, `setInputFiles`, tap `modifiers`, and `selectOption({ index })` fail with a message that says so. |
-| Secrets | Password fields never expose their value and are painted black in screenshots. If a screenshot can't cover a password field, or the window is deeper than `maxDepth` or larger than a read takes, it fails instead of saving. |
+| Secrets | Password fields never expose their value and are painted black in screenshots. A screenshot that can't cover one fails instead of saving. |
 
-Temporary state is cleaned up when the run exits, and if an app or worker
-gets killed mid-run, the next desktop run cleans up the leftover app process
-automatically.
-
-<Accordion title="Additional desktop edge cases">
-- **Unreadable windows:** a window that can't be read never reads as empty,
-  so `not.toBeVisible()` can't pass on it.
-- **Pop-up menus:** choosing a missing option in a pop-up button closes its
-  menu again; if the menu stays open, the error says so.
-</Accordion>
-
-## Options
-
-| Option | Type | Default |
-| --- | --- | --- |
-| `snapshot` | `'full' \| 'interactive'` | `'full'` |
-| `physicalInput` | `boolean` | `false` |
-| `settle` | `number \| false` | `150` |
-| `maxDepth` | `number` | `24` |
-
-`snapshot: 'interactive'` makes the agent's observations read only controls,
-without static text; locators and `expect` read the whole window either way.
-`physicalInput` allows the real pointer and keyboard, which move your cursor
-and bring the app forward. `settle` is how long the engine waits after an agent action before the agent
-reads the screen, in milliseconds. `maxDepth` is how many levels of a window a
-read goes down, from 1 to 50; raise it when locators on a deeply nested app
-time out on a read only in part.
+`desktop()` takes four options: `snapshot`, `physicalInput`, `settle`, and
+`maxDepth`. See [Options](/reference/desktop#options).
 
 ## Next
 
 <CardGroup cols={2}>
+  <Card title="Desktop engine reference" icon="book" href="/reference/desktop">
+    Every option and `desktop` fixture member, with defaults and errors.
+  </Card>
   <Card title="Mobile" icon="mobile" href="/mobile">
     Run the same tests on iOS simulators and Android emulators.
   </Card>

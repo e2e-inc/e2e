@@ -1,0 +1,340 @@
+---
+title: Escrevendo uma engine
+description: Implemente o contrato de engine do e2e para outra plataforma de UI.
+"og:image": "https://e2e.com/docs/images/og/writing-an-engine.png?v=093c02efc1"
+"twitter:image": "https://e2e.com/docs/images/og/writing-an-engine.png?v=093c02efc1"
+---
+
+Uma engine liga `screen`, `app` e as chamadas ao agente a uma plataforma de UI
+por meio do contrato `e2e/engine`. Escreva uma para testar um app desktop, uma
+TV ou outra plataforma. `@e2e-dev/web` e `@e2e-dev/mobile` usam a mesma API
+pública `defineEngine` e são exemplos completos.
+
+Esta página constrói uma em TypeScript, servida no processo do runner. Para
+rodar uma em outro processo ou em outra linguagem, veja
+[Servidores de engine](/reference/engine-protocol).
+
+Engines controlam apenas interfaces de usuário. Para uma caixa de entrada, um
+banco de dados ou uma API de teste, escreva uma fixture com
+[`test.extend`](/reference/test#your-own-fixtures).
+
+## O limite de responsabilidades
+
+O runner gerencia os testes e as políticas. A engine observa e controla a UI.
+
+| Responsável | Atribuições |
+| --- | --- |
+| runner | Coleta, alvos, novas tentativas, hooks, sessões. Polling de consultas e de asserções, verificações estritas de correspondência única, registro dos passos, tempos limite. Planejamento do agente, prompts, orçamentos, registro dos passos anteriores. Autorização de ferramentas, resolução de segredos, ocultação como defesa em profundidade |
+| engine | Uma consulta imediata, uma leitura de nó. A acionabilidade de um nó e o envio da entrada a ele. Mecânica de processo, de página e de dispositivo. Mascaramento na origem das observações seguras |
+
+`locate` retorna de imediato as correspondências atuais, ou um array vazio.
+Não repita consultas nem rejeite várias correspondências.
+
+## A estrutura de uma engine
+
+Retorne um handle de `defineEngine`. Essa função valida o manifesto e calcula as
+capabilities da engine quando a configuração carrega.
+
+<Note>
+Importe tipos e funções auxiliares apenas de `@e2e-dev/core/engine`; não existe
+subcaminho interno. Declare `@e2e-dev/core` como peer dependency, para que a
+engine, o runner e os programas do [@e2e-dev/core](/core) compartilhem um único
+conjunto de classes de erro. `e2e/engine` reexporta o mesmo módulo, então uma
+engine que o importa e tem `e2e` como peer dependency também roda sob o
+runner.
+</Note>
+
+Este esqueleto supõe um adaptador `createClient` para a sua plataforma. Os nós
+do adaptador precisam seguir as [regras da árvore semântica](#nodes-and-refs).
+
+```ts title="src/index.ts" expandable
+import { ConfigurationError, defineEngine, resolveExpression, type EngineHandle } from '@e2e-dev/core/engine';
+
+export function hyperdrive(options: { device: string }): EngineHandle {
+  const client = createClient(options);
+  let bundleId = '';
+  return defineEngine({
+    name: 'hyperdrive',
+    version: '1.0.0',
+    spiVersion: 1,
+    platform: 'ios',
+    validateApp(app, { targetName }) {
+      if (app.bundleId === undefined) {
+        throw new ConfigurationError('INVALID_CONFIG', `target "${targetName}" needs app.bundleId`);
+      }
+    },
+    async init(info) {
+      bundleId = info.app.bundleId!;
+      await client.boot();
+    },
+    async dispose(context) { await client.shutdown({ signal: context.signal }); },
+    async observe() {
+      const screen = await client.snapshot();
+      return {
+        location: screen.title,
+        // One root with a stable id: `perform(root, swipe)` is the viewport swipe.
+        root: { ref: { id: 'root', revision: '' }, role: 'window', children: screen.nodes },
+        viewport: screen.viewport,
+      };
+    },
+    async locate(expression) {
+      const screen = await client.snapshot();
+      return resolveExpression(expression, screen.nodes);
+    },
+    actions: ['tap', 'fill', 'swipe'],
+    async perform(ref, action) {
+      switch (action.kind) {
+        case 'tap': return client.tap(ref.id);
+        case 'fill': return client.type(ref.id, action.value);
+        case 'swipe': return client.scroll(ref.id === 'root' ? undefined : ref.id, action.direction);
+      }
+    },
+    session: {
+      async back() { await client.back(); },
+      async restart() { await client.relaunch(bundleId); },
+    },
+  });
+}
+```
+
+```ts title="e2e.config.ts"
+targets: [{ name: 'phone', engine: hyperdrive({ device: 'iPhone 16' }), app: { bundleId: 'com.example.app' } }],
+```
+
+- `version` é obrigatório. Os relatórios o informam, e uma sessão salva só é
+  restaurada sob a versão que a salvou. O cache de replay não usa esse campo
+  na chave.
+- `locate` responde às consultas de `screen`. O `resolveExpression` exportado
+  aplica as regras padrão de consulta a uma árvore semântica.
+- O app em teste é o `app` do alvo, não uma opção da engine. `validateApp` o
+  verifica no carregamento da configuração. `prepare` e `init` o recebem como
+  `info.app`.
+
+## Capabilities
+
+Os métodos opcionais que você implementa definem as capabilities da engine.
+Chamadas a um método ausente falham com `UNSUPPORTED_CAPABILITY`. Comece por
+estes:
+
+| Membro | Libera |
+| --- | --- |
+| `observe(context, options?)` | Observações do agente e o cache de replay |
+| `perform(ref, action, context)` + `actions` | Ações em nós dos tipos declarados, incluindo a rolagem do viewport por `swipe` |
+| `locate(expression, context)` | `screen`, `Locator` e `expect(locator)` |
+| `validateApp(app, info)` | Uma verificação do `app` do alvo no carregamento da configuração. Lance `INVALID_CONFIG` nomeando `info.targetName` para um campo de que a plataforma precisa ou que ela não consegue controlar. [Referência](/reference/engine#app) |
+| `session.{open?,back?,resize?,switchTab?,closeTab?,restart?,reset?}` | `app.open()`, `app.back()`, `app.restart()`, `app.clearState()` e os verbos `navigate`, `back`, `resize_viewport`, `switch_tab` e `close_tab` do agente |
+
+Ações de ponteiro, o teclado, o estado salvo, os artefatos e as fixtures
+contribuídas também são capabilities opcionais. `actions`, `location`, `pointer`
+e `keyboard` exigem `observe`. O agente recebe só as ferramentas que os tipos
+declarados por você liberam; a
+[referência da engine](/reference/engine#capabilities) lista cada membro e qual
+tipo libera qual ferramenta.
+
+As ações do agente e as dos localizadores chegam a `perform` como uma
+`LocatorAction`. Quando um nó não consegue fazer uma ação declarada, lance
+`UNSUPPORTED_CAPABILITY`.
+
+`session.open` recebe uma URL que o runner já resolveu. Depois de `restart` ou
+`reset`, o runner abre de novo o endereço configurado por meio de `open`. Se a
+sua engine não tiver `open`, inicie o app de novo nesses hooks.
+
+## Ciclo de vida
+
+| Hook | Quando | Use para |
+| --- | --- | --- |
+| `prepare` | Uma vez por alvo, no processo do runner, em uma execução com testes a rodar | Instalar runtimes. O `env` que ele retorna chega a todo worker |
+| `init` | Uma vez por worker, antes da primeira tentativa do worker | Fazer o boot dos dispositivos. Ele também precisa funcionar em uma engine que foi descartada |
+| `startAttempt` | Antes de cada tentativa | Criar a UI do teste |
+| `settleAttempt` | Depois do corpo, e de novo depois da desmontagem | Lançar o erro de um callback do teste que nenhum passo aguardou, como um handler de diálogo |
+| `endAttempt` | Depois de cada tentativa, também depois de um início que falhou | Limpar a UI do teste. Torne o hook idempotente |
+| `dispose` | No encerramento do worker, mesmo que `init` nunca tenha rodado | Liberar os recursos do worker |
+| `finish` | Uma vez por alvo, depois que o último worker se encerra, sempre que `prepare` rodou | Liberar o que `prepare` adquiriu |
+
+Use `info.env` para os processos que você inicia e `info.log` para informar o
+progresso. A [referência da engine](/reference/engine#lifecycle) traz os
+argumentos e os orçamentos de cada hook.
+
+## Nós e refs
+
+`observe` retorna uma árvore de `SemanticNode`, e `locate` retorna os nós que
+correspondem. Dê a cada nó um id que continue único durante toda a vida da UI.
+O runner atribui as revisões e verifica se um nó está desatualizado.
+
+- Mantenha o id da raiz estável entre as observações. O `scroll` do agente e
+  `screen.swipe()` chamam `perform(root, { kind: 'swipe' })`. Um gesto de
+  deslizar em outro nó rola dentro desse nó.
+- Quando `perform` receber `{ id, revision }`, procure o id. Lance
+  `NODE_STALE` quando o nó não existir mais.
+- Quando uma correspondência sai da UI enquanto `locate` a lê, lance um
+  `NODE_STALE` que permite nova tentativa. Nunca retorne um nó lido do que já
+  sumiu: um elemento removido não tem tamanho, então `toBeHidden` passaria
+  enquanto o substituto do elemento está na tela. O runner resolve de novo
+  dentro do prazo de quem chamou.
+- Limite o tamanho do snapshot se a plataforma puder retornar uma árvore
+  ilimitada, e defina `truncated` quando o limite cortar nós.
+- Use os nomes acessíveis da plataforma para os nós.
+- Coloque os identificadores de teste em `testId`: um atributo do documento,
+  um identificador de acessibilidade do iOS, um id de recurso do Android ou um
+  id de automação de desktop. A consulta `testId` corresponde apenas a esse
+  campo.
+
+O `location` opcional de uma observação, como uma URL ou o título de uma tela,
+vai para o modelo e para o relatório, e ancora as entradas do cache de replay.
+
+## Teclado
+
+Implemente `keyboard` para digitar em um controle depois que o agente coloca o
+foco nele. `keyboard.type` precisa passar pelo caminho de teclado da
+plataforma, para que o app receba os eventos de tecla que a digitação de uma
+pessoa gera: `keydown`, `keypress`, `input` e `keyup` por caractere em um
+navegador, o teclado do dispositivo em um dispositivo. Definir o valor sem
+pressionar teclas não cumpre o contrato.
+
+- Lance `NOT_ACTIONABLE` quando nenhum controle editável estiver com o foco.
+- Deixe `dismiss` de fora em plataformas sem teclado virtual.
+- `locator.pressSequentially` usa o mesmo hook depois de uma ação `focus`.
+
+Em `press`, leia teclas como `Enter` ou `ControlOrMeta+a` com o `parseKey`
+exportado. O runner rejeita grafias inválidas com `INVALID_ARGUMENT`. Mapeie as
+teclas válidas para a sua plataforma e lance `UNSUPPORTED_CAPABILITY` para as
+teclas que a plataforma não consegue enviar. Veja a
+[gramática de teclas](/reference/engine#keys).
+
+## Superfícies apenas visuais
+
+Para uma UI sem árvore semântica, retorne um `root` sem filhos, junto com
+`pixels`, a partir de `observe`. Implemente `performAt` e declare os tipos
+dele em `pointerActions`.
+
+O agente age por ferramentas como `tap_at`, e o runner passa o ponto para
+`performAt` quando nenhum nó listado está nele. Ações por coordenadas só são
+reproduzidas no tamanho de viewport gravado.
+
+## Trate os segredos
+
+O preenchimento de um segredo chega à engine como uma ação `fill` com
+`sensitive: true`, sem uma flag de capability separada. No `type_secret` de um
+agente, o runner já verificou a credencial, a observação e o campo. O
+`fill(secret)` de um teste pula essas
+[verificações](/reference/security#secret-fills). Trate o preenchimento de
+forma segura ou lance `UNSUPPORTED_CAPABILITY`. As capturas de tela depois
+dele continuam indo para o modelo, com os
+[campos seguros mascarados](/reference/security#screenshots-after-a-secret-fill).
+
+Uma opção da engine também pode receber um segredo, como uma senha que a
+engine envia ao app:
+
+1. Aceite `string | Secret`. Diferencie os dois com `isSecret` de
+   `@e2e-dev/core/engine`.
+2. Liste cada referência em `secrets` da engine. O carregamento da
+   configuração rejeita um nome que nenhum segredo tem.
+3. Leia o valor em `startAttempt` com `context.resolveSecret(secret)`.
+
+O runner oculta o valor a partir do momento em que ele é resolvido. Quando o
+app vê o valor em outra forma, como um cabeçalho codificado, retorne essa
+forma por meio de `resolveSecret(secret, { derived })` para ocultá-la sob o
+mesmo nome. Isso protege apenas texto: uma sessão cuja engine resolveu um
+segredo mantém as capturas de tela.
+
+## O estado é uma credencial
+
+Um snapshot de `state` pode conter cookies e tokens. O runner o criptografa
+por execução, o vincula à execução, ao alvo, à engine e ao app, e o apaga
+depois da execução. Não persista snapshots, não os guarde em cache, não os
+registre em log nem os coloque em erros. `restore` precisa substituir todo o
+estado persistido do app, não se mesclar a ele.
+
+## Erros
+
+Lance `EngineError` com um código da
+[referência da engine](/reference/engine).
+
+- Só `NODE_STALE` e `FRAME_NOT_FOUND` podem permitir nova tentativa.
+- Use `ACTION_MAY_HAVE_COMMITTED` quando uma ação pode já ter tido efeito,
+  para que o runner não a repita.
+- `INVALID_STATE` vira `APP_NOT_OPEN`, e `UNSUPPORTED_CAPABILITY` é um erro de
+  configuração.
+- Erros desconhecidos viram falhas de infraestrutura.
+
+## Fixtures contribuídas
+
+Uma engine pode fornecer fixtures como `browser` ou `device`. Para um teste,
+elas são [fixtures embutidas](/reference/test#fixtures). Envolva os métodos
+delas com `context.fixture` para registrar cada chamada como um passo
+`<fixture>.<method>`, com artefatos e falhas próprios. As fixtures rodam no
+processo do runner, ao lado do teste. Um servidor de engine as recebe de
+`connectEngine`; veja
+[Mantenha o trabalho do host no cliente](/reference/engine-protocol).
+
+```ts
+fixtures: {
+  device: (context) => context.fixture('device', {
+    async setNetwork(state: 'online' | 'offline') { await client.network(state); },
+    async home() { await client.home(); },
+  }, {
+    setNetwork: { kind: 'resource', label: (state) => state },
+    home: { kind: 'resource' },
+  }),
+},
+```
+
+```ts title="tests/fixtures.ts"
+import { test as base } from 'e2e';
+import type { Device } from 'e2e-engine-hyperdrive';
+
+export const test = base.extend<{ device: Device }>();
+```
+
+O contexto da fixture também oferece verificações da política de URL, tempos
+limite, orçamentos, artefatos e factories de localizadores e de asserções, como
+`expectable(target, factory)` para `expect(fixture)`. Veja a
+[referência da engine](/reference/engine#contributed-fixtures).
+
+## Publique um pacote de ferramentas
+
+Para operações da plataforma que faltam no conjunto de ações, publique
+[ferramentas do projeto](/tools) construídas com `defineTool`, com `platforms`
+definido para que cada uma apareça só nos alvos compatíveis, como
+`@e2e-dev/mobile/tools` faz.
+
+## Abra pelo nome
+
+Exporte a factory da engine como o export padrão do pacote. Assim, um agente
+de código pode abrir uma [sessão MCP](/reference/mcp#without-a-config) na
+engine em um diretório sem configuração:
+
+```ts title="src/index.ts"
+export default function kiosk(options?: KioskOptions) {
+  return defineEngine({ /* ... */ });
+}
+```
+
+```txt
+open_session {engine: {package: "kiosk-engine", options: {lane: 2}}}
+```
+
+A factory recebe `options`, ou `undefined` quando o agente passa só o nome do
+pacote. Retorne uma engine nova a cada chamada, para que cada sessão tenha a
+sua.
+
+## Verifique a engine
+
+Rode um arquivo de teste contra a sua engine. Verifique a ordem do ciclo de
+vida, as observações, as ações, os erros e as capabilities não suportadas.
+[`engine-contract.test.ts`](https://github.com/e2e-inc/e2e/blob/main/packages/e2e/tests/integration/engine-contract.test.ts)
+tem exemplos dessas verificações.
+
+## Próximos passos
+
+<CardGroup cols={2}>
+  <Card title="Contrato de engine" icon="gear" href="/reference/engine">
+    Cada tipo e cada hook de `e2e/engine`.
+  </Card>
+  <Card title="Referência da engine mobile" icon="mobile-screen" href="/reference/mobile">
+    Uma engine de dispositivo completa para ler junto.
+  </Card>
+  <Card title="Servidores de engine" icon="network-wired" href="/reference/engine-protocol">
+    Rode a engine em outro processo, outra máquina ou outra linguagem.
+  </Card>
+</CardGroup>

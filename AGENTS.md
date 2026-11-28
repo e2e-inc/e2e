@@ -153,9 +153,13 @@ the way a user would.
   run's environment (`INHERITED_ENV` in `src/launch-ownership.ts`): the driver
   launches through `open -n` with exactly that environment, since
   LaunchServices hands the app the environment of the process that asks.
-  `pnpm --filter @e2e-dev/desktop build:native` (needs `rustup`) builds
+  `pnpm --filter @e2e-dev/desktop build:native` (needs `rustup` and `pnpm install`) builds
   `packages/desktop/desktop.<platform>-<arch>.node`, which the loader takes in a
-  checkout; a release ships it in `@e2e-dev/desktop-darwin-arm64` and
+  checkout, and writes `packages/desktop/src/native.ts`: the driver's functions and
+  argument objects as NAPI-RS reads them from the crate's `#[napi]` items. That file
+  types the loader, is never edited by hand, and is committed with any change to those
+  items (CI's `native` job fails on a difference). What a call resolves with is still
+  written by hand in `driver.ts` and `nodes.ts`, named by `ts_return_type` in the crate. A release ships the addon in `@e2e-dev/desktop-darwin-arm64` and
   `@e2e-dev/desktop-darwin-x64` (`packages/desktop/npm/<platform>`, where
   every native addon's platform packages live), optional dependencies with `os`/`cpu` set,
   in a changesets `fixed` group with the engine, each with a
@@ -275,7 +279,9 @@ the way a user would.
 - `packages/acp` — the published `@e2e-dev/acp` package: a `StepExecutor`
   (`acp()`, with `claudeCode()` and `codex()` presets) that runs
   `agent.act` and `agent.assert` on a coding agent over the Agent Client
-  Protocol. The step tools (`createGrammarTools`, `createVerdictTool` from
+  Protocol, answers `agent.waitFor` and `agent.extract` in a second,
+  tool-less session (`answer`), and takes `e2e explore`'s rules and
+  `report_finding` through `extend`. The step tools (`createGrammarTools`, `createVerdictTool` from
   `e2e/agent`) reach the agent as an MCP server on 127.0.0.1; permission
   requests for anything else are rejected, and a tool of the agent's own
   that runs without asking fails the step with `POLICY_DENIED`.
@@ -845,7 +851,8 @@ trees, on both platforms, without a device.
   params, the agent's context, and the current screen with its location. Without a model, the first `agent` acquisition in a run
   reports one run-level `MODEL_UNAVAILABLE` and stops the run (exit 2). A
   custom executor handles `act` and `assert` through `runStep` and needs no
-  model; its `waitFor` and `extract` still use the built-in judgments. No implicit target either: `targets` is required and
+  model; its `waitFor` and `extract` use the built-in judgments on the
+  agent's `judge` or `model`, else on the executor's own `answer`. No implicit target either: `targets` is required and
   each names its engine.
 - Security invariants (fail closed when one cannot be enforced):
   - Secret values never reach model input, digests, logs, reports, or

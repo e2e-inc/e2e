@@ -1,6 +1,6 @@
 ---
 title: expect
-description: "Locator assertions, fixture assertions, and plain value matchers."
+description: "API reference for expect in e2e, with retrying locator assertions, screenshot comparison, plain value matchers, expect.poll, and expect.soft."
 "og:image": "https://e2e.com/docs/images/og/reference/expect.png?v=118436cc41"
 "twitter:image": "https://e2e.com/docs/images/og/reference/expect.png?v=118436cc41"
 ---
@@ -40,10 +40,8 @@ test('checkout summary', async ({ screen }) => {
 `expect` tells the argument apart by what it is:
 
 - A built-in fixture an engine contributes can provide matchers, such as
-  `expect(browser).toHaveURL()`.
-  Such a fixture is an `Expectable<E>`: its engine attached the matcher set
-  `E` through [`expectable`](/reference/engine#contributed-fixtures), and
-  `expect(fixture)` returns it.
+  `expect(browser).toHaveURL()`. Its engine attaches them through
+  [`expectable`](/reference/engine#contributed-fixtures).
 - Every other argument gets the value matchers, a promise included. Await a
   promise before passing its result to `expect`.
 
@@ -96,10 +94,9 @@ await expect(screen.getByTestId('cart-empty'), 'the cart is empty').toBeVisible(
 #### `toBeVisible` and `toBeHidden`
 
 `toBeVisible` waits for the one match to be shown. `toBeHidden` waits for a
-hidden or absent state. On a device, a node whose centre the soft
-keyboard covers is hidden, except for the keyboard's own keys, suggestion bar,
-and dock, the focused field, and a container with a child still showing
-([Visibility](/reference/mobile#visibility)).
+hidden or absent state. On a device, a node whose centre the soft keyboard
+covers is hidden; [Visibility](/reference/mobile#visibility) lists the
+exceptions.
 
 ```ts
 await expect(screen.getByRole('dialog')).toBeVisible();
@@ -127,8 +124,8 @@ on the engine:
 
 | Engine | Measures | `ratio` |
 | --- | --- | --- |
-| `@e2e-dev/web` | Uses the page's `IntersectionObserver`, matching Playwright. The viewport, scrolling or `overflow` ancestors, and frames clip the box. Replacing `IntersectionObserver` changes the result | Supported |
-| `@e2e-dev/mobile` | Checks device-reported bounds against the confirmed screen. Scroll containers clip the bounds, and offscreen nodes leave the tree | `ratio > 0` fails with `UNSUPPORTED_CAPABILITY` once the node is on screen, because the device reports only the visible part |
+| `@e2e-dev/web` | The viewport, scrolling or `overflow` ancestors, and frames clip the box, as in Playwright | Supported |
+| `@e2e-dev/mobile` | Scroll containers clip the device-reported bounds, and offscreen nodes leave the tree | `ratio > 0` fails with `UNSUPPORTED_CAPABILITY` once the node is on screen |
 
 It fails at once with `UNSUPPORTED_CAPABILITY`, `.not` included, if the target's
 engine does not implement
@@ -159,8 +156,7 @@ await expect(screen.getByRole('button', 'Pay')).toBeEnabled({ enabled: false });
 ```
 
 A node is enabled unless it reports `disabled`. On the web, `disabled` is
-the state the browser applies, not the attribute alone. That is the reading
-Playwright's `toBeDisabled` gives:
+the state the browser applies, not the attribute alone, as in Playwright:
 
 - A control inside a `<fieldset disabled>` is disabled unless it sits in
   that fieldset's first `<legend>`.
@@ -176,16 +172,12 @@ await expect(screen.getByLabel('Email')).toBeEditable();
 await expect(screen.getByLabel('Order id')).toBeEditable({ editable: false }); // read-only or disabled
 ```
 
-- Read-only is the state the engine reports. The web engine follows
-  Playwright's rules for native controls and `aria-readonly`, using e2e's
-  roles and the disabled state that `toBeEnabled()` reports. An `input`, `textarea`, or
-  `select` reads its `readonly` attribute alone, with any value. An element
-  of a role that takes `aria-readonly` (`textbox`, `searchbox`, `combobox`,
-  `listbox`, `checkbox`, `switch`, `slider`, `spinbutton`, `gridcell`, and
-  the rest) reads `aria-readonly="true"`, in any case. An editing host reads
-  it only by its ARIA role, explicit or from its tag (a `td` in a grid is a
-  `gridcell`); a plain `<div contenteditable>` has none. Any other editing
-  host, and any element inside one, is never read-only.
+- On the web, read-only follows Playwright's rules: an `input`, `textarea`,
+  or `select` reads its `readonly` attribute, with any value, and an element
+  of a role that takes `aria-readonly` (`textbox`, `combobox`, `gridcell`,
+  and the rest) reads `aria-readonly="true"`, in any case. An editing host
+  without such a role, such as a plain `<div contenteditable>`, and any
+  element inside one, is never read-only.
 - A disabled node is not editable either, as
   [`toBeEnabled`](#tobeenabled-and-tobedisabled) reads it.
 - Any other node, such as a button, has no read-only state. It fails the
@@ -253,7 +245,6 @@ contained normalized text. Both take a single `TextMatch` or a list.
 await expect(screen.getByRole('status')).toHaveText('Saved');
 await expect(screen.getByRole('alert')).not.toContainText('error', { ignoreCase: true });
 await expect(screen.getByTestId('todo')).toHaveText(['Write spec', /^Ship/, 'Release']);
-await expect(screen.getByTestId('todo')).toContainText(['spec', 'runner', 'Release']);
 await expect(screen.getByTestId('todo')).toContainText(['spec', 'Release']);
 ```
 
@@ -289,8 +280,7 @@ await expect(screen.getByLabel('Search')).toHaveValue('');
   that is not a native form control or an editor reads its `aria-valuetext`,
   otherwise its `aria-valuenow`, skipping a blank one. Without either, a native
   `<progress>` or `<meter>` with a `value` attribute reads the browser's
-  built-in `.value`, clamped to its range, even when a customized built-in
-  (`<progress is="...">`) overrides that getter. A `slider` or `spinbutton`
+  built-in `.value`, clamped to its range. A `slider` or `spinbutton`
   with none reads as `''`, and any other widget with none, such as an
   indeterminate `<progress>`, has no value and is refused.
 - On a device, a node reads the accessibility value the platform reports.
@@ -397,8 +387,16 @@ Both forms take the [Screenshot options](#screenshot-options).
 | `maskColor` | `string` | `#ff00ff` |
 | `timeout` | `number` | `config.assertionTimeout` |
 
-[`ScreenshotOptions`](#screenexpectation-and-screenshotoptions) describes
-each option.
+- `threshold` is how far one pixel's color may drift and still count as the
+  same, from 0 (exact) to 1.
+- `maxDiffPixels` is how many pixels may differ.
+- `maxDiffPixelRatio` is the share of the pixels that may differ, from 0 to 1.
+- `mask` lists locators painted over before comparing, for content that
+  changes from run to run.
+- `maskColor` is the color of the `mask` boxes, as `#rrggbb`.
+- `timeout` is the assertion budget in milliseconds.
+
+The type is [`ScreenshotOptions`](#screenexpectation-and-screenshotoptions).
 
 ### browser matchers
 
@@ -618,10 +616,8 @@ when they are the same infinity.
 
 `toMatchSchema` validates a value against a
 [Standard Schema](https://standardschema.dev): a Zod, Valibot, or ArkType
-schema, or any library that implements the spec. Pass the schema your app
-already parses its API with, and the test fails when the API drifts from it.
-It returns the schema's output, typed, so the rest of the test reads
-properties without casting.
+schema, or any library that implements the spec. It returns the schema's
+output, typed, so the rest of the test reads properties without casting.
 
 ```ts
 import { z } from 'zod';
@@ -634,8 +630,8 @@ expect(users.map((user) => user.name)).toContain('Ada');
 
 - A failure lists every issue by its path (`1.email: Invalid email address`).
 - The output is the schema's, so defaults and transforms apply.
-- A matcher returns before anything could await it, so a schema that
-  validates asynchronously (an async refinement) is `INVALID_ARGUMENT`.
+- A schema that validates asynchronously (an async refinement) is
+  `INVALID_ARGUMENT`.
 - Negated, it passes when the value does not match and returns nothing.
 
 #### `toBeOK`
@@ -651,18 +647,15 @@ expect(created).toBeOK();
 ```
 
 - The failure names the status and the origin and path of `response.url`,
-  the URL of the response being checked. For `request` that is the URL after
-  redirects. Path segments show; the credentials, query, and fragment do not.
-  A relative URL, one that does not parse, or one that is not `http` or
-  `https` is left out. The body is never read.
+  without its credentials, query, or fragment. A URL that is not an absolute
+  `http` or `https` one is left out. The body is never read.
 - A status number and other types that are not `WebResponse` fail to
   compile, and so does `WebResponse | undefined` under `strictNullChecks`. A
   value typed `any` compiles. In a generic helper, type the parameter as
   `WebResponse`: `R extends WebResponse` does not compile.
 - At run time, an object with a numeric `status` and a string `url` is
   checked as a response. A value with either field missing or of another
-  type fails as `ASSERTION_FAILED`, negated too. A `status` or `url` getter
-  that throws raises its own error.
+  type fails as `ASSERTION_FAILED`, negated too.
 - To wait for a 2xx status, poll the call:
   `await expect.poll(() => request.get('/api/jobs/7')).toBeOK()`.
 
@@ -682,16 +675,13 @@ same way. A `browser` expectation takes none; its failure names the matcher.
 
 The unit-runner matchers (`toThrow`, `toBeInstanceOf`, `toBeNaN`,
 `toStrictEqual`, `resolves`, `rejects`, `expect.extend`) are not part of
-`expect`. An end-to-end test checks what the app shows and what its API
-returns; the value matchers cover that, see [API](/api-testing). Code-level
-checks belong in the unit runner.
+`expect`. Code-level checks belong in the unit runner.
 
 ### Asymmetric matchers
 
 An asymmetric matcher stands in for a value inside `toEqual`,
 `toMatchObject`, the collection form of `toContain`, and the value of
-`toHaveProperty`. Where the comparison would test equality, it asks the
-matcher instead. They are Jest's matchers, with Jest's rules.
+`toHaveProperty`. They are Jest's matchers, with Jest's rules.
 
 | Matcher | Matches |
 | --- | --- |
@@ -794,7 +784,8 @@ await expect.poll(() => readStatus(), { message: 'the batch never finished' }).n
   during `afterEach`. In `beforeAll`, `afterAll`, and worker fixture teardown,
   it is capped by the hook deadline. `0` polls until that cap, so outside a
   test, hook, or hosted session it is `INVALID_CONFIG`. The maximum timeout
-  is 2147483647 ms.
+  is 2147483647 ms. A hosted session (`openHost()`) defaults to
+  `config.assertionTimeout` too.
 - `interval` is the pause between reads in milliseconds, a finite number
   above 0. It is deprecated: pass `intervals: [<ms>]`. It will be removed no
   earlier than April 1, 2027.
@@ -873,7 +864,8 @@ await expect(async () => {
 
 - `timeout` is the deadline in milliseconds, from 0 through 2147483647. At
   `0` there is no timeout, and the block is retried until the test or hook
-  deadline. Outside a test or hook, a positive `timeout` is required.
+  deadline. Outside a test, hook, or hosted session (`openHost()`), a
+  positive `timeout` is required.
 - `intervals` is the list of pauses between tries, in milliseconds. Each
   entry must be a positive safe integer. The last entry repeats.
 
@@ -931,15 +923,12 @@ teardown, the last error is included in the timeout message.
 
 ## Behavior
 
-Rules that apply across the matcher groups.
-
 ### Timeouts and failures
 
 | Property | Value |
 | --- | --- |
 | Default timeout | [`config.assertionTimeout`](/reference/config#assertiontimeout) |
 | Override | `{ timeout }` in milliseconds, on every locator and `browser` matcher |
-| Reads | At 0, 20, and 50 ms, then every 100 ms from the start |
 | Unknown option | `INVALID_ARGUMENT`; see [Option validation](#option-validation) |
 | Failure code | `ASSERTION_FAILED`, exit code 1 |
 
@@ -991,17 +980,14 @@ withholds its value and text.
 | `toHaveAttribute` | `POLICY_DENIED`, like `getAttribute()`, for every attribute name and negated too |
 | `toHaveAccessibleName`, `toHaveRole`, and the state matchers | Answer as usual |
 
-Reading the withheld value as `''` would pass a filled password field as
-cleared, and reading the withheld `value` attribute as absent would pass
-`not.toHaveAttribute('value')` on a password field that has one. Assert the
-outcome of the fill, not the field.
+Assert the outcome of the fill, not the field.
 
 ### Option validation
 
 - A matcher refuses any option key it does not take, and a flag that is not a
-  boolean, with `INVALID_ARGUMENT` before it reads the screen.
-- Types catch these in TypeScript, but `e2e run` does not type-check, so the
-  check runs for a JavaScript test or a computed option object too.
+  boolean, with `INVALID_ARGUMENT` before it reads the screen. `e2e run` does
+  not type-check, so this is the check a JavaScript test or a computed option
+  object gets.
 - Playwright options e2e does not implement, such as `indeterminate` on
   `toBeChecked` or `useInnerText` on `toHaveText`, fail this way instead of
   passing on the default.
@@ -1013,10 +999,8 @@ outcome of the fill, not the field.
 ### `ExpectCall`, `SoftExpectCall`, and `Expect`
 
 ```ts
-/** `T`, or `never` when `T` is `any`, so an `any` argument skips an overload. */
 type NotAny<T> = 0 extends 1 & T ? never : T;
 
-/** The `expect(actual)` call: a locator, `screen`, an engine fixture, or a value, told apart by the argument. */
 export interface ExpectCall {
   <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
   <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
@@ -1025,7 +1009,6 @@ export interface ExpectCall {
   <T>(actual: T, message?: string): ValueExpectation<T>;
 }
 
-/** The `expect.soft(actual)` call: `expect(actual)` whose failures are kept instead of thrown. */
 export interface SoftExpectCall {
   <L extends Locator>(actual: NotAny<L>, message?: string): AsyncExpectation;
   <S extends Screen>(actual: NotAny<S>, message?: string): ScreenExpectation;
@@ -1034,11 +1017,8 @@ export interface SoftExpectCall {
   <T>(actual: T, message?: string): SoftValueExpectation<T>;
 }
 
-/** The `expect` entry: the call, `expect.poll`, `expect.soft`, and the asymmetric matchers. */
 export interface Expect extends ExpectCall {
-  /** Re-reads a value until the chosen matcher holds or `timeout` passes. */
   poll<T>(read: () => T | Promise<T>, options?: PollOptions): PollExpectation<T>;
-  /** The same matchers, a failure kept on the attempt instead of thrown; the attempt fails once the body has settled. */
   readonly soft: SoftExpectCall;
   any(sample: Class | typeof BigInt | typeof Symbol): AsymmetricMatcher;
   anything(): AsymmetricMatcher;
@@ -1052,73 +1032,36 @@ export interface Expect extends ExpectCall {
 ### `AsyncExpectation` and `TextMatcherOptions`
 
 ```ts
-/**
- * The locator matchers. An option a matcher does not take, or a flag that is
- * not a boolean, is `INVALID_ARGUMENT` before the first read.
- */
 export interface AsyncExpectation {
-  /** Inverts the matcher. A negated matcher passes on the first read that satisfies the negation. */
   readonly not: AsyncExpectation;
-  /** Waits for visibility; `visible: false` waits for hidden or absent state, as `toBeHidden`. */
   toBeVisible(options?: { visible?: boolean; timeout?: number }): Promise<void>;
-  /** Waits for hidden or absent state. */
   toBeHidden(options?: { timeout?: number }): Promise<void>;
-  /**
-   * Waits for part of the match to be inside the viewport, after clipping by
-   * scrolling and overflow ancestors; `ratio` (0 to 1) sets the share of its
-   * box that must be. No match is outside the viewport. It never scrolls.
-   */
   toBeInViewport(options?: { ratio?: number; timeout?: number }): Promise<void>;
-  /** Waits for one match to exist, visible or not; `attached: false` waits for none. */
   toBeAttached(options?: { attached?: boolean; timeout?: number }): Promise<void>;
-  /** Waits for enabled state; `enabled: false` waits for disabled state. */
   toBeEnabled(options?: { enabled?: boolean; timeout?: number }): Promise<void>;
-  /** Waits for disabled state. */
   toBeDisabled(options?: { timeout?: number }): Promise<void>;
-  /** Waits for an enabled control that is not read-only; `editable: false` waits for a disabled or read-only one. A node with no read-only state, a button included, fails either way. */
   toBeEditable(options?: { editable?: boolean; timeout?: number }): Promise<void>;
-  /** Waits for checked state; `checked: false` waits for unchecked state. */
   toBeChecked(options?: { checked?: boolean; timeout?: number }): Promise<void>;
-  /** Waits for selected state. */
   toBeSelected(options?: { timeout?: number }): Promise<void>;
-  /** Waits for expanded state. */
   toBeExpanded(options?: { timeout?: number }): Promise<void>;
-  /** Waits for focused state. */
   toBeFocused(options?: { timeout?: number }): Promise<void>;
-  /**
-   * Waits for a node the engine reports empty: on the web an input or
-   * textarea with no value, or any other element whose text content trims to
-   * nothing; on a device a text field with no value, or a node with no text
-   * or value in its subtree. Denied on a secure field.
-   */
   toBeEmpty(options?: { timeout?: number }): Promise<void>;
-  /** Waits for exact normalized text; a list waits for exactly that many matches, each with its entry's text, in order. */
   toHaveText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
   toHaveText(expected: readonly TextMatch[], options?: TextMatcherOptions): Promise<void>;
-  /** Waits for contained normalized text; a list waits for each entry to be contained by a distinct match, in order, extra matches allowed. */
   toContainText(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
   toContainText(expected: readonly TextMatch[], options?: TextMatcherOptions): Promise<void>;
-  /** Waits for a control's value, compared as it is. */
   toHaveValue(expected: TextMatch, options?: { timeout?: number }): Promise<void>;
-  /** Waits for the attribute to be present; with `value`, for it to match. */
   toHaveAttribute(name: string, options?: { timeout?: number }): Promise<void>;
   toHaveAttribute(name: string, value: TextMatch, options?: TextMatcherOptions): Promise<void>;
-  /** Waits for an exact match count. */
   toHaveCount(expected: number, options?: { timeout?: number }): Promise<void>;
-  /** Waits for an accessible name. */
   toHaveAccessibleName(expected: TextMatch, options?: TextMatcherOptions): Promise<void>;
-  /** Waits for the role; `img` is read as `image`, as `getByRole` reads it. */
   toHaveRole(role: Role | RoleAlias, options?: { timeout?: number }): Promise<void>;
-  /** Waits for the one match to look like its stored screenshot; see [Screenshot matchers](#screenshot-matchers). */
   toHaveScreenshot(name: string, options?: ScreenshotOptions): Promise<void>;
   toHaveScreenshot(options?: ScreenshotOptions): Promise<void>;
 }
 
-/** Options of a locator matcher that compares text. */
 export interface TextMatcherOptions {
-  /** Compares a string case-insensitively; on a RegExp, `true` adds the `i` flag and `false` removes it. */
   ignoreCase?: boolean;
-  /** Assertion budget in milliseconds. */
   timeout?: number;
 }
 ```
@@ -1127,25 +1070,17 @@ export interface TextMatcherOptions {
 
 ```ts
 export interface ScreenExpectation {
-  /** Inverts the matcher: waits for the screen to differ from its stored screenshot. */
   readonly not: ScreenExpectation;
-  /** Waits for the screen to look like its stored screenshot, `name` or one named after the test. */
   toHaveScreenshot(name: string, options?: ScreenshotOptions): Promise<void>;
   toHaveScreenshot(options?: ScreenshotOptions): Promise<void>;
 }
 
 export interface ScreenshotOptions {
-  /** How far one pixel's color may drift and still count as the same, from 0 (exact) to 1. Default `0.2`. */
   threshold?: number;
-  /** How many pixels may differ. Default `0`. */
   maxDiffPixels?: number;
-  /** What share of the pixels may differ, from 0 to 1. Default `0`. */
   maxDiffPixelRatio?: number;
-  /** Locators painted over before comparing, for content that changes from run to run. */
   mask?: readonly Locator[];
-  /** Color of the `mask` boxes, `#rrggbb`. Default `#ff00ff`. */
   maskColor?: string;
-  /** Assertion budget in milliseconds. */
   timeout?: number;
 }
 ```
@@ -1154,13 +1089,9 @@ export interface ScreenshotOptions {
 
 ```ts
 export interface BrowserExpectation {
-  /** Inverts the matcher. */
   readonly not: BrowserExpectation;
-  /** Waits for the current URL to match; `ignoreCase` compares a string case-insensitively and adds the `i` flag to a RegExp, `false` removes it. */
   toHaveURL(expected: string | RegExp, options?: { ignoreCase?: boolean; timeout?: number }): Promise<void>;
-  /** Waits for the current title to match. */
   toHaveTitle(expected: TextMatch, options?: { timeout?: number }): Promise<void>;
-  /** Waits for the target's `class` attribute to match: a string is the whole normalized class list, a RegExp is tested against it. */
   toHaveClass(target: Locator, expected: TextMatch, options?: { timeout?: number }): Promise<void>;
 }
 ```
@@ -1169,90 +1100,49 @@ export interface BrowserExpectation {
 
 ```ts
 export interface ValueExpectation<T> {
-  /** Inverts the matcher. */
   readonly not: NegatedValueExpectation<T>;
-  /** Compares with Object.is. */
   toBe(expected: T): void;
-  /** Performs recursive structural equality; `undefined` properties are ignored and class types are not compared. */
   toEqual(expected: unknown): void;
-  /** Requires every property of `expected` to match recursively; extra properties on the value are fine, arrays must match element-wise with equal length. */
   toMatchObject(expected: object): void;
-  /** Requires a truthy value. */
   toBeTruthy(): void;
-  /** Requires a falsy value. */
   toBeFalsy(): void;
-  /** Requires null. */
   toBeNull(): void;
-  /** Requires undefined. */
   toBeUndefined(): void;
-  /** Requires any value but undefined; null passes. */
   toBeDefined(): void;
-  /** Requires a `length` property equal to `expected`: a string, an array, or anything array-like. */
   toHaveLength(expected: number): void;
-  /** Requires the property at `path` to exist; with `expected`, to equal it by `toEqual` rules. */
   toHaveProperty(path: PropertyPath, ...expected: [] | [expected: unknown]): void;
-  /** Requires string or collection containment. */
   toContain(expected: unknown): void;
-  /** Requires a string or regexp match. */
   toMatch(expected: string | RegExp): void;
-  /** Requires a numeric lower bound. */
   toBeGreaterThan(expected: number): void;
-  /** Requires a numeric lower bound, inclusive. */
   toBeGreaterThanOrEqual(expected: number): void;
-  /** Requires a numeric upper bound. */
   toBeLessThan(expected: number): void;
-  /** Requires a numeric upper bound, inclusive. */
   toBeLessThanOrEqual(expected: number): void;
-  /** Requires a number within `10 ** -digits / 2` of `expected`; `digits` defaults to 2. */
   toBeCloseTo(expected: number, digits?: number): void;
-  /**
-   * Requires the value to pass a synchronous Standard Schema (Zod, Valibot,
-   * ArkType, ...) and returns the schema's output, typed:
-   * `const users = expect(await response.json()).toMatchSchema(Users)`.
-   * A schema that validates asynchronously is `INVALID_ARGUMENT`.
-   */
   toMatchSchema<Schema extends StandardSchemaV1>(schema: Schema): StandardSchemaV1.InferOutput<Schema>;
-  /**
-   * Requires a `WebResponse` whose status is 2xx (200 to 299), as `request`,
-   * `waitForResponse`, and `route.fetch()` return it. The failure names the
-   * status and the URL's origin and path; the body is never read.
-   */
   toBeOK(...valueIsNotAResponse: [T] extends [WebResponse] ? [] : [never]): void;
 }
 
-/** `expect(value).not`: every value matcher inverted, none returning a value; `Back` is what `.not` returns to. */
 export type NegatedValueExpectation<T, Back = ValueExpectation<T>> = {
   readonly not: Back;
 } & {
   readonly [K in Exclude<keyof ValueExpectation<T>, 'not'>]: (...args: Parameters<ValueExpectation<T>[K]>) => void;
 };
 
-/** `expect.soft(value)`: the value matchers, with `toMatchSchema` returning `undefined` after a kept failure. */
 export type SoftValueExpectation<T> = Omit<ValueExpectation<T>, 'toMatchSchema' | 'not'> & {
   readonly not: NegatedValueExpectation<T, SoftValueExpectation<T>>;
   toMatchSchema<Schema extends StandardSchemaV1>(schema: Schema): StandardSchemaV1.InferOutput<Schema> | undefined;
 };
 
-/** A class, abstract or not: what `expect.any` takes. */
 export type Class = abstract new (...args: never[]) => unknown;
 
-/** A property path for `toHaveProperty`: dotted (`'user.address.city'`) or one key per element (`['user', 'address', 'city']`). */
 export type PropertyPath = string | readonly (string | number)[];
 ```
 
 ### `AsymmetricMatcher`
 
 ```ts
-/**
- * A stand-in for a value inside `toEqual`, `toMatchObject`, `toContain`, and
- * `toHaveProperty`: `expect.any(Number)` in place of a number,
- * `expect.objectContaining({ id: 1 })` in place of a record. The structural
- * matchers ask it whether a value matches instead of comparing.
- */
 export interface AsymmetricMatcher {
-  /** Whether `other` satisfies the matcher. */
   asymmetricMatch(other: unknown): boolean;
-  /** The matcher's name, `ObjectContaining`; a failure message adds the sample. */
   toString(): string;
 }
 ```
@@ -1261,25 +1151,12 @@ export interface AsymmetricMatcher {
 
 ```ts
 export interface PollOptions {
-  /** Deadline in milliseconds. Default `config.assertionTimeout` in an e2e test, suite hook, or `openHost()` session, else 5000. */
   timeout?: number;
-  /**
-   * Pause between reads in milliseconds.
-   * @deprecated Pass `intervals: [<ms>]`.
-   */
   interval?: number;
-  /** Pauses between reads in milliseconds. Default [100, 250, 500, 1000]. The last pause is repeated. */
   intervals?: readonly number[];
-  /** Extra line in the timeout error, after the matcher line. */
   message?: string;
 }
 
-/**
- * The asynchronous form of every `ValueExpectation<T>` matcher: the same
- * names and parameters, each resolving once the re-read value passes;
- * `toMatchSchema` resolves to the schema's output for the passing read.
- * Derived from `ValueExpectation<T>` so the two cannot drift.
- */
 export type PollExpectation<T> = {
   readonly not: NegatedPollExpectation<T>;
 } & {
@@ -1290,7 +1167,6 @@ export type PollExpectation<T> = {
   toMatchSchema<Schema extends StandardSchemaV1>(schema: Schema): Promise<StandardSchemaV1.InferOutput<Schema>>;
 };
 
-/** `expect.poll(read).not`: every poll matcher inverted, none resolving to a value. */
 export type NegatedPollExpectation<T> = {
   readonly not: PollExpectation<T>;
 } & {
@@ -1302,26 +1178,14 @@ export type NegatedPollExpectation<T> = {
 
 ```ts
 export type PassOptions = {
-  /**
-   * Timeout in milliseconds. In `config.toPass` it defaults to 0: only the test, hook, or session deadline applies.
-   * On a call it defaults to the configured value when an e2e test, suite hook, or `openHost()` session
-   * supplies it, else 0. With none of them active, 0 is `INVALID_CONFIG`.
-   */
   timeout?: number;
-  /**
-   * Pauses between tries in milliseconds. The last pause is repeated. In `config.toPass` they default to
-   * [100, 250, 500, 1000]. On a call they default to the configured value when an e2e test, suite hook,
-   * or `openHost()` session supplies it, else [100, 250, 500, 1000].
-   */
   intervals?: readonly number[];
 };
 
 type PassMatcher = {
-  /** Retries the block until the assertion passes or the deadline is reached. */
   toPass(options?: PassOptions): Promise<void>;
 };
 
-/** Value matchers for a function, with retries for positive and negated assertions. */
 export type PassExpectation<T, Value = ValueExpectation<T>> = Omit<Value, 'not'> & PassMatcher & {
   readonly not: NegatedValueExpectation<T, PassExpectation<T, Value>> & PassMatcher;
 };

@@ -7,7 +7,7 @@ description: Apunta el motor web a tu app o deja que el ejecutor la inicie, y ej
 
 `@e2e-dev/web` ejecuta tests en un navegador contra la URL de tu app. Para
 rutas, cookies, diálogos y descargas, consulta
-[Trabajar con el navegador](/browser).
+[Trabajar con el navegador](/reference/web).
 
 ## Iniciar tu app
 
@@ -58,7 +58,7 @@ variables del directorio temporal, `inheritEnv` y `env`.
 
 | Opción | Para qué sirve |
 | --- | --- |
-| `reuseExisting: true` | Usa un servidor que ya se está ejecutando, como uno que inició una [sesión MCP](/mcp-server#run-tests-next-to-a-session). En CI, e2e la ignora, y un servidor que ya responde da `APP_ALREADY_RUNNING`. |
+| `reuseExisting: true` | Usa un servidor que ya se está ejecutando, como uno que inició una [sesión MCP](/coding-agents). En CI, e2e la ignora, y un servidor que ya responde da `APP_ALREADY_RUNNING`. |
 | `log` | Guarda el stdout y el stderr de la app en un archivo relativo al proyecto. Un error de arranque, o una salida inesperada durante `e2e run`, cita las líneas que cualquier proceso añadió al archivo desde que empezó el comando. Un log de hasta 40 líneas dentro de 8 KiB se cita entero; si no, la cita conserva hasta 20 líneas de cada extremo, con `[startup output omitted]` entre ellas, y en un log de más de 8 KiB esas líneas salen de sus primeros y últimos 4 KiB. Los valores de `command.env` y `inheritEnv` de al menos cuatro caracteres se ocultan en la cita. El archivo en sí no se oculta. |
 | `env` | Variables de entorno para la app. |
 | `inheritEnv` | Variables del host que se pasan cuando están definidas, por nombre o prefijo: `['DATABASE_URL', 'STRIPE_*']`. `env` tiene prioridad sobre ellas. |
@@ -283,7 +283,7 @@ siendo un navegador de escritorio: factor de escala 1, puntero de escritorio y
 su user agent habitual. No emula el tacto. Para probar en un simulador o
 emulador, usa el [motor móvil](/mobile). Para el modo oscuro y el movimiento
 reducido, consulta
-[Emula el modo oscuro y el movimiento reducido](/browser#emulate-dark-mode-and-reduced-motion).
+[Emula el modo oscuro y el movimiento reducido](/reference/web).
 
 Un vídeo conserva el tamaño que tenía la página cuando empezó la grabación.
 Define `web({ screencast: { size } })` para un único tamaño fijo. Un proveedor
@@ -315,9 +315,6 @@ app pueda usar el portapapeles, concédelo en el destino:
 ## Siguiente
 
 <CardGroup cols={2}>
-  <Card title="Trabajar con el navegador" icon="globe" href="/browser">
-    Simula rutas, define cookies, gestiona diálogos y descarga archivos.
-  </Card>
   <Card title="Referencia del motor web" icon="masks-theater" href="/reference/web">
     Cada opción de `web()` y cada método de `browser`.
   </Card>

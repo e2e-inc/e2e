@@ -1,6 +1,6 @@
 ---
 title: request
-description: "The request fixture: HTTP calls from a test, each one a step in the report."
+description: "API reference for the request fixture, which sends HTTP calls from a test, each one a step in the report, with URLs, timeouts, and cookies."
 ---
 
 The `request` fixture sends HTTP requests from a test. A path resolves
@@ -40,8 +40,8 @@ Sends a request with the method in `options.method`, `GET` by default.
 const removed = await request.fetch('/api/orders/7', { method: 'DELETE' });
 ```
 
-The method is any HTTP method name but `CONNECT`, `TRACE`, and `TRACK`,
-which Node's `fetch` cannot send. e2e sends it upper-cased.
+The method is any HTTP method name but `CONNECT`, `TRACE`, and `TRACK`.
+e2e sends it upper-cased.
 
 ### Shorthands
 
@@ -65,12 +65,10 @@ A `GET` or `HEAD` request takes no body.
 | `redirect` | `'follow' \| 'manual' \| 'error'` | `'follow'` |
 | `method` | `string` | `'GET'` |
 
-- `json` is sent through `JSON.stringify`, with
-  `content-type: application/json` unless `headers` sets a content type. It
-  takes JSON-safe values only: plain objects, arrays, strings, finite
-  numbers, booleans, and `null`. A key whose value is `undefined`, a `Date`,
-  and a `secrets.get()` handle are refused, where `JSON.stringify` would drop
-  or convert them.
+- `json` is sent as JSON, with `content-type: application/json` unless
+  `headers` sets a content type. It takes JSON-safe values only: plain
+  objects, arrays, strings, finite numbers, booleans, and `null`. A key whose
+  value is `undefined`, a `Date`, and a `secrets.get()` handle are refused.
 - `body` is sent as is, with `content-type: text/plain;charset=UTF-8` unless
   `headers` sets one. Pass `json` or `body`, not both. Form, multipart,
   and binary bodies are not supported yet.
@@ -87,8 +85,7 @@ A `GET` or `HEAD` request takes no body.
 An HTTP response whose body `request` has already read. The web engine's
 `route.fetch()` returns the same type.
 [`browser.waitForResponse`](/reference/web#waitforresponse) returns a
-`PageResponse`, which extends `WebResponse` with `request` and starts reading
-the body as soon as the response matches.
+`PageResponse`, which extends `WebResponse` with `request`.
 
 | Member | Type |
 | --- | --- |
@@ -102,7 +99,9 @@ the body as soon as the response matches.
 - `url` is the URL after redirects when `redirect` is `'follow'`, or the
   requested URL when `redirect` is `'manual'`.
 - `headers` has lower-cased names. Several `set-cookie` values are joined
-  with `\n`.
+  with `\n`. `browser.waitForResponse` leaves cookie headers out.
+- `body()`, `text()`, and `json()` wait for the body, and reject with
+  `ACTION_FAILED` when it could not be read.
 - `text()` decodes the body as UTF-8. `json()` parses it, `unknown` unless
   you name a type. Nothing checks that type: use
   [`toMatchSchema`](/reference/expect#matching-a-schema) to check it.
@@ -129,7 +128,7 @@ URL goes where it names, on any target.
 | --- | --- |
 | `APP_URL_REQUIRED` | The URL is a path and the target declares no `app.url`. |
 | `POLICY_DENIED` | The URL is malformed, or has a scheme other than `http` or `https`, `about:blank` included. Also a `Secret` in `json`. |
-| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type or is one `request` does not take (Playwright's `data` or `params`, say), `headers` is not a plain object, a header name or value is invalid, the header is `content-length`, `host`, or `sec-fetch-mode`, which `fetch` sets itself, the header is `expect`, `keep-alive`, `transfer-encoding`, or `upgrade`, which `fetch` cannot send, a `connection` header other than `close` or `keep-alive`, `accept-encoding` combined with `range` (where `fetch` appends `identity`), `json` and `body` are both set, `json` is not JSON-safe, a `GET` or `HEAD` request has a body, `timeout` is negative or over 2147483647, `redirect` is not `'follow'`, `'manual'`, or `'error'`, or the method is not an HTTP method name or is `CONNECT`, `TRACE`, or `TRACK`. |
+| `INVALID_ARGUMENT` | The URL is not a non-empty string or has credentials (`https://user:pass@...`), an option has the wrong type or is one `request` does not take (Playwright's `data` or `params`, say), `headers` is not a plain object, a header name or value is invalid, the header is `content-length`, `host`, `sec-fetch-mode`, `expect`, `keep-alive`, `transfer-encoding`, or `upgrade`, a `connection` header other than `close` or `keep-alive`, `accept-encoding` combined with `range`, `json` and `body` are both set, `json` is not JSON-safe, a `GET` or `HEAD` request has a body, `timeout` is negative or over 2147483647, `redirect` is not `'follow'`, `'manual'`, or `'error'`, or the method is not an HTTP method name or is `CONNECT`, `TRACE`, or `TRACK`. |
 
 ## Steps and timeouts
 
@@ -150,16 +149,14 @@ test that runs out of time fails with its usual timeout error.
 | --- | --- |
 | `ACTION_FAILED` | The call ran past its `timeout`, the server redirected with `redirect: 'error'`, or the network failed: the server refused the connection, or the host does not resolve. |
 
-e2e does not retry a call. Node's `fetch` itself sends a request again one
-time when the server answers `421 Misdirected Request`. To retry a read, wrap it in
+e2e does not retry a call. To retry a read, wrap it in
 [`expect.poll`](/reference/expect#polling-a-value).
 
 ## Cookies and scope
 
 `request` does not send the browser's cookies, and it keeps no cookies
 between calls. Pass a token or your app's session cookie in `headers`, as
-[Signed-in requests](/api-testing#signed-in-requests) shows. Credentials in
-the URL are refused.
+[Signed-in requests](/api-testing#signed-in-requests) shows.
 
 `request` is a test fixture. Test bodies, `beforeEach`, and `afterEach` get
 it. `beforeAll`, `afterAll`, and worker fixtures do not.
@@ -168,58 +165,33 @@ it. `beforeAll`, `afterAll`, and worker fixtures do not.
 
 ```ts
 export interface APIRequest {
-  /** Sends a request with `options.method`, GET by default. */
   fetch(url: string, options?: APIRequestFetchOptions): Promise<WebResponse>;
-  /** Sends a GET request. */
   get(url: string, options?: APIRequestOptions): Promise<WebResponse>;
-  /** Sends a POST request. */
   post(url: string, options?: APIRequestOptions): Promise<WebResponse>;
-  /** Sends a PUT request. */
   put(url: string, options?: APIRequestOptions): Promise<WebResponse>;
-  /** Sends a PATCH request. */
   patch(url: string, options?: APIRequestOptions): Promise<WebResponse>;
-  /** Sends a DELETE request. */
   delete(url: string, options?: APIRequestOptions): Promise<WebResponse>;
-  /** Sends a HEAD request. */
   head(url: string, options?: APIRequestOptions): Promise<WebResponse>;
 }
 
-/** What one `request` call sends beside its URL. */
 export interface APIRequestOptions {
-  /** Request headers. */
   readonly headers?: Readonly<Record<string, string>>;
-  /** A body sent as JSON, with `content-type: application/json` unless `headers` sets one. Not with `body`. */
   readonly json?: unknown;
-  /** A body sent as is. Not with `json`. */
   readonly body?: string;
-  /** Timeout in milliseconds; defaults to `actionTimeout`. 0 sets none of its own, so only the running test's or hook's budget bounds the call. */
   readonly timeout?: number;
-  /** How redirects are handled; `'follow'` by default. `'manual'` returns the 3xx response as is; `'error'` fails the call with `ACTION_FAILED`. */
   readonly redirect?: 'follow' | 'manual' | 'error';
 }
 
-/** `request.fetch` options: the method beside the rest. */
 export interface APIRequestFetchOptions extends APIRequestOptions {
-  /** The HTTP method; GET by default. */
   readonly method?: string;
 }
 
-/**
- * An HTTP response: what `request` calls, the web engine's
- * `browser.waitForResponse`, and `route.fetch()` return.
- */
 export interface WebResponse {
-  /** Response URL. */
   readonly url: string;
-  /** HTTP status. */
   readonly status: number;
-  /** Response headers, lower-cased names; `request` and `route.fetch()` join several `set-cookie` values with `\n`, `waitForResponse` leaves cookie headers out. */
   readonly headers: Readonly<Record<string, string>>;
-  /** Waits for the body and returns its bytes; rejects with `ACTION_FAILED` when the body could not be read. */
   body(): Promise<Buffer>;
-  /** Waits for the body and parses it as JSON; rejects with `ACTION_FAILED` when the body could not be read. */
   json<T = unknown>(): Promise<T>;
-  /** Waits for the body and reads it as text; rejects with `ACTION_FAILED` when the body could not be read. */
   text(): Promise<string>;
 }
 ```
