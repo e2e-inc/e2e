@@ -1014,14 +1014,14 @@ export class TargetExecutor extends EngineSessions implements SerialHost {
       // recording is worth.
       if (failure === undefined && skipped !== undefined) {
         record.status = 'skipped';
-        record.skip = { cause: runtimeSkipCause(skipped), reason: truncateUtf8(sanitizeRecordedText(redact(skipped.reason)), 8192) };
+        record.skip = { cause: runtimeSkipCause(skipped), reason: truncateUtf8(redact(sanitizeRecordedText(redact(skipped.reason))), 8192) };
       } else if (failure === undefined) {
         record.status = 'passed';
       } else {
         record.status = classifyAttemptStatus(failure, timedOut, this.interruptSignal.aborted);
         record.error = serializeError(failure, { phase: failurePhase ?? phase, projectRoot: this.config.projectRoot, redact });
         // A failure outranks the skip; the reason stays beside it.
-        if (skipped !== undefined) record.skip = { cause: runtimeSkipCause(skipped), reason: truncateUtf8(sanitizeRecordedText(redact(skipped.reason)), 8192) };
+        if (skipped !== undefined) record.skip = { cause: runtimeSkipCause(skipped), reason: truncateUtf8(redact(sanitizeRecordedText(redact(skipped.reason))), 8192) };
         // A failure that first landed in teardown has had no look yet.
         await captureEvidence();
       }
