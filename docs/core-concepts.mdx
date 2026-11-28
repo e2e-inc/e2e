@@ -192,7 +192,8 @@ test('needs two organizations', async ({ app }) => {
   using a mobile [deep link](/mobile#the-device-fixture). (Browsers start a
   fresh context per attempt; mobile devices keep app state until you call
   `app.open()` or `app.clearState()`.)
-- **Skip conditionally** with `test.skip(condition, reason)`.
+- **Skip conditionally** with `test.skip(condition, reason)`, which skips
+  when the condition is truthy.
 - **Chain dependent tests** with `{ serial: true }` on a `describe` block so
   they run in order on one worker and retry together.
 - **Share setup and cleanup** with `test.extend`. See

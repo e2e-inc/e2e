@@ -117,8 +117,16 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 });
 ```
 
-- When the condition is true, the call throws, as Playwright's does. Nothing
-  after the call runs.
+- When the condition is truthy, the call throws, as Playwright's does.
+  Nothing after the call runs.
+- A falsy condition does nothing, as in Playwright. The type takes a
+  `boolean`, but a JavaScript test or an `any` value can pass `undefined` or
+  `0`, and those do nothing too, except in the one-argument forms below.
+- With one argument, a string or `undefined` is the reason, not a
+  condition, so the call always skips. Playwright does not skip on
+  `test.skip(undefined)` or `test.skip('')`.
+- A Promise or a function as the condition fails the test with
+  `INVALID_ARGUMENT`. Await the Promise, or call the function, first.
 - With no failure before it, the test is reported `skipped` with `reason`,
   with no retry.
 - Steps before it stay in the report as they ran.
@@ -134,7 +142,8 @@ test('switches organizations', { session: 'admin' }, async ({ app, agent }) => {
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | Called in a setup test with a true condition, or none. A setup test cannot skip because other tests depend on its sessions. |
+| `INVALID_ARGUMENT` | Called in a setup test with a truthy condition, or none. A setup test cannot skip because other tests depend on its sessions. |
+| `INVALID_ARGUMENT` | A Promise or function condition inside a running test, its hooks, or its fixtures. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. |
 | `COLLECTION_ERROR` | The registration form, inside a serial group. Set [`skip`](#skip) on the serial `describe` instead. |
 
@@ -178,7 +187,8 @@ test.fixme(); // inside a body, always
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | Called in a setup test with a true condition, or none. A setup test cannot skip because other tests depend on its sessions. |
+| `INVALID_ARGUMENT` | Called in a setup test with a truthy condition, or none. A setup test cannot skip because other tests depend on its sessions. |
+| `INVALID_ARGUMENT` | A Promise or function condition inside a running test, its hooks, or its fixtures. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body. Use `test.fixme(title, fn)` at collection. |
 | `COLLECTION_ERROR` | The registration form, inside a serial group. Set [`skip`](#skip) on the serial `describe` instead. |
 
@@ -314,6 +324,9 @@ To mark every test in a group, use [`describe.fail`](#describe-fail).
 
 - The body keeps running after the call. A `beforeEach` hook can mark the
   test too.
+- The condition reads as in `test.skip`: a falsy one does nothing, a lone
+  string or `undefined` is the reason and always marks, and a Promise or a
+  function fails the test.
 - A failed assertion, action, thrown error, or timeout makes the test
   `passed`. The report keeps the reason and the error.
 - A pass makes the test `failed` with `UNEXPECTED_PASS`. Remove the mark
@@ -325,7 +338,8 @@ To mark every test in a group, use [`describe.fail`](#describe-fail).
 
 | Throws | When |
 | --- | --- |
-| `INVALID_ARGUMENT` | A true condition in a setup test, a serial group member, an `afterEach` hook, or a fixture teardown. |
+| `INVALID_ARGUMENT` | A Promise or function condition inside a running test, its hooks, or its fixtures. |
+| `INVALID_ARGUMENT` | A truthy condition in a setup test, a serial group member, an `afterEach` hook, or a fixture teardown. |
 | `COLLECTION_ERROR` | The conditional form, outside a test body, or the `fail` option inside a serial group. |
 
 #### `test.setTimeout`
@@ -380,16 +394,18 @@ test('renders the report', async ({ platform }) => {
 - As in Playwright, it slows an attempt once: a second call, in the body or
   a `beforeEach` hook, does nothing. A later `test.setTimeout` still
   replaces the timeout.
-- With a false condition it does nothing. The reason is for the reader and
-  is not reported.
+- The condition reads as in [`test.skip`](#test-skip): a falsy one does
+  nothing, and a lone string or `undefined` is the reason and always slows.
+  The reason is for the reader and is not reported.
 - A retry starts from the [`timeout`](#timeout) option again.
 - There is no `test.slow(title, fn)`. Call `test.slow()` first in the body,
   or pass `timeout`.
 
 | Throws | When |
 | --- | --- |
+| `INVALID_ARGUMENT` | A Promise or function condition inside a test body or hook. |
 | `INVALID_ARGUMENT` | A call from an `afterEach` or `afterAll` hook, a fixture teardown, or a hosted session; or from code a test or hook left running after it ended. |
-| `COLLECTION_ERROR` | A call outside a running test or hook, even with a false condition, or `test.slow(title, fn)`. Use the `timeout` option there. |
+| `COLLECTION_ERROR` | A call outside a running test or hook, even with a falsy condition, or `test.slow(title, fn)`. Use the `timeout` option there. |
 
 #### `test.step`
 
@@ -1339,11 +1355,12 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   /** Registers one skipped test. */
   skip(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
-   * Inside a running test: skips it when `condition` is true (or always,
+   * Inside a running test: skips it when `condition` is truthy (or always,
    * with no condition) by throwing, so nothing after the call runs. The
    * attempt is reported `skipped` with `reason`; steps that already ran stay
    * in the report without deciding the status, and teardown still runs. A
-   * setup test cannot skip: its sessions are owed.
+   * setup test cannot skip: its sessions are owed. A Promise or function
+   * condition fails the test with `INVALID_ARGUMENT`: await or call it first.
    * Outside a test body this form is `COLLECTION_ERROR`; use the `skip`
    * option to skip at collection.
    */
@@ -1354,12 +1371,13 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   /** Registers one skipped test marked fixme, reported with the skip cause and reason `fixme`. */
   fixme(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
-   * Inside a running test: skips it as fixme when `condition` is true (or
-   * always, with no condition), as `test.skip` does. The skip cause is
-   * `fixme`, and the reason `fixme`, or `fixme: <reason>` when `reason` is not
-   * blank. A setup test cannot skip. Outside a test body this form is
-   * `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a test fixme at
-   * collection.
+   * Inside a running test: skips it as fixme when `condition` is truthy (or
+   * always, with no condition), as `test.skip` does, and a Promise or
+   * function condition fails the test with `INVALID_ARGUMENT`. The skip
+   * cause is `fixme`, and the reason `fixme`, or `fixme: <reason>` when
+   * `reason` is not blank. A setup test cannot skip. Outside a test body
+   * this form is `COLLECTION_ERROR`; use `test.fixme(title, fn)` to mark a
+   * test fixme at collection.
    */
   fixme(condition: boolean, reason?: string): void;
   fixme(reason?: string): void;
@@ -1409,21 +1427,24 @@ export interface TestAPI<Fixtures = TestFixtures, Worker = WorkerFixtures> exten
   fail(title: string, fn: TestFn<Fixtures & Worker>): TestCase;
   /**
    * Inside a running test: marks it expected to fail when `condition` is
-   * true (or always, with no condition). The body keeps running. A test
+   * truthy (or always, with no condition). The body keeps running. A test
    * failure then passes the test, keeping the error and `reason` in the
    * report; a pass fails it with `UNEXPECTED_PASS`. Infrastructure failures
    * and interrupts are not covered. A setup test or a serial group member
-   * cannot be marked. Outside a test body this form is `COLLECTION_ERROR`;
-   * use `test.fail(title, fn)` or the `fail` option to mark at collection.
+   * cannot be marked, and a Promise or function condition fails the test
+   * with `INVALID_ARGUMENT`. Outside a test body this form is
+   * `COLLECTION_ERROR`; use `test.fail(title, fn)` or the `fail` option to
+   * mark at collection.
    */
   fail(condition: boolean, reason?: string): void;
   fail(reason?: string): void;
   /**
-   * Triples the running test's timeout in force when `condition` is true (or
-   * always), as Playwright's `test.slow()` does: once per attempt, so a
+   * Triples the running test's timeout in force when `condition` is truthy
+   * (or always), as Playwright's `test.slow()` does: once per attempt, so a
    * second call does nothing. In a `beforeAll` hook it triples that hook's
    * timeout. Otherwise it follows `setTimeout`'s rules; `reason` is not
-   * reported.
+   * reported. A Promise or function condition fails the call with
+   * `INVALID_ARGUMENT`.
    */
   slow(condition: boolean, reason?: string): void;
   slow(reason?: string): void;

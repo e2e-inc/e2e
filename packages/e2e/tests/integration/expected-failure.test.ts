@@ -27,6 +27,18 @@ test('condition false runs as normal', async () => {
   test.fail(false, 'never');
 });
 
+test('unset condition runs as normal', async () => {
+  test.fail(undefined as unknown as boolean, 'only on CI');
+});
+
+test('promise condition', async () => {
+  test.fail(Promise.resolve(false) as unknown as boolean, 'async check');
+});
+
+test('function condition', async () => {
+  test.fail((() => false) as unknown as boolean, 'not called');
+});
+
 test('option passes', { fail: 'gap is fixed' }, async () => {});
 
 test('marked then skipped', { fail: 'gap' }, async () => {
@@ -67,6 +79,20 @@ test('times out', { fail: 'too slow', timeout: 500 }, async () => {
       expect(normal.status).toBe('passed');
       expect(normal.expectedFailure).toBeUndefined();
       expect(normal.attempts[0]?.expectedFailure).toBeUndefined();
+      // A falsy condition does not mark the test, as in Playwright: an unset env var is undefined.
+      const unset = byTitle('unset condition runs as normal');
+      expect(unset.status).toBe('passed');
+      expect(unset.expectedFailure).toBeUndefined();
+      const promise = byTitle('promise condition');
+      expect(promise.status).toBe('failed');
+      expect(promise.attempts[0]?.error).toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: expect.stringContaining('test.fail() got a Promise'),
+      });
+      expect(byTitle('function condition').attempts[0]?.error).toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: expect.stringContaining('test.fail() got a function'),
+      });
 
       const unexpected = byTitle('option passes');
       expect(unexpected.status).toBe('failed');
@@ -87,7 +113,7 @@ test('times out', { fail: 'too slow', timeout: 500 }, async () => {
       expect(engine.attempts[0]?.error).toMatchObject({ category: 'infrastructure', code: 'ENGINE_FAILURE' });
       expect(engine.attempts[0]?.expectedFailure).toEqual({ reason: 'engine gap' });
 
-      expect(outcome.report.run.summary).toMatchObject({ passed: 5, failed: 3, skipped: 1 });
+      expect(outcome.report.run.summary).toMatchObject({ passed: 6, failed: 5, skipped: 1 });
       expect(outcome.exitCode).toBe(3);
 
       const junit = renderJunitReport(outcome.report);
@@ -241,9 +267,17 @@ test.describe('wizard', { serial: true }, () => {
   });
 });
 
+test.describe('checkout', { serial: true }, () => {
+  test('pays', async () => {
+    test.fail(0 as unknown as boolean, 'only on CI');
+  });
+});
+
 test('consumer', { session: 'admin' }, async () => {});
 `;
       const { outcome, project } = await runProject({ 'tests/refused.e2e.ts': file }, {});
+      // A falsy condition does nothing, so a serial group member may make the call.
+      expect(resultByTitle(outcome, 'pays').status).toBe('passed');
       expect(resultByTitle(outcome, 'sign in').attempts[0]?.error?.code).toBe('INVALID_ARGUMENT');
       const member = outcome.report.run.serialGroups[0]?.attempts[0]?.members[0];
       expect(member?.error).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('serial group member') });

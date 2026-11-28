@@ -4,6 +4,7 @@
  */
 
 import { currentAttempt } from '../expect/attempt.ts';
+import { readRunningCondition } from './condition.ts';
 import { CollectionError, TestError, type SerializedError } from './errors.ts';
 
 /** The reason recorded for a mark that gave none. */
@@ -28,21 +29,21 @@ export function expectedFailureOption(fail: boolean | string | undefined): strin
 }
 
 /**
- * Marks the running test expected to fail when `condition` holds. Unlike a
+ * Marks the running test expected to fail when `condition` is truthy. Unlike a
  * skip it does not throw: the body runs on. Outside a body there is no
  * running test, so the call is a collection error pointing at the collection
  * forms. A setup test, a serial group member, and a test whose verdict is
  * already reached (its afterEach hooks and fixture teardowns) publish no way
  * to mark, and the call is a test error there.
  */
-export function markRunningTestExpectedToFail(condition: boolean, reason: string | undefined): void {
+export function markRunningTestExpectedToFail(condition: unknown, reason: string | undefined): void {
   const attempt = currentAttempt();
   if (attempt === undefined) {
     throw new CollectionError(
       'test.fail(condition, reason) marks the running test and must be called inside a test body; to mark at collection, use test.fail(title, fn) or describe.fail(title, fn), or pass { fail: true } or a reason string as the test or describe option',
     );
   }
-  if (!condition) return;
+  if (!readRunningCondition('test.fail()', condition)) return;
   if (attempt.expectFailure === undefined) {
     throw new TestError('INVALID_ARGUMENT', `test.fail() cannot mark ${unmarkable(attempt)}`);
   }

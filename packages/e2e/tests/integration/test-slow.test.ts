@@ -1,7 +1,8 @@
 /**
  * `test.slow()` through the real runner: from a body or a `beforeEach` hook
  * it triples the attempt's timeout in force, counted from the attempt's
- * start, once per attempt as in Playwright; `test.slow(false)` leaves it;
+ * start, once per attempt as in Playwright; a falsy condition leaves it,
+ * and a Promise condition is refused;
  * a later `test.setTimeout` replaces it; from a `beforeAll` hook it triples
  * that hook's timeout, once; a retry starts from the test's own timeout again;
  * `afterEach` and `afterAll` hooks, a call outside a running test, and the
@@ -64,6 +65,27 @@ test('times out without it', { timeout: 300 }, async () => {
 test('leaves the timeout on a false condition', { timeout: 300 }, async () => {
   test.slow(false, 'only on CI');
   await sleep(10_000);
+});
+
+test('leaves the timeout on an unset condition', { timeout: 300 }, async () => {
+  test.slow(undefined, 'only on CI');
+  await sleep(10_000);
+});
+
+test('refuses a Promise condition', async () => {
+  test.slow(Promise.resolve(false), 'async check');
+});
+
+test('refuses a function condition', async () => {
+  test.slow(() => false, 'not called');
+});
+
+describe('a Promise condition in beforeAll', () => {
+  beforeAll(() => {
+    test.slow(Promise.resolve(true));
+  });
+
+  test('never runs either', async () => {});
 });
 
 test('takes a condition and a reason', { timeout: 300 }, async () => {
@@ -174,6 +196,30 @@ describe('test.slow', () => {
           message: expect.stringContaining('test timed out after 300 ms'),
         });
 
+        // A falsy condition does nothing, as in Playwright: an unset env var reads as undefined.
+        expect(result('leaves the timeout on an unset condition').status).toBe('timed-out');
+        expect(error('leaves the timeout on an unset condition')).toMatchObject({
+          code: 'TEST_TIMEOUT',
+          message: expect.stringContaining('test timed out after 300 ms'),
+        });
+        // A Promise is always truthy, so a forgotten await fails the call instead of slowing.
+        expect(error('refuses a Promise condition')).toMatchObject({
+          code: 'INVALID_ARGUMENT',
+          message: expect.stringContaining('test.slow() got a Promise as its condition'),
+        });
+        expect(error('refuses a function condition')).toMatchObject({
+          code: 'INVALID_ARGUMENT',
+          message: expect.stringContaining('test.slow() got a function as its condition'),
+        });
+        expect(outcome.report.run.errors).toContainEqual(
+          expect.objectContaining({
+            code: 'HOOK_FAILED',
+            scopeId: 'a Promise condition in beforeAll',
+            message: expect.stringContaining('test.slow() got a Promise as its condition'),
+          }),
+        );
+        expect(result('never runs either')).toMatchObject({ status: 'skipped', skip: { cause: 'hook-failed' } });
+
         // 100 ms from test.setTimeout, tripled: not the 30 s option tripled.
         expect(result('triples the timeout in force').status).toBe('timed-out');
         expect(error('triples the timeout in force')).toMatchObject({
@@ -227,6 +273,7 @@ describe('test.slow', () => {
   it.each([
     ['a call outside a running test', 'test.slow();\ntest(\'never registered\', async () => {});\n', /test\.slow\(\) triples the running test's timeout and must be called inside a test body/],
     ['test.slow(false) outside a running test', 'test.slow(false);\ntest(\'never registered\', async () => {});\n', /must be called inside a test body/],
+    ['test.slow(Promise) outside a running test', 'test.slow(Promise.resolve(false));\ntest(\'never registered\', async () => {});\n', /must be called inside a test body/],
     ['the registration form', 'test.slow(\'never registered\', async () => {});\n', /test\.slow\(\) takes no test/],
   ])(
     'rejects %s at collection',

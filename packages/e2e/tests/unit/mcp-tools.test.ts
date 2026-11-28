@@ -1,4 +1,4 @@
-import type { Tool, ToolSet } from 'ai';
+import { jsonSchema, type Tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadAiSdk } from '@e2e-dev/core/lib/agent/ai-sdk';
@@ -69,6 +69,11 @@ describe('describeToolDetail and toolJsonSchema', () => {
       required: ['target'],
       properties: { target: { type: 'string', description: 'Node id' }, times: { type: 'integer' } },
     });
+  });
+
+  it('renders a schema that resolves later as a bare object, since the catalog is built synchronously', () => {
+    const lazy = { ...tap, inputSchema: jsonSchema(Promise.resolve({ type: 'object', required: ['target'] } as const)) };
+    expect(toolJsonSchema(lazy)).toEqual({ type: 'object' });
   });
 });
 

@@ -13,6 +13,7 @@ import type { AttemptBudget } from '@e2e-dev/core/lib/run/budget';
 import type { StepRecorder } from '@e2e-dev/core/lib/run/steps';
 import { CollectionError, TestError } from '@e2e-dev/core/lib/internal/errors';
 import type { SelfSkipCause } from '@e2e-dev/core/lib/run/records';
+import { readRunningCondition } from '@e2e-dev/core/lib/internal/condition';
 
 const runtimeSkipBrand: unique symbol = Symbol.for('e2e.runtimeSkip.v1');
 
@@ -63,24 +64,32 @@ export function attemptStep(steps: StepRecorder, budget: AttemptBudget): NonNull
   return (title, body) => steps.group(title, body, { passesThrough: isRuntimeSkip, signal: budget.signal });
 }
 
-/** The three shapes `test.skip`, `test.fixme`, and `test.fail` accept, told apart before anything runs. */
+/**
+ * The three shapes `test.skip`, `test.fixme`, `test.fail`, and `test.slow`
+ * accept, told apart before anything runs.
+ */
 export type ModifierCall =
   | { readonly kind: 'register'; readonly title: string; readonly fn: unknown }
-  | { readonly kind: 'runtime'; readonly condition: boolean; readonly reason: string | undefined };
+  | { readonly kind: 'runtime'; readonly condition: unknown; readonly reason: string | undefined };
 
 /**
  * `skip(title, fn)` registers a skipped test; `skip(condition, reason?)` and
- * `skip(reason?)` skip the running one, and `fixme` and `fail` take the same
- * shapes. A string alone is a reason, never a title: a registration always
- * carries its body.
+ * `skip(reason?)` skip the running one, and `fixme`, `fail`, and `slow` take
+ * the same shapes. `args` are the call's own arguments, so a lone
+ * `skip(undefined)` is the reason form and `skip(undefined, reason)` has a
+ * condition. With a condition, the reason is the second argument, as in
+ * Playwright. The condition stays as given: each API reads it after its own
+ * location check.
  */
-export function parseModifierCall(first: unknown, second: unknown): ModifierCall {
-  if (typeof first === 'string' && typeof second === 'function') return { kind: 'register', title: first, fn: second };
-  return {
-    kind: 'runtime',
-    condition: typeof first === 'boolean' ? first : true,
-    reason: typeof first === 'string' ? first : typeof second === 'string' ? second : undefined,
-  };
+export function parseModifierCall(args: readonly unknown[]): ModifierCall {
+  const [first, second] = args;
+  if (typeof first === 'string' && typeof second === 'function') {
+    return { kind: 'register', title: first, fn: second };
+  }
+  if (args.length <= 1 && (first === undefined || typeof first === 'string')) {
+    return { kind: 'runtime', condition: true, reason: first };
+  }
+  return { kind: 'runtime', condition: first, reason: typeof second === 'string' ? second : undefined };
 }
 
 /**
@@ -101,7 +110,7 @@ export function fixmeReason(reason?: string): string {
 }
 
 /**
- * Skips the running test when `condition` holds. `api` names the caller in
+ * Skips the running test when `condition` is truthy. `api` names the caller in
  * errors. Outside a body there is no running test, so the call is a
  * collection error pointing at the collection form; inside a setup test it is
  * a test error, because the sessions the setup declares are owed to their
@@ -109,7 +118,7 @@ export function fixmeReason(reason?: string): string {
  */
 export function skipRunningTest(
   api: keyof typeof RUNTIME_SKIP_APIS,
-  condition: boolean,
+  condition: unknown,
   reason: string | undefined,
 ): void {
   const attempt = currentAttempt();
@@ -118,7 +127,7 @@ export function skipRunningTest(
       `${api}(condition, reason) skips the running test and must be called inside a test body; ${RUNTIME_SKIP_APIS[api].hint}`,
     );
   }
-  if (!condition) return;
+  if (!readRunningCondition(`${api}()`, condition)) return;
   if (attempt.testKind === 'setup') {
     throw new TestError('INVALID_ARGUMENT', `${api}() cannot skip a setup test: the sessions it declares are owed to their consumers`);
   }

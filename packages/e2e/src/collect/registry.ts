@@ -14,6 +14,8 @@ import { registrarModuleSlot } from '../internal/registrar-modules.ts';
 import { expectedFailureOption, markRunningTestExpectedToFail } from '@e2e-dev/core/lib/internal/expected-failure';
 import { setRunningTestTimeout, slowRunningTest } from '@e2e-dev/core/lib/internal/test-timeout';
 import { runTestStep } from '@e2e-dev/core/lib/internal/test-step';
+import { readCondition } from '@e2e-dev/core/lib/internal/condition';
+import { isPromiseLike } from '@e2e-dev/core/lib/internal/promise-like';
 import { fixmeReason, parseModifierCall, skipRunningTest } from '../internal/skip.ts';
 import { formatEachTitle, readRows } from './each.ts';
 import { unknownKeyMessage } from '@e2e-dev/core/lib/internal/options';
@@ -332,25 +334,6 @@ class Collector {
   }
 }
 
-/**
- * The truthiness of a `skipIf` or `runIf` condition. A Promise is always
- * truthy, so an unawaited async check would decide nothing; it throws.
- */
-function readCondition(api: string, condition: unknown): boolean {
-  if (isPromiseLike(condition)) {
-    throw new CollectionError(`${api} got a Promise as its condition; await it before the call`);
-  }
-  return Boolean(condition);
-}
-
-function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { then?: unknown }).then === 'function'
-  );
-}
-
 /** Canonical group-tree walk: the enclosing groups of a node, outermost first. */
 export function groupChain(group: GroupNode | undefined): GroupNode[] {
   const chain: GroupNode[] = [];
@@ -636,6 +619,11 @@ export async function collectModule(
   return collector.close();
 }
 
+/** The error a `skipIf` or `runIf` condition that cannot be read throws: the call is made at collection. */
+function collectionError(message: string): CollectionError {
+  return new CollectionError(message);
+}
+
 function requireCollector(api: string): Collector {
   const collector = collectorSlot.get(globalThis);
   if (collector === undefined) {
@@ -910,8 +898,8 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
   });
 
   const api: TestAPI = Object.assign(testFunction, {
-    skip(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
-      const call = parseModifierCall(first, second);
+    skip(...args: [first?: string | boolean, second?: TestBody | string]): TestCase | undefined {
+      const call = parseModifierCall(args);
       if (call.kind === 'register') {
         return registrar('test.skip()', true)(call.title, call.fn as TestBody);
       }
@@ -924,16 +912,16 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
       }
       return registerOne('test.todo()', 'todo', title, {}, () => {});
     },
-    fixme(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
-      const call = parseModifierCall(first, second);
+    fixme(...args: [first?: string | boolean, second?: TestBody | string]): TestCase | undefined {
+      const call = parseModifierCall(args);
       if (call.kind === 'register') {
         return registrar('test.fixme()', 'fixme')(call.title, call.fn as TestBody);
       }
       skipRunningTest('test.fixme', call.condition, fixmeReason(call.reason));
       return undefined;
     },
-    fail(first?: string | boolean, second?: TestBody | string): TestCase | undefined {
-      const call = parseModifierCall(first, second);
+    fail(...args: [first?: string | boolean, second?: TestBody | string]): TestCase | undefined {
+      const call = parseModifierCall(args);
       if (call.kind === 'register') {
         return requireCollector('test.fail()').registerTest('test', 'normal', call.title, { fail: true }, [], call.fn as TestBody, chain);
       }
@@ -943,8 +931,8 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
     setTimeout(timeout: number): void {
       setRunningTestTimeout(timeout);
     },
-    slow(first?: string | boolean, second?: TestBody | string): void {
-      const call = parseModifierCall(first, second);
+    slow(...args: [first?: string | boolean, second?: TestBody | string]): void {
+      const call = parseModifierCall(args);
       if (call.kind === 'register') {
         throw new CollectionError(
           'test.slow() takes no test: call test.slow() inside the test body to triple its timeout, or pass { timeout } as the test option',
@@ -954,10 +942,10 @@ function createTestAPI(chain: readonly FixtureDefinition[]): TestAPI {
     },
     step: runTestStep,
     skipIf(condition: unknown): TestRegistrar<object> {
-      return registrar('test.skipIf()', readCondition('test.skipIf()', condition));
+      return registrar('test.skipIf()', readCondition('test.skipIf()', condition, collectionError));
     },
     runIf(condition: unknown): TestRegistrar<object> {
-      return registrar('test.runIf()', !readCondition('test.runIf()', condition));
+      return registrar('test.runIf()', !readCondition('test.runIf()', condition, collectionError));
     },
     each(rows: unknown): EachRegistrar<unknown[]> {
       return eachRegistrar('test.each()', readRows('test.each()', rows), true);

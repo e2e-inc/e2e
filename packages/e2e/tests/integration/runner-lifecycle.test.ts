@@ -103,6 +103,22 @@ test('condition false runs on', async () => {
   test.skip(false, 'never');
 });
 
+test('unset condition runs on', async () => {
+  test.skip(undefined as unknown as boolean, 'only on CI');
+});
+
+test('string condition skips with the second argument as the reason', async () => {
+  test.skip('1' as unknown as boolean, 'the real reason');
+});
+
+test('promise condition', async () => {
+  test.skip(Promise.resolve(false) as unknown as boolean, 'async check');
+});
+
+test('function condition', async () => {
+  test.skip((() => false) as unknown as boolean, 'not called');
+});
+
 test('bare skip', async () => {
   test.skip();
 });
@@ -111,6 +127,13 @@ test.setup('sign in', { sessions: ['admin'] }, async ({ session }) => {
   test.skip(true, 'a setup may not skip');
   await session.save('admin');
 });
+
+test.setup('sign in on CI only', { sessions: ['viewer'] }, async ({ session }) => {
+  test.skip(undefined as unknown as boolean, 'only on CI');
+  await session.save('viewer');
+});
+
+test('viewer consumer', { session: 'viewer' }, async () => {});
 
 test('consumer', { session: 'admin' }, async () => {});
 `;
@@ -122,6 +145,26 @@ test('consumer', { session: 'admin' }, async () => {});
       expect(conditional.attempts[0]?.status).toBe('skipped');
       expect(conditional.attempts[0]?.steps.map((step) => step.api)).toEqual(['app.open']);
       expect(resultByTitle(outcome, 'condition false runs on').status).toBe('passed');
+      // The condition is read by truthiness, as in Playwright: an unset env var reads as undefined.
+      expect(resultByTitle(outcome, 'unset condition runs on').status).toBe('passed');
+      // A falsy condition does nothing, so a setup test may make the call.
+      expect(resultByTitle(outcome, 'sign in on CI only').status).toBe('passed');
+      expect(resultByTitle(outcome, 'viewer consumer').status).toBe('passed');
+      const stringCondition = resultByTitle(outcome, 'string condition skips with the second argument as the reason');
+      expect(stringCondition.skip).toEqual({ cause: 'explicit', reason: 'the real reason' });
+      // A Promise is always truthy, so a forgotten await fails the test instead of skipping it.
+      const promise = resultByTitle(outcome, 'promise condition');
+      expect(promise.status).toBe('failed');
+      expect(promise.attempts[0]?.error).toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: expect.stringContaining('test.skip() got a Promise'),
+      });
+      const fn = resultByTitle(outcome, 'function condition');
+      expect(fn.status).toBe('failed');
+      expect(fn.attempts[0]?.error).toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: expect.stringContaining('test.skip() got a function'),
+      });
       expect(resultByTitle(outcome, 'bare skip').skip).toEqual({ cause: 'explicit', reason: 'skipped' });
       const setup = resultByTitle(outcome, 'sign in');
       expect(setup.status).toBe('failed');
@@ -258,6 +301,14 @@ test('condition false runs on', async () => {
   test.fixme(false);
 });
 
+test('unset condition runs on', async () => {
+  test.fixme(undefined, 'only on CI');
+});
+
+test('promise condition', async () => {
+  test.fixme(Promise.resolve(false), 'async check');
+});
+
 test('bare', async () => {
   test.fixme();
 });
@@ -292,6 +343,14 @@ test('consumer', { session: 'admin' }, async () => {});
       expect(conditional.skip).toEqual({ cause: 'fixme', reason: 'fixme: flaky on webkit' });
       expect(conditional.attempts[0]?.steps.map((step) => step.api)).toEqual(['app.open']);
       expect(resultByTitle(outcome, 'condition false runs on').status).toBe('passed');
+      // The condition is read by truthiness, as in Playwright: an unset env var reads as undefined.
+      expect(resultByTitle(outcome, 'unset condition runs on').status).toBe('passed');
+      const promise = resultByTitle(outcome, 'promise condition');
+      expect(promise.status).toBe('failed');
+      expect(promise.attempts[0]?.error).toMatchObject({
+        code: 'INVALID_ARGUMENT',
+        message: expect.stringContaining('test.fixme() got a Promise'),
+      });
       expect(resultByTitle(outcome, 'bare').skip).toEqual({ cause: 'fixme', reason: 'fixme' });
       expect(resultByTitle(outcome, 'blank reason').skip).toEqual({ cause: 'fixme', reason: 'fixme' });
       expect(resultByTitle(outcome, 'member').skip).toEqual({ cause: 'fixme', reason: 'fixme: hook says not yet' });
@@ -424,6 +483,39 @@ test('never registered', async () => {});
       expect(outcome.report.run.errors[0]?.message).toContain(
         'test.fixme(condition, reason) skips the running test and must be called inside a test body; to mark a test fixme at collection, register it with test.fixme(title, fn)',
       );
+      project.cleanup();
+    },
+    120_000,
+  );
+
+  it(
+    'points a Promise condition in a beforeAll hook at the test body, as for any condition',
+    async () => {
+      const file = `import { test } from 'e2e';
+
+test.describe('skips from beforeAll', () => {
+  test.beforeAll(() => {
+    test.skip(Promise.resolve(false), 'async check');
+  });
+  test('skip member', async () => {});
+});
+
+test.describe('fails from beforeAll', () => {
+  test.beforeAll(() => {
+    test.fail(Promise.resolve(false), 'async check');
+  });
+  test('fail member', async () => {});
+});
+`;
+      const { outcome, project } = await runProject({ 'tests/before-all-promise.e2e.ts': file }, {});
+      // A beforeAll has no running test, so the location error wins over the condition.
+      const hookErrors = outcome.report.run.errors.filter((error) => error.code === 'HOOK_FAILED');
+      expect(hookErrors.map((error) => error.scopeId).toSorted()).toEqual(['fails from beforeAll', 'skips from beforeAll']);
+      for (const error of hookErrors) {
+        expect(error.message).toContain('must be called inside a test body');
+        expect(error.message).not.toContain('Promise');
+      }
+      assertValidReport(outcome.report);
       project.cleanup();
     },
     120_000,

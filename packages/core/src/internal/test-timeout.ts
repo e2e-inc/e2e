@@ -4,6 +4,7 @@ import { currentAttempt, type PublishedAttempt } from '../expect/attempt.ts';
 import type { AttemptBudget } from '../run/budget.ts';
 import type { PassOptions } from '../types.ts';
 import { slowedBrand, suiteHookBrand } from './brands.ts';
+import { readRunningCondition } from './condition.ts';
 import { CollectionError, TestError } from './errors.ts';
 import { realmSlot } from './realm-slot.ts';
 import { MAX_TIMER_MS } from './time.ts';
@@ -128,7 +129,7 @@ function slowed(): WeakSet<object> {
 }
 
 /**
- * Triples the running test's timeout when `condition` holds, as
+ * Triples the running test's timeout when `condition` is truthy, as
  * `test.slow()` does in Playwright: the timeout in force, so after
  * `test.setTimeout(10_000)` it is 30 s. Like Playwright's, it slows an
  * attempt once: a later call, from a `beforeEach` hook or the body, does
@@ -137,11 +138,11 @@ function slowed(): WeakSet<object> {
  * keeps. Outside a test or hook the call is a collection error, checked
  * before the condition so a misplaced `test.slow(false)` is caught too.
  */
-export function slowRunningTest(condition: boolean): void {
+export function slowRunningTest(condition: unknown): void {
   const code = runningCode(
     'test.slow() triples the running test\'s timeout and must be called inside a test body or a beforeEach or beforeAll hook; to give every test in a group more time, call test.slow() in a beforeEach hook, or pass { timeout } as the test or describe option',
   );
-  if (!condition) return;
+  if (!readRunningCondition('test.slow()', condition)) return;
   const owner = code.hook ?? code.attempt;
   const done = slowed();
   if (done.has(owner)) {
