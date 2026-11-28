@@ -823,6 +823,15 @@ describe('DesktopSurface: reading', () => {
     await expect(surface.observe(operation(), undefined)).rejects.toMatchObject({ code: 'NODE_STALE' });
   });
 
+  it('reads no empty screen from an app that quit while its windows were listed', async () => {
+    const quits = (driver: FakeDriver): Answer => {
+      process.kill(driver.pid, 'SIGKILL');
+      return { ok: true, data: [], sleepMs: 300 };
+    };
+    const { surface } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }]), quits] }, { observe: false });
+    await expect(surface.locate(testId('nowhere'), operation())).rejects.toMatchObject({ code: 'INVALID_STATE', message: expect.stringMatching(/quit/) });
+  });
+
   it('reads no empty screen from an app that quit', async () => {
     const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-mine', is_focused: true }]), ok([])] }, { observe: false });
     process.kill(fake.pid, 'SIGKILL');

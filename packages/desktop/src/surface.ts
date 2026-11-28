@@ -800,7 +800,11 @@ export class DesktopSurface {
   private async readWindows(operation: OperationContext, windowId?: string, forMask = false, whole = false): Promise<WindowsRead> {
     const windows = await this.ownWindows(operation, true);
     const target = windowId ?? this.activeChoice(windows);
-    if (windows.length === 0 && this.pid !== undefined) this.unlessLocked();
+    if (windows.length === 0 && this.pid !== undefined) {
+      this.unlessLocked();
+      // An app that quit while its windows were listed has none: a quit, not an empty screen a negative assertion could take.
+      await this.requireRunning();
+    }
     // A window the list no longer has is closed: its identities go, so windows opened and closed one after another do not pile them up.
     const open = new Set(windows.map((window) => window.id));
     for (const identity of this.ids.keys()) if (!open.has(identity.slice(0, identity.indexOf('|')))) this.ids.delete(identity);
