@@ -141,14 +141,18 @@ the mistake.
 
 Their agentic tests are declared and skipped with the `UNRECORDED` reason
 (`tests-agent/recordings.ts`): CI replays read-only and would otherwise call
-the model live for their unrecorded steps on every pull request. To enable
-one, remove its skip, pass it in a keyed `test:agent` run, and commit the
-recordings that run writes. In the bug-book tests plain locator steps reach
-the view that shows the bug, deterministic checks confirm it is that view,
-and only a failed judgment there counts as catching it. Each has a
-healthy twin on the same page (the time zone that does save; page 4, which
-matches its footer) where the judgment must pass, so a flow that calls
-everything broken scores nothing.
+the model live for their unrecorded steps on every pull request. To enable a
+task scenario, remove its skip, pass it in a keyed `test:agent` run, and
+commit the recordings that run writes. The bug-book tests are judgments
+(`agent.assert`), which are never recorded: once enabled they call the model
+on every run, as the existing bug-book judgments do, so enabling them is a
+decision to pay for that, made after a keyed run passes them.
+
+In the bug-book tests plain locator steps reach the view that shows the bug,
+deterministic checks confirm it is that view, and only a failed judgment
+there counts as catching it. Each has a healthy twin on the same page (the
+time zone that does save; page 4, which matches its footer) where the
+judgment must pass, so a flow that calls everything broken scores nothing.
 
 ## Adding a scenario
 

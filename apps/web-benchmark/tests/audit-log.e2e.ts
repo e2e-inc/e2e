@@ -28,19 +28,18 @@ test.describe('audit log', () => {
   test('the other pages match their footers', async ({ screen }) => {
     const rows = screen.getByRole('table', 'Audit log').getByRole('row');
     const expected = [
-      { page: 3, first: '#27', last: '#18', count: 11 },
-      { page: 4, first: '#17', last: '#8', count: 11 },
-      { page: 5, first: '#7', last: '#1', count: 8 },
+      { page: 3, range: '21-30', first: '#27', last: '#18', count: 11 },
+      { page: 4, range: '31-40', first: '#17', last: '#8', count: 11 },
+      { page: 5, range: '41-47', first: '#7', last: '#1', count: 8 },
     ];
     await screen.getByRole('button', 'Next').tap();
-    for (const { page, first, last, count } of expected) {
+    for (const { page, range, first, last, count } of expected) {
       await screen.getByRole('button', 'Next').tap();
-      await expect(screen.getByTestId('page-range')).toContainText(`page ${page} of 5`);
+      await expect(screen.getByTestId('page-range')).toHaveText(`Showing ${range} of 47 · page ${page} of 5`);
       await expect(rows).toHaveCount(count);
       await expect(rows.nth(1)).toContainText(first);
       await expect(rows.last()).toContainText(last);
     }
-    await expect(screen.getByTestId('page-range')).toHaveText('Showing 41-47 of 47 · page 5 of 5');
     await expect(screen.getByRole('button', 'Next')).toBeDisabled();
   });
 });
