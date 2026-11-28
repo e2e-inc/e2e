@@ -15,6 +15,24 @@ import { OBSERVED_NAME_LIMIT, OBSERVED_TEXT_LIMIT, type SemanticNode } from '@e2
 import { elementFields, isButtonInput, isCheckable, isFocusable, isHiddenSubtree, isSecure, isTextField, roleOf, stringOf, type AXNode, type FieldContext, type ProjectionPolicy } from './fields.ts';
 import { collapse, type DomFacts, type DomSnapshot } from './snapshot.ts';
 
+/** Controls that are their text wherever it is drawn: a text query answers with the control, and its state. */
+const TEXT_IS_THE_NODE = new Set([
+  'button', 'link', 'heading', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'checkbox', 'radio', 'switch', 'treeitem', 'textbox', 'searchbox', 'combobox',
+]);
+
+/** An icon font's glyphs: private-use code points Chromium puts in a name from CSS generated content. */
+const ICON_GLYPHS = /\p{Co}/gu;
+
+/**
+ * A name as a person reads it: an icon font's glyph is a picture, not a
+ * character, so a button drawn as an icon and "Scan" is named "Scan". A name
+ * of glyphs alone is kept as it is, the only name the node has.
+ */
+function spokenName(name: string): string {
+  const spoken = collapse(name.replace(ICON_GLYPHS, ' '));
+  return spoken === '' ? collapse(name) : spoken;
+}
+
 /** How the window's layout maps the snapshot's device pixels to the viewport's CSS pixels. */
 export interface WindowGeometry {
   /** Device pixels per CSS pixel. */
@@ -194,10 +212,22 @@ class TreeProjector {
   placeAbsent(roots: Draft[]): void {
     const wanted = new Set(this.options.keep ?? []);
     if (this.policy.hiddenTestIds) {
+      // Content under aria-hidden or inert is out of the accessibility tree and on screen all the same: a text query
+      // finds it, as on the web, on the element that holds the text, each one under the element that hides them. It
+      // has no role, so a role query still does not.
+      const hides = (facts: DomFacts): boolean => facts.attributes['aria-hidden']?.toLowerCase() === 'true' || facts.attributes['inert'] !== undefined;
+      const hiding = new Set<number>();
+      for (const [backend, facts] of this.snapshot.elements()) if (hides(facts)) hiding.add(backend);
+      /** Whether the element hides itself or sits under one that does; a page that hides nothing is not walked. */
+      const hidden = (backend: number, index: number): boolean => {
+        if (hiding.size === 0) return false;
+        if (hiding.has(backend)) return true;
+        for (const ancestor of this.snapshot.ancestors(index)) if (hiding.has(ancestor)) return true;
+        return false;
+      };
       for (const [backend, facts] of this.snapshot.elements()) {
-        // Content under aria-hidden is out of the accessibility tree and on screen all the same: a text query finds
-        // it, as on the web, on the element that hides it. It has no role, so a role query still does not.
-        const offTree = facts.attributes['aria-hidden']?.toLowerCase() === 'true' && facts.bounds !== undefined;
+        // Elements only: their text runs fold into them, so a locator answers with the element that holds the text.
+        const offTree = !facts.nodeName.startsWith('#') && facts.bounds !== undefined && hidden(backend, facts.index);
         if (facts.attributes[this.testIdAttribute] !== undefined || offTree) wanted.add(backend);
       }
     }
@@ -226,7 +256,7 @@ class TreeProjector {
     const unnamed = node.ignored && facts?.bounds !== undefined ? this.snapshot.sourceText(facts.index) : undefined;
     if (backend !== undefined && unnamed !== undefined) return this.textRun(backend, facts, unnamed);
     const { role, silent } = roleOf(node, facts, this.policy);
-    const name = collapse(stringOf(node.name) ?? '');
+    const name = spokenName(stringOf(node.name) ?? '');
     // A container Chromium leaves out, or one that says nothing, gives its place to its children: unless a test id,
     // a name, a locator's selector, or taking focus makes it addressable, so an action reaches it rather than the
     // container its text would fold into.
@@ -325,7 +355,22 @@ class TreeProjector {
       const text = textOf(draft, this.policy.descendantText, this.snapshot);
       if (text !== '') draft.text = cut(text, this.policy.textLimit);
     }
-    if (onlyText && (!this.policy.descendantText || draft.children.length === 1)) draft.children = [];
+    if (!onlyText) return;
+    if (!this.policy.descendantText) draft.children = [];
+    else if (draft.children.length === 1 && !this.runStandsApart(draft, draft.children[0]!)) draft.children = [];
+  }
+
+  /**
+   * Whether a node's lone text run stays a node of its own for a locator:
+   * the run sits inside elements the tree leaves out
+   * (`<div role="toolbar"><span>Unselect All</span></div>`), so the text has
+   * a box of its own, which is where a tap on the text belongs and what a
+   * text query on the web answers with. Decided by the document's structure
+   * alone, never by where things are drawn.
+   */
+  private runStandsApart(draft: Draft, run: Draft): boolean {
+    if (draft.role !== undefined && TEXT_IS_THE_NODE.has(draft.role)) return false;
+    return this.snapshot.parentOf(run.order) !== draft.order;
   }
 
   /**

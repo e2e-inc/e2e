@@ -614,10 +614,11 @@ type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumen
 ```
 
 - Um valor de objeto é uma string, um número finito com magnitude abaixo de
-  2^53, um booleano ou uma lista de strings. Um nome não tem hífen no início,
-  espaço em branco nem caracteres de controle, e nada contém um caractere
-  NUL. Um valor lido do ambiente pode ser `undefined`: essa entrada fica de
-  fora.
+  2^53, um booleano ou uma lista de strings. Um nome não tem hífen no início
+  nem caracteres de controle. Espaços dentro de um nome são aceitos, como em
+  `'NSSplitView Subview Frames Main'`; um espaço em uma das pontas e qualquer
+  outro espaço em branco não são aceitos. Nada contém um caractere NUL. Um
+  valor lido do ambiente pode ser `undefined`: essa entrada fica de fora.
 - A tabela em
   [Argumentos de inicialização e permissões](/reference/mobile#launch-arguments-and-permissions)
   mostra cada tipo de valor no iOS e no Android.
@@ -626,7 +627,7 @@ type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumen
 
 | Lança | Quando |
 | --- | --- |
-| `INVALID_CONFIG` | Um item da lista que não é string. Um objeto com um nome vazio, um nome com espaço em branco ou caractere de controle, um valor de outro tipo, um número além de 2^53 - 1 em magnitude, ou um caractere NUL em qualquer lugar. A engine acrescenta regras próprias: veja [a referência mobile](/reference/mobile#launch-arguments-and-permissions). |
+| `INVALID_CONFIG` | Um item da lista que não é string. Um objeto com um nome vazio, um nome com caractere de controle, com um espaço em uma das pontas ou com espaço em branco que não seja um espaço, um valor de outro tipo, um número além de 2^53 - 1 em magnitude, ou um caractere NUL em qualquer lugar. A engine acrescenta regras próprias: veja [a referência mobile](/reference/mobile#launch-arguments-and-permissions). |
 
 #### `permissions`
 

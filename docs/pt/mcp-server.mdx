@@ -19,19 +19,22 @@ age sobre ela e verifica o próprio trabalho.
 | Corrigir um teste que falha | Percorre o fluxo clicando de novo | Roda o teste e fica parado na falha |
 | Mostrar uma mudança em um PR | Descreve a mudança | Grava um vídeo |
 
-O servidor não precisa de modelo. Um teste que ele roda só precisa de um para
-um passo do agente sem gravação.
+O servidor MCP em si não precisa de um modelo. Você só precisa de um se
+rodar um teste com um passo do agente sem cache.
 
 ## Configure
 
-O [plugin do e2e](/coding-agents) inclui o servidor como
-`npx -y e2e@<version> mcp`, fixado na versão do e2e do plugin. Ele roda essa
-versão mesmo quando o projeto tem outra versão do e2e instalada.
-Sem o plugin, registre o servidor no projeto. O `e2e init` se oferece para
-registrar o servidor em `.mcp.json` (Claude Code), `.cursor/mcp.json` (Cursor)
-e `.codex/config.toml` (Codex). Instale as dependências do projeto e inicie o
-cliente MCP no diretório do projeto para que o `npx` (`bunx` em um projeto
-Bun) use a versão do e2e instalada. Manualmente:
+O [plugin do e2e](/coding-agents) para Codex e Cursor inclui o servidor
+como `npx -y e2e@<version> mcp`, que roda a release do e2e do plugin mesmo
+quando o projeto tem outra versão instalada. No Claude Code (ou sem o
+plugin), registre o servidor no seu projeto. O `e2e init` pode escrever a
+configuração para `.mcp.json` (Claude Code), `.cursor/mcp.json` (Cursor) e
+`.codex/config.toml` (Codex), com o comando do seu gerenciador de pacotes:
+`npx e2e mcp`, `pnpm exec e2e mcp`, `yarn exec e2e mcp`
+(`yarn --silent exec -- e2e mcp` no Yarn 1) ou `bunx e2e mcp`. Instale as
+dependências do seu projeto e inicie o seu cliente MCP no diretório do
+projeto para que o comando use a versão instalada do `e2e`. Para configurar
+manualmente:
 
 <Tabs>
   <Tab title="Claude Code">
@@ -88,21 +91,27 @@ Bun) use a versão do e2e instalada. Manualmente:
   </Tab>
 </Tabs>
 
-Uma sessão inicia o comando do app do alvo, se ele tiver um, e o identifica
-pela URL e pela porta. A configuração lê o ambiente do servidor, não o shell
-do agente.
+Se o cliente informar `Connection closed` e o comando falhar em um terminal
+com `EBADDEVENGINES`, o `devEngines` do projeto fixa outro gerenciador de
+pacotes: registre o comando desse gerenciador, como `pnpm exec e2e mcp`.
+
+Se o seu alvo define um `app.command`, a sessão inicia o seu app e imprime a
+URL e a porta do app. A primeira sessão em um arquivo de configuração inicia
+os [serviços](/services) desse arquivo, e a última a fechar encerra esses
+serviços. A configuração lê o ambiente do servidor MCP, não o shell do seu
+agente.
 
 ## Experimente sem uma configuração
 
-Em um diretório sem arquivo de configuração do e2e, o agente indica a engine
-ao abrir uma sessão:
+Se o diretório ainda não tem um `e2e.config.ts`, o agente pode mesmo assim
+abrir uma sessão indicando a engine diretamente:
 
 ```txt
 open_session {engine: "@e2e-dev/web", app: {url: "http://localhost:3000"}}
 ```
 
-`e2e run` ainda precisa de uma configuração. Para opções da engine,
-provedores de dispositivos e a instalação de uma engine, veja
+`e2e run` continua exigindo um arquivo de configuração. Para opções da
+engine, provedores de dispositivos e a instalação de engines, veja
 [Sem uma configuração](/reference/mcp#without-a-config).
 
 ## Peça ao agente
@@ -125,8 +134,9 @@ Test line: await screen.getByRole("button", "Sign in").tap();
 ```
 
 O agente copia as linhas de que precisa para o teste enquanto percorre o
-fluxo. `test_lines` devolve todas as linhas até o momento, em ordem, como um
-rascunho do corpo do teste. Veja [`test_lines`](/reference/mcp#test_lines)
+fluxo. `test_lines` devolve todas as linhas até o momento, em ordem, com
+orientações conforme a sessão seja uma gravação nova, um teste retomado ou
+uma sessão conectada a um teste pausado. Veja [`test_lines`](/reference/mcp#test_lines)
 para saber como uma linha é montada.
 
 ## Como ele verifica um localizador
@@ -191,29 +201,29 @@ corrigida. O agente coloca essas linhas no teste no lugar da que falhou.
 
 Para rodar de novo o teste editado, o agente fecha a sessão e abre uma nova
 com o mesmo `test`. Os passos do agente são reproduzidos do cache, como no
-`e2e run`. Veja [Rodando um teste](/reference/mcp#running-a-test) para saber o
+`e2e run`. Veja [Rodar um teste](/reference/mcp#running-a-test) para saber o
 que roda e quais são os limites.
 
 ## Rode testes ao lado de uma sessão
 
-Uma sessão não escreve resultados de teste, e só um teste que ela roda com
-`open_session {test}` usa o cache de replay. O agente roda suítes com
-`e2e run` e, quando uma execução pode acontecer ao lado da sessão, mantém a
-sessão aberta entre as execuções. Depois de uma execução que falhou, ele vai até a tela da
-falha nessa sessão em vez de abrir uma nova.
+Uma sessão interativa não escreve relatórios de teste, e só os testes
+iniciados via `open_session {test}` usam o cache de replay. O seu agente pode
+manter uma sessão aberta enquanto roda suítes com `e2e run` e ir direto para
+qualquer tela de falha depois.
 
-Na web, uma execução ao lado de uma sessão depende do `app` do alvo:
+Na web, se o `e2e run` pode rodar ao lado de uma sessão aberta depende da sua
+configuração de `app`:
 
-| `app` do alvo | Uma execução enquanto uma sessão está aberta |
+| `app` do alvo | Rodar `e2e run` enquanto uma sessão está aberta |
 | --- | --- |
-| Sem `command` | As duas usam o app que você iniciou. |
-| `url` na porta [`0`](/web#let-the-runner-pick-the-port) | Cada uma inicia sua própria cópia do app. Um servidor de desenvolvimento que roda uma cópia por diretório, como o `next dev`, faz a execução falhar. |
-| `command` com [`reuseExisting: true`](/web#starting-your-app) | A execução usa o app que a sessão iniciou. Quando a sessão fecha, inclusive durante uma execução, esse app é encerrado. |
-| `command` em uma porta fixa, sem `reuseExisting` | Falha com `APP_ALREADY_RUNNING`. |
+| Sem `command` | Os dois compartilham o servidor que você mesmo iniciou. |
+| `url` na porta [`0`](/web#let-the-runner-pick-the-port) | Cada um inicia sua própria instância do servidor (observe que servidores como o `next dev` não permitem duas instâncias no mesmo diretório). |
+| `command` com [`reuseExisting: true`](/web#starting-your-app) | A execução de testes reutiliza o servidor da sessão. Fechar a sessão encerra esse servidor. |
+| `command` em uma porta fixa sem `reuseExisting` | Falha porque a porta já está em uso. |
 
-Quando `CI` está definido, o e2e ignora `reuseExisting`, e a execução falha
-como em uma porta fixa. Feche a sessão antes de uma execução que falharia. No
-mobile, rode em um dispositivo que nenhuma sessão usa.
+Na CI, o e2e ignora `reuseExisting`, então uma porta fixa se comporta como na
+última linha. Feche a sessão antes de rodar os testes se eles forem disputar
+com ela a porta ou o dispositivo mobile.
 
 ## Rode vários agentes
 

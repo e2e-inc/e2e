@@ -66,13 +66,13 @@ web({ viewport: { width: 390, height: 844 }, locale: 'de-DE' });
 
 - `web()` टारगेट को `app.url` चाहिए होता है और यह डिवाइस की (`bundleId`,
   `appPath`, `launchArguments`) को मना कर देता है। इसका `app.permissions` सिर्फ़
-  `'grant'` लेता है, उन नामों के लिए जिन्हें इसका ब्राउज़र ग्रांट करता है;
-  [`permissions`](/reference/config#permissions) देखें।
+  `'grant'` लेता है, उन नामों के लिए जिन्हें इसका ब्राउज़र ग्रांट करता है, या सबके लिए
+  `'all'`; [`permissions`](/reference/config#permissions) देखें।
 - JSDoc के साथ पूरा डिक्लेरेशन नीचे टाइप सेक्शन में [`WebOptions`](#weboptions) में है।
 
 | थ्रो करता है | कब |
 | --- | --- |
-| `INVALID_CONFIG` | ऐसा ऑप्शन जो `web()` नहीं लेता (`url` या कोई और app key भी शामिल है), या `connect` या `basicAuth` के अंदर कोई अनजान key। अगर टाइपिंग की गलती लगे (`viewprt` की जगह `viewport`) तो मैसेज सबसे क़रीबी जानी-पहचानी key का नाम बताता है, वरना सारी keys बताता है। |
+| `INVALID_CONFIG` | ऐसा ऑप्शन जो `web()` नहीं लेता (`url` या कोई और app key भी शामिल है), या `connect` या `basicAuth` के अंदर कोई अनजान key। अगर टाइपिंग की गलती लगे (`viewprt` की जगह `viewport`) तो मैसेज सबसे क़रीबी जानी-पहचानी key का नाम बताता है, नहीं तो सारी keys की लिस्ट देता है। |
 | `INVALID_CONFIG` | किसी ऐसे टारगेट पर ब्राउज़र प्रोवाइडर, `connect`, `headers`, या `basicAuth` देना जिसका [`app.url` कोई फ़ाइल है](/reference/config#a-file-as-the-app)। |
 | `INVALID_CONFIG` | किसी [पर्सिस्टेंट कॉन्टेक्स्ट](#recovering-a-cdp-transport) (`connect.reconnectEndpoint`, या `scope: 'attempt'` वाला प्रोवाइडर) पर `headers`, `basicAuth`, `userAgent`, `locale`, `timezoneId`, या `deviceScaleFactor` देना। |
 
@@ -244,7 +244,7 @@ interface WebConnectOptions {
 
 | थ्रो करता है | कब |
 | --- | --- |
-| `ENGINE_FAILURE` | डिस्कनेक्ट रहने के दौरान कोई डॉक्यूमेंट क्लोज़्ड शैडो DOM हुक के बिना लोड हो गया। |
+| `ENGINE_FAILURE` | डिस्कनेक्ट रहने के दौरान कोई डॉक्यूमेंट क्लोज़्ड शैडो DOM हुक के बिना लोड हो गया, या अटेम्प्ट ने [`browser.clock`](#clock) इस्तेमाल किया, जिसे रिकवरी आगे नहीं ले जा सकती। |
 | `OPERATION_TIMEOUT` | एंडपॉइंट रिज़ॉल्यूशन, अटैचमेंट, सेटअप, और डिस्पैच ने अपना साझा टाइमआउट पूरा खर्च कर दिया। |
 | `CANCELLED` | कॉलर या अटेम्प्ट ने कैंसल कर दिया। |
 
@@ -267,7 +267,7 @@ interface WebConnectOptions {
 
 `scope: 'attempt'` वाला `browser` प्रोवाइडर इसी पर्सिस्टेंट कॉन्टेक्स्ट पर और इन्हीं
 सीमाओं के साथ चलता है। लीज़ का `cdpEndpoint` अटेम्प्ट का ब्राउज़र देता है, और उसका
-`reconnectEndpoint` (वरना फिर से `cdpEndpoint`) उससे रीकनेक्ट करता है। प्रोवाइडर के
+`reconnectEndpoint` (या फिर से `cdpEndpoint`) उससे रीकनेक्ट करता है। प्रोवाइडर के
 कॉन्ट्रैक्ट के हिसाब से हर लीज़ ताज़ा होती है, इसलिए इंजन इसके कॉन्टेक्स्ट की तुलना
 पिछले अटेम्प्ट्स के कॉन्टेक्स्ट से नहीं करता। कोई होस्टेड सर्विस एक ही स्नैपशॉट से
 ब्राउज़र रिस्टोर कर सकती है, जिससे नए ब्राउज़र को वही कॉन्टेक्स्ट id मिल जाती है।
@@ -471,12 +471,15 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 
 - जो भी चीज़ पेज को पढ़ती है या उस पर एक्शन करती है, वह एक्टिव टैब पर चलती है:
   `goto`, `reload`, `back`, `forward`, `url`, `title`, `waitForURL`, `locator`,
-  `frameLocator`, `evaluate`, `waitForResponse`, `waitForDownload`, `keyboard`,
-  `mouse`, `expect(browser)` के मैचर, और हर `screen` क्वेरी।
+  `frameLocator`, `evaluate`, `waitForResponse`, `waitForRequest`,
+  `waitForDownload`, `keyboard`, `mouse`, `expect(browser)` के मैचर, और हर `screen`
+  क्वेरी।
 - जो चीज़ें पूरे ब्राउज़र की हैं, वे हर टैब पर लागू होती हैं: `cookies`, `setCookies`,
-  `clearCookies`, `route`, `unroute`, `unrouteAll`, `onDialog`, और `addInitScript`।
+  `clearCookies`, `route`, `unroute`, `unrouteAll`, `onDialog`, `addInitScript`, और
+  [`clock`](#clock)।
 - `setViewport` एक्टिव टैब और उसके बाद खुलने वाले हर टैब का साइज़ सेट करता है।
 - [`emulateMedia`](#media-emulation) सभी खुले और आने वाले टैब पर मीडिया बदलता है।
+- [`setNetwork`](#setnetwork) हर टैब और सर्विस वर्कर को ऑफ़लाइन कर देता है।
 - ऐप `target="_blank"` लिंक या `window.open` से जो टैब खोलता है, वह बैकग्राउंड में
   खुलता है: एक्टिव टैब वहीं रहता है जब तक `waitForPopup` या `activate` किसी दूसरे को
   एक्टिव न बना दे। [टैब](#tabs) देखें।
@@ -492,6 +495,8 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 
 | मेंबर | क्या लौटाता है |
 | --- | --- |
+| [`name`](#name-version) | `BrowserName` |
+| [`version`](#name-version) | `string` |
 | [`goto`](#goto) | `Promise<void>` |
 | [`reload`](#reload-back-forward) | `Promise<void>` |
 | [`back`](#reload-back-forward) | `Promise<void>` |
@@ -506,12 +511,14 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 | [`route`](#route) | `Promise<void>` |
 | [`unroute`](#unroute) | `Promise<void>` |
 | [`unrouteAll`](#unrouteall) | `Promise<void>` |
-| [`waitForResponse`](#waitforresponse) | `Promise<WebResponse>` |
+| [`waitForResponse`](#waitforresponse) | `Promise<PageResponse>` |
+| [`waitForRequest`](#waitforrequest) | `Promise<WebRequest>` |
 | [`cookies`](#cookies) | `Promise<Cookie[]>` |
 | [`setCookies`](#setcookies) | `Promise<void>` |
 | [`clearCookies`](#clearcookies) | `Promise<void>` |
 | [`setViewport`](#setviewport) | `Promise<void>` |
 | [`emulateMedia`](#media-emulation) | `Promise<void>` |
+| [`setNetwork`](#setnetwork) | `Promise<void>` |
 | [`onDialog`](#ondialog) | `Promise<() => Promise<void>>` |
 | [`tabs`](#tabs) | `readonly BrowserTab[]` |
 | [`waitForPopup`](#tabs) | `Promise<BrowserTab>` |
@@ -521,22 +528,52 @@ export type WebInitScript = string | { readonly path: string } | (() => unknown)
 | [`keyboard`](#keyboard) | `{ press, down, up, type }` |
 | [`mouse`](#mouse) | `{ move, wheel, down, up }` |
 | [`webmcp`](#webmcp) | `{ tools, callTool }` |
+| [`clock`](#clock) | `BrowserClock` |
 
 [कॉन्फ़िग](/reference/config) हर मेंबर का टाइम बजट तय करता है:
 
 - `goto`, `reload`, `back`, और `forward`: [`timeout`](/reference/config#timeout),
   वही बजट जो `app.open()` इस्तेमाल करता है।
 - `waitForURL`: [`assertionTimeout`](/reference/config#assertiontimeout)।
-- बाकी हर मेंबर: [`actionTimeout`](/reference/config#actiontimeout)। `locator` और
-  `frameLocator` पेज को छूते नहीं हैं और कोई बजट नहीं लेते।
+- बाकी हर मेंबर: [`actionTimeout`](/reference/config#actiontimeout)। `name`,
+  `version`, `locator`, और `frameLocator` पेज को छूते नहीं हैं और कोई बजट नहीं लेते।
 
-`goto`, `reload`, `back`, `forward`, `waitForResponse`, `waitForPopup`,
-`waitForDownload`, और `waitForDownloads` पर `{ timeout }` ऑप्शन बजट को ओवरराइड करता
+`goto`, `reload`, `back`, `forward`, `waitForResponse`, `waitForRequest`,
+`waitForPopup`, `waitForDownload`, और `waitForDownloads` पर `{ timeout }` ऑप्शन बजट को ओवरराइड करता
 है, जो टेस्ट डेडलाइन (`afterEach` में `cleanupTimeout`) तक सीमित रहता है; `0` उस
 डेडलाइन तक इंतज़ार करता है। `url`, `title`, `evaluate`, `addInitScript`, `route`,
 `unroute`, `unrouteAll`, `cookies`, `setCookies`, `clearCookies`, `setViewport`,
-`emulateMedia`, `onDialog`, `newTab`, `BrowserTab` के मेथड, `keyboard.*`, `mouse.*`,
-और `webmcp.*` कोई ओवरराइड नहीं लेते।
+`emulateMedia`, `setNetwork`, `onDialog`, `newTab`, `BrowserTab` के मेथड, `keyboard.*`,
+`mouse.*`, `webmcp.*`, और `clock.*` कोई ओवरराइड नहीं लेते।
+
+#### `name`, `version`
+
+टेस्ट किस ब्राउज़र में चल रहा है, और वह ब्राउज़र अपना कौन सा वर्ज़न बताता है।
+
+```ts
+test('exports a PDF', async ({ app, browser }) => {
+  test.skip(browser.name !== 'chromium', 'PDF export is Chromium only');
+  console.log(browser.version); // 159.0.8154.6
+  await app.open('/invoice');
+});
+```
+
+- `name` इनमें से एक है: `'chromium'`, `'firefox'`, या `'webkit'`। यह
+  [`browser`](#browser) ऑप्शन की वैल्यू होती है।
+- [`connect`](#connect) से जुड़ा या किसी प्रोवाइडर से लीज़ पर लिया ब्राउज़र हमेशा
+  `'chromium'` होता है, क्योंकि इंजन उसे CDP पर चलाता है। Chrome और Edge के लिए भी
+  यही होता है, और ऐसे CDP सर्वर के लिए भी जो Chromium नहीं है, जैसे
+  [Lightpanda](/integrations/lightpanda)।
+- `version` चल रहे ब्राउज़र से पढ़ा जाता है। जुड़े हुए या होस्टेड ब्राउज़र के लिए यह
+  वही है जो उसका CDP एंडपॉइंट बताता है। [`userAgent`](#useragent) ऑप्शन इसे नहीं
+  बदलता।
+- दोनों प्रॉपर्टी हैं, स्टेप नहीं, और पहले नेविगेशन से पहले भी पढ़ी जा सकती हैं।
+- ऑपरेटिंग सिस्टम जानने के लिए, अगर ब्राउज़र रनर की मशीन पर चलता है तो
+  `process.platform` इस्तेमाल करें। होस्टेड ब्राउज़र के लिए [`evaluate`](#evaluate)
+  से `navigator.platform` पढ़ें।
+- Chrome और Edge में फ़र्क करने के लिए [`evaluate`](#evaluate) से
+  `navigator.userAgentData.brands` पढ़ें। Chromium इसे सिर्फ़ सिक्योर कॉन्टेक्स्ट में
+  देता है: HTTPS, लूपबैक, या `file:` पेज।
 
 #### `goto`
 
@@ -599,8 +636,8 @@ await browser.waitForURL(/\/orders\/\d+$/, { timeout: 15_000 });
   में नॉन-ASCII टेक्स्ट और स्पेस उसी तरह मैच करते हैं जैसे ब्राउज़र उन्हें एनकोड करता है।
   खाली स्ट्रिंग किसी भी URL से मैच करती है।
 - `expect(browser).toHaveURL` में `*` और `{` को उन्हीं के रूप में पढ़ा जाता है, जैसा
-  Playwright करता है; [`route`](#route), `unroute`, और `waitForResponse` भी इस वेट
-  की तरह वही ग्लॉब पढ़ते हैं।
+  Playwright करता है; [`route`](#route), `unroute`, `waitForResponse`, और
+  `waitForRequest` भी इस वेट की तरह वही ग्लॉब पढ़ते हैं।
 - `RegExp` पूरे URL की जाँच करता है।
 
 | थ्रो करता है | कब |
@@ -718,11 +755,11 @@ await browser.route({ method: 'POST', url: '**/api/orders' }, async (route) => {
 - पैटर्न एक स्ट्रिंग या `RegExp` होता है, जिसे ठीक [`waitForURL`](#waitforurl) की तरह
   पढ़ा जाता है: स्ट्रिंग Playwright के ग्रामर वाला ग्लॉब होती है (`?` लिटरल, `{a,b}`
   दोनों में से कोई) जो बेस URL के हिसाब से रिज़ॉल्व होती है, इसलिए बिना वाइल्डकार्ड वाली
-  स्ट्रिंग ठीक उसी URL से मैच करती है। `unroute` और `waitForResponse` भी यही पैटर्न
-  लेते हैं।
+  स्ट्रिंग ठीक उसी URL से मैच करती है। `unroute`, `waitForResponse`, और
+  `waitForRequest` भी यही पैटर्न लेते हैं।
 - `{ method, url }` पैटर्न को एक HTTP मेथड तक सीमित भी करता है। `method` केस-इनसेंसिटिव
-  होता है, `url` में ऊपर वाला स्ट्रिंग या `RegExp` ग्रामर ही रहता है, और `unroute` और
-  `waitForResponse` भी यही रूप लेते हैं।
+  होता है, `url` में ऊपर वाला स्ट्रिंग या `RegExp` ग्रामर ही रहता है, और `unroute`,
+  `waitForResponse`, और `waitForRequest` भी यही रूप लेते हैं।
 - जिस रूट का मेथड मैच नहीं करता, वह अपने से पहले रजिस्टर हुए रूट्स और फिर नेटवर्क को
   रास्ता दे देता है, मानो उसका URL मैच ही न हुआ हो।
 - मेथड पैटर्न ठीक उसी मेथड से मैच करता है: `GET` रूट `HEAD` का जवाब नहीं देता।
@@ -789,20 +826,31 @@ export interface RouteMatcher {
   readonly method: string;
   /**
    * The URL pattern: a string using the same grammar as a plain `route`
-   * pattern, or a `RegExp`. `route` and `waitForResponse` match requests
-   * against it; `unroute` compares it structurally.
+   * pattern, or a `RegExp`. `route`, `waitForResponse`, and `waitForRequest`
+   * match requests against it; `unroute` compares it structurally.
    */
   readonly url: string | RegExp;
 }
 
+/** A request the page made: what a route handler reads as `route.request` and `waitForRequest` returns. */
+export interface WebRequest {
+  /** Request URL. */
+  readonly url: string;
+  /** HTTP method, as the page sent it. */
+  readonly method: string;
+  /**
+   * Request headers, lower-cased names. The cookie headers the browser adds
+   * on its own are there only when a route intercepts the request, so always
+   * in `route.request`.
+   */
+  readonly headers: Readonly<Record<string, string>>;
+  /** Request body as text; absent when the request has none. */
+  readonly postData?: string;
+}
+
 export interface WebRoute {
   /** The intercepted request. */
-  readonly request: {
-    readonly url: string;
-    readonly method: string;
-    readonly headers: Readonly<Record<string, string>>;
-    readonly postData?: string;
-  };
+  readonly request: WebRequest;
   /** Reads upstream without deciding the route or following redirects. */
   fetch(): Promise<WebResponse>;
   /** Fulfills the intercepted request once. */
@@ -842,34 +890,61 @@ await browser.unrouteAll();
 
 #### `waitForResponse`
 
-[`route`](#route) के पैटर्न सिंटैक्स में दिए पैटर्न से मैच होने वाले रिस्पॉन्स का इंतज़ार
-करता है।
+एक्टिव टैब पर ऐसे रिस्पॉन्स का इंतज़ार करता है जो [`route`](#route) पैटर्न या किसी
+प्रेडिकेट से मैच करे।
 
 ```ts
-const response = await browser.waitForResponse('**/api/orders');
-expect(response.status).toBe(201);
+const [created] = await Promise.all([
+  browser.waitForResponse({ method: 'POST', url: '**/api/orders' }),
+  screen.getByRole('button', 'Place order').tap(),
+]);
+expect(created.status).toBe(201);
+
+const [ready] = await Promise.all([
+  browser.waitForResponse(
+    async (response) =>
+      response.url.endsWith('/api/jobs/42') &&
+      response.status === 200 &&
+      (await response.json<{ state: string }>()).state === 'done',
+    { timeout: 15_000 }, // default: actionTimeout
+  ),
+  screen.getByRole('button', 'Run job').tap(),
+]);
+expect(ready.request.method).toBe('GET');
 ```
 
-```ts
-const created = browser.waitForResponse({ method: 'POST', url: '**/api/orders' });
-await screen.getByRole('button', 'Place order').tap();
-expect((await created).status).toBe(201);
-```
-
-- `{ method, url }` पैटर्न सिर्फ़ उसी मेथड के रिस्पॉन्स से मैच करता है; किसी और मेथड के
-  रिस्पॉन्स निकल जाते हैं।
-- डेडलाइन मैच की समय-सीमा तय करती है: हेडर आते ही रिस्पॉन्स रिज़ॉल्व हो जाता है।
-- `body()`, `text()`, और `json()` बॉडी के लिए अपने अलग बजट पर इंतज़ार करते हैं, जो
-  टेस्ट डेडलाइन तक सीमित `config.actionTimeout` होता है।
-- `url`, `status`, और `headers` हमेशा पढ़े जा सकते हैं।
-- सचमुच खाली बॉडी `body()` से खाली `Buffer` और `text()` से `''` देती है; `json()` उसे
+- इंतज़ार उस एक्शन से पहले शुरू करें जो रिक्वेस्ट भेजता है, आम तौर पर `Promise.all` में।
+  यह पहली `browser.goto` या `app.open` कॉल से पहले भी काम करता है।
+- URL ग्लॉब स्ट्रिंग, `RegExp`, `{ method, url }`, या कोई प्रेडिकेट फ़ंक्शन पास करें।
+  पैटर्न [`route`](#route) वाले नियमों पर ही चलते हैं।
+- प्रेडिकेट हर रिस्पॉन्स पर एक बार `PageResponse` के साथ चलता है और
+  `boolean | Promise<boolean>` लौटाता है। रनटाइम पर कोई भी ट्रूदी वैल्यू मैच मानी जाती
+  है। async प्रेडिकेट कई रिस्पॉन्स पर एक साथ चल सकते हैं, और Playwright की तरह जो
+  पहले मैच करे, वही जीतता है।
+- अगर प्रेडिकेट थ्रो या रिजेक्ट करे, तो स्टेप उसी एरर से फ़ेल होता है, बिना बदले।
+  e2e एरर अपना कोड रखता है, इसलिए फ़ेल हुआ `expect` `ASSERTION_FAILED` थ्रो करता है
+  और न पढ़ी जा सकने वाली बॉडी `ACTION_FAILED` थ्रो करती है। कोई और थ्रो `ERROR` से
+  फ़ेल होता है।
+- पैटर्न के साथ, या ऐसे प्रेडिकेट के साथ जो बॉडी नहीं पढ़ता, रिस्पॉन्स हेडर आते ही
+  इंतज़ार रिज़ॉल्व हो जाता है।
+- प्रेडिकेट के अंदर `body()`, `text()`, और `json()` इंतज़ार का ही टाइमआउट शेयर करते
+  हैं। जिस बॉडी को पेज कभी पूरा नहीं पढ़ता, जैसे कोई स्ट्रीम या बंद न हुआ रिस्पॉन्स, वह
+  Playwright की तरह प्रेडिकेट को टाइमआउट तक रोके रख सकती है। इंतज़ार खत्म होने पर छोड़े गए
+  रिस्पॉन्स की जो बॉडी रीड अभी बाकी हैं, e2e उन्हें कैंसल कर देता है।
+- लौटाए गए `PageResponse` पर `body()`, `text()`, और `json()` हर एक
+  `config.actionTimeout` इस्तेमाल करता है, जो टेस्ट डेडलाइन तक सीमित रहता है।
+- `url`, `status`, `headers`, और `request` प्रॉपर्टी हैं, मेथड नहीं, और बॉडी का
+  इंतज़ार किए बिना हमेशा पढ़ी जा सकती हैं। सिर्फ़ `body()`, `text()`, और `json()`
+  मेथड हैं।
+- खाली बॉडी पर `body()` खाली `Buffer` लौटाता है, `text()` `''` लौटाता है, और `json()`
   रिजेक्ट करता है।
+- ट्रेस में स्टेप का लेबल पैटर्न होता है, या फ़ंक्शन के लिए `predicate`।
 
 | थ्रो करता है | कब |
 | --- | --- |
-| `INVALID_ARGUMENT` | ऐसा पैटर्न जो स्ट्रिंग, `RegExp`, या `{ method, url }` न हो; ऐसा ग्लॉब जिसमें `{` के अंदर `{` हो या `{` या `}` बिना जोड़े के छूट जाए; ऐसा `{ method, url }` पैटर्न जिसमें कोई key कम या ज़्यादा हो, मेथड HTTP मेथड न हो, या `url` स्ट्रिंग या `RegExp` न हो। |
+| `INVALID_ARGUMENT` | ऐसा पैटर्न जो स्ट्रिंग, `RegExp`, `{ method, url }`, या फ़ंक्शन न हो; ऐसा ग्लॉब जिसमें `{` के अंदर `{` हो या `{` या `}` बिना जोड़े के छूट जाए; ऐसा `{ method, url }` पैटर्न जिसमें कोई key कम या ज़्यादा हो, मेथड HTTP मेथड न हो, या `url` स्ट्रिंग या `RegExp` न हो; `timeout` के अलावा कोई और ऑप्शन, जैसे Playwright का `signal`। |
 | `APP_URL_REQUIRED` | बिना `app.url` वाले टारगेट पर रिलेटिव पैटर्न। |
-| `ACTION_FAILED` | डेडलाइन के अंदर कुछ मैच नहीं हुआ। `body()`, `text()`, और `json()` से: उनका बजट खत्म होने पर भी बॉडी स्ट्रीम हो रही हो, या ऐसी बॉडी जिसे ब्राउज़र पढ़ न सका (बताए गए `Content-Length` से पहले कनेक्शन रीसेट, पेज से अबॉर्ट की गई रिक्वेस्ट, या रीडायरेक्ट जिसकी बॉडी ब्राउज़र कभी नहीं रखता), खाली स्ट्रिंग देने के बजाय। |
+| `ACTION_FAILED` | टाइमआउट से पहले कोई रिस्पॉन्स मैच नहीं हुआ। `body()`, `text()`, या `json()` से: ऐसी बॉडी जो उनके बजट के अंदर पूरी नहीं होती, या ऐसी बॉडी जिसे ब्राउज़र पढ़ नहीं सकता, जैसे `Content-Length` से पहले कटा कनेक्शन, अबॉर्ट की गई रिक्वेस्ट, या ऐसा रीडायरेक्ट जिसकी बॉडी ब्राउज़र कभी नहीं रखता। ऐसे में खाली स्ट्रिंग नहीं लौटती। |
 
 ```ts
 /**
@@ -890,15 +965,74 @@ export interface WebResponse {
   /** Waits for the body and reads it as text; rejects with `ACTION_FAILED` when the body could not be read. */
   text(): Promise<string>;
 }
+
+/** What `waitForResponse` returns and its predicate reads: a `WebResponse` and the request it answers. */
+export interface PageResponse extends WebResponse {
+  /** The request this response answers. */
+  readonly request: WebRequest;
+}
 ```
+
+#### `waitForRequest`
+
+एक्टिव टैब पर ऐसी रिक्वेस्ट का इंतज़ार करता है जो [`route`](#route) पैटर्न या किसी
+प्रेडिकेट से मैच करे। यह तभी रिज़ॉल्व हो जाता है जब पेज रिक्वेस्ट भेजता है, कोई
+रिस्पॉन्स आने से पहले।
+
+```ts
+const [order] = await Promise.all([
+  browser.waitForRequest({ method: 'POST', url: '**/api/orders' }),
+  screen.getByRole('button', 'Place order').tap(),
+]);
+expect(JSON.parse(order.postData ?? '{}')).toEqual({ sku: 'A-1', quantity: 2 });
+
+const [search] = await Promise.all([
+  browser.waitForRequest(
+    (request) => new URL(request.url).searchParams.get('q') === 'shoes',
+    { timeout: 10_000 }, // default: actionTimeout
+  ),
+  screen.getByRole('searchbox').fill('shoes'),
+]);
+expect(search.method).toBe('GET');
+```
+
+- इंतज़ार उस एक्शन से पहले शुरू करें जो रिक्वेस्ट भेजता है, आम तौर पर `Promise.all` में।
+  यह पहली `browser.goto` या `app.open` कॉल से पहले भी काम करता है।
+- [`WebRequest`](#route) लौटाता है, जो `route.request` वाला ही टाइप है: `url`,
+  `method`, `headers`, और ऑप्शनल `postData`। हर फ़ील्ड एक प्रॉपर्टी है। `headers` के
+  नाम लोअरकेस में होते हैं। ब्राउज़र जो कुकी हेडर खुद जोड़ता है, वे तभी होते हैं जब कोई
+  [`route`](#route) रिक्वेस्ट को इंटरसेप्ट करे।
+- प्रेडिकेट हर रिक्वेस्ट पर एक बार `WebRequest` के साथ चलता है। ट्रूदी वैल्यू से मैच,
+  एक साथ चलने वाले async प्रेडिकेट, थ्रो हुए एरर, और ट्रेस का `predicate` लेबल ठीक
+  [`waitForResponse`](#waitforresponse) की तरह काम करते हैं।
+
+| थ्रो करता है | कब |
+| --- | --- |
+| `INVALID_ARGUMENT` | कोई भी पैटर्न शेप या ऑप्शन जिसे [`waitForResponse`](#waitforresponse) मना करता है, `timeout` के अलावा हर ऑप्शन भी। |
+| `APP_URL_REQUIRED` | बिना `app.url` वाले टारगेट पर रिलेटिव पैटर्न। |
+| `ACTION_FAILED` | टाइमआउट से पहले कोई रिक्वेस्ट मैच नहीं हुई। |
 
 #### `cookies`
 
-मौजूदा कॉन्टेक्स्ट को दिखने वाली कुकी लौटाता है।
+ब्राउज़र की सारी कुकी लौटाता है, या सिर्फ़ वे कुकी जो किसी URL पर जाने वाली रिक्वेस्ट
+साथ ले जाएगी।
 
 ```ts
-const cookies = await browser.cookies();
+const all = await browser.cookies();
+const sent = await browser.cookies('/api/orders');
+const either = await browser.cookies(['/api/orders', 'https://auth.example.com']);
 ```
+
+- कुकी URL से अपने डोमेन, अपने पाथ, और `Secure` के हिसाब से मैच होती है: `Secure`
+  कुकी `https` URL से मैच होती है, और `localhost` जैसे लूपबैक होस्ट पर `http` URL से भी।
+- रिलेटिव URL बेस URL के हिसाब से रिज़ॉल्व होता है, जैसे `goto` उसे रिज़ॉल्व करता है।
+- खाली लिस्ट कोई कुकी नहीं लौटाती।
+
+| थ्रो करता है | कब |
+| --- | --- |
+| `INVALID_ARGUMENT` | ऐसी वैल्यू जो स्ट्रिंग या स्ट्रिंग की ऐरे न हो। |
+| `POLICY_DENIED` | पार्स न होने वाला URL, या ऐसा URL जो `http(s)` न हो। |
+| `APP_URL_REQUIRED` | ऐसे टारगेट पर URL, जो कोई `app.url` डिक्लेयर नहीं करता। |
 
 #### `setCookies`
 
@@ -972,6 +1106,45 @@ await app.open('/');
   लेआउट रेंडर नहीं करता।
 - यह साइज़ अटेम्प्ट के बाकी समय के लिए बना रहता है, `app.restart()` और `app.clearState()`
   के बाद भी।
+
+#### `setNetwork`
+
+अटेम्प्ट के बाकी समय के लिए ब्राउज़र को ऑफ़लाइन करता है, या वापस ऑनलाइन।
+
+```ts
+await app.open('/');
+await browser.setNetwork('offline');
+await screen.getByRole('button', 'Refresh').tap();
+await expect(screen.getByText('You are offline')).toBeVisible();
+await browser.setNetwork('online');
+```
+
+- ऑफ़लाइन होने पर नेटवर्क तक पहुँचने वाली रिक्वेस्ट वैसे ही फ़ेल होती है जैसे
+  कनेक्शन न होने पर, और `navigator.onLine` `false` होता है। खुले पेज को `offline`
+  इवेंट मिलता है।
+- यह हर टैब, बाद में खुलने वाले हर टैब, और पेज के सर्विस वर्कर पर लागू होता है।
+  वर्कर फिर भी अपने कैश से जवाब दे सकता है, इसलिए `browser.reload()` वह पेज लोड कर
+  देता है जो उसने कैश किया था।
+- ब्राउज़र का HTTP कैश भी जवाब देता रहता है। Chromium सिर्फ़ वह रिस्पॉन्स देता है जो
+  अब भी फ़्रेश है, Firefox हर वह रिस्पॉन्स जो उसने स्टोर किया है, और WebKit कोई नहीं।
+  जो पेज किसी कैश में नहीं है, उस पर नेविगेशन फ़ेल होता है।
+- पहले से खुला कनेक्शन, जैसे इवेंट स्ट्रीम, खुला रहता है।
+- नेविगेशन फ़ेल होने के बाद Chromium अपना एरर पेज दिखाता है, और उस पेज का `reload()`
+  रिज़ॉल्व हो जाता है। स्क्रीन पर असर्ट करें।
+- यह `app.restart()` और `app.clearState()` के बाद भी बना रहता है। हर अटेम्प्ट ऑनलाइन
+  शुरू होता है, रीट्राई भी।
+- यह पहले नेविगेशन से पहले भी काम करता है।
+- Chromium और WebKit अब भी वह रिक्वेस्ट पूरी करते हैं जिसका जवाब [`route`](#route)
+  देता है। Firefox उसे फ़ेल कर देता है।
+- [`headers`](#headers) कॉन्फ़िगर होने पर सर्विस वर्कर ब्लॉक होते हैं, इसलिए कोई वर्कर
+  कैश किया हुआ पेज नहीं देता।
+- [`request`](/reference/request) फ़िक्स्चर रनर के प्रोसेस में चलता है और ऑनलाइन
+  रहता है।
+
+| थ्रो करता है | कब |
+| --- | --- |
+| `INVALID_ARGUMENT` | `'online'` या `'offline'` के अलावा कोई स्टेट। |
+| `ACTION_FAILED` | ब्राउज़र ऑफ़लाइन रहते हुए कोई नेविगेशन फ़ेल होता है। |
 
 #### `onDialog`
 
@@ -1211,6 +1384,79 @@ export interface WebMcpTool {
 | `INVALID_ARGUMENT` | `callTool`: `name` नॉन-एम्प्टी स्ट्रिंग नहीं है, या `input` JSON ऑब्जेक्ट नहीं है। |
 | `INVALID_CONFIG` | `connect`, ब्राउज़र प्रोवाइडर, या WebKit के साथ `web({ webmcp: true })`। |
 
+#### `clock`
+
+`browser.clock` अटेम्प्ट के पेज में समय कंट्रोल करता है: `Date`, `performance`,
+टाइमर, `requestAnimationFrame`, और `requestIdleCallback`। यह Playwright का
+`page.clock` ही है, उन्हीं मेथड और आर्ग्युमेंट के साथ।
+
+```ts
+await browser.clock.install({ time: new Date('2024-02-02T08:00:00Z') });
+await browser.clock.pauseAt(new Date('2024-02-02T09:00:00Z'));
+await app.open('/offer');
+await browser.clock.runFor(3000); // fires every timer due in 3 seconds
+await browser.clock.fastForward('30:00'); // jumps 30 minutes, firing each due timer once
+```
+
+| मेथड | क्या करता है |
+| --- | --- |
+| `install({ time? })` | टाइम फ़ंक्शन को नकली से बदल देता है, जो `time` से शुरू होते हैं (डिफ़ॉल्ट: अभी)। क्लॉक असली समय की रफ़्तार से चलती रहती है। |
+| `pauseAt(time)` | `time` तक फ़ास्ट-फ़ॉरवर्ड करता है और वहीं रुक जाता है। टाइमर सिर्फ़ `runFor` और `fastForward` से फ़ायर होते हैं। |
+| `resume()` | रुकी हुई क्लॉक को फिर से असली समय की रफ़्तार से चलने देता है। |
+| `runFor(ticks)` | क्लॉक को आगे बढ़ाता है, और रास्ते में जिस भी टाइमर का समय आए, उसे फ़ायर करता है। |
+| `fastForward(ticks)` | आगे छलांग लगाता है, और जिस टाइमर का समय आ चुका हो, उसे ज़्यादा से ज़्यादा एक बार फ़ायर करता है। |
+| `setFixedTime(time)` | `Date.now()` और `new Date()` को `time` पर रोक कर रखता है। टाइमर चलते रहते हैं। |
+| `setSystemTime(time)` | कोई टाइमर फ़ायर किए बिना वॉल-क्लॉक टाइम बदलता है। |
+
+- `time` एपॉक मिलीसेकंड हो सकता है, ऐसी स्ट्रिंग जिसे रनर के प्रोसेस में `new Date()`
+  पार्स करता है, या कोई `Date`। `ticks` मिलीसेकंड होते हैं, या `'ss'`, `'mm:ss'`, या
+  `'hh:mm:ss'`।
+- अगर क्लॉक इंस्टॉल नहीं है, तो बाकी हर मेथड पहले उसे इंस्टॉल करता है, जैसे Playwright
+  करता है। तब वह Unix एपॉक, 1970-01-01, से शुरू होती है, इसलिए पहले
+  `install({ time })` कॉल करें, जब तक अगली कॉल खुद समय सेट न करे। `app.open` से पहले
+  इंस्टॉल करें, ताकि पेज इसी क्लॉक पर लोड हो। जो पेज पहले से खुला है, उसे क्लॉक तुरंत
+  मिल जाती है।
+- क्लॉक हर टैब और फ़्रेम पर लागू होती है, ऐप के खोले हुए टैब और फ़्रेम भी। यह
+  नेविगेशन, `app.restart()`, और `app.clearState()` के बाद भी बनी रहती है, और अटेम्प्ट
+  के साथ खत्म होती है।
+- `app.clearState()` और सेशन रिस्टोर नए कॉन्टेक्स्ट पर क्लॉक की कॉल को रीप्ले करते
+  हैं, जैसे नया डॉक्यूमेंट करता है। फ़ेल हुई कॉल भी गिनी जाती है, जैसे ऐसा `runFor`
+  जिसके टाइमर ने थ्रो किया, लेकिन मना किया गया `pauseAt` नहीं गिना जाता। रुकी हुई या
+  फ़िक्स्ड क्लॉक वैसी ही वापस आती है जैसी थी। चल रही क्लॉक क्लियर से पहले बीता असली
+  समय खो देती है।
+- सिर्फ़ पेज का समय बदलता है। टेस्ट के टाइमआउट, `expect` की पोलिंग, और एजेंट के
+  इंतज़ार असली समय पर चलते हैं, इसलिए रुकी हुई क्लॉक किसी स्टेप को कभी नहीं रोकती।
+- अगर अटेम्प्ट ने क्लॉक इस्तेमाल की है, तो उसके बाद
+  [CDP रिकवरी](#recovering-a-cdp-transport) अटेम्प्ट को `ENGINE_FAILURE` से फ़ेल कर
+  देती है। खुले पेज अपनी क्लॉक रखते हैं, लेकिन रीकनेक्ट हुआ ब्राउज़र उसे रिस्टोर नहीं कर
+  सकता।
+- कभी खत्म न होने वाला टाइमर लूप, जैसे `runFor('10:00:00')` के अंदर 1 ms का इंटरवल,
+  कॉल को `actionTimeout` पर `ACTION_FAILED` के साथ रोक देता है।
+
+```ts
+/** A point in time: epoch milliseconds, a string `Date` parses, or a `Date`. */
+export type ClockTime = number | string | Date;
+
+/** A span of time: milliseconds, or a `'ss'`, `'mm:ss'`, or `'hh:mm:ss'` string. */
+export type ClockTicks = number | string;
+
+export interface BrowserClock {
+  install(options?: { time?: ClockTime }): Promise<void>;
+  fastForward(ticks: ClockTicks): Promise<void>;
+  runFor(ticks: ClockTicks): Promise<void>;
+  pauseAt(time: ClockTime): Promise<void>;
+  resume(): Promise<void>;
+  setFixedTime(time: ClockTime): Promise<void>;
+  setSystemTime(time: ClockTime): Promise<void>;
+}
+```
+
+| थ्रो करता है | कब |
+| --- | --- |
+| `INVALID_ARGUMENT` | ऐसा समय जो फ़ाइनाइट नंबर, पार्स हो सकने वाली नॉन-एम्प्टी स्ट्रिंग, या सही `Date` न हो; ऐसे ticks जो नेगेटिव हों या `'hh:mm:ss'` के बाहर हों; `install` का कोई अनजान ऑप्शन; क्लॉक के मौजूदा समय से पहले का `pauseAt`। |
+| `EVALUATE_FAILED` | `runFor`, `fastForward`, या `pauseAt` के दौरान पेज के चलाए किसी टाइमर ने थ्रो किया। मैसेज में पेज का एरर होता है। |
+| `ACTION_FAILED` | कॉल `actionTimeout` से ज़्यादा देर चली। |
+
 ## ब्राउज़र इंस्टॉल करना
 
 यह पैकेज `playwright-core` को ठीक एक वर्ज़न पर पिन करता है, ताकि इंजन हमेशा उसी
@@ -1289,7 +1535,7 @@ live!.context();                  // its BrowserContext
 
 | थ्रो करता है | कब |
 | --- | --- |
-| `INVALID_STATE` | एक्टिव अटेम्प्ट के बाहर किसी एक्सेसर को कॉल करना। |
+| `INVALID_STATE` | एक्टिव अटेम्प्ट के बाहर किसी एक्सेसर को कॉल करना, या ऐसे हैंडल पर जो इस प्रोसेस में शुरू नहीं हुआ, जैसे दूसरा `web()`। |
 
 ## टाइप
 
@@ -1299,9 +1545,10 @@ live!.context();                  // its BrowserContext
 `BrowserProviderScope`, `BrowserRequest`, `BrowserLease`,
 `BrowserReleaseContext`, `BrowserProviderDownloads`,
 `BrowserDownloadContext`, `PlaywrightLiveSurface`, `Browser`, `FrameScreen`,
-`BrowserExpectation`, `WebRoute`, `RouteFulfillResponse`,
-`RouteContinueOverrides`, `RouteMatcher`, `WebResponse`, `Cookie`, `CookieFields`,
-`CookieFilter`, `Dialog`, और `DialogHandler`।
+`BrowserExpectation`, `BrowserClock`, `ClockTime`, `ClockTicks`, `WebRoute`,
+`RouteFulfillResponse`, `RouteContinueOverrides`, `RouteMatcher`, `WebRequest`,
+`WebResponse`, `PageResponse`, `Cookie`, `CookieFields`, `CookieFilter`, `Dialog`,
+और `DialogHandler`।
 
 रनटाइम एक्सपोर्ट्स हैं `web`, [`surfaceOf`](#surfaceof), और `browser` फ़िक्स्चर के साथ
 टाइप किए गए `test`, `describe`, `beforeEach`, `afterEach`, `beforeAll`, और `afterAll`।
@@ -1417,8 +1664,8 @@ export interface WebOptions {
 ```ts
 /**
  * The browser the attempt drives, showing one active tab. Navigation, reads,
- * `locator`, `frameLocator`, `evaluate`, `waitForResponse`, `waitForDownload`,
- * the keyboard and mouse, `expect(browser)`, and `screen` act on the active
+ * `locator`, `frameLocator`, `evaluate`, `waitForResponse`, `waitForRequest`,
+ * `waitForDownload`, the keyboard and mouse, `expect(browser)`, and `screen` act on the active
  * tab; cookies, routes, and dialog handlers cover the whole browser, every
  * tab included. A tab the app opens (a `target="_blank"` link,
  * `window.open`) joins `tabs()` but does not become active on its own:
@@ -1427,6 +1674,18 @@ export interface WebOptions {
  * again.
  */
 export interface Browser extends Expectable<BrowserExpectation> {
+  /**
+   * The browser the attempt drives, as the driver names it: the
+   * `web({ browser })` value, and `chromium` for every browser the engine
+   * attaches to over CDP (`connect`, a provider), whatever it is.
+   */
+  readonly name: BrowserName;
+  /**
+   * The version the running browser reports, such as `159.0.8154.6`: for
+   * an attached or hosted one, what its CDP endpoint reports. The target's
+   * `userAgent` does not change it.
+   */
+  readonly version: string;
   /** Navigates to an allowed URL. */
   goto(
     url: string,
@@ -1475,13 +1734,32 @@ export interface Browser extends Expectable<BrowserExpectation> {
   unroute(pattern: string | RegExp | RouteMatcher): Promise<void>;
   /** Removes all routes registered by this browser fixture, preserving the configured headers. */
   unrouteAll(): Promise<void>;
-  /** Waits for a matching response, optionally narrowed to one HTTP method. */
+  /**
+   * Waits for a response on the active tab matching a URL pattern, a
+   * `{ method, url }` matcher, or a predicate. The predicate runs per response
+   * until one returns or resolves to a truthy value; throwing fails the wait
+   * with the predicate's own error.
+   */
   waitForResponse(
-    pattern: string | RegExp | RouteMatcher,
+    pattern: string | RegExp | RouteMatcher | ((response: PageResponse) => boolean | Promise<boolean>),
     options?: { timeout?: number },
-  ): Promise<WebResponse>;
-  /** Returns cookies visible to the current context. */
-  cookies(): Promise<Cookie[]>;
+  ): Promise<PageResponse>;
+  /**
+   * Waits for a request on the active tab matching a URL pattern, a
+   * `{ method, url }` matcher, or a predicate, and resolves when the page sends
+   * it before any response arrives. Predicate matching and errors work the
+   * same way as in `waitForResponse`.
+   */
+  waitForRequest(
+    pattern: string | RegExp | RouteMatcher | ((request: WebRequest) => boolean | Promise<boolean>),
+    options?: { timeout?: number },
+  ): Promise<WebRequest>;
+  /**
+   * Returns every cookie of the browser, or only those a request to `urls`
+   * (one URL or several) would carry. A relative URL resolves against the
+   * base URL.
+   */
+  cookies(urls?: string | readonly string[]): Promise<Cookie[]>;
   /** Sets cookies after URL validation. */
   setCookies(cookies: readonly Cookie[]): Promise<void>;
   /** Removes matching cookies only; without filters removes every cookie, preserving other storage. */
@@ -1490,6 +1768,8 @@ export interface Browser extends Expectable<BrowserExpectation> {
   setViewport(size: { width: number; height: number }): Promise<void>;
   /** Emulates CSS media features on every open tab and every tab opened after them. */
   emulateMedia(media: WebMedia): Promise<void>;
+  /** Takes the browser offline or back online for the rest of the attempt: every tab and the page's service workers. */
+  setNetwork(state: 'online' | 'offline'): Promise<void>;
   /** Registers an attempt-scoped dialog handler and returns an unsubscribe function. */
   onDialog(handler: DialogHandler): Promise<() => Promise<void>>;
   /** Returns the open tabs, in the order they opened. */
@@ -1547,6 +1827,8 @@ export interface Browser extends Expectable<BrowserExpectation> {
     /** Calls one tool and resolves with what its `execute` resolved to. */
     callTool(name: string, input?: { readonly [key: string]: JsonValue } | null): Promise<JsonValue>;
   };
+  /** Controls time in the attempt's pages. See [clock](#clock). */
+  readonly clock: BrowserClock;
 }
 ```
 

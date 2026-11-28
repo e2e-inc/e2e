@@ -7,9 +7,9 @@ description: हर कॉन्फ़िगरेशन key, उसका ड�
 
 `e2e.config.ts` रनर को कॉन्फ़िगर करता है: जिन टारगेट्स पर टेस्ट चलते हैं, हर टारगेट जो
 ऐप टेस्ट करता है, एजेंट्स, और रीप्ले कैश। `satisfies E2EConfig` के साथ एक ऑब्जेक्ट
-एक्सपोर्ट करें, जो इसका शेप चेक करता है और इसके इनफ़र्ड टाइप बनाए रखता है। लोड होने पर
-रनर कॉन्फ़िग को फिर से जाँचता है, उन रेंज और नियमों के साथ जिन्हें TypeScript चेक नहीं
-कर सकता। ज़्यादातर प्रोजेक्ट जो ऑप्शन बदलते हैं, उनके लिए
+एक्सपोर्ट करें, जो इसका शेप चेक करता है और इसके इनफ़र्ड टाइप बनाए रखता है, या उसे
+[`defineConfig`](#defineconfig) को दें। लोड होने पर रनर कॉन्फ़िग को फिर से जाँचता है,
+उन रेंज और नियमों के साथ जिन्हें TypeScript चेक नहीं कर सकता। ज़्यादातर प्रोजेक्ट जो ऑप्शन बदलते हैं, उनके लिए
 [प्रोजेक्ट कॉन्फ़िगर करें](/quickstart#configure-the-project) देखें।
 
 ```ts title="e2e.config.ts"
@@ -29,6 +29,45 @@ export default {
 
 ## रेफ़रेंस
 
+### `defineConfig`
+
+`defineConfig` उसे दिया गया कॉन्फ़िग ही लौटाता है। इसे `satisfies E2EConfig` की जगह
+इस्तेमाल करें, ताकि जो ऑप्शन उसी कॉन्फ़िग के दूसरे ऑप्शन पर टिके हैं, उन्हें भी सही
+टाइप मिले।
+
+```ts title="e2e.config.ts"
+import { defineConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+import { email } from './services/email.ts';
+
+export default defineConfig({
+  services: { email },
+  targets: [
+    {
+      engine: web(),
+      app: {
+        url: 'http://127.0.0.1:0',
+        command: { executable: 'node', args: ['app/server.mjs'], env: ({ services }) => ({ PORT: '{port}', EMAIL_API_URL: services.email.url }) },
+      },
+    },
+  ],
+});
+```
+
+- `satisfies E2EConfig` की तरह, एडिटर हर key कंप्लीट करता है, और अनजान टॉप-लेवल
+  key टाइप एरर है।
+- कॉन्फ़िग अपना इनफ़र्ड टाइप बनाए रखता है, इसलिए `typeof config` अब भी
+  [`test.extend`](/reference/test#test-extend) के टाइप आर्ग्युमेंट की तरह काम करता है।
+- नीचे का हर नियम तब लागू होता है जब रनर कॉन्फ़िग रिज़ॉल्व करता है, तब नहीं जब
+  `defineConfig` कॉल होता है।
+
+```ts
+export function defineConfig<
+  const Config extends E2EConfig<ServiceValues<Services>>,
+  Services extends Readonly<Record<string, Service>> = {},
+>(config: Config & { readonly services?: Services } & { readonly [Key in Exclude<keyof Config, keyof E2EConfig>]: never }): Config;
+```
+
 ### टॉप लेवल
 
 | ऑप्शन | टाइप | डिफ़ॉल्ट |
@@ -46,6 +85,7 @@ export default {
 | [`failOnSkippedFailure`](#failonskippedfailure) | `boolean` | `false` |
 | [`maxDuration`](#maxduration) | `number` | - |
 | [`workers`](#workers) | `number` | आधे कोर, CI में `1` |
+| [`fullyParallel`](#fullyparallel) | `boolean` | `false` |
 | [`reporters`](#reporters) | `(BuiltinReporter \| Reporter)[]` | `['list']` |
 | [`output`](#output) | `string` | `'.e2e'` |
 | [`artifacts`](#artifacts) | `ArtifactsConfig` | सिर्फ़ लोकल |
@@ -53,6 +93,7 @@ export default {
 | [`video`](#video) | `RecordingMode` | `'off'` |
 | [`agents`](#agents) | `Record<string, AgentConfig>` | `default`, बिना मॉडल |
 | [`filters`](#filters) | `TestFilter[]` | - |
+| [`services`](#services) | `Record<string, Service>` | - |
 | [`cache`](#cache) | `CacheMode \| CacheConfig` | `'read-write'`, CI में `'read-only'` |
 | [`credentials`](#credentials) | `Record<string, CredentialConfig>` | - |
 | [`secrets`](#secrets) | `Record<string, SecretConfig>` | - |
@@ -257,6 +298,23 @@ workers: 4, // default: 1 in CI, else half the cores
   पहले शुरू होती हैं, जैसा [सबसे ज़्यादा संभावना वाले पहले चलाएँ](/filters#start-the-likeliest-first)
   में बताया गया है।
 
+#### `fullyParallel`
+
+हर फ़ाइल में, एक फ़ाइल के टेस्ट अलग-अलग वर्कर पर एक साथ चलाता है।
+
+```ts
+fullyParallel: true, // default: false
+```
+
+- डिफ़ॉल्ट रूप से फ़ाइलें पैरेलल में चलती हैं, और एक फ़ाइल के टेस्ट एक वर्कर पर क्रम से
+  चलते हैं।
+- यह हर फ़ाइल पर [`parallel: true`](/reference/test#parallel) की तरह काम करता है।
+  हुक, सीरियल ग्रुप, और `parallel: false` के नियम उसी एंट्री में हैं।
+- टारगेट का `fullyParallel` इस पर भारी पड़ता है। `--fully-parallel` दोनों पर भारी
+  पड़ता है।
+- एक वर्कर के साथ, जो CI में डिफ़ॉल्ट है, टेस्ट अब भी एक-एक करके चलते हैं।
+  [`workers`](#workers) 1 से ज़्यादा सेट करें।
+
 #### `reporters`
 
 रन के रिपोर्टर: बिल्ट-इन id, और `e2e/reporters` की फ़ैक्ट्री जैसे रिपोर्टर ऑब्जेक्ट।
@@ -300,6 +358,7 @@ targets: [
 | [`app`](#the-app-under-test) | `TargetApp` | - |
 | [`trace`](#trace) | `RecordingMode` | कॉन्फ़िग का `trace` |
 | [`video`](#video) | `RecordingMode` | कॉन्फ़िग का `video` |
+| [`fullyParallel`](#fullyparallel) | `boolean` | कॉन्फ़िग वाला |
 
 - `{ engine: web(), app: { url } }` एक पूरा टारगेट है।
 - जिस टेस्ट के `platforms` में टारगेट का प्लेटफ़ॉर्म न हो, वह उसके लिए स्किप हो जाता है।
@@ -382,7 +441,7 @@ targets: [
 | [`identity`](#identity) | `string` | ऐप से निकाला गया |
 | [`environment`](#environment) | `'test' \| 'staging' \| 'production'` | `'test'` या `'production'` |
 | [`launchArguments`](#launcharguments) | `string[] \| Record<string, LaunchArgumentValue>` | - |
-| [`permissions`](#permissions) | `Record<string, AppPermissionState>` | - |
+| [`permissions`](#permissions) | `Record<string, AppPermissionState> \| 'all'` | - |
 | [`command`](#command) | `CommandConfig` | - |
 | [`readyUrl`](#readyurl) | `string` | `url` |
 
@@ -402,8 +461,7 @@ targets: [
 <Note>
 पुरानी स्पेलिंग अनजान key हैं और कॉन्फ़िग लोड पर `INVALID_CONFIG` से फ़ेल होती हैं:
 `web({ url })` और `web()` और `mobile()` के पुराने app ऑप्शन, `mobile({ app })` (अब
-`app.bundleId`), सीधे टारगेट पर कोई app key, टॉप-लेवल `app` या `url`, और कहीं भी
-[`services`](#services)।
+`app.bundleId`), सीधे टारगेट पर कोई app key, और टॉप-लेवल `app` या `url`।
 </Note>
 
 #### `url`
@@ -549,13 +607,15 @@ type LaunchArguments = readonly string[] | Readonly<Record<string, LaunchArgumen
 permissions: { camera: 'grant' },
 ```
 
-हर एक `'grant'`, `'deny'`, या `'reset'` होती है।
+हर एक `'grant'`, `'deny'`, या `'reset'` होती है। `permissions: 'all'` वे सारी परमिशन
+दे देता है जो टारगेट का इंजन दे सकता है।
 
 - `mobile()` टारगेट हर नए लॉन्च से पहले इनमें से हर एक को सेट करता है।
   [परमिशन](/reference/mobile#engine) देखें।
 - `web()` टारगेट सिर्फ़ `'grant'` लेता है और इसे अटेम्प्ट के हर पेज पर, किसी भी ऑरिजिन के
   लिए ग्रांट कर देता है। हेडलेस Chromium छोड़ी गई परमिशन को मना कर देता है।
-  [ब्राउज़र परमिशन ग्रांट करना](/web#granting-browser-permissions) देखें।
+  [ब्राउज़र परमिशन ग्रांट करना](/web#granting-browser-permissions) देखें। `'all'`
+  नीचे की टेबल में उस ब्राउज़र का हर नाम ग्रांट कर देता है।
 
 | ब्राउज़र | नाम |
 | --- | --- |
@@ -603,7 +663,19 @@ command: {
   है।
 - हर `args` एंट्री और `env` वैल्यू स्ट्रिंग होती है। `undefined` `env` वैल्यू छोड़ दी
   जाती है।
-- `startupTimeout` [`readyUrl`](#readyurl) प्रोब का बजट होता है।
+- `env` एक sync या async फ़ंक्शन भी हो सकता है जिसे `{ services }` मिलता है, यानी वही
+  [`services`](#services) वैल्यू जो टेस्ट में मिलती हैं (जैसे `env: ({ services }) => ({ EMAIL_API_URL: services.email.url })`)।
+  फ़ंक्शन हर रन में एक बार कॉल होता है, सर्विसें शुरू होने के बाद और कोई भी ऐप कमांड
+  शुरू होने से पहले। `reuseExisting` सेट हो और कोई प्रोसेस पहले से चल रहा हो, तब भी
+  फ़ंक्शन चलता है। चल रहे प्रोसेस को लौटाए गए वेरिएबल नहीं मिलते, और एक नोटिस प्रिंट
+  होता है। `reuseExisting` इस्तेमाल करते समय, ऐप जिन सर्विसों को इस्तेमाल करता है
+  उन्हें फ़िक्स पोर्ट दें और ऐप को उन्हीं वैल्यू के साथ शुरू करें।
+- `e2e mcp` `env` फ़ंक्शन को हर सेशन में एक बार कॉल करता है, और `openHost` हर होस्ट में
+  एक बार। अगर कई टारगेट एक ही फ़ंक्शन शेयर करें, तो वह उन सबके लिए एक ही बार कॉल होता
+  है।
+- लौटाई गई वैल्यू में `{port}` एक्सपैंड होता है, और उन वैल्यू की जाँच ठीक `env` ऑब्जेक्ट
+  की तरह होती है।
+- `startupTimeout` `env` फ़ंक्शन और [`readyUrl`](#readyurl) प्रोब, दोनों पर लागू होता है।
 - `shutdownTimeout` फ़ोर्स-किल से पहले का ग्रेस पीरियड होता है।
 - `e2e run` में, अगर कोई कमांड रेडी होने के बाद बंद हो जाए और किसी निर्भर टारगेट का काम
   बाकी हो, तो रन `APP_UNREACHABLE` से फ़ेल हो जाता है। इसमें एग्ज़िट कोड 0 और सिग्नल से
@@ -625,17 +697,19 @@ command: {
   प्रोसेस को इस्तेमाल कर लेता है। वह कुछ शुरू नहीं करता और कुछ बंद नहीं करता। CI एक नोटिस
   के साथ इसे नज़रअंदाज़ करता है और हमेशा कमांड शुरू करता है।
 - एक ही कमांड डिक्लेयर करने वाले टारगेट एक ही प्रोसेस शेयर करते हैं, जिसकी जाँच पहले
-  डिक्लेयर करने वाले टारगेट के `readyUrl` पर होती है।
+  डिक्लेयर करने वाले टारगेट के `readyUrl` पर होती है। जिन कमांड में `env` फ़ंक्शन हो,
+  उनकी तुलना फ़ंक्शन के लौटाए वेरिएबल से होती है।
 - रनर कभी उस प्रोसेस को बंद नहीं करता जिसे उसने शुरू नहीं किया।
 
 | थ्रो करता है | कब |
 | --- | --- |
 | `INVALID_CONFIG` | `inheritEnv` में सीधा `'*'`। |
 | `INVALID_CONFIG` | ऐसी `args` एंट्री या `env` वैल्यू जो स्ट्रिंग न हो (संख्या या `secrets.get()` हैंडल समेत)। |
+| `INVALID_CONFIG` | ऐसा `env` फ़ंक्शन जो अपने एरर कोड के बिना वाला एरर थ्रो करे, या स्ट्रिंग और `undefined` वैल्यू वाले ऑब्जेक्ट के अलावा कुछ और लौटाए। |
 | `INVALID_CONFIG` | ऐसे ऐप पर `reuseExisting` जिसका `url` पोर्ट 0 माँगता है: पहले से चल रहा प्रोसेस रन से दिए गए पोर्ट पर सर्व नहीं कर सकता। |
 | `APP_URL_REQUIRED` | कॉन्फ़िग लोड पर ऐसा `app.command` जिसके पास न `app.url` हो न `app.readyUrl`। |
 | `APP_ALREADY_RUNNING` | `reuseExisting` के बिना, ऐसा `readyUrl` जो पहले से जवाब दे रहा हो। |
-| `APP_UNREACHABLE` | कमांड स्पॉन नहीं हो पाई, उसका `log` नहीं खुल सका, `startupTimeout` पूरा हो गया, कमांड रेडी होने से पहले बंद हो गई, या `e2e run` के दौरान अचानक बंद हो गई। |
+| `APP_UNREACHABLE` | कमांड स्पॉन नहीं हो पाई, उसका `log` नहीं खुल सका, `startupTimeout` पूरा हो गया, कमांड रेडी होने से पहले बंद हो गई, `e2e run` के दौरान अचानक बंद हो गई, या कोई `env` फ़ंक्शन `startupTimeout` के अंदर नहीं लौटा। |
 
 <Warning>
 `log` में कच्चा आउटपुट होता है जिसमें कुछ भी छिपाया नहीं जाता। इसे gitignore की हुई डायरेक्टरी में
@@ -718,15 +792,6 @@ app: {
   पोर्ट पर एक ही कमांड डिक्लेयर करने वाले दो टारगेट एक प्रोसेस शेयर करते हैं।
 - डिफ़ॉल्ट [`identity`](#identity) डिक्लेयर किए गए `:0` से निकलता है।
 - टेस्ट एलोकेट किया गया URL [`app.baseUrl`](/reference/app) से पढ़ते हैं।
-
-#### services
-
-<Note>
-यह वर्ज़न कोई डिपेंडेंसी प्रोसेस (डेटाबेस, API मॉक, या कई टारगेट्स का साझा डेव सर्वर)
-शुरू नहीं करता, और `services` जहाँ भी आए वह अनजान key है। उन्हें रन से पहले शुरू करें, या
-`app.command` से ऐसी स्क्रिप्ट चलाएँ जो उन्हें शुरू करे और ऐप सर्व करे। services API
-आगे के रिलीज़ में वापस आएगी।
-</Note>
 
 ### output
 
@@ -1233,6 +1298,65 @@ export default {
 
 डिक्लेरेशन [`TestFilter`](#testfilter) में हैं, जो `e2e` से एक्सपोर्ट होता है।
 
+### services
+
+टेस्ट हो रहे ऐप की डिपेंडेंसी (जैसे कोई ईमेल API या डेटाबेस), नाम के हिसाब से। हर
+एंट्री `defineService` से बनती है:
+
+```ts title="e2e.config.ts"
+import { defineConfig, defineService } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+const inbox = defineService({
+  startupTimeout: 180_000, // default: 60000
+  async *start({ signal }) {
+    const server = await startInbox({ signal });
+
+    yield { url: server.url };
+
+    await server.close();
+  },
+});
+
+export default defineConfig({
+  services: { inbox },
+  targets: [{ engine: web(), app: { url: 'http://localhost:3000' } }],
+});
+```
+
+`start` एक async generator है। इसमें आप डिपेंडेंसी शुरू करते हैं, जो वैल्यू आप टेस्ट को
+देना चाहते हैं उसके साथ एक बार yield करते हैं, और `yield` के बाद डिपेंडेंसी बंद करते
+हैं। `yield` के बाद का कोड तब चलता है जब सर्विसों की ज़रूरत नहीं रहती। `start` को
+`{ signal }` मिलता है। शुरू होने या बंद होने में बहुत ज़्यादा समय लगे तो सिग्नल अबॉर्ट
+होता है ([`ServiceStartContext`](#service) देखें)।
+
+सर्विस पर `startupTimeout` और `shutdownTimeout` शुरू होने (डिफ़ॉल्ट 60000) और बंद होने
+(डिफ़ॉल्ट 10000) की समय सीमा हैं, मिलीसेकंड में।
+
+सर्विस का लाइफ़साइकल:
+
+- `e2e run` और `e2e explore`: सर्विसें key के क्रम में, किसी भी ऐप कमांड से पहले शुरू
+  होती हैं, और ऐप कमांड रुकने के बाद उल्टे क्रम में बंद होती हैं।
+- `e2e mcp`: सर्विसें किसी कॉन्फ़िग फ़ाइल पर पहले सेशन के साथ शुरू होती हैं, और उस फ़ाइल
+  का आखिरी सेशन बंद होने पर बंद होती हैं।
+- `openHost`: सर्विसें होस्ट खुलने पर शुरू होती हैं और `host.close()` में बंद होती हैं।
+
+अगर कोई सर्विस शुरू न हो पाए, तो पहले से शुरू हुई सारी सर्विसें बंद कर दी जाती हैं।
+
+हर सर्विस का एक ही इंस्टेंस सभी वर्कर्स में शेयर होता है। वैल्यू टेस्ट में
+[`services` फ़िक्स्चर](/reference/test#services) से मिलती हैं, और `app.command` के
+[`env` फ़ंक्शन](#command) के आर्ग्युमेंट में भी। पूरे उदाहरण के लिए
+[सर्विसें](/services) देखें।
+
+| थ्रो करता है | कब |
+| --- | --- |
+| `INVALID_CONFIG` | कॉन्फ़िग लोड पर `services` प्लेन ऑब्जेक्ट न हो, कोई एंट्री `start` फ़ंक्शन वाला प्लेन ऑब्जेक्ट न हो, या किसी एंट्री में अनजान key हो। |
+| `SERVICE_START_FAILED` | `start` थ्रो करे, yield किए बिना खत्म हो जाए, async generator न हो, या अपने `startupTimeout` के अंदर yield न करे। |
+| `INVALID_SERVICE_VALUE` | yield की गई वैल्यू प्लेन ऑब्जेक्ट न हो, उसमें ऐसी वैल्यू हो जो कॉपी नहीं हो सकती (जैसे किसी कस्टम क्लास का इंस्टेंस), या उसमें किसी मैप या सेट के अंदर फ़ंक्शन हो। [सर्विस क्या yield कर सकती है](/services#what-a-service-can-yield) देखें। |
+| `SERVICE_STOP_FAILED` | `yield` के बाद का कोड थ्रो करे, दूसरी बार yield करे, या सर्विस के `shutdownTimeout` के अंदर खत्म न हो। |
+
+डिक्लेरेशन [`Service`](#service) में हैं, जो `e2e` से एक्सपोर्ट होता है।
+
 ### credentials
 
 नेम्ड अकाउंट। हर एंट्री में एक यूज़रनेम और एक पासवर्ड होता है जिसे मॉडल कभी नहीं देखता।
@@ -1498,7 +1622,7 @@ cache: { strict: true }, // default: false
 | `retries` | `0` | `1` |
 | `workers` | `max(1, floor(availableParallelism() / 2))` | `1` |
 | `cache` | `read-write` | अनसेट होने पर `read-only` |
-| `test.only` | अलाउ है | `ONLY_IN_CI`, एग्ज़िट कोड 2 |
+| `test.only`, `describe.only` | अलाउ है | `ONLY_IN_CI`, एग्ज़िट कोड 2 |
 | `command.reuseExisting` | माना जाता है | नोटिस के साथ नज़रअंदाज़ |
 
 ## लोडिंग
@@ -1629,12 +1753,15 @@ e2e खुद TypeScript और JSX कंपाइल करता है। �
 
 ### `E2EConfig`
 
+`Services` उस `services` का टाइप है जो `env` फ़ंक्शन को मिलता है। इसे `defineConfig`
+इनफ़र करता है।
+
 ```ts
-export interface E2EConfig {
+export interface E2EConfig<Services = Readonly<Record<string, unknown>>> {
   /** Stable project id, 1 through 256 characters; defaults to the root `package.json` name. */
   projectId?: string;
   /** The surfaces tests run on; required, at least one, each naming its engine. */
-  targets: readonly Target[];
+  targets: readonly Target<Services>[];
   /** Test file globs relative to the project root (`*`, `?`, and a whole `**` segment; a leading `!` excludes); default every `*.e2e.ts` under `tests/`. */
   tests?: string | readonly string[];
   /** Test attempt deadline in milliseconds; default 120000. */
@@ -1657,6 +1784,8 @@ export interface E2EConfig {
   maxDuration?: number;
   /** Parallel workers, 1 through 1024; default 1 in CI, else half the cores. An engine may cap it lower. */
   workers?: number;
+  /** Runs the tests of one file at the same time on separate workers; default false. */
+  fullyParallel?: boolean;
   /** `{ store }` hands every artifact to a host store as it is produced. */
   artifacts?: ArtifactsConfig;
   /** Which tests keep a trace page; default `retain-on-failure`. */
@@ -1671,6 +1800,8 @@ export interface E2EConfig {
   agents?: Readonly<Record<string, AgentConfig>>;
   /** Test filters, in order, run with `--changed-since`: each judges the tests the one before it kept. */
   filters?: readonly TestFilter[];
+  /** Dependencies of the app under test, keyed by name and defined with `defineService`, started before the app commands. */
+  services?: Readonly<Record<string, Service>>;
   /** Replay cache mode or options; default `read-write`, `read-only` in CI. */
   cache?: CacheMode | CacheConfig;
   /** Named accounts: a username and a password the model never sees. */
@@ -1687,7 +1818,7 @@ export interface E2EConfig {
  * One named test target: the app under test and the engine that drives it.
  * Without an engine, the target supports agent tools and `request` calls to absolute URLs.
  */
-export interface Target {
+export interface Target<Services = Readonly<Record<string, unknown>>> {
   /** Label in reports and for `--target`; defaults to the platform. */
   name?: string;
   /** Platform label; inherited from the engine when omitted. */
@@ -1695,29 +1826,43 @@ export interface Target {
   /** The engine driving the surface. */
   engine?: EngineHandle;
   /** The app under test: what it is, where it is served, and the command that starts it. */
-  app?: TargetApp;
+  app?: TargetApp<Services>;
   /** Which tests on this target keep a trace page, in place of the config's `trace`. */
   trace?: RecordingMode;
   /** Which attempts on this target record a video, in place of the config's `video`. */
   video?: RecordingMode;
+  /** Whether this target runs the tests of one file in parallel, in place of the config's `fullyParallel`. */
+  fullyParallel?: boolean;
 }
 ```
 
 ### `CommandConfig`
 
 ```ts
-export interface CommandConfig {
+export interface CommandConfig<Services = Readonly<Record<string, unknown>>> {
   /** Resolved with `PATH`; never shell-interpreted. */
   executable: string;
   /** Passed verbatim; `{port}` expands to the app's port. */
   args?: readonly string[];
   /** Working directory, resolved from the project root. */
   cwd?: string;
-  /** Added to the inherited set; `{port}` expands in values. */
-  env?: Readonly<Record<string, string>>;
+  /**
+   * Added to the inherited set, with `{port}` expanded in values. An `env`
+   * function is called after services start and before any app commands start.
+   * The call happens one time per run in `e2e run` and `e2e explore`, one time
+   * per session in `e2e mcp`, and one time per host in `openHost`. The function
+   * still runs when `reuseExisting` is set and a process is already running.
+   * The running process doesn't get the returned variables, and a notice is
+   * printed. The function receives the same `services` object tests get. The
+   * returned variables are validated the same way as an `env` object. Targets
+   * with the same command and the same variables share one process.
+   */
+  env?:
+    | Readonly<Record<string, string>>
+    | ((context: { readonly services: Services }) => Readonly<Record<string, string>> | Promise<Readonly<Record<string, string>>>);
   /** Variables copied from the runner's environment when set: exact names, or prefixes ending in `*`. */
   inheritEnv?: readonly string[];
-  /** Ready-probe budget in milliseconds; default 60000. */
+  /** Milliseconds the `env` function gets to return, and then the ready probe gets; default 60000 each. */
   startupTimeout?: number;
   /** Grace period before force-kill in milliseconds; default 10000. */
   shutdownTimeout?: number;
@@ -1727,6 +1872,62 @@ export interface CommandConfig {
   reuseExisting?: boolean;
 }
 ```
+
+### `Service`
+
+```ts
+/**
+ * A dependency of the app under test (like an email API, an OAuth provider,
+ * or a database) started before the app commands and stopped at the end of
+ * the run. One instance is shared across all workers.
+ */
+export type Service<Value extends object = object> = {
+  /**
+   * Milliseconds the service gets to yield (default 60000). When the timeout
+   * passes, the service's signal aborts and startup fails with
+   * `SERVICE_START_FAILED`.
+   */
+  startupTimeout?: number;
+  /**
+   * Milliseconds the code after `yield` gets to finish (default 10000). When
+   * the timeout passes, the signal aborts and the runner stops waiting.
+   */
+  shutdownTimeout?: number;
+  /**
+   * Starts the dependency and stops it when it's no longer needed. This async
+   * generator yields the service value once, and the config and tests receive
+   * it.
+   */
+  start(context: ServiceStartContext): AsyncGenerator<Value, void, undefined>;
+};
+
+/** Context passed to a service's `start` function. */
+export type ServiceStartContext = {
+  /**
+   * Aborts in these cases:
+   *
+   * - Startup is cancelled, or the service doesn't yield within
+   *   `startupTimeout` (60 seconds by default).
+   * - When the services are no longer needed, the code after `yield` doesn't
+   *   finish within `shutdownTimeout` (10 seconds by default).
+   * - Ctrl+C is pressed a second time in `e2e run` or `e2e explore`, either
+   *   during the tests or while services are stopping.
+   */
+  readonly signal: AbortSignal;
+};
+
+/**
+ * Returns `service` unchanged, preserving the inferred type that `start`
+ * yields for both the config and tests. A yielded value that can't be copied
+ * to tests is a type error.
+ */
+export function defineService<Value extends object>(
+  service: Service<Value> & { start(context: ServiceStartContext): AsyncGenerator<NoInfer<CopyableServiceValue<Value>>, void, undefined> },
+): Service<Value>;
+```
+
+yield हुई वैल्यू का हर फ़ंक्शन टेस्ट और `env` फ़ंक्शन में async फ़ंक्शन बन जाता है
+(`ServiceValue<Value>`), और बाकी हर वैल्यू कॉपी होती है।
 
 ### `ArtifactsConfig`
 

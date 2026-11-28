@@ -110,9 +110,25 @@ translation moves or goes with it in the same change.
 | pull request | pull request (keep in English, o pull request, PR) |
 | config, configuration | configuração |
 | screenshot | captura de tela |
+| match (a locator), exactly-one rule | correspondência, regra de correspondência única |
+| actionable, actionability | acionável, acionabilidade |
+| scroll (noun), scroll container | rolagem, contêiner de rolagem |
+| offset | deslocamento |
+| drag (noun) | arrasto |
+| modifier (a key) | modificador |
+| editing host | host de edição |
+| fold (reruns into a report) | incorporar, incorporação |
+| run header, summary rows | cabeçalho da execução, linhas de resumo |
+| trace page | página de trace |
 | semantic tree | árvore semântica |
 | flaky, flaky test | instável, teste instável |
 | harness | harness (keep in English, o harness) |
+| hosted attempt (`openHost`), one-shot attempt | tentativa hospedada, tentativa avulsa |
+| policy denial | negação de política |
+| transport, manifest (engine protocol) | transporte, manifesto |
+| signal (engine protocol) | sinal |
+| outbound connection | conexão de saída |
+| crash reporting | envio de relatórios de crash |
 | simulator, emulator | simulador, emulador (simulador iOS, emulador Android) |
 | real device | dispositivo real |
 | lease (a device or browser) | reserva, reservar (`DeviceLease` in code) |
@@ -129,6 +145,15 @@ translation moves or goes with it in the same change.
 | stop (a recording) | encerrar, encerramento |
 | shorthand (`request.get`) | atalho |
 | trace | trace (keep in English, o trace) |
+| engine protocol, engine server | protocolo de engine, servidor de engine |
+| contributed fixture | fixture contribuída (a engine fornece a fixture) |
+| crash report | relatório de travamento (crash report) |
+| stop reason (a replay) | motivo de interrupção |
+| fleet (telemetry) | frota |
+| main process (Electron) | processo principal |
+| packaged app, unsigned build | app empacotado, build sem assinatura |
+| file chooser | diálogo de escolha de arquivos |
+| splash screen | tela de abertura |
 | artifact | artefato |
 | matcher | matcher (keep in English, o matcher) |
 | soft assertion, soft failure | asserção suave, falha suave |

@@ -113,9 +113,9 @@ usam os próprios.
 
 ### Vercel OIDC em vez de uma chave
 
-Sem `AI_GATEWAY_API_KEY`, `gateway()` faz login com um token OIDC da Vercel de
-curta duração, que ele renova. Faça login na Vercel CLI e vincule o projeto
-uma vez:
+Se `AI_GATEWAY_API_KEY` não estiver definida, `gateway()` se autentica com um
+token OIDC da Vercel de curta duração e o renova automaticamente. Faça login
+na Vercel CLI e vincule o seu projeto uma vez:
 
 <CodeGroup>
 ```bash npm
@@ -137,12 +137,10 @@ bunx e2e run
 ```
 </CodeGroup>
 
-O gateway usa um `VERCEL_OIDC_TOKEN` válido. Se não houver um, ele obtém um
-token para o projeto em `.vercel/project.json`, que ele procura do diretório
-de trabalho para cima. O e2e não carrega nenhum arquivo `.env`, então
-um token de `npx vercel env pull` só funciona quando o seu shell o exporta, ou
-quando a configuração carrega o arquivo com
-[`process.loadEnvFile()`](/reference/config#loading).
+O gateway usa `VERCEL_OIDC_TOKEN` se ele for válido; caso contrário, pede um
+token para o projeto em `.vercel/project.json`. O e2e não carrega arquivos
+`.env` por conta própria, então exporte o token no seu shell ou chame
+[`process.loadEnvFile()`](/reference/config#loading) em `e2e.config.ts`.
 
 ## Provedores do AI SDK
 
@@ -253,16 +251,11 @@ linguagem do AI SDK. Para Clef ou Jev, use o
 
 ## Retenção de dados e conformidade
 
-A entrada do modelo é a tela com dados sensíveis ocultados, a instrução do
-passo e as capturas de tela que o agente pede. O e2e não lê nada de volta do
-provedor depois de uma resposta, então uma execução não precisa de nenhum
-estado armazenado pelo provedor.
-
-Toda requisição ao modelo identifica o e2e: um `User-Agent` que começa com
-`e2e/<version> (<platform>; <arch>)`, além de `HTTP-Referer:
-https://tester.army/e2e` e `X-Title: e2e` para o Vercel AI Gateway e o
-OpenRouter. Eles substituem os mesmos cabeçalhos definidos na instância do
-provedor.
+O e2e envia ao seu provedor de modelo a tela com dados sensíveis ocultados, a
+instrução do passo e as capturas de tela pedidas, e nunca depende de
+armazenamento de conversas no servidor. Toda requisição envia `e2e/<version>`
+no `User-Agent` (além dos cabeçalhos `HTTP-Referer` e `X-Title` para o Vercel
+AI Gateway e o OpenRouter).
 
 <AccordionGroup>
 <Accordion title="OpenAI e Azure OpenAI: retenção zero de dados">

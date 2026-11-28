@@ -1,0 +1,395 @@
+---
+title: Cache replay
+description: Putar ulang tindakan agent yang sudah diverifikasi tanpa memanggil model, lalu biarkan agent mengambil alih saat aplikasi berubah.
+"og:image": "https://e2e.com/docs/images/og/cache.png?v=d035986b13"
+"twitter:image": "https://e2e.com/docs/images/og/cache.png?v=d035986b13"
+---
+
+import { VideoCard } from '../snippets/video-card.jsx';
+
+Cache replay menyimpan tindakan dari langkah `agent.act()` yang berhasil setelah
+pemeriksaan berikutnya mengonfirmasi hasilnya. Pada eksekusi mendatang, e2e
+memutar ulang tindakan tersebut tanpa memanggil model. Jika UI berubah sehingga
+elemen atau state akhir yang diharapkan tidak lagi cocok, agent mengambil alih
+dari layar saat ini. Lihat [Tes dengan perbaikan otomatis](/self-healing).
+
+<VideoCard
+  id="FHTMtH0v4SI"
+  title="Bagaimana Cache Berbasis Agent Bekerja di e2e?"
+  subtitle="Dalam video ini, Kacper menunjukkan cara e2e memutar ulang tindakan agent tanpa memanggil model dan apa yang terjadi ketika aplikasi berubah."
+/>
+
+`agent.assert`, `agent.waitFor`, dan `agent.extract` selalu dijalankan langsung.
+Ringkasan eksekusi merinci status setiap langkah `agent.act`:
+
+```text
+           AI  4.1k tokens · 2 model calls · openai/gpt-6-luna-fast
+        Cache  4 replayed · 1 handed off · 1 missed · 1 not saved
+```
+
+`not saved` menghitung langkah yang berhasil tanpa menulis rekaman. Biasanya
+ini terjadi karena tidak ada assertion setelah langkah tersebut atau karena
+langkah itu tidak mengubah UI secara terlihat.
+
+## Kapan rekaman disimpan
+
+Selalu akhiri tes dengan assertion. Dalam mode `read-write`, e2e hanya
+menyimpan rekaman `agent.act` di akhir tes jika pemeriksaan verifikasi
+setelahnya berhasil. Satu pemeriksaan di akhir mengonfirmasi semua pemanggilan
+`agent.act` sebelumnya.
+
+```ts title="tests/cart.e2e.ts"
+import { expect, test } from 'e2e';
+
+test('adds an item', async ({ app, agent, screen }) => {
+  await app.open('/cart');
+
+  await agent.act('add one item to the cart');
+
+  await expect(screen.getByRole('status')).toHaveText('1 item');
+});
+```
+
+| Dianggap sebagai verifikasi | Tidak dianggap sebagai verifikasi |
+| --- | --- |
+| `expect(locator).toHaveText(...)` dan matcher locator lainnya | `expect(value).toBe(...)` pada nilai biasa |
+| `expect(browser).toHaveURL(...)` dan assertion engine lainnya | `expect.poll(...)` |
+| `locator.waitFor()`, `browser.waitForURL()` | `locator.textContent()` dan pembacaan lainnya |
+| `agent.assert(...)`, `agent.waitFor(...)` | `agent.extract(...)`, pemanggilan `act` lain, atau langkah yang sekadar berhasil |
+
+Dalam laporan JSON, `step.cache.write` mencatat status entri:
+
+| `step.cache.write` | Arti |
+| --- | --- |
+| `saved` | Direkam untuk eksekusi berikutnya. |
+| `kept` | Entri yang sudah ada dibiarkan apa adanya. |
+| `unconfirmed` | Tidak disimpan karena tidak ada pemeriksaan verifikasi yang berhasil setelah langkah tersebut. |
+| `evicted` | Dihapus karena pemutaran ulang gagal, memerlukan perbaikan, atau belum dikonfirmasi sebelum terjadi kegagalan. |
+| `no-change` | Tidak disimpan karena tidak ada kontrol atau rute yang berubah secara terlihat (termasuk langkah yang hanya menyentuh [iframe lintas origin](/browser#reach-into-an-iframe)). Langkah seperti ini dijalankan langsung setiap kali. |
+| `not-written` | Tidak disimpan karena cache store menolaknya (misalnya, ukuran melewati batas). |
+
+Jika tes gagal di tengah jalan, e2e tetap menyimpan langkah sebelumnya yang
+sudah dikonfirmasi dan menghapus rekaman pemutaran ulang yang rusak. Untuk
+mempertahankan langkah penyiapan saat men-debug assertion yang gagal, tambahkan
+`locator.waitFor()` singkat setelah penyiapan. Membatalkan eksekusi tidak
+mengubah cache.
+
+<Accordion title="Kegagalan saat model tidak dapat menjawab">
+Jika tes gagal hanya karena model tidak dapat diakses (model belum
+dikonfigurasi, API key ditolak, batas laju tercapai, atau provider mengalami
+gangguan), e2e tidak menghapus rekaman Anda. Kegagalan tersebut tidak
+menunjukkan masalah pada aplikasi, sehingga eksekusi `read-write` tanpa akses
+model tidak akan menghapus entri cache yang berfungsi.
+
+Kegagalan alur tetap menghapus rekaman seperti biasa: output model tidak valid
+(`MODEL_OUTPUT_INVALID`), context overflow (`CONTEXT_OVERFLOW`), penolakan
+(`MODEL_REFUSED`), `STEP_TIMEOUT`, atau kegagalan lain dalam percobaan yang
+sama (misalnya assertion `afterEach`).
+</Accordion>
+
+## Hal yang harus cocok
+
+Setiap entri cache terkait dengan satu tes, target, instruksi, kumpulan params,
+dan agent. Cache miss terjadi jika Anda:
+
+- mengganti nama tes, blok `describe`, atau target, maupun memindahkan file tes;
+- mengubah teks instruksi atau param biasa;
+- beralih ke agent lain atau mengubah `context` / `agentContext`-nya;
+- beralih engine atau mengubah `projectId` maupun `app.identity`.
+
+Beralih model atau memperbarui engine **tidak** membatalkan cache. Gunakan
+`--no-cache` jika ingin menguji kinerja model baru.
+
+Nilai dinamis seperti timestamp atau alamat email yang dibuat otomatis akan
+menyebabkan cache miss di setiap eksekusi. Bungkus dengan `unique()` agar e2e
+mengganti nilainya saat pemutaran ulang:
+
+```ts
+import { unique } from 'e2e';
+
+const name = `E2E ${Date.now()} Company`;
+await agent.act('create a company named {name}', { params: { name: unique(name) } });
+await expect(screen.getByRole('heading', { name })).toBeVisible();
+```
+
+Gunakan `unique()` untuk data yang dimasukkan atau ditampilkan alur, dan params
+biasa untuk nilai yang mengubah cabang alur (seperti nama paket). Jangan
+gunakan kembali nilai `unique()` di dalam nilai param lain, karena e2e akan
+melewati perekaman langkah tersebut.
+
+Untuk URL preview yang berubah setiap kali di-deploy, atur
+[`app.identity`](/reference/config#the-app-under-test) agar rekaman tetap
+berlaku di semua preview. Pada perangkat mobile, pemutaran ulang mengenali
+layar berdasarkan [judul layar](/reference/mobile#replay-cache-on-a-device).
+
+## Jalankan ulang tes saat memperbaikinya
+
+Pertahankan cache dalam mode `read-write` (default lokal) saat memperbaiki tes
+yang gagal. Tujuan penyiapan sebelumnya yang sudah dikonfirmasi akan diputar
+ulang tanpa memanggil model:
+
+1. Jalankan hanya tes yang sedang diperbaiki berdasarkan nomor baris:
+   `npx e2e run tests/cart.e2e.ts:3`.
+2. Jangan mengganti nama tes atau mengubah kata-kata tujuan yang berhasil,
+   karena itu [menyebabkan cache miss](#what-must-match).
+3. Berikan `--retries 0` jika percobaan ulang diaktifkan (percobaan ulang
+   melewati pemutaran ulang dan menjalankan setiap tujuan langsung).
+4. Setelah berhasil, jalankan sekali dengan `--no-cache` untuk memastikan
+   agent langsung tetap dapat mencapai tujuan tanpa rekaman.
+
+## Cara kerja pemutaran ulang
+
+1. **Periksa layar awal** untuk memastikan aplikasi berada di rute yang sama.
+2. **Putar ulang setiap tindakan yang direkam** dengan mencocokkan kontrol
+   berdasarkan role, nama, ID tes, dan konteks di sekitarnya. e2e menunggu
+   kontrol muncul dan berhenti jika hasil pencocokannya ambigu.
+3. **Periksa state akhir** (rute terakhir serta kontrol yang muncul, hilang,
+   atau berubah state).
+4. **Selesaikan tanpa memanggil model**, atau serahkan ke agent langsung dengan
+   ringkasan tindakan yang sudah dijalankan.
+
+Teks yang diketik diputar ulang persis; pengisian secret mencari secret saat
+ini berdasarkan nama lalu menjalankan ulang otorisasi.
+
+Pemutaran ulang selesai segera setelah perubahan UI yang direkam muncul. Ini
+dapat terjadi sebelum konten di bagian bawah halaman selesai dimuat. Jika
+langkah berikutnya memeriksa konten asinkron, gunakan `agent.waitFor`, bukan
+`agent.assert`.
+
+<Accordion title="Apa yang dianggap sebagai rute yang sama">
+Rute mencakup origin, jalur, dan parameter kueri; ID dinamis, token,
+timestamp, dan fragmen diabaikan. Contohnya,
+`/orders/42?t=1727780000` dan `/orders/7?t=1727780999` dianggap sebagai rute
+yang sama, sedangkan `?tab=notes` dan `?tab=billing`, atau `/products/a` dan
+`/products/b`, dianggap sebagai rute yang berbeda.
+
+Halaman pada origin aplikasi Anda sendiri hanya dibandingkan berdasarkan
+jalurnya, sehingga rekaman dapat digunakan di URL preview yang memakai
+`app.identity` yang sama.
+</Accordion>
+
+<Accordion title="Cara pemeriksaan akhir memverifikasi layar">
+- Setidaknya satu perubahan yang direkam harus terjadi saat pemutaran ulang
+  (atau tindakan terakhir harus berpindah ke rute lain). State yang sudah ada
+  di layar sebelum langkah dimulai tidak dihitung.
+- Alert tak terduga yang tidak muncul saat perekaman akan menghentikan
+  pemutaran ulang.
+- Nilai yang berubah-ubah seperti tanggal, durasi, atau UUID yang dibuat
+  otomatis tetap ditoleransi selama ada perubahan UI stabil yang juga terjadi.
+  Jumlah berlabel yang muncul di layar yang sama (seperti `3 records imported`)
+  tetap harus cocok saat diputar ulang.
+- Kontrol tanpa nama dicocokkan berdasarkan posisinya di dalam baris, item
+  daftar, atau grup yang bernama. Jika ID tes berubah, e2e menggunakan role dan
+  nama sebagai alternatif jika hasilnya tidak ambigu.
+</Accordion>
+
+## Alasan langkah tidak diputar ulang
+
+Setiap langkah `act` menyertakan detail cache di
+[halaman trace](/debugging#traces) dan pada `result.cache`.
+
+| Ringkasan eksekusi | `step.cache.mode` | Arti |
+| --- | --- | --- |
+| `replayed` | `self-finalized` | Diputar ulang sepenuhnya tanpa memanggil model. |
+| `handed off` | `agent-concluded` | Pemutaran ulang dimulai, lalu dialihkan ke agent. |
+| `missed` | `missed` | Dijalankan langsung sejak awal. |
+
+Jika langkah mengalami cache miss atau dialihkan, trace menampilkan alasan
+dan tindakan yang menghentikannya. Rekaman `truncated` tidak pernah diputar
+ulang, jadi reporter default juga menyebutkannya pada baris langkah tersebut
+di setiap eksekusi sampai langkahnya berubah:
+
+```text
+   ✓ adds a note > agent.act "Add a note to the first row" 9.41s · 3 model calls · not replayed: truncated
+```
+
+| Alasan | Yang terjadi | Tindakan |
+| --- | --- | --- |
+| `no-entry` | Tidak ada rekaman yang cocok dengan langkah dan params ini. | Eksekusi berikutnya yang terverifikasi akan merekamnya. |
+| `retry` | Percobaan ulang dijalankan langsung (kecuali `--strict-cache` aktif). | Tidak perlu tindakan. |
+| `invalid-entry` | Rekaman tidak dapat dibaca, terlalu besar, atau memakai skema yang tidak kompatibel. | Jalankan `npx e2e cache clear`. |
+| `truncated` | Rekaman melewati batas ukuran atau jumlah tindakan ([lihat di bawah](#limits-and-gaps)). | Pecah langkah menjadi tujuan yang lebih kecil atau berikan secret sebagai handle `Secret`. |
+| `wrong-context` | Aplikasi dimulai pada rute yang berbeda dari rute saat perekaman. | Buka layar yang sama sebelum langkah dimulai. |
+| `target-not-found` | Kontrol yang direkam tidak muncul dalam 15 detik. | Jika UI berubah, eksekusi berikutnya yang berhasil akan memperbarui cache. Beri label pada kontrol tanpa nama atau letakkan dalam kontainer bernama. |
+| `target-ambiguous` | Beberapa kontrol cocok, padahal rekaman mengharapkan satu (atau jumlah kontrol yang cocok berubah). | Beri nama berbeda pada kontrol berulang atau gunakan data tes yang unik. |
+| `gap` | Tindakan tidak dapat diputar ulang dengan aman ([lihat di bawah](#limits-and-gaps)). | Biarkan agent menjalankannya langsung atau berikan nilai stabil melalui `params`. |
+| `action-failed` | Aplikasi menolak tindakan yang diputar ulang. | Periksa aplikasinya. |
+| `action-uncertain` | Tindakan yang diputar ulang gagal dan mungkin sudah diterapkan; agent memeriksa layar sebelum bertindak. | Periksa aplikasinya. |
+| `viewport-changed` | Tap/hover/drag berdasarkan koordinat direkam pada ukuran viewport berbeda. | Jaga ukuran viewport tetap konsisten. |
+| `end-mismatch` | Semua tindakan dijalankan, tetapi perubahan UI yang diharapkan tidak cocok. | Periksa data tersisa, banner yang tidak stabil, atau regresi sebenarnya. |
+
+Untuk memastikan cache bukan penyebab kegagalan saat debugging, jalankan sekali
+dengan `--no-cache`:
+
+<CodeGroup>
+```bash npm
+npx e2e run --no-cache
+```
+
+```bash pnpm
+pnpm exec e2e run --no-cache
+```
+
+```bash bun
+bunx e2e run --no-cache
+```
+</CodeGroup>
+
+### Batas dan gap
+
+Rekaman ditandai `truncated` jika sebuah langkah melakukan lebih dari 50
+tindakan, mengetik string lebih dari 4.096 karakter (atau secret terdaftar
+secara langsung), maupun berinteraksi dengan kontrol tanpa deskripsi yang
+dapat digunakan.
+
+Beberapa tindakan tidak dapat diputar ulang dengan aman dan ditandai sebagai
+`gap`, sehingga agent langsung yang akan menanganinya:
+
+- memanggil [tool proyek](/tools) yang mengubah data;
+- mengetik nilai yang dibaca agent dari layar (seperti kode sekali pakai atau
+  token yang baru dibuat), dihitung dari tanggal saat ini, atau dibaca dari
+  screenshot.
+
+Nilai yang diberikan di instruksi atau `params` (serta nilai yang disusun oleh
+agent) dapat diputar ulang seperti biasa. Pada field kode sekali pakai, atau
+field fokus pada langkah yang menampilkannya, hanya nilai utuh minimal dua
+karakter yang tertulis di instruksi atau `params` yang dapat diputar ulang;
+kode yang diketik ke kotak digit terpisah menjadi gap sejak karakter pertama.
+
+## Isi rekaman
+
+Setiap entri adalah file JSON di `.e2e/cache/` yang berisi tindakan yang
+direkam, deskripsi target, teks yang diketik, ringkasan singkat, serta
+pemeriksaan state akhir yang diharapkan. Rekaman tidak pernah menyimpan prompt,
+transkrip, screenshot, pohon DOM, atau nilai secret (pengisian secret hanya
+menyimpan namanya).
+
+<Warning>
+Nilai non-secret yang diketik disimpan apa adanya. Tinjau diff cache sebelum
+melakukan commit atau membagikannya. Lihat [keamanan cache](/reference/security#cache-trust).
+</Warning>
+
+## Mode
+
+| Mode | Memutar ulang | Merekam | Bawaan |
+| --- | --- | --- | --- |
+| `'read-write'` | ya | ya | secara lokal |
+| `'read-only'` | ya | tidak | di CI jika `cache` tidak diatur |
+| `'off'` | tidak | tidak | `--no-cache` untuk satu eksekusi |
+
+```ts title="e2e.config.ts fragment"
+cache: 'off',
+// or
+cache: { mode: 'read-write', dir: '.e2e/cache' },
+```
+
+`--no-cache` menimpa konfigurasi untuk satu eksekusi. Dalam mode `read-only`,
+entri usang tidak diubah sampai eksekusi `read-write` menggantinya.
+`cache.store` khusus menggantikan file store dan tidak otomatis memakai mode
+`read-only` di CI. Sesi interaktif `e2e explore` dan `e2e mcp` tidak memakai
+cache (kecuali MCP menjalankan tes melalui
+[`open_session {test}`](/reference/mcp#running-a-test)).
+
+## Bagikan cache antar-checkout
+
+Arahkan beberapa checkout atau worktree ke satu folder bersama dengan
+`E2E_CACHE_DIR` atau `--cache-dir`. Berikan `projectId` yang sama (atau nilai
+`name` dari `package.json`) pada setiap checkout agar entri cocok di semua
+jalur.
+
+- Penulisan dilakukan secara atomik agar eksekusi paralel dapat memakai
+  direktori yang sama. Checkout berbagi entri, sehingga eksekusi yang gagal
+  pada checkout mana pun menghapus entri bersama, dan branch berbeda dengan
+  identitas aplikasi yang sama dapat saling menimpa.
+- Saat override ini diatur, cache yang di-commit di `cache.dir` tidak dibaca.
+- Gunakan satu direktori per proyek agar `--strict-cache` tidak mencampur
+  entri dari repo lain.
+
+```bash
+E2E_CACHE_DIR=~/.cache/my-app/e2e npx e2e run
+```
+
+## Commit cache replay
+
+<span id="commit-your-traces" />
+
+`e2e init` menambahkan `.e2e/cache/` ke `.gitignore`. Untuk membagikan rekaman
+kepada tim dan CI, hapus baris itu lalu commit `.e2e/cache/`. Default CI adalah
+`read-only`, sehingga entri yang di-commit diputar ulang tanpa diubah.
+
+Eksekusi lokal menjaga diff git tetap bersih: e2e hanya menulis ulang file
+cache saat langkah direkam pertama kali, diperbaiki setelah UI berubah,
+dihapus dari cache, atau pembaruan `e2e` mengubah format kunci cache.
+
+## Gagalkan rekaman yang usang
+
+Secara default, jika rekaman yang di-commit tidak lagi cocok dengan aplikasi,
+agent langsung mengambil alih dan CI akan memanggil model di setiap eksekusi
+sampai cache diperbarui. Berikan `--strict-cache` (atau atur
+`cache: { strict: true }`) agar langsung gagal tanpa memanggil model:
+
+<CodeGroup>
+```bash npm
+CI=1 npx e2e run --strict-cache
+```
+
+```bash pnpm
+CI=1 pnpm exec e2e run --strict-cache
+```
+
+```bash bun
+CI=1 bunx e2e run --strict-cache
+```
+</CodeGroup>
+
+Mode strict menggagalkan setiap rekaman dengan UI atau kunci cache yang berubah
+melalui `REPLAY_STALE` (exit 2, tanpa percobaan ulang), serta tidak pernah
+menulis atau menghapus file cache. Deteksi kunci alternatif hanya berlaku
+untuk file store bawaan (bukan `cache.store` khusus). Langkah yang belum pernah
+direkam, mengalami kegagalan saat membaca store, atau memiliki rekaman `gap`
+atau `truncated` tetap dijalankan langsung.
+
+Untuk memperbarui rekaman yang usang:
+
+1. Jalankan tes secara lokal dalam mode `read-write` tanpa `--strict-cache`
+   (nonaktifkan `cache.strict` jika diatur dalam konfigurasi).
+2. Commit file cache yang sudah diperbarui.
+
+## Periksa cache
+
+<CodeGroup>
+```bash npm
+npx e2e cache ls      # one row per entry: test, target, instruction digest, age, actions
+npx e2e cache stats   # entry count and size
+npx e2e cache clear   # delete every entry
+```
+
+```bash pnpm
+pnpm exec e2e cache ls      # one row per entry: test, target, instruction digest, age, actions
+pnpm exec e2e cache stats   # entry count and size
+pnpm exec e2e cache clear   # delete every entry
+```
+
+```bash bun
+bunx e2e cache ls      # one row per entry: test, target, instruction digest, age, actions
+bunx e2e cache stats   # entry count and size
+bunx e2e cache clear   # delete every entry
+```
+</CodeGroup>
+
+<Note>
+Persentase `cached` pada penggunaan AI adalah prompt cache milik provider.
+Fitur itu mengurangi biaya pemanggilan model. Cache replay melewati pemanggilan
+model tersebut.
+</Note>
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Referensi konfigurasi" icon="sliders" href="/reference/config#cache">
+    `mode`, `store`, `dir`.
+  </Card>
+  <Card title="Referensi CLI" icon="terminal" href="/reference/cli#e2e-cache">
+    `e2e cache ls`, `stats`, `clear`.
+  </Card>
+</CardGroup>

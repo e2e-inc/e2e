@@ -1,0 +1,132 @@
+---
+title: Bug bash
+description: Jalankan banyak sesi explore sekaligus, lalu buktikan setiap bug dengan tes yang gagal.
+"og:image": "https://e2e.com/docs/images/og/bug-bash.png?v=eb59f8290c"
+"twitter:image": "https://e2e.com/docs/images/og/bug-bash.png?v=eb59f8290c"
+---
+
+import { ShowMore } from '../snippets/show-more.jsx';
+import { Video } from '../snippets/video.jsx';
+
+Bug bash menjalankan banyak sesi `e2e explore` secara bersamaan, masing-masing
+untuk satu area aplikasi. Coding agent kemudian menulis tes untuk setiap
+temuan dan melaporkannya sebagai bug hanya jika tes tersebut gagal.
+
+<Video>
+  <video src="/images/bug-bash.mp4" aria-label="Coding agent menjalankan bug bash di browser headed." muted loop playsInline controls />
+
+  Setiap browser menjalankan satu sesi explore.
+</Video>
+
+## Sebelum memulai
+
+- Pastikan aplikasi Anda dapat melayani beberapa explorer sekaligus. Jalankan
+  aplikasi satu kali dengan `reuseExisting: true` pada `app.command`, atau
+  gunakan port `0` di URL agar setiap eksekusi memiliki salinan sendiri. (Di
+  CI, e2e mengabaikan `reuseExisting`, jadi gunakan port `0`.) Lihat
+  [Menjalankan aplikasi](/web#starting-your-app).
+- Untuk mobile, konfigurasi satu target per simulator atau emulator agar
+  setiap explorer memiliki perangkat sendiri.
+- Setiap sesi explore memanggil model dan menampilkan penggunaan token, biaya,
+  serta durasinya saat selesai.
+- Jangan mengubah data pada situs bersama atau situs produksi.
+
+Agent menangani penyiapan lainnya, seperti akun berisi data awal dan sign-in,
+berdasarkan skill.
+
+## Pasang skill
+
+Coding agent menjalankan bug bash menggunakan [`e2e` skill](/coding-agents),
+yang dipasang oleh `e2e init`. Untuk memasangnya tanpa `init`:
+
+<CodeGroup>
+```bash npm
+npx skills add e2e-inc/e2e
+```
+
+```bash pnpm
+pnpm dlx skills add e2e-inc/e2e
+```
+
+```bash bun
+bunx skills add e2e-inc/e2e
+```
+</CodeGroup>
+
+## Mulai bug bash
+
+Berikan prompt kepada coding agent:
+
+```text
+Bug bash the checkout and account settings on this branch.
+```
+
+## Yang dilakukan agent
+
+<ShowMore id="bug-bash-steps">
+
+1. Membaca rute aplikasi. Jika bekerja pada branch, agent juga membaca diff.
+2. Menulis 5 sampai 10 charter. Charter adalah tujuan satu kalimat untuk satu
+   area, dengan satu sudut pandang: pengguna baru, angka dan teks, input kasus
+   tepi, state setelah pemuatan ulang, atau jalur error.
+3. Menjalankan satu `e2e explore` untuk setiap charter, empat sekaligus.
+   Setiap sesi memakai persona (`--agent`) dan direktori output (`--output`)
+   sendiri.
+4. Menggabungkan temuan dari semua charter.
+5. Menolak temuan yang penyebabnya sudah diketahui. Penyebabnya bisa berupa
+   batasan explorer (misalnya, tautan yang membuka tab baru), lingkungan
+   lokal, desain yang memang diinginkan, atau data awal.
+6. Menulis tes reproduksi untuk setiap temuan yang tersisa: langkah temuan
+   menjadi panggilan `agent.act` dan perilaku yang diharapkan menjadi
+   `agent.assert` penutup. Agent dapat memulai satu subagent untuk setiap area.
+7. Menjalankan tes reproduksi. Temuan hanya dikonfirmasi sebagai bug jika tes
+   reproduksinya benar-benar gagal pada cacat yang dilaporkan.
+8. Melaporkan, dengan urutan berikut: bug yang terkonfirmasi, risiko produksi
+   yang tidak dapat diverifikasi secara lokal, temuan yang ditolak beserta
+   alasannya, lalu peringatan.
+
+</ShowMore>
+
+Setiap bug yang terkonfirmasi memiliki tes reproduksi dan langkahnya, serta
+screenshot dan video explorer jika engine merekamnya.
+
+<Warning>
+Video tidak disamarkan. Jika explorer mengetik kata sandi, periksa video
+sebelum membagikannya.
+</Warning>
+
+Untuk membaca prosedur lengkap, jalankan `npx e2e guide bug-bash`.
+
+## Tes reproduksi
+
+Tes reproduksi akan gagal sampai bug diperbaiki. Agent memberi tag `bugbash`
+pada setiap tes. Keluarkan tes tersebut dari eksekusi yang menjadi syarat
+merge:
+
+<CodeGroup>
+```bash npm
+npx e2e run --exclude-tag bugbash
+```
+
+```bash pnpm
+pnpm exec e2e run --exclude-tag bugbash
+```
+
+```bash bun
+bunx e2e run --exclude-tag bugbash
+```
+</CodeGroup>
+
+Setelah bug diperbaiki, tes akan berhasil. Hapus tag dan pertahankan tes
+tersebut sebagai tes regresi.
+
+## Selanjutnya
+
+<CardGroup cols={2}>
+  <Card title="Menjelajahi tanpa tes" icon="compass" href="/explore">
+    Cara kerja satu eksekusi `e2e explore`, batas anggaran, dan laporannya.
+  </Card>
+  <Card title="MCP server" icon="plug" href="/mcp-server">
+    Sesi langsung untuk beberapa coding agent sekaligus.
+  </Card>
+</CardGroup>
