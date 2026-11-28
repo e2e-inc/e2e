@@ -249,6 +249,9 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
             // key that types the character on this Mac's layout, in its Command layer for a Command shortcut. Text and
             // Shift keys carry their characters, as typed.
             let shortcut = flags.intersects(CGEventFlags::CGEventFlagCommand | CGEventFlags::CGEventFlagControl | CGEventFlags::CGEventFlagAlternate);
+            // The key that types the character on this Mac's layout without a modifier, when there is one.
+            let on_layout =
+                if shortcut { None } else { crate::layout::characters(crate::layout::Layer::Plain).and_then(|table| crate::layout::code_for(lower, &table)) };
             let code = if shortcut {
                 let layer = if flags.contains(CGEventFlags::CGEventFlagCommand) { crate::layout::Layer::Command } else { crate::layout::Layer::Plain };
                 let table = crate::layout::characters(layer)
@@ -262,13 +265,16 @@ pub fn parse_combo(combo: &str) -> Outcome<Combo> {
             } else {
                 // The key carries its character, but an app that reads the key code must see the key a person would
                 // press on this layout, as typed text does; a layout with no key for it keeps the US one.
-                crate::layout::characters(crate::layout::Layer::Plain).and_then(|table| crate::layout::code_for(lower, &table)).unwrap_or(us)
+                on_layout.unwrap_or(us)
             };
-            // With Shift the key types its shifted character on this Mac's layout (Shift-3 is £ on a British one), else the US
-            // one; one with neither is left to the app to work out.
+            // With Shift the key types its shifted character: on this Mac's layout when the layout gave the key (Shift-3 is £
+            // on a British one), else the US one, since the US key's Shift layer on another layout types something
+            // unrelated; one with neither is left to the app to work out.
             let typed = if flags.contains(CGEventFlags::CGEventFlagShift) {
-                crate::layout::characters(crate::layout::Layer::Shift)
-                    .and_then(|table| table.iter().find(|(key, _)| *key == code).map(|(_, character)| *character))
+                on_layout
+                    .and_then(|key| {
+                        crate::layout::characters(crate::layout::Layer::Shift)?.iter().find(|(code, _)| *code == key).map(|(_, character)| *character)
+                    })
                     .or_else(|| shifted(lower))
             } else {
                 Some(lower)
