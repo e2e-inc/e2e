@@ -534,10 +534,15 @@ export class DesktopSurface {
     return undefined;
   }
 
-  /** The window a command reads or acts in: the one the test made active, else the first by `byPreference`. */
+  /**
+   * The window a command reads or acts in: the one the test made active, else the first by `byPreference` that
+   * accessibility can read, as `screen` reads it, else the first.
+   */
   private activeWindow(windows: readonly RawWindow[]): RawWindow | undefined {
     const chosen = this.activeChoice(windows);
-    return chosen === undefined ? byPreference(windows)[0] : windows.find((window) => window.id === chosen);
+    if (chosen !== undefined) return windows.find((window) => window.id === chosen);
+    const ranked = byPreference(windows);
+    return ranked.find((window) => window.accessible !== false) ?? ranked[0];
   }
 
   /** `desktop.closeApp()`: the app quit, as at the end of every test. */

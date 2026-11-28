@@ -950,6 +950,12 @@ describe('desktop fixture: windows', () => {
     await expect(closed.activate()).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/has closed/) });
   });
 
+  it('presses a key into the window screen reads, not one accessibility cannot read that ranks first', async () => {
+    const { surface, fake } = await launched({ listWindows: [windows(() => [{ id: 'w-doc', visible: false }, { id: 'w-raw', visible: true, accessible: false }])] }, { observe: false });
+    await surface.pressKey('Enter', operation());
+    expect(last(fake, 'press')).toMatchObject({ windowId: 'w-doc' });
+  });
+
   it('marks as active the window screen reads, not a focused one accessibility cannot read', async () => {
     const { surface } = await launched({ listWindows: [windows(() => [{ ...mine, accessible: false }, panel])] });
     const desktop = createDesktopFixture(surface, fixtureContext());
