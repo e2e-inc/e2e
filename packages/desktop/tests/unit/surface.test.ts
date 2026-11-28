@@ -1010,6 +1010,14 @@ describe('desktop fixture: windows', () => {
     expect(await Promise.all([first!.isActive(), second!.isActive()])).toEqual([false, true]);
   });
 
+  it('reads no window as closed when the list fails as no app while the app still runs', async () => {
+    const both = windows(() => [mine, panel]);
+    const { surface } = await launched({ listWindows: [both, both, both, failure('APP_NOT_FOUND', 'not_delivered', 'the app is no longer running'), both] });
+    const desktop = createDesktopFixture(surface, fixtureContext());
+    const controls = (await desktop.windows())[1]!;
+    expect(await controls.isClosed()).toBe(false);
+  });
+
   it('reads no window as closed while the screen is locked, which lists none, and reads again until it unlocks', async () => {
     const { surface, fake } = await launched({ listWindows: [(driver) => windows(() => (driver.locked === true ? [] : [mine, panel]))(driver)] });
     const desktop = createDesktopFixture(surface, fixtureContext(1_000));
