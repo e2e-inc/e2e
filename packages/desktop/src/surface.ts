@@ -1034,10 +1034,12 @@ export class DesktopSurface {
             onCutOff: () => this.driver?.cancelInput(focusId),
           }).catch((cause: unknown) => Promise.reject(translate(cause, 'focus window', true)));
         }
-        await this.refCommand('focus', binding, operation);
-        // The focus already reached the app: a failure from here on may have committed, and a retry of the whole press
-        // would focus the control a second time, which an app's focus handler sees.
-        await afterChange(`press ${action.key}`, async () => {
+        const focused = await this.tryRef('focus', binding, operation).catch((cause: unknown) => Promise.reject(translate(cause, 'focus', true)));
+        // A focus that moved the keyboard reached the app: a failure from here on may have committed, and a retry of the whole
+        // press would focus the control a second time, which an app's focus handler sees. A control that already held the
+        // keyboard was sent nothing, so a refusal from here on is still one that sent nothing.
+        const moved = (focused as { moved?: boolean } | undefined)?.moved !== false;
+        const keyed = async (): Promise<void> => {
           // The key goes to the process, which hands it to its key window: with another window that could be it, the control's must be the one shown focused.
           // A window on another Space, which the window list shows as not visible, is still the control's: with `physicalInput` the press brings it forward.
           const windows = await this.ownWindows(operation);
@@ -1050,7 +1052,8 @@ export class DesktopSurface {
           }
           // Focusing can hand focus on (a dialog it opens): the driver sends the key only while the control's own element still holds it.
           await this.sendKey(combo, window, `press ${action.key}`, operation, binding.ref);
-        });
+        };
+        await (moved ? afterChange(`press ${action.key}`, keyed) : keyed());
         break;
       }
       case 'selectOption':

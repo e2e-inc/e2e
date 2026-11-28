@@ -46,7 +46,6 @@ pub enum Action {
     Click,
     DoubleClick,
     RightClick,
-    Focus,
     Clear,
     Check(bool),
     ScrollTo,
@@ -428,7 +427,7 @@ fn click_shown(entry: &Entry, deadline: Instant) -> Outcome<()> {
     // A tap on a text field puts the keyboard there. AppKit's password field also offers AXConfirm, which the action
     // choice below would send in its place, leaving the keyboard in the field before.
     if role == "textfield" && settable(element, "AXFocused", "click")? {
-        return focus(element, deadline);
+        return focus(element, deadline).map(|_moved| ());
     }
     let names = action_names(element, "click")?;
     if let Some(action) = ["AXPress", "AXOpen", "AXConfirm"].into_iter().find(|name| names.iter().any(|candidate| candidate == name)) {
@@ -462,12 +461,13 @@ fn click_shown(entry: &Entry, deadline: Instant) -> Outcome<()> {
         return Err(Failure::unconfirmed(codes::ACTION_FAILED, "the element did not become selected"));
     }
     if roles::takes_text(role) && settable(element, "AXFocused", "click")? {
-        return focus(element, deadline);
+        return focus(element, deadline).map(|_moved| ());
     }
     Err(Failure::refused(codes::ACTION_NOT_SUPPORTED, format!("this {role} takes no click through accessibility")))
 }
 
-fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
+/// Puts the keyboard on `element`, and says whether it moved it there: one that already held it was sent nothing.
+fn focus(element: &Element, deadline: Instant) -> Outcome<bool> {
     // The app's focused element is the one source, as the snapshot reads it: a table's cell reports the table's focus as
     // its own `AXFocused`.
     let holds = || -> Result<bool, AXError> {
@@ -480,7 +480,7 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
     };
     // A stall before the write is no proof the element lacks focus: nothing is sent, and a retry may get past it.
     if holds().map_err(|error| unread(error, "focus"))? {
-        return Ok(());
+        return Ok(false);
     }
     go("focus")?;
     // A focus write that failed after the app took it (a focus handler that replaced the element) may have run its
@@ -492,7 +492,7 @@ fn focus(element: &Element, deadline: Instant) -> Outcome<()> {
         last == Ok(true)
     });
     match last {
-        Ok(true) => Ok(()),
+        Ok(true) => Ok(true),
         Err(_) => Err(Failure::unconfirmed(codes::APP_UNRESPONSIVE, "focus: the app did not answer in time after the element was focused")),
         Ok(false) => Err(Failure::unconfirmed(codes::ACTION_FAILED, "focus: the element did not take keyboard focus")),
     }
@@ -505,6 +505,11 @@ fn guarded<T>(input_id: Option<u32>, deadline: Instant, work: impl FnOnce() -> O
     let outcome = work();
     CURRENT.with(|current| current.borrow_mut().take());
     outcome
+}
+
+/// Puts the keyboard on the element `reference` names, as `focus` does.
+pub fn focus_on(reference: &str, input_id: Option<u32>, deadline: Instant) -> Outcome<bool> {
+    guarded(input_id, deadline, || focus(&resolve(reference)?.element, deadline))
 }
 
 /// Runs one action on the element `reference` names.
@@ -536,7 +541,6 @@ fn run(reference: &str, action: Action, deadline: Instant) -> Outcome<()> {
             menu_shown(entry.pid, before, deadline);
             Ok(())
         }
-        Action::Focus => focus(element, deadline),
         Action::Clear => set_value(element, "", deadline),
         Action::Check(wanted) => check(element, wanted, deadline),
         Action::ScrollTo => reveal(element, deadline, "scroll into view").map(|_| ()),

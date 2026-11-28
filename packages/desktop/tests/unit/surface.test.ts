@@ -1492,6 +1492,12 @@ describe('DesktopSurface: keys', () => {
     await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED', message: expect.stringMatching(/lost keyboard focus/) });
   });
 
+  it('refuses the key as nothing sent when the control already held the keyboard, so the focus sent nothing either', async () => {
+    const lost = failure('ACTION_FAILED', 'not_delivered', 'the control lost keyboard focus before the key was sent, so nothing was sent');
+    const { surface, byTestId } = await launched({ snapshot: [renamed('macos/sign-in-form', 'w-8321', 'w-mine')], act: [ok({ moved: false })], press: [lost] });
+    await expect(surface.perform(byTestId('username'), { kind: 'press', key: 'Enter' }, operation())).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/lost keyboard focus/) });
+  });
+
   it('presses a key into one of two look-alike fields by its own element, whatever box it has once focused', async () => {
     // A look-alike has no identity a later read could find it by, and a field can grow as it takes focus: the driver holds its element.
     const field = (ref: string, y: number) => ({ role: 'textfield', name: 'Item', ref_id: ref, bounds: { x: 10, y, width: 100, height: 20 } });
