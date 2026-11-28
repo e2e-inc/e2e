@@ -44,51 +44,14 @@ describe('nodeOp', () => {
     expect(await run(await element('#hidden'), 'checkEnabled', false)).toEqual({ ok: false, reason: 'it is not visible' });
   });
 
-  it('finds an element inert through the slot it is shown in, and outside an open modal dialog, and refuses a file input there', async () => {
-    await window.setContent(`<span id="host"><select id="slotted"><option>A</option><option>B</option></select></span><input id="file" type="file"><dialog id="modal"><input id="inside"></dialog><script>
+  it('finds an element inert through the slot it is shown in, and refuses a file input under an inert element', async () => {
+    await window.setContent(`<span id="host"><select id="slotted"><option>A</option><option>B</option></select></span><div inert><input id="file" type="file"></div><input id="free" type="file"><script>
       document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<div inert><slot></slot></div>';
     </script>`);
     const inert = { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
     expect(await run(await element('#slotted'), 'checkSelect', { label: 'B' })).toEqual(inert);
-    expect(await run(await element('#file'), 'checkFileInput')).toEqual({ ok: true });
-    await window.inPage(() => (document.getElementById('modal') as HTMLDialogElement).showModal());
     expect(await run(await element('#file'), 'checkFileInput')).toEqual(inert);
-    expect(await run(await element('#inside'), 'checkEditable')).toEqual({ ok: true });
-  });
-
-  it('takes a modal dialog in a shadow root as open, and a modal under an inert element as out of its reach, as Chromium does', async () => {
-    await window.setContent(`<input id="file" type="file"><span id="host"></span><div inert><dialog id="nested"><input id="free"></dialog></div><script>
-      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<dialog><p>Shadow modal</p></dialog>';
-    </script>`);
-    const inert = { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
-    await window.inPage(() => (document.getElementById('host')!.shadowRoot!.querySelector('dialog') as HTMLDialogElement).showModal());
-    expect(await run(await element('#file'), 'checkFileInput')).toEqual(inert);
-    await window.inPage(() => {
-      (document.getElementById('host')!.shadowRoot!.querySelector('dialog') as HTMLDialogElement).close();
-      (document.getElementById('nested') as HTMLDialogElement).showModal();
-    });
-    // What Chromium says: the input inside the modal takes focus.
-    expect(await window.inPage(() => {
-      document.getElementById('free')!.focus();
-      return document.activeElement?.id;
-    })).toBe('free');
-    expect(await run(await element('#free'), 'checkEditable')).toEqual({ ok: true });
-  });
-
-  it('takes the controls of a modal dialog another one covers as inert, centred over it or not, and the top one\'s as free', async () => {
-    const inert = { ok: false, reason: 'it is inert (a modal or the app blocks it)' };
-    for (const placed of ['', 'margin:0;left:0;top:0']) {
-      await window.setContent(`<dialog id="lower" style="width:300px;height:200px"><select id="under"><option>A</option><option>B</option></select></dialog><dialog id="upper" style="${placed}"><select id="over"><option>A</option><option>B</option></select></dialog>`);
-      await window.inPage(() => {
-        (document.getElementById('lower') as HTMLDialogElement).showModal();
-        (document.getElementById('upper') as HTMLDialogElement).showModal();
-      });
-      expect(await run(await element('#under'), 'checkSelect', { label: 'B' })).toEqual(inert);
-      expect(await run(await element('#over'), 'checkSelect', { label: 'B' })).toEqual({ ok: true });
-      // Closed, the top one leaves the one under it free again.
-      await window.inPage(() => (document.getElementById('upper') as HTMLDialogElement).close());
-      expect(await run(await element('#under'), 'checkSelect', { label: 'B' })).toEqual({ ok: true });
-    }
+    expect(await run(await element('#free'), 'checkFileInput')).toEqual({ ok: true });
   });
 
   it('hit-tests through a slot and a shadow host, and names the element that covers the point', async () => {
@@ -284,20 +247,83 @@ describe('queryAll', () => {
 });
 
 describe('waitReady', () => {
-  it('refuses a control a modal dialog in a closed shadow root makes inert, which no page-side walk reaches', async () => {
-    await window.setContent(`<select id="background"><option>A</option><option>B</option></select><span id="host"></span><script>
+  const INERT = /it is inert \(a modal or the app blocks it\)/;
+  const SELECT = (id: string): string => `<select id="${id}"><option>A</option><option>B</option></select>`;
+  /** `'ready'`, or the error `waitReady` gave up with. */
+  const ready = async (selector: string, ...[check, ...args]: Parameters<typeof waitReady> extends [unknown, ...infer Rest] ? Rest : never): Promise<unknown> => {
+    const operation = { signal: new AbortController().signal, timeoutMs: 300, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext;
+    const target = { devtools, window: { page: window.page } as AppWindow, backendNodeId: await element(selector), operation, deadline: new Deadline(300) };
+    return await waitReady(target, check, ...args).then(() => 'ready', (error: unknown) => error);
+  };
+  const selects = (selector: string): Promise<unknown> => ready(selector, 'checkSelect', { label: 'B' });
+  const showModals = (ids: readonly string[]): Promise<void> => window.inPage((shown) => shown.forEach((id) => (document.getElementById(id) as HTMLDialogElement).showModal()), ids);
+
+  it('refuses a control outside an open modal dialog, a file input too, and not one inside it', async () => {
+    await window.setContent(`<input id="file" type="file"><dialog id="modal"><input id="inside"></dialog>`);
+    expect(await ready('#file', 'checkFileInput')).toBe('ready');
+    await showModals(['modal']);
+    expect(await ready('#file', 'checkFileInput')).toMatchObject({ message: expect.stringMatching(INERT) });
+    expect(await ready('#inside', 'checkEditable')).toBe('ready');
+  });
+
+  it('takes a modal dialog in a shadow root as open, and a modal under an inert element as out of its reach, as Chromium does', async () => {
+    await window.setContent(`<input id="file" type="file"><span id="host"></span><div inert><dialog id="nested"><input id="free"></dialog></div><script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<dialog><p>Shadow modal</p></dialog>';
+    </script>`);
+    await window.inPage(() => (document.getElementById('host')!.shadowRoot!.querySelector('dialog') as HTMLDialogElement).showModal());
+    expect(await ready('#file', 'checkFileInput')).toMatchObject({ message: expect.stringMatching(INERT) });
+    await window.inPage(() => (document.getElementById('host')!.shadowRoot!.querySelector('dialog') as HTMLDialogElement).close());
+    await showModals(['nested']);
+    // What Chromium says: the input inside the modal takes focus.
+    expect(await window.inPage(() => {
+      document.getElementById('free')!.focus();
+      return document.activeElement?.id;
+    })).toBe('free');
+    expect(await ready('#free', 'checkEditable')).toBe('ready');
+  });
+
+  it('takes the controls of a modal dialog another one covers as inert, centred over it or not, and the top one\'s as free', async () => {
+    for (const placed of ['', 'margin:0;left:0;top:0']) {
+      await window.setContent(`<dialog id="lower" style="width:300px;height:200px">${SELECT('under')}</dialog><dialog id="upper" style="${placed}">${SELECT('over')}</dialog>`);
+      await showModals(['lower', 'upper']);
+      expect(await selects('#under')).toMatchObject({ message: expect.stringMatching(INERT) });
+      expect(await selects('#over')).toBe('ready');
+      // Closed, the top one leaves the one under it free again.
+      await window.inPage(() => (document.getElementById('upper') as HTMLDialogElement).close());
+      expect(await selects('#under')).toBe('ready');
+    }
+  });
+
+  it('reads which modal dialog is on top from Chromium, where a hit test at a dialog\'s centre would not tell', async () => {
+    // The top one lets clicks through its centre, as a full-screen positioner around a panel does.
+    await window.setContent(`<dialog id="lower" style="width:300px;height:200px">${SELECT('under')}</dialog><dialog id="upper" style="pointer-events:none;width:400px;height:300px;border:0;padding:0;background:transparent"><div style="pointer-events:auto;height:40px">${SELECT('over')}</div></dialog>`);
+    await showModals(['lower', 'upper']);
+    expect(await selects('#over')).toBe('ready');
+    expect(await selects('#under')).toMatchObject({ message: expect.stringMatching(INERT) });
+    // The lower one is off screen, with no point to hit.
+    await window.setContent(`<dialog id="lower" style="margin:0;top:-500px;height:100px">${SELECT('under')}</dialog><dialog id="upper">${SELECT('over')}</dialog>`);
+    await showModals(['lower', 'upper']);
+    expect(await selects('#under')).toMatchObject({ message: expect.stringMatching(INERT) });
+    // The top one opens from a component inside the lower one, so a hit at the lower one's centre lands in it.
+    await window.setContent(`<dialog id="lower">${SELECT('under')}<span id="host"></span></dialog><script>
+      document.getElementById('host').attachShadow({ mode: 'open' }).innerHTML = '<dialog><p>Inner modal</p></dialog>';
+    </script>`);
+    await showModals(['lower']);
+    await window.inPage(() => (document.getElementById('host')!.shadowRoot!.querySelector('dialog') as HTMLDialogElement).showModal());
+    expect(await selects('#under')).toMatchObject({ message: expect.stringMatching(INERT) });
+  });
+
+  it('refuses a control a closed shadow root makes inert, by a modal dialog or an inert slot, which no page-side walk reaches', async () => {
+    await window.setContent(`${SELECT('background')}<span id="host"></span><span id="component">${SELECT('slotted')}</span><script>
       const root = document.getElementById('host').attachShadow({ mode: 'closed' });
       root.innerHTML = '<dialog><p>Closed modal</p></dialog>';
       globalThis.openClosedModal = () => root.querySelector('dialog').showModal();
+      document.getElementById('component').attachShadow({ mode: 'closed' }).innerHTML = '<div inert><slot></slot></div>';
     </script>`);
-    const ready = async (): Promise<unknown> => {
-      const operation = { signal: new AbortController().signal, timeoutMs: 300, runId: 'run', attemptId: 'attempt', origin: 'test' } as OperationContext;
-      const target = { devtools, window: { page: window.page } as AppWindow, backendNodeId: await element('#background'), operation, deadline: new Deadline(300) };
-      return await waitReady(target, 'checkSelect', { label: 'B' }).then(() => 'ready', (error: unknown) => error);
-    };
-    expect(await ready()).toBe('ready');
+    expect(await selects('#slotted')).toMatchObject({ message: expect.stringMatching(INERT) });
+    expect(await selects('#background')).toBe('ready');
     await window.inPage(() => (globalThis as unknown as { openClosedModal: () => void }).openClosedModal());
-    expect(await ready()).toMatchObject({ message: expect.stringMatching(/it is inert \(a modal or the app blocks it\)/) });
+    expect(await selects('#background')).toMatchObject({ message: expect.stringMatching(INERT) });
   });
 });
 
