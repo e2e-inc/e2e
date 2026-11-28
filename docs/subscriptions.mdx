@@ -236,9 +236,11 @@ rotating refresh token works there only for a limited time.
 ## Use your coding agent
 
 `@e2e-dev/acp` runs `agent.act` and `agent.assert` on Claude Code or Codex
-over the [Agent Client Protocol](https://agentclientprotocol.com). The
-agent signs in with its own login or API key, so e2e needs no model
-provider.
+over the [Agent Client Protocol](https://agentclientprotocol.com) with no AI
+SDK model provider—the agent signs in with its own login or API key.
+`e2e explore`, `agent.waitFor`, and `agent.extract` still run on the
+built-in agent and require a `model` (an AI SDK model instance) on the
+agent entry.
 
 The agent gets `complete_step` and the built-in agent's action tools for
 the verbs the target's engine supports. The runner records every action, so
