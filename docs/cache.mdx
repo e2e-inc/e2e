@@ -138,13 +138,9 @@ model calls:
 1. **Check the starting screen** to make sure the app is on the same route.
 2. **Replay each recorded action**, matching controls by role, name, test
    ID, and surrounding context. e2e waits for controls to appear and stops
-   if a match is ambiguous. If the recorded drag point identifies the source
-   among same-named controls, replay keeps waiting for the drop target.
-   During that wait, replay stops if fewer visible, placeable controls
-   match the source identity used to start the wait. This includes a
-   same-named neighbor disappearing while the original source stays
-   in place. A recovered source or drop target also needs a visible,
-   usable box. Replay hands off when live fallback is available.
+   if a match is ambiguous. A drag between two points waits for a drop
+   target that is late or still hidden, and stops if one of the source's
+   same-named look-alikes disappears meanwhile.
 3. **Check the end state** (final route plus the controls that appeared,
    disappeared, or changed state).
 4. **Finish with zero model calls**, or hand off to the live agent with a
