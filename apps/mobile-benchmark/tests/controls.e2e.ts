@@ -411,6 +411,23 @@ test.describe('control inventory', () => {
     expect(ambiguous?.code).toBe('LOCATOR_AMBIGUOUS');
   });
 
+  test('a clip cuts the screen as a locator screenshot cuts its match, and a full page is refused', async ({ app, screen }) => {
+    const header = screen.getByTestId('inventory-header');
+    const box = await header.boundingBox();
+    expect(box).not.toBeNull();
+    // Both are cut from the device's screenshot at its own density, so a still header comes out the same bytes. Right
+    // after the scenario opens, its push transition can still repaint the header's text between two captures.
+    await expect.poll(async () => {
+      const clipped = await app.screenshot('header-clip', { clip: box! });
+      const matched = await header.screenshot('header-match');
+      return readFileSync(clipped).equals(readFileSync(matched));
+    }, { timeout: 15_000 }).toBe(true);
+    expect(await rejection(app.screenshot({ clip: { x: 0, y: 100_000, width: 10, height: 10 } }))).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    // A device screen has no page past it to capture.
+    expect(await rejection(app.screenshot({ fullPage: true }))).toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    expect(await rejection(expect(screen).toHaveScreenshot('inventory-page', { fullPage: true }))).toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+  });
+
   test('screenshot, restart, and clearState reopen the app on its home list', async ({ app, screen }) => {
     const shot = await app.screenshot('inventory');
     expect(isAbsolute(shot)).toBe(true);
@@ -423,20 +440,6 @@ test.describe('control inventory', () => {
 
     await app.clearState();
     await expect(screen.getByTestId('Login Form')).toBeVisible();
-  });
-
-  test('a clip cuts the screen as a locator screenshot cuts its match, and a full page is refused', async ({ app, screen }) => {
-    const header = screen.getByTestId('inventory-header');
-    const box = await header.boundingBox();
-    expect(box).not.toBeNull();
-    // Both are cut from the device's screenshot at its own density, so a still header comes out the same bytes.
-    const clipped = await app.screenshot('header-clip', { clip: box! });
-    const matched = await header.screenshot('header-match');
-    expect(readFileSync(clipped).equals(readFileSync(matched))).toBe(true);
-    expect(await rejection(app.screenshot({ clip: { x: 0, y: 100_000, width: 10, height: 10 } }))).toMatchObject({ code: 'INVALID_ARGUMENT' });
-    // A device screen has no page past it to capture.
-    expect(await rejection(app.screenshot({ fullPage: true }))).toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
-    expect(await rejection(expect(screen).toHaveScreenshot('inventory-page', { fullPage: true }))).toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
   });
 });
 
