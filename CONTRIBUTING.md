@@ -169,7 +169,10 @@ Install dependencies from the root:
 pnpm install
 ```
 
-Build first; nearly everything downstream consumes `dist`:
+Build first; nearly everything downstream consumes `dist`. The build starts
+with `@e2e-dev/util`'s Rust addon, so install
+[rustup](https://rustup.rs) first; it installs the toolchain that
+`rust-toolchain.toml` pins on the first build:
 
 ```sh
 pnpm build

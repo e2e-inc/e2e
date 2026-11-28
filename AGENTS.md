@@ -509,7 +509,9 @@ the way a user would.
 
 ## Commands
 
-Build first — nearly everything downstream consumes `dist`.
+Build first — nearly everything downstream consumes `dist`. The build starts
+with `@e2e-dev/util`'s Rust addon, so it needs `rustup`, which installs the
+toolchain `rust-toolchain.toml` pins.
 
 ```bash
 pnpm check          # lint -> check:dead-code -> typecheck -> docs:check-errors -> check:peer-ranges -> check:changeset-bumps -> check:examples -> check:benchmark-coverage -> check:install-scripts -> plugins:check -> mcp-server:check -> docs:check (full gate)
@@ -521,7 +523,8 @@ pnpm test:web-benchmark   # builds, then runs the real CLI against the benchmark
 Focused work:
 
 ```bash
-pnpm --filter @e2e-dev/core run build && pnpm --filter e2e run build
+pnpm --filter @e2e-dev/util run build:native && pnpm --filter @e2e-dev/util run build
+pnpm --filter @e2e-dev/core run build && pnpm --filter e2e run build   # core compiles against util's dist
 pnpm --filter e2e run test:unit                       # unit only; needs @e2e-dev/core built
 pnpm --filter e2e exec vitest run tests/unit/scheduler.test.ts
 pnpm --filter e2e exec vitest run -t 'name fragment'
