@@ -428,6 +428,17 @@ impl Walk {
         })
     }
 
+    /// Whether a scroll area has a scroll bar for the axis. A stall leaves a hole in the read: an area the app did not
+    /// answer about is not one that cannot scroll.
+    fn scroll_bar(&mut self, element: &Element, vertical: bool) -> bool {
+        crate::actions::scroll_bar(element, vertical)
+            .unwrap_or_else(|_| {
+                self.lose();
+                None
+            })
+            .is_some()
+    }
+
     /// The actions a control takes, in the raw vocabulary, and the axes it scrolls along when it takes `Scroll`.
     fn actions(&mut self, element: &Element, read: &Read) -> (Vec<&'static str>, Vec<&'static str>) {
         let mut out = Vec::new();
@@ -462,10 +473,7 @@ impl Walk {
         // SwiftUI gives every scroll area the page actions, also one whose content fits: only a scroll bar says a scroll
         // area scrolls. A viewport swipe goes to the first node offered Scroll, so one that cannot scroll must not be.
         let (vertical, horizontal) = if role == "scrollarea" {
-            (
-                read.vertical_bar || crate::actions::scroll_bar(element, true).is_some(),
-                read.horizontal_bar || crate::actions::scroll_bar(element, false).is_some(),
-            )
+            (read.vertical_bar || self.scroll_bar(element, true), read.horizontal_bar || self.scroll_bar(element, false))
         } else {
             (has("AXScrollDownByPage") || has("AXScrollUpByPage"), has("AXScrollLeftByPage") || has("AXScrollRightByPage"))
         };

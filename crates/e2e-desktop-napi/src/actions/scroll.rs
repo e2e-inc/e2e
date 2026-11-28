@@ -4,20 +4,25 @@ use super::*;
 
 /// A scroll area's scroll bar for one axis. A SwiftUI `List` lists it only as a child, with no `AXVerticalScrollBar`; a
 /// scroll area that holds its content directly lists the bar after any number of children, so the last few are read too.
-pub fn scroll_bar(element: &Element, vertical: bool) -> Option<Element> {
-    element.element(if vertical { "AXVerticalScrollBar" } else { "AXHorizontalScrollBar" }).or_else(|| {
-        let orientation = if vertical { "AXVerticalOrientation" } else { "AXHorizontalOrientation" };
-        let first = element.elements("AXChildren", 16).ok()?;
-        let last = if first.len() < 16 { Vec::new() } else { element.last_elements("AXChildren", 4).unwrap_or_default() };
-        first.into_iter().chain(last).find(|child| {
-            child.text("AXRole").as_deref() == Some("AXScrollBar")
-                && match child.text("AXOrientation") {
-                    Some(shown) => shown == orientation,
-                    // No orientation: a vertical bar is taller than it is wide.
-                    None => child.frame().is_some_and(|(_, _, width, height)| (height > width) == vertical),
-                }
-        })
-    })
+/// A read the app did not answer in time is `Err(AX_CANNOT_COMPLETE)`: no proof that the area has no bar.
+pub fn scroll_bar(element: &Element, vertical: bool) -> Result<Option<Element>, AXError> {
+    let stalled = |error: AXError| if error == ax::AX_CANNOT_COMPLETE { Err(error) } else { Ok(Vec::new()) };
+    match element.attribute(if vertical { "AXVerticalScrollBar" } else { "AXHorizontalScrollBar" }) {
+        Ok(Value::Element(bar)) => return Ok(Some(bar)),
+        Err(ax::AX_CANNOT_COMPLETE) => return Err(ax::AX_CANNOT_COMPLETE),
+        _ => {}
+    }
+    let orientation = if vertical { "AXVerticalOrientation" } else { "AXHorizontalOrientation" };
+    let first = element.elements("AXChildren", 16).or_else(stalled)?;
+    let last = if first.len() < 16 { Vec::new() } else { element.last_elements("AXChildren", 4).or_else(stalled)? };
+    Ok(first.into_iter().chain(last).find(|child| {
+        child.text("AXRole").as_deref() == Some("AXScrollBar")
+            && match child.text("AXOrientation") {
+                Some(shown) => shown == orientation,
+                // No orientation: a vertical bar is taller than it is wide.
+                None => child.frame().is_some_and(|(_, _, width, height)| (height > width) == vertical),
+            }
+    }))
 }
 
 /// Scrolls a scroll area by moving its scroll bar, `pages` of its visible size.
@@ -26,7 +31,8 @@ pub(super) fn scroll(element: &Element, direction: &str, pages: f64) -> Outcome<
     // A node that scrolls itself along the axis is the one moved; one that does not, a list or table, scrolls through the
     // scroll area that holds it. The enclosing pane comes last, so a swipe on a nested list never moves the pane around it.
     let (_, role) = role_of(element, "scroll")?;
-    let own = scrolls_itself(role, scroll_bar(element, vertical).is_some(), &action_names(element, "scroll")?, direction);
+    let bar = scroll_bar(element, vertical).map_err(|error| unread(error, "scroll"))?;
+    let own = scrolls_itself(role, bar.is_some(), &action_names(element, "scroll")?, direction);
     let target = if own { None } else { enclosing_scroll_area(element, vertical) };
     scroll_by(target.as_ref().unwrap_or(element), direction, pages).map_err(|failure| {
         // An element that takes none of the ways to scroll: say so, not which attribute it lacks. Like a window with
@@ -51,7 +57,7 @@ pub(super) fn scrolls_itself(role: &str, bar: bool, actions: &[String], directio
 pub(super) fn enclosing_scroll_area(element: &Element, vertical: bool) -> Option<Element> {
     let mut current = element.element("AXParent")?;
     for _ in 0..4 {
-        if current.text("AXRole").as_deref() == Some("AXScrollArea") && scroll_bar(&current, vertical).is_some() {
+        if current.text("AXRole").as_deref() == Some("AXScrollArea") && scroll_bar(&current, vertical).ok().flatten().is_some() {
             return Some(current);
         }
         current = current.element("AXParent")?;
@@ -84,7 +90,7 @@ pub(super) fn repeat(element: &Element, action: &str, count: usize) -> Outcome<(
 pub(super) fn scroll_by(element: &Element, direction: &str, pages: f64) -> Outcome<()> {
     let vertical = matches!(direction, "up" | "down");
     let forward = matches!(direction, "down" | "right");
-    if let Some(bar) = scroll_bar(element, vertical) {
+    if let Some(bar) = scroll_bar(element, vertical).map_err(|error| unread(error, "scroll"))? {
         // A position the app did not answer is no position: one step from the top could move the view the wrong way.
         let current = match bar.attribute("AXValue") {
             Ok(Value::Number(number)) => Some(number),
