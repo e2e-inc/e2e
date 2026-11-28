@@ -49,7 +49,7 @@ runs:
             }
           }
           // Every platform package of @e2e-dev/util, which names their exact snapshots too; npm skips the ones
-          // whose os, cpu, and libc are not this runner's.
+          // whose os, cpu, and libc do not match this runner. No apostrophes here: this script is single-quoted.
           const platforms = fs.readdirSync(process.env.PACKED).flatMap((file) => /^util-(.+)\.tgz$/.exec(file)?.[1] ?? []);
           manifest.overrides = {
             ...manifest.overrides,
