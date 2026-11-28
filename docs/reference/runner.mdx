@@ -200,7 +200,8 @@ Each exploration that returns a report sends one anonymous
 
 `list(options?: ListOptions)` collects and selects the way
 [`e2e list`](/reference/cli#e2e-list) does, and stops there. No app process,
-engine, or worker starts, and nothing is written.
+engine, or worker starts, and nothing is written, except the git objects
+`sinceLastRun` records.
 
 ```ts
 import { isE2EError, list } from 'e2e/runner';
