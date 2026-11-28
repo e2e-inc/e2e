@@ -51,6 +51,8 @@ export interface Desktop {
    * Runs a trigger and waits for the window it opens, then resolves with that
    * window once it is the active one. Rejects with `ACTION_FAILED` when no
    * window opens within `timeout` milliseconds, or else the action timeout.
+   * The time the trigger takes counts toward it, and a trigger that took all
+   * of it still gets one look at the windows.
    */
   waitForWindow(trigger: () => Promise<void>, options?: { readonly timeout?: number }): Promise<DesktopWindow>;
   /**
