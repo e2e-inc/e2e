@@ -89,6 +89,7 @@ export function revyl(options: RevylOptions): DeviceProvider {
         prepareHome: plugin.prepareHome,
         installAppPath: true,
       }).catch(async (error: unknown) => {
+        if (!/\bHTTP 422\b/.test(error instanceof Error ? error.message : String(error))) throw error;
         throw (await unlisted(credentials, request, device, options.osVersion, error)) ?? error;
       });
     },
@@ -116,12 +117,12 @@ export function revyl(options: RevylOptions): DeviceProvider {
 }
 
 /**
- * After Revyl refused a lease, the error naming the models or OS versions
- * Revyl lists when it lists neither `device` nor `osVersion` for the
- * platform: Revyl itself answers an unknown one with a bare 422. Asked only
- * once the allocation failed, since the allocation also takes aliases the
- * catalog does not list, such as `Pixel7`, a bare API level, or a retired
- * iOS beta. Nothing when Revyl lists both or does not answer.
+ * After Revyl refused a lease with a 422, the error naming the models or OS
+ * versions Revyl lists when `device` or `osVersion` is not among them:
+ * Revyl itself answers an unknown one with a bare 422. Asked only once the
+ * allocation refused, since the allocation also takes aliases the catalog
+ * does not list, such as `Pixel7`, a bare API level, or a retired iOS beta.
+ * Nothing when Revyl lists both or does not answer.
  */
 async function unlisted(credentials: RevylCredentials, request: DeviceRequest, device: string, osVersion: string | undefined, cause: unknown): Promise<Error | undefined> {
   const catalog = await new RevylDeviceClient(credentials).catalog(request.platform, request.signal).catch(() => undefined);

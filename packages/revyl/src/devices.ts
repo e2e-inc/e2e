@@ -114,7 +114,13 @@ export class RevylDeviceClient {
       const text = await response.text().catch(() => '');
       return new Error(`Revyl stop_screen_recording answered ${response.status}: ${text.slice(0, 300).trim()}`);
     }
-    const body = await json(response, 'stop_screen_recording');
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      return error instanceof Error ? error : new Error(String(error));
+    }
+    const body = parse(response, text, 'stop_screen_recording');
     if (body.success !== false) throw new Error('Revyl stopped the recording without returning a video');
     const reason = typeof body.error === 'string' ? body.error : 'no reason given';
     if (reason.includes('recording retained')) return new Error(`Revyl refused stop_screen_recording: ${reason}`);
@@ -124,15 +130,19 @@ export class RevylDeviceClient {
     throw new Error(`Revyl refused stop_screen_recording: ${reason}`);
   }
 
-  /** A GET's JSON object, asked again after a rate limit, a gateway error, or a dropped connection, none of which change anything. */
+  /** A GET's JSON object, asked again after a rate limit, a gateway error, or a connection dropped before or during the answer, none of which change anything. */
   async #read(path: string, what: string, signal: AbortSignal): Promise<Readonly<Record<string, unknown>>> {
+    const dropped = (attempt: number) => (error: unknown) => {
+      if (!(error instanceof TypeError) || signal.aborted || attempt >= READ_ATTEMPTS) throw error;
+      return undefined;
+    };
     for (let attempt = 1; ; attempt += 1) {
-      const response = await this.#request('GET', path, undefined, signal).catch((error: unknown) => {
-        if (!(error instanceof TypeError) || signal.aborted || attempt >= READ_ATTEMPTS) throw error;
-        return undefined;
-      });
+      const response = await this.#request('GET', path, undefined, signal).catch(dropped(attempt));
       const transient = response === undefined || response.status === 429 || (response.status >= 502 && response.status <= 504);
-      if (response !== undefined && (!transient || attempt >= READ_ATTEMPTS)) return json(response, what);
+      if (response !== undefined && (!transient || attempt >= READ_ATTEMPTS)) {
+        const text = await response.text().catch(dropped(attempt));
+        if (text !== undefined) return parse(response, text, what);
+      }
       await delay(500 * attempt, undefined, { signal });
     }
   }
@@ -158,7 +168,11 @@ function proxy(workflowRunId: string): string {
 
 /** A response's JSON object; a failed status or any other body throws, naming `what`. */
 async function json(response: Response, what: string): Promise<Readonly<Record<string, unknown>>> {
-  const text = await response.text();
+  return parse(response, await response.text(), what);
+}
+
+/** The JSON object in `text`, the body `response` answered with; a failed status or any other body throws, naming `what`. */
+function parse(response: Response, text: string, what: string): Readonly<Record<string, unknown>> {
   if (!response.ok) throw new Error(`Revyl ${what} answered ${response.status}: ${text.slice(0, 300).trim()}`);
   let parsed: unknown;
   try {

@@ -176,7 +176,7 @@ describe('revyl()', () => {
     },
   );
   describe('device check', () => {
-    const refused = new Error('Revyl device start failed with HTTP 422');
+    const refused = new Error('Revyl request POST /api/v1/execution/device-sessions/start failed with HTTP 422: Unprocessable Entity');
 
     it('leases a name Revyl takes without asking the catalog, so an alias the catalog does not list still leases', async () => {
       await revyl({ ...options, device: 'Pixel7', osVersion: '34' }).acquire(request());
@@ -208,6 +208,13 @@ describe('revyl()', () => {
       mocks.acquire.mockRejectedValueOnce(refused);
       await expect(revyl({ ...options, device: 'Pixel 9' }).acquire(request({ env: { ...env, REVYL_API_URL: 'https://backend-staging.revyl.ai' } }))).rejects.toBe(refused);
       expect(calls.at(-1)!.url).toBe('https://backend-staging.revyl.ai/api/v1/execution/device-targets');
+    });
+
+    it('keeps any failure other than an allocation refusal as it is, without asking the catalog', async () => {
+      const failed = new Error('installing the app failed: Revyl storage refused the app upload with HTTP 413.');
+      mocks.acquire.mockRejectedValueOnce(failed);
+      await expect(revyl({ ...options, device: 'Pixel7' }).acquire(request())).rejects.toBe(failed);
+      expect(calls).toEqual([]);
     });
   });
 
@@ -291,6 +298,28 @@ describe('revyl()', () => {
       await expect(recording.stop({ dir, signal: AbortSignal.abort() })).rejects.toThrow();
       await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual({ file: 'recording.mp4' });
       expect(readFileSync(join(dir, 'recording.mp4'))).toEqual(Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]));
+    });
+
+    const brokenJson = () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('{"success":'));
+            controller.error(new TypeError('terminated'));
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      );
+
+    it('asks a stop or a session lookup again when the connection drops while its JSON answer is read', async () => {
+      const running = routes[`GET /api/v1/execution/device-sessions/${sessionId}`]!;
+      let lookups = 0;
+      routes[`GET /api/v1/execution/device-sessions/${sessionId}`] = (call) => (++lookups === 1 ? brokenJson() : running(call));
+      const recording = await revyl(options).record!(lease, recordContext);
+      expect(lookups).toBe(2);
+      answers(brokenJson, video);
+      await expect(recording.stop({ dir, signal: new AbortController().signal })).resolves.toEqual({ file: 'recording.mp4' });
+      expect(stops()).toHaveLength(2);
     });
 
     it('asks the stop again after a download that breaks partway, leaving only the whole video', async () => {
