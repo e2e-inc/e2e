@@ -2103,7 +2103,7 @@ export interface Secret {
 | Field | Description |
 | --- | --- |
 | `Secret.name` | The entry's name in `secrets`, or `<credential>.password` for a credential's password. |
-| `Secret.purpose` | Where the value may be filled: a `password` only into a password field, a `generic-secret` (an API key, a token, any value from the environment) into any editable input. |
+| `Secret.purpose` | Where an agent may fill the value: a `password` only into a password field, a `generic-secret` (an API key, a token, any value from the environment) into any editable input. `locator.fill` does not check it. |
 
 ### `CacheConfig`
 

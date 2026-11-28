@@ -1099,7 +1099,7 @@ resolvem todos para `off`, ou para um modo de nova tentativa com
 | --- | --- |
 | Engine de navegador, screencast do Playwright | `video/video.webm`, um segmento por página que a tentativa mostrou, os seguintes como `video/video-part<n>.webm`. [`web({ screencast })`](/reference/web#options) define o tamanho e a qualidade dos quadros |
 | Engine mobile, agent-device | `video/video.mp4` |
-| A gravação do próprio provedor ([`BrowserProvider.record`](/reference/web#recording-on-the-provider), [`DeviceProvider.record`](/mobile#hosted-devices)) | o arquivo que o provedor escreveu, como `video/<file>`: o do Kernel é `video/replay.mp4`. Ou um link para uma gravação que o serviço mantém, registrado com `url` no lugar de `path`; o runner nunca baixa essa gravação |
+| A gravação do próprio provedor ([`BrowserProvider.record`](/reference/web), [`DeviceProvider.record`](/mobile#hosted-devices)) | o arquivo que o provedor escreveu, como `video/<file>`: o do Kernel é `video/replay.mp4`. Ou um link para uma gravação que o serviço mantém, registrado com `url` no lugar de `path`; o runner nunca baixa essa gravação |
 
 - Cada segmento traz `startedAt`, então `step.startedAt - artifact.startedAt`
   é o deslocamento de um passo dentro dele.

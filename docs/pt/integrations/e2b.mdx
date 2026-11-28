@@ -7,7 +7,7 @@ description: Rode alvos Android e alvos web em sandboxes do E2B com os provedore
 `@e2e-dev/e2b` roda os seus alvos em sandboxes do [E2B](https://e2b.dev):
 Android 16 com `e2b()`, um [provedor de dispositivos](/mobile#hosted-devices),
 e Chromium com `e2bBrowsers()` de `@e2e-dev/e2b/web`, um
-[provedor de navegadores](/reference/web#hosted-browsers). Os seus testes continuam
+[provedor de navegadores](/reference/web). Os seus testes continuam
 os mesmos.
 
 ## Autentique-se
@@ -70,7 +70,7 @@ agent-device informa para o `.apk`.
 Cada worker recebe o próprio sandbox Chromium, e cada tentativa recebe nele
 um novo contexto de navegador, como em uma execução local. Com
 `scope: 'attempt'`, cada tentativa recebe um sandbox novo em vez disso
-([limites desse escopo](/reference/web#pick-a-lease-scope)).
+([limites desse escopo](/reference/web)).
 
 Instale a integração junto com a engine web:
 
@@ -172,7 +172,7 @@ enquanto a execução detém a reserva.
   <Card title="Dispositivos hospedados" icon="mobile" href="/mobile#hosted-devices">
     Como um provedor de dispositivos reserva dispositivos.
   </Card>
-  <Card title="Navegadores hospedados" icon="globe" href="/reference/web#hosted-browsers">
+  <Card title="Navegadores hospedados" icon="globe" href="/reference/web">
     Como um provedor de navegadores reserva navegadores.
   </Card>
 </CardGroup>

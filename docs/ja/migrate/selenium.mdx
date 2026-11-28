@@ -41,7 +41,7 @@ e2e は Selenium のスイートを TypeScript のテストに置き換えます
 | 各 `driver.get` の URL | ターゲットの `app: { url }` に設定し、以後は相対パス |
 | スクリプトでアプリを起動 | `app: { url, command }`。[アプリの起動](/web#starting-your-app)を参照 |
 | ブラウザごとのドライバー | `web({ browser })` のビルドごとにターゲットを作成。Chrome、Edge、Safari ではなく `chromium`、`firefox`、`webkit` |
-| Selenium Grid | 並列実行には `workers`、ホスト型 Chromium には[ブラウザプロバイダー](/reference/web#hosted-browsers) |
+| Selenium Grid | 並列実行には `workers`、ホスト型 Chromium には[ブラウザプロバイダー](/reference/web) |
 | `System.getenv` からのパスワード | 設定の `credentials` または `secrets`。[認証](/authentication)を参照 |
 
 ## フローを 1 つ書き換える
@@ -106,7 +106,7 @@ test('signs in', async ({ app, screen, browser }) => {
 | `element.findElement(By.cssSelector)`、WebdriverIO の `$('a').$('b')` | 単一の `browser.locator('a >> b')` セレクター、または `getBy*` クエリの連結 |
 | `ChromeOptions.addArguments`, `setBinary`, `Proxy`, `acceptInsecureCerts` | フラグを指定して Chrome または Edge を起動し、`web({ connect })` で接続 |
 | `@BeforeSuite`、`@AfterSuite`、pytest のセッションスコープのフィクスチャ、WebdriverIO の `onPrepare` | 実行ごとに 1 回なら、`app.command` が起動するスクリプト、または `e2e run` を囲むラッパー。ファイルごとなら `beforeAll` と `afterAll`。サインインはセッションを保存するトップレベルの `test.setup` |
-| Web 用の BrowserStack または Sauce Labs | ベンダーに CDP エンドポイントがあれば、独自の[ブラウザプロバイダー](/reference/web#write-a-provider) |
+| Web 用の BrowserStack または Sauce Labs | ベンダーに CDP エンドポイントがあれば、独自の[ブラウザプロバイダー](/reference/web) |
 | `manage().logs()`、リクエストリスナー、位置情報 | `browser.addInitScript` でページを変更し、`browser.route` でリクエストを記録 |
 | `setNetworkConditions` | オフラインには `browser.route` でリクエストを中断。帯域制限や遅延を再現する機能はないため、それらのテストは Selenium に残す |
 

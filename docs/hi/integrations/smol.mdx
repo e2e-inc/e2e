@@ -7,7 +7,7 @@ description: "@e2e-dev/smol के smol() ब्राउज़र प्रो�
 ---
 
 `@e2e-dev/smol` का `smol()` एक
-[ब्राउज़र प्रोवाइडर](/reference/web#hosted-browsers) है, जो आपके कंप्यूटर पर
+[ब्राउज़र प्रोवाइडर](/reference/web) है, जो आपके कंप्यूटर पर
 [smol machines](https://smolmachines.com) microVM में Chromium चलाता है। हर
 वर्कर स्लॉट एक ब्राउज़र मशीन बूट करता है। डिफ़ॉल्ट रूप से हर टेस्ट अटेम्प्ट उस
 मशीन की कॉपी-ऑन-राइट ब्रांच में चलता है, जो करीब एक सेकंड में तैयार हो जाती
@@ -158,7 +158,7 @@ smol({
 ## स्कोप चुनें
 
 `scope: 'attempt'`, जो डिफ़ॉल्ट है, हर अटेम्प्ट को स्लॉट के वॉर्म ब्राउज़र की
-अपनी ब्रांच देता है। इसमें [हर अटेम्प्ट वाली लीज़](/reference/web#hosted-browsers)
+अपनी ब्रांच देता है। इसमें [हर अटेम्प्ट वाली लीज़](/reference/web)
 की सीमाएँ लागू होती हैं।
 
 `scope: 'worker'` पूरे रन के लिए हर वर्कर स्लॉट पर एक मशीन रखता है। हर अटेम्प्ट
@@ -197,7 +197,7 @@ smol({
   <Card title="सुरक्षा" icon="shield-halved" href="/security">
     आपके कंप्यूटर पर क्या चलता है, और क्या अब भी लीक हो सकता है।
   </Card>
-  <Card title="होस्टेड ब्राउज़र" icon="globe" href="/reference/web#hosted-browsers">
+  <Card title="होस्टेड ब्राउज़र" icon="globe" href="/reference/web">
     ब्राउज़र प्रोवाइडर ब्राउज़र लीज़ पर कैसे लेता है, और `'attempt'` स्कोप की सीमाएँ।
   </Card>
 </CardGroup>

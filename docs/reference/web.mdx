@@ -773,7 +773,9 @@ It does not follow redirects.
   before it, then the network, as if its URL had not matched.
 - A method pattern matches that method exactly: a `GET` route does not answer
   `HEAD`.
-- Register a route before the page opens.
+- A route answers requests made after it is registered, also on an open
+  page. Register it before the page opens to answer a request the page
+  makes as it loads.
 - A route survives `app.restart()`, `app.clearState()`, and session restore.
 - Routes run newest first.
 - The handler must decide exactly once, with `fulfill`, `continue`,
@@ -1461,8 +1463,10 @@ bunx @e2e-dev/web install chromium --with-deps
 ## Hosted browsers
 
 A browser provider leases a browser from a service and gives the engine its
-CDP endpoint. Pass it as [`browser`](#browser). The engine gives each
-browser back when its scope ends, on every exit path.
+CDP endpoint. Pass it as [`browser`](#browser). The runner releases each
+lease when its scope ends, also after a failure or Ctrl-C. A worker that
+crashes or is killed first leaves an orphan for the provider's
+[`sweep`](#pick-a-lease-scope) or the service's own expiry.
 
 | Service | Provider |
 | --- | --- |

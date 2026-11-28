@@ -731,7 +731,7 @@ video: 'retain-on-failure', // default: 'off'
 | --- | --- |
 | ブラウザエンジン、Playwright スクリーンキャスト | `video/video.webm`。試行で表示したページごとに 1 セグメントで、2 つ目以降は `video/video-part<n>.webm` です。[`web({ screencast })`](/reference/web#options) でフレームのサイズと画質を設定します |
 | モバイルエンジン、agent-device | `video/video.mp4` |
-| プロバイダー自身の録画（[`BrowserProvider.record`](/reference/web#recording-on-the-provider)、[`DeviceProvider.record`](/mobile#hosted-devices)） | プロバイダーが書いたファイルを `video/<file>` として保存します。Kernel は `video/replay.mp4` です。またはサービス側が保持する録画へのリンクで、`path` の代わりに `url` を記録します。ランナーはダウンロードしません |
+| プロバイダー自身の録画（[`BrowserProvider.record`](/reference/web)、[`DeviceProvider.record`](/mobile#hosted-devices)） | プロバイダーが書いたファイルを `video/<file>` として保存します。Kernel は `video/replay.mp4` です。またはサービス側が保持する録画へのリンクで、`path` の代わりに `url` を記録します。ランナーはダウンロードしません |
 
 - 各セグメントには `startedAt` があり、`step.startedAt - artifact.startedAt` がそのセグメント内のステップの開始位置になります。
 - 録画は何もマスキングせず、`redaction: 'incomplete'` として記録します。

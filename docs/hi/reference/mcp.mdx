@@ -514,7 +514,7 @@ args = ["e2e", "mcp"]
 ```
 
 OpenCode प्रोजेक्ट की `opencode.json` में `mcp` से सर्वर पढ़ता है।
-[MCP सर्वर](/coding-agents#register-the-server) में OpenCode टैब देखें।
+[MCP सर्वर](/coding-agents) में OpenCode टैब देखें।
 
 सर्वर [MCP Registry](https://registry.modelcontextprotocol.io) में भी
 `io.github.e2e-inc/e2e` नाम से लिस्ट है। वहाँ से इंस्टॉल करने वाला क्लाइंट लिस्ट
@@ -737,7 +737,7 @@ open_session {test: "tests/checkout.e2e.ts:12"}
 `--max-sessions` तक कई सेशन एक साथ खुले रह सकते हैं, हर एक अपने अटेम्प्ट और अपने
 ब्राउज़र या डिवाइस के साथ। पैरेलल एजेंट (जैसे कोडिंग एजेंट के सबएजेंट) इसी तरह
 एक सर्वर शेयर करते हैं: हर एक अपना सेशन खोलता है और हर `tools`, `call`, और
-`close_session` में अपना id पास करता है। [Bug Bash](/explore#bug-bashes) इसी का इस्तेमाल
+`close_session` में अपना id पास करता है। [Bug Bash](/explore) इसी का इस्तेमाल
 करते हैं: रीप्रो को स्क्रिप्टेड टेस्ट में बदलने वाला वेरिफ़ाइंग सबएजेंट अपना खुद
 का सेशन चलाता है।
 

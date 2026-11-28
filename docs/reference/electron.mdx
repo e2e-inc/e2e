@@ -55,8 +55,9 @@ electron({ executablePath: 'dist/mac/MyApp.app/Contents/MacOS/MyApp', env: { APP
 | [`testIdAttribute`](#testidattribute) | `string` | `'data-testid'` |
 | [`settle`](#settle) | `number \| false` | `100` |
 
-Every optional value also accepts `undefined`, so values read straight from
-`process.env` need no conditional spread.
+Every optional value also accepts `undefined`, so an unset `process.env`
+value needs no conditional spread. Parse a set one for `settle` first: a
+string there is `INVALID_CONFIG`.
 
 | Throws | When |
 | --- | --- |

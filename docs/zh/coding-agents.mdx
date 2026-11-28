@@ -62,7 +62,7 @@ cp -R "$repo/plugins/e2e" ~/.cursor/plugins/local/
 ```
 </CodeGroup>
 
-启动新会话。在 Cursor 中，运行 **Developer: Reload Window**。在 Cursor Teams 和 Enterprise 中，本地插件需要管理员开启 **Allow Local Plugin Imports**，或者由管理员将 `e2e-inc/e2e` 导入为团队插件市场。插件添加 `e2e`、`create-verification-skill` 和 `migrate-to-e2e` 技能以及 [MCP 服务器](/coding-agents#let-the-agent-use-the-app)，不会安装 npm 包。调用后两个技能时，Claude Code 使用插件名称前缀 `/e2e:<skill>`，Codex 使用 `$e2e:<skill>`，Cursor 使用 `/<skill>`。
+启动新会话。在 Cursor 中，运行 **Developer: Reload Window**。在 Cursor Teams 和 Enterprise 中，本地插件需要管理员开启 **Allow Local Plugin Imports**，或者由管理员将 `e2e-inc/e2e` 导入为团队插件市场。插件添加 `e2e`、`create-verification-skill` 和 `migrate-to-e2e` 技能以及 [MCP 服务器](/reference/mcp)，不会安装 npm 包。调用后两个技能时，Claude Code 使用插件名称前缀 `/e2e:<skill>`，Codex 使用 `$e2e:<skill>`，Cursor 使用 `/<skill>`。
 
 插件版本跟随 e2e 发布。要更新插件，请运行以下命令并启动新会话。在 Cursor 中，请重新运行上面的命令。
 
@@ -100,7 +100,7 @@ hermes skills install e2e-inc/e2e/e2e
 
 ## 让智能体使用应用
 
-`e2e mcp` 为智能体提供应用的实时会话。它会在写入定位器前对照屏幕检查定位器，也会检查自己对 UI 的更改。`init` 会注册服务器。配置方法和提示词见 [MCP 服务器](/coding-agents#let-the-agent-use-the-app)。
+`e2e mcp` 为智能体提供应用的实时会话。它会在写入定位器前对照屏幕检查定位器，也会检查自己对 UI 的更改。`init` 会注册服务器。配置方法和提示词见 [MCP 服务器](/reference/mcp)。
 
 ## 智能体如何编写和运行测试
 
@@ -184,7 +184,7 @@ bunx skills add e2e-inc/e2e --skill create-verification-skill
 - 根据配置得出的启动和 doctor 命令。
 - 操作应用的两种方式：实时 `e2e mcp` 会话和测试。
 - 验证时需要保留的证据。
-- 功能地图，每个功能对应一个 `e2e explore` 探索任务，让 [Bug Bash](/explore#bug-bashes) 从地图展开。
+- 功能地图，每个功能对应一个 `e2e explore` 探索任务，让 [Bug Bash](/explore) 从地图展开。
 
 生成的技能只描述你的应用实际具备的内容，其余内容通过链接指向 e2e 技能。它基于 poteto 的 pstack 中的 [create-verification-skill](https://github.com/cursor/plugins/tree/main/pstack/skills/create-verification-skill)，使用 e2e 替代手写的测试执行框架。
 </Accordion>

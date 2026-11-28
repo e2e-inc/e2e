@@ -5,7 +5,7 @@ description: Rode alvos web nos navegadores em nuvem do Notte com o provedor de 
 ---
 
 `notte()` de `@e2e-dev/notte` é um
-[provedor de navegadores](/reference/web#hosted-browsers) para o [Notte](https://notte.cc).
+[provedor de navegadores](/reference/web) para o [Notte](https://notte.cc).
 Cada tentativa de teste recebe a própria sessão de navegador em nuvem. Os
 testes continuam iguais. Só o `browser` do alvo muda.
 
@@ -79,7 +79,7 @@ O provedor reserva apenas no escopo `attempt`. Uma sessão do Notte tem um
 `worker` precisa para manter os testes separados. Cada tentativa, incluindo
 as novas tentativas, roda no contexto padrão e na primeira aba de uma sessão
 nova. Cada teste arca com o custo de iniciar uma sessão, e os
-[limites de uma reserva por tentativa](/reference/web#hosted-browsers) se aplicam,
+[limites de uma reserva por tentativa](/reference/web) se aplicam,
 incluindo as sessões.
 
 ## Acompanhe e limpe as sessões
@@ -125,7 +125,7 @@ artefatos da tentativa.
 ## Próximos passos
 
 <CardGroup cols={2}>
-  <Card title="Navegadores hospedados" icon="globe" href="/reference/web#hosted-browsers">
+  <Card title="Navegadores hospedados" icon="globe" href="/reference/web">
     Como um provedor de navegadores reserva navegadores, e os limites do escopo `'attempt'`.
   </Card>
   <Card title="Integração contínua" icon="rotate" href="/ci">

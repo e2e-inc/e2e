@@ -58,7 +58,7 @@ diretório temporário, `inheritEnv` e `env`.
 
 | Opção | Finalidade |
 | --- | --- |
-| `reuseExisting: true` | Usa um servidor que já está rodando, como um que uma [sessão MCP](/coding-agents#run-tests-next-to-a-session) iniciou. Na CI, o e2e ignora essa opção, e a execução falha com `APP_ALREADY_RUNNING` quando um servidor já responde. |
+| `reuseExisting: true` | Usa um servidor que já está rodando, como um que uma [sessão MCP](/coding-agents) iniciou. Na CI, o e2e ignora essa opção, e a execução falha com `APP_ALREADY_RUNNING` quando um servidor já responde. |
 | `log` | Salva o stdout e o stderr do app em um arquivo relativo ao projeto. Um erro de inicialização, ou um encerramento inesperado durante `e2e run`, cita as linhas que qualquer processo acrescentou ao arquivo desde que o comando começou. Um log de até 40 linhas dentro de 8 KiB é citado inteiro; caso contrário, a citação mantém até 20 linhas de cada extremidade, com `[startup output omitted]` entre elas, e, para um log acima de 8 KiB, essas linhas vêm dos seus primeiros e últimos 4 KiB. Valores de `command.env` e `inheritEnv` com pelo menos quatro caracteres são ocultados da citação. O arquivo em si não é ocultado. |
 | `env` | Variáveis de ambiente para o app. |
 | `inheritEnv` | Variáveis do host a repassar quando definidas, por nome ou prefixo: `['DATABASE_URL', 'STRIPE_*']`. `env` tem precedência sobre elas. |
@@ -291,7 +291,7 @@ sendo um navegador de desktop: fator de escala 1, ponteiro de desktop e seu
 user agent de sempre. Ele não emula toque. Para testar em um simulador ou
 emulador, use a [engine mobile](/mobile). Para modo escuro e movimento
 reduzido, veja
-[Emular modo escuro e movimento reduzido](/reference/web#media-emulation).
+[Emular modo escuro e movimento reduzido](/reference/web).
 
 Um vídeo mantém o tamanho que a página tinha quando a gravação começou. Defina
 `web({ screencast: { size } })` para um tamanho fixo. Um provedor de navegador
@@ -328,9 +328,6 @@ app usar a área de transferência, conceda-a no alvo:
 ## Próximos passos
 
 <CardGroup cols={2}>
-  <Card title="Trabalhando com o navegador" icon="globe" href="/reference/web">
-    Simule rotas, defina cookies, trate diálogos e baixe arquivos.
-  </Card>
   <Card title="Referência da engine web" icon="masks-theater" href="/reference/web">
     Todas as opções de `web()` e todos os métodos de `browser`.
   </Card>

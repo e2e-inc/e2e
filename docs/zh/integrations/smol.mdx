@@ -6,7 +6,7 @@ description: 使用 @e2e-dev/smol 的 smol() 浏览器提供方，让每次网�
 "twitter:image": "https://e2e.com/docs/images/og/integrations/smol.png?v=93b61e0399"
 ---
 
-`@e2e-dev/smol` 中的 `smol()` 是一个[浏览器提供方](/reference/web#hosted-browsers)，在你计算机上的 [smol machines](https://smolmachines.com) 微型虚拟机中运行 Chromium。每个工作进程槽位启动一台浏览器虚拟机。默认情况下，每次测试尝试都在它的写时复制分支中运行，约一秒即可就绪，因此每次重试都从相同的浏览器状态开始。只有当应用[在虚拟机中运行](#run-the-app-in-the-machine)时，应用数据才会重置。你计算机上或外部服务中的状态仍然共享。
+`@e2e-dev/smol` 中的 `smol()` 是一个[浏览器提供方](/reference/web)，在你计算机上的 [smol machines](https://smolmachines.com) 微型虚拟机中运行 Chromium。每个工作进程槽位启动一台浏览器虚拟机。默认情况下，每次测试尝试都在它的写时复制分支中运行，约一秒即可就绪，因此每次重试都从相同的浏览器状态开始。只有当应用[在虚拟机中运行](#run-the-app-in-the-machine)时，应用数据才会重置。你计算机上或外部服务中的状态仍然共享。
 
 ## 配置提供方
 
@@ -130,7 +130,7 @@ smol({
 
 ## 选择作用域
 
-默认值 `scope: 'attempt'` 让每次尝试都获得槽位预热浏览器的独立分支，并受到[每次尝试租约](/reference/web#hosted-browsers)的限制。
+默认值 `scope: 'attempt'` 让每次尝试都获得槽位预热浏览器的独立分支，并受到[每次尝试租约](/reference/web)的限制。
 
 `scope: 'worker'` 在本次运行中为每个工作进程槽位保留一台虚拟机。每次尝试都会在其中获得一个新的浏览器上下文，与本地运行相同，因此会话以及 `headers`、`locale` 等选项都可用。此时不会创建任何分支，设置 `prepare` 会导致 `INVALID_CONFIG`。
 
@@ -160,7 +160,7 @@ smol({
   <Card title="安全" icon="shield-halved" href="/security">
     哪些内容在你的计算机上运行，以及哪些内容仍可能泄露。
   </Card>
-  <Card title="托管浏览器" icon="globe" href="/reference/web#hosted-browsers">
+  <Card title="托管浏览器" icon="globe" href="/reference/web">
     浏览器提供方如何租用浏览器，以及 `'attempt'` 作用域的限制。
   </Card>
 </CardGroup>

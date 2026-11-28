@@ -17,6 +17,10 @@
     "Deep dive": "Zaawansowane",
     "Migrate": "Migracja",
     "Test API": "API testów",
-    "Project": "Projekt"
+    "Project": "Projekt",
+    "Browsers": "Przeglądarki",
+    "Devices": "Urządzenia",
+    "Browsers and devices": "Przeglądarki i urządzenia",
+    "Ecosystem": "Ekosystem"
   }
 }

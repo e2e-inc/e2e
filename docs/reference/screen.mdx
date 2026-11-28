@@ -584,8 +584,9 @@ inside the page, call it on the list: [`scrollTo`](#scrollto).
   the list, not the screen.
 - The timeout is [`config.actionTimeout`](/reference/config#actiontimeout).
   It bounds the whole scroll.
-- It resolves at once when the container is already at the edge or nothing
-  scrolls.
+- On the web, it resolves at once when the container is already at the edge
+  or nothing scrolls. On a device it still sends one drag to confirm, which
+  can trigger pull-to-refresh.
 - A frame's screen (`browser.frameLocator()`) refuses it. Call it on a
   locator inside the frame.
 

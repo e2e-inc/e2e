@@ -41,7 +41,7 @@ e2e 用 TypeScript 测试替换 Selenium 测试套件。定位器按角色和标
 | 每个 `driver.get` 中的 URL | 测试目标上的 `app: { url }`，之后使用相对路径 |
 | 在脚本中启动应用 | `app: { url, command }`，参阅[启动应用](/web#starting-your-app) |
 | 每个浏览器一个驱动 | 每种 `web({ browser })` 构建对应一个测试目标，使用 `chromium`、`firefox` 或 `webkit`，而非 Chrome、Edge 或 Safari |
-| Selenium Grid | 通过 `workers` 并行运行，通过[浏览器提供方](/reference/web#hosted-browsers)使用托管 Chromium |
+| Selenium Grid | 通过 `workers` 并行运行，通过[浏览器提供方](/reference/web)使用托管 Chromium |
 | 来自 `System.getenv` 的密码 | 配置中的 `credentials` 或 `secrets`，参阅[身份验证](/authentication) |
 
 ## 改写一个流程
@@ -106,7 +106,7 @@ test('signs in', async ({ app, screen, browser }) => {
 | `element.findElement(By.cssSelector)`、WebdriverIO 的 `$('a').$('b')` | 一个 `browser.locator('a >> b')` 选择器，或链式 `getBy*` 查询 |
 | `ChromeOptions.addArguments`、`setBinary`、`Proxy`、`acceptInsecureCerts` | 使用这些标志启动 Chrome 或 Edge，再通过 `web({ connect })` 连接 |
 | `@BeforeSuite`、`@AfterSuite`、pytest 会话作用域测试夹具、WebdriverIO 的 `onPrepare` | 每次运行执行一次：`app.command` 启动的脚本，或包装 `e2e run` 的脚本。每个文件执行一次：`beforeAll` 和 `afterAll`。登录：保存会话的顶层 `test.setup` |
-| 网页端的 BrowserStack 或 Sauce Labs | 如果厂商提供 CDP 端点，使用你自己的[浏览器提供方](/reference/web#write-a-provider) |
+| 网页端的 BrowserStack 或 Sauce Labs | 如果厂商提供 CDP 端点，使用你自己的[浏览器提供方](/reference/web) |
 | `manage().logs()`、请求监听器、地理位置 | 在 `browser.addInitScript` 中修改页面，在 `browser.route` 中记录请求 |
 | `setNetworkConditions` | 离线场景可在 `browser.route` 中中止请求。不支持带宽限制或延迟，请将这些测试留在 Selenium 中 |
 

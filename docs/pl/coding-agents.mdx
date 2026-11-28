@@ -80,7 +80,7 @@ planach Cursor Teams i Enterprise lokalne wtyczki wymagają ustawienia
 administratora **Allow Local Plugin Imports**. Zamiast tego administrator
 może też zaimportować `e2e-inc/e2e` jako marketplace zespołu. Wtyczka dodaje
 skille `e2e`, `create-verification-skill` i `migrate-to-e2e`, ale nie pakiet
-npm. W Codex i Cursorze dodaje też [serwer MCP](/coding-agents#let-the-agent-use-the-app); w Claude Code
+npm. W Codex i Cursorze dodaje też [serwer MCP](/reference/mcp); w Claude Code
 i Grok Build zarejestruj go w projekcie. Pozostałe dwa skille
 wywołujesz z nazwą wtyczki: `/e2e:<skill>` w Claude Code i `$e2e:<skill>` w
 Codex, a w Cursorze jako `/<skill>`.
@@ -127,7 +127,7 @@ hermes skills install e2e-inc/e2e/e2e
 `e2e mcp` daje agentowi sesję na żywo w twojej aplikacji. Agent sprawdza
 locatory na ekranie, zanim je zapisze, i weryfikuje własne zmiany w UI.
 `init` rejestruje serwer. Konfigurację i przykładowe prompty znajdziesz na
-stronie [Serwer MCP](/coding-agents#let-the-agent-use-the-app).
+stronie [Serwer MCP](/reference/mcp).
 
 ## Jak agent pisze i uruchamia test
 
@@ -248,7 +248,7 @@ Potem poproś agenta o `/create-verification-skill`.
 - Dwa sposoby sterowania aplikacją: sesję `e2e mcp` na żywo i test.
 - Dowody, które trzeba zachować jako potwierdzenie działania.
 - Mapę funkcjonalności z jednym charterem `e2e explore` na każdą
-  funkcjonalność, aby [bug bash](/explore#bug-bashes) mógł rozdzielić pracę według
+  funkcjonalność, aby [bug bash](/explore) mógł rozdzielić pracę według
   tej mapy.
 
 Wygenerowany skill opisuje tylko to, co dotyczy twojej aplikacji, a po

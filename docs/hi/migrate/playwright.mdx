@@ -164,7 +164,7 @@ test('checkout', async ({ app, agent, screen }) => {
 | Playwright | e2e |
 | --- | --- |
 | `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | `browser` पर वही; पैटर्न एक `RegExp`, ऐप URL के हिसाब से रिज़ॉल्व होने वाला URL ग्लॉब, या एक HTTP मेथड के लिए `{ method, url }` होता है |
-| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | वही, हर मेथड के ऑप्शन के लिए [`route`](/reference/web#route) देखें |
+| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | वही, हर मेथड के ऑप्शन के लिए [`route`](/reference/web) देखें |
 | `page.waitForResponse(pattern)` | उन्हीं URL ग्लॉब के साथ `browser.waitForResponse(pattern)` |
 | `page.on('dialog')`, `page.waitForEvent('download')` | `browser.onDialog('accept')` या कोई हैंडलर; `browser.waitForDownload(() => trigger)` |
 | `page.waitForEvent('popup')` | `browser.waitForPopup(() => trigger)`, जो नए टैब को एक्टिव कर देता है, [टैब](/reference/web#tabs) देखें |

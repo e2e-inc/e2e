@@ -22,8 +22,8 @@ flowchart LR
 | Você quer | Escreva | Guia |
 | --- | --- | --- |
 | Uma engine em TypeScript | `defineEngine`, definida em um alvo | [Escrevendo uma engine](/writing-an-engine) |
-| Uma engine TypeScript em um processo próprio | `defineEngine`, servida com `serveEngine` | [Servidores de engine](/reference/engine-protocol#serve-a-typescript-engine) |
-| Uma engine em outra linguagem, ou em um dispositivo | Um servidor que responde às mensagens do protocolo | [Servidores de engine](/reference/engine-protocol#write-a-server-in-another-language) |
+| Uma engine TypeScript em um processo próprio | `defineEngine`, servida com `serveEngine` | [Servidores de engine](/reference/engine-protocol) |
+| Uma engine em outra linguagem, ou em um dispositivo | Um servidor que responde às mensagens do protocolo | [Servidores de engine](/reference/engine-protocol) |
 
 Uma engine criada com `defineEngine` roda no processo do runner. Mesmo assim,
 toda chamada atravessa o protocolo, então uma engine que passa na própria
@@ -52,7 +52,7 @@ onde o contrato supunha um navegador ou um dispositivo:
   <Card title="Escrevendo uma engine" icon="code" href="/writing-an-engine">
     Construa uma engine com `defineEngine`, passo a passo.
   </Card>
-  <Card title="Servidores de engine" icon="network-wired" href="/reference/engine-protocol#engine-servers">
+  <Card title="Servidores de engine" icon="network-wired" href="/reference/engine-protocol">
     Rode uma engine em outro processo, outra máquina ou outra linguagem.
   </Card>
   <Card title="e2e/engine" icon="book" href="/reference/engine">

@@ -55,7 +55,7 @@ test('adds an item', async ({ app, agent, screen }) => {
 | `kept` | 条目保持原样。 |
 | `unconfirmed` | 未保存：步骤之后没有检查通过。在测试结束时添加定位器断言、引擎断言或 `agent.assert`，或使用 `locator.waitFor()` 或 `agent.waitFor` 等待状态。 |
 | `evicted` | 条目已删除：回放以失败或修复结束，或在尝试失败前没有检查确认它。 |
-| `no-change` | 未录制任何内容：没有控件出现、消失或改变状态，路由也没有变化。这也包括唯一变化发生在[其他网站的框架](/reference/web#framelocator)中的步骤。这类步骤每次运行都实时执行。 |
+| `no-change` | 未录制任何内容：没有控件出现、消失或改变状态，路由也没有变化。这也包括唯一变化发生在[其他网站的框架](/reference/web)中的步骤。这类步骤每次运行都实时执行。 |
 | `not-written` | 未保存：存储拒绝了写入或录制记录，例如记录超过文件存储的大小限制。 |
 
 未执行任何操作的步骤不会录制任何内容，也不会报告 `write`。

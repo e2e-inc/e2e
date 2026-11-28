@@ -79,7 +79,7 @@ Teams a Enterprise potřebují lokální pluginy administrátorské nastavení
 **Allow Local Plugin Imports**, nebo administrátor naimportuje `e2e-inc/e2e`
 jako týmový marketplace. Plugin přidá skilly
 `e2e`, `create-verification-skill` a `migrate-to-e2e` a
-[MCP server](/coding-agents#let-the-agent-use-the-app), ne balíček npm. Další dva skilly vyvoláš pod
+[MCP server](/reference/mcp), ne balíček npm. Další dva skilly vyvoláš pod
 názvem pluginu: `/e2e:<skill>` v Claude Code, `$e2e:<skill>` v Codexu
 a `/<skill>` v Cursoru.
 
@@ -124,7 +124,7 @@ hermes skills install e2e-inc/e2e/e2e
 `e2e mcp` dá agentovi živou relaci s tvou aplikací. Agent si v ní ověří
 lokátory proti obrazovce dřív, než je zapíše, a zkontroluje i vlastní změny
 UI. Příkaz `init` zaregistruje server. Nastavení a ukázkové prompty najdeš na
-stránce [MCP server](/coding-agents#let-the-agent-use-the-app).
+stránce [MCP server](/reference/mcp).
 
 ## Jak agent píše a spouští test
 
@@ -245,7 +245,7 @@ Potom agenta požádej o `/create-verification-skill`.
 - Dva způsoby, jak aplikaci ovládat: živou relaci `e2e mcp` a test.
 - Důkazy, které si ověření uchovává.
 - Mapu funkcí s jedním zadáním `e2e explore` pro každou funkci, aby se
-  [bug bash](/explore#bug-bashes) mohl z mapy rozvětvit.
+  [bug bash](/explore) mohl z mapy rozvětvit.
 
 Vygenerovaný skill uvádí jen to, co o tvé aplikaci skutečně platí, a pro
 všechno ostatní odkazuje na skill e2e. Vychází ze skillu

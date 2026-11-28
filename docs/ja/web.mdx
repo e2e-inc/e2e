@@ -54,7 +54,7 @@ export default {
 
 | オプション | 用途 |
 | --- | --- |
-| `reuseExisting: true` | [MCP セッション](/coding-agents#run-tests-next-to-a-session) が起動したものなど、既存のサーバーを使います。CI では無視され、応答するサーバーがすでにあると `APP_ALREADY_RUNNING` になります。 |
+| `reuseExisting: true` | [MCP セッション](/coding-agents) が起動したものなど、既存のサーバーを使います。CI では無視され、応答するサーバーがすでにあると `APP_ALREADY_RUNNING` になります。 |
 | `log` | アプリの stdout と stderr を、プロジェクトからの相対パスのファイルに保存します。起動エラーや `e2e run` 中の予期しない終了では、コマンド開始後にいずれかのプロセスが追記した行を引用します。8 KiB 以内かつ 40 行以内なら全体を引用します。それ以外は先頭と末尾からそれぞれ最大 20 行を残し、間に `[startup output omitted]` を挿入します。8 KiB を超える場合は、先頭と末尾の各 4 KiB から行を取得します。`command.env` と `inheritEnv` の 4 文字以上の値は引用では秘匿されます。ファイル自体は秘匿されません。 |
 | `env` | アプリに渡す環境変数。 |
 | `inheritEnv` | 設定されている場合に渡すホスト側の変数を、名前または接頭辞で指定します。例は `['DATABASE_URL', 'STRIPE_*']` です。`env` が優先されます。 |
@@ -260,7 +260,7 @@ test('the sidebar stays open', async ({ app, screen, browser }) => {
 ブラウザは引き続きデスクトップブラウザで、スケール係数は 1、ポインターとユーザーエージェントも通常のデスクトップ用です。
 タッチ操作はエミュレートしません。シミュレーターやエミュレーターでのテストには [モバイルエンジン](/mobile) を使います。
 ダークモードと視差効果の低減については、
-[ダークモードと視差効果の低減をエミュレートする](/reference/web#media-emulation) を参照してください。
+[ダークモードと視差効果の低減をエミュレートする](/reference/web) を参照してください。
 
 動画は録画開始時のページサイズを保持します。
 固定サイズにするには `web({ screencast: { size } })` を設定します。
@@ -291,9 +291,6 @@ test('the sidebar stays open', async ({ app, screen, browser }) => {
 ## 次のステップ
 
 <CardGroup cols={2}>
-  <Card title="ブラウザの操作" icon="globe" href="/reference/web">
-    ルートのモック、Cookie の設定、ダイアログの処理、ファイルのダウンロードを行います。
-  </Card>
   <Card title="Web エンジンリファレンス" icon="masks-theater" href="/reference/web">
     `web()` の全オプションと `browser` の全メソッドを確認します。
   </Card>

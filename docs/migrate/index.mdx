@@ -82,8 +82,8 @@ stop after any session.
 - It reads the migration guide for your runner first, then ports the slice
   you pick and runs each ported test three times on every target.
 - A `MIGRATION.md` file records progress for the next session.
-- Optionally, it plants a temporary bug in the app, such as a wrong checkout
-  total, and checks whether both suites fail on it.
+- It asks first, and only when you agree plants a temporary bug in the app,
+  such as a wrong checkout total, and checks whether both suites fail on it.
 - It deletes an old test only when you confirm.
 
 ## Migrate from a runner with no guide

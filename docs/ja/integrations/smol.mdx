@@ -8,7 +8,7 @@ description: "@e2e-dev/smol の smol() ブラウザプロバイダーを使い�
 
 `@e2e-dev/smol` の `smol()` は、手元のコンピューター上の
 [smol machines](https://smolmachines.com) microVM で Chromium を実行する
-[ブラウザプロバイダー](/reference/web#hosted-browsers)です。
+[ブラウザプロバイダー](/reference/web)です。
 各ワーカースロットはブラウザ用のマシンを 1 台起動します。
 デフォルトでは、各テスト試行はそのマシンのコピーオンライトのブランチで実行されます。
 ブランチは約 1 秒で準備でき、どのリトライも同じブラウザ状態から始まります。
@@ -153,7 +153,7 @@ smol({
 ## スコープの選択
 
 デフォルトの `scope: 'attempt'` は、各試行に、スロットの起動済みブラウザから作った専用のブランチを割り当てます。
-[試行ごとのリース](/reference/web#hosted-browsers)の制限が適用されます。
+[試行ごとのリース](/reference/web)の制限が適用されます。
 
 `scope: 'worker'` は、実行中、ワーカースロットごとに 1 台のマシンを維持します。
 ローカル実行と同様に、各試行はそのマシン上で新しいブラウザコンテキストを使うため、
@@ -190,7 +190,7 @@ CI ジョブのキャンセルなどでランナーが強制終了すると、`'
   <Card title="セキュリティ" icon="shield-halved" href="/security">
     手元のコンピューターで実行される処理と、情報が漏れる可能性について説明します。
   </Card>
-  <Card title="ホスト型ブラウザ" icon="globe" href="/reference/web#hosted-browsers">
+  <Card title="ホスト型ブラウザ" icon="globe" href="/reference/web">
     ブラウザプロバイダーのリースの仕組みと、`'attempt'` スコープの制限を説明します。
   </Card>
 </CardGroup>

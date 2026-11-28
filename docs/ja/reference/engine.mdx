@@ -2013,7 +2013,7 @@ export interface VideoLink {
 
 #### プロバイダーによる録画
 
-ホスト型サービスからブラウザやデバイスを借りるエンジンは、自身で取得する代わりに、サービス側で試行を録画できます。[`BrowserProvider.record`](/reference/web#recording-on-the-provider) と [`DeviceProvider.record`](/mobile#hosted-devices) はこの仕組みです。`e2e/engine` は共通の形式と `stopProviderRecording` をエクスポートし、すべてのエンジンが同じ方法でプロバイダーの録画を `VideoSegment` に変換できます。
+ホスト型サービスからブラウザやデバイスを借りるエンジンは、自身で取得する代わりに、サービス側で試行を録画できます。[`BrowserProvider.record`](/reference/web) と [`DeviceProvider.record`](/mobile#hosted-devices) はこの仕組みです。`e2e/engine` は共通の形式と `stopProviderRecording` をエクスポートし、すべてのエンジンが同じ方法でプロバイダーの録画を `VideoSegment` に変換できます。
 
 ```ts
 async stopVideo(context) {
@@ -2420,4 +2420,4 @@ export type QueryKind = 'role' | 'label' | 'placeholder' | 'text' | 'displayValu
 
 ## 関連ページ
 
-[エンジン](/engines)では実装方法を比較しています。[エンジンを作る](/writing-an-engine)では `defineEngine` を順に説明し、[エンジンサーバー](/reference/engine-protocol#engine-servers)では別のプロセス、マシン、言語で動かします。`@e2e-dev/web`（[リファレンス](/reference/web)）と `@e2e-dev/mobile`（[リファレンス](/reference/mobile)）は、同じ公開 `defineEngine` でこの契約を実装しています。
+[エンジン](/engines)では実装方法を比較しています。[エンジンを作る](/writing-an-engine)では `defineEngine` を順に説明し、[エンジンサーバー](/reference/engine-protocol)では別のプロセス、マシン、言語で動かします。`@e2e-dev/web`（[リファレンス](/reference/web)）と `@e2e-dev/mobile`（[リファレンス](/reference/mobile)）は、同じ公開 `defineEngine` でこの契約を実装しています。

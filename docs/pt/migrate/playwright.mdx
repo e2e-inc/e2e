@@ -169,7 +169,7 @@ só rodam em um navegador, então um teste que faz essas chamadas declara
 | Playwright | e2e |
 | --- | --- |
 | `page.route(pattern, handler)`, `unroute()`, `unrouteAll()` | igual em `browser`; um padrão é uma `RegExp`, um glob de URL resolvido em relação à URL do app, ou `{ method, url }` para um método HTTP |
-| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | igual, veja [`route`](/reference/web#route) para as opções de cada um |
+| `route.fulfill()`, `continue()`, `fallback()`, `abort()`, `fetch()` | igual, veja [`route`](/reference/web) para as opções de cada um |
 | `page.waitForResponse(urlOrPredicate)`, `page.waitForRequest(urlOrPredicate)` | `browser.waitForResponse` e `browser.waitForRequest` com um glob de URL, uma `RegExp`, `{ method, url }` ou um predicado. Só `body()`, `text()` e `json()` são métodos; `response.status`, `response.request.method` e `request.postData` são propriedades. `timeout` é a única opção |
 | `page.on('dialog')`, `page.waitForEvent('download')` | `browser.onDialog('accept')` ou um handler; `browser.waitForDownload(() => trigger)` |
 | `page.waitForEvent('popup')` | `browser.waitForPopup(() => trigger)`, que torna ativa a nova aba, veja [Abas](/reference/web#tabs) |
@@ -180,7 +180,7 @@ só rodam em um navegador, então um teste que faz essas chamadas declara
 | `page.clock.install()`, `pauseAt()`, `runFor()`, `fastForward()`, `resume()`, `setFixedTime()`, `setSystemTime()` | `browser.clock`, com os mesmos métodos e argumentos; ele cobre todas as abas, como `context.clock` |
 | `context.addCookies()`, `cookies(urls)`, `clearCookies()` | `browser.setCookies()`, `browser.cookies(urls)`, `browser.clearCookies()` |
 | A fixture `browserName`, `browser.browserType().name()`, `browser.version()` | [`browser.name`](/reference/web#name-version), `browser.version`; `test.skip(browser.name === 'firefox', reason)` no corpo |
-| `context.setOffline(true)` | [`browser.setNetwork('offline')`](/reference/web#setnetwork), `'online'` para voltar |
+| `context.setOffline(true)` | [`browser.setNetwork('offline')`](/reference/web), `'online'` para voltar |
 | A fixture `request`: `get()`, `post()`, `put()`, `patch()`, `delete()`, `head()`, `fetch()` | igual em [`request`](/reference/request): `{ json }` para `data` (essa opção recusa um valor `undefined` ou uma `Date`), os parâmetros de consulta na URL para `params`, `{ redirect: 'manual' }` para `maxRedirects: 0`, `status` e `headers` como propriedades. A fixture não guarda cookies entre chamadas: passe um token ou um cookie de sessão em `headers` |
 | `page.request`, que compartilha os cookies da página | `request` com um cabeçalho `cookie` vindo de `browser.cookies(url)`, veja [Requisições autenticadas](/api-testing#signed-in-requests) |
 

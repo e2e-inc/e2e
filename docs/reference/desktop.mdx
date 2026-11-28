@@ -60,8 +60,9 @@ desktop({ physicalInput: true, maxDepth: 32 });
 | [`settle`](#settle) | `number \| false` | `150` |
 | [`maxDepth`](#maxdepth) | `number` | `24` |
 
-Every optional value also accepts `undefined`, so values read straight from
-`process.env` need no conditional spread.
+Every optional value also accepts `undefined`, so an unset `process.env`
+value needs no conditional spread. Parse a set one first: a string for a
+boolean or a number is `INVALID_CONFIG`.
 
 | Throws | When |
 | --- | --- |

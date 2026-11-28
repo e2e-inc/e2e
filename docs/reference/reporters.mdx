@@ -872,7 +872,7 @@ to stdout.
 
 ```bash
 jq '.run | {status, exitCode, errors}' .e2e/report.json
-jq '.run.results[] | select(.status != "passed") | .attempts[-1]
+jq '.run.results[] | select(.status != "passed") | .attempts[-1] | select(. != null)
     | {status, error, failure, steps: [.steps[] | select(.status != "passed") | {api, label, source, status, error}], artifacts}' .e2e/report.json
 ```
 

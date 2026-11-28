@@ -212,7 +212,9 @@ The `e2e` skill teaches the framework, not your app. The
 `.agents/skills/verify-<app>/` skill for your app and tests it once before
 finishing. Install it with the plugin or with
 `npx skills add e2e-inc/e2e --skill create-verification-skill`, then ask the
-agent for `/create-verification-skill`.
+agent for `/create-verification-skill`. Installed with the plugin, it is
+`/e2e:create-verification-skill` in Claude Code and
+`$e2e:create-verification-skill` in Codex.
 
 The generated skill holds the launch and doctor commands from your config,
 the two ways to drive the app (a live `e2e mcp` session and a test), the

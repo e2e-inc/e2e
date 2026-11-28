@@ -781,7 +781,7 @@ await device.openApp('com.example.app', { relaunch: true, launchArguments: { App
 - `launchArguments` and `permissions` apply to this launch alone. On a
   relaunch of the pinned app they replace the target's `app.launchArguments`
   and `app.permissions`, which apply otherwise. An open without `relaunch`
-  gets neither.
+  gets neither of the target's, only what the call passes.
 
 | Throws | When |
 | --- | --- |

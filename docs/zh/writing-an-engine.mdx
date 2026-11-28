@@ -7,7 +7,7 @@ description: 为其他 UI 平台实现 e2e 引擎契约。
 
 引擎通过 `e2e/engine` 契约将 `screen`、`app` 和智能体调用连接到 UI 平台。你可以编写引擎来测试桌面应用、电视或其他平台。`@e2e-dev/web` 和 `@e2e-dev/mobile` 使用相同的公共 `defineEngine` API，可作为完整示例。
 
-本页使用 TypeScript 构建一个在运行器进程中提供服务的引擎。要在其他进程或语言中运行引擎，请参阅[引擎服务器](/reference/engine-protocol#engine-servers)。
+本页使用 TypeScript 构建一个在运行器进程中提供服务的引擎。要在其他进程或语言中运行引擎，请参阅[引擎服务器](/reference/engine-protocol)。
 
 引擎只驱动用户界面。对于收件箱、数据库或测试 API，请使用 [`test.extend`](/reference/test#your-own-fixtures) 编写测试夹具。
 
@@ -178,7 +178,7 @@ targets: [{ name: 'phone', engine: hyperdrive({ device: 'iPhone 16' }), app: { b
 
 ## 引擎提供的测试夹具
 
-引擎可以提供 `browser` 或 `device` 等测试夹具。对测试来说，它们是[内置测试夹具](/reference/test#fixtures)。使用 `context.fixture` 包装它们的方法，将每次调用记录为 `<fixture>.<method>` 步骤，并带有独立的产物和失败信息。测试夹具与测试一起在运行器进程中运行。引擎服务器通过 `connectEngine` 获取它们；参阅[将宿主工作保留在客户端](/reference/engine-protocol#keep-host-work-on-the-client)。
+引擎可以提供 `browser` 或 `device` 等测试夹具。对测试来说，它们是[内置测试夹具](/reference/test#fixtures)。使用 `context.fixture` 包装它们的方法，将每次调用记录为 `<fixture>.<method>` 步骤，并带有独立的产物和失败信息。测试夹具与测试一起在运行器进程中运行。引擎服务器通过 `connectEngine` 获取它们；参阅[将宿主工作保留在客户端](/reference/engine-protocol)。
 
 ```ts
 fixtures: {
@@ -234,7 +234,7 @@ open_session {engine: {package: "kiosk-engine", options: {lane: 2}}}
   <Card title="移动端引擎参考" icon="mobile-screen" href="/reference/mobile">
     可供对照阅读的完整设备引擎。
   </Card>
-  <Card title="引擎服务器" icon="network-wired" href="/reference/engine-protocol#engine-servers">
+  <Card title="引擎服务器" icon="network-wired" href="/reference/engine-protocol">
     在其他进程、机器或语言中运行引擎。
   </Card>
 </CardGroup>

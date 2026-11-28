@@ -144,7 +144,7 @@ one node can't do a declared action, throw `UNSUPPORTED_CAPABILITY`.
 | `startAttempt` | Before each attempt | Create the test's UI |
 | `settleAttempt` | After the body, and again after teardown | Throw the error of a test callback no step awaited, such as a dialog handler |
 | `endAttempt` | After each attempt, also after a failed start | Clean up the test's UI. Make it idempotent |
-| `dispose` | At worker shutdown, even if `init` never ran | Release the worker's resources |
+| `dispose` | At worker shutdown once `init` was called, even if it failed | Release the worker's resources |
 | `finish` | One time per target, after the last worker is gone, whenever `prepare` ran | Release what `prepare` acquired |
 
 Use `info.env` for the processes you start and `info.log` to report
