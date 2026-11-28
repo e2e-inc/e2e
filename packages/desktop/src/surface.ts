@@ -630,6 +630,11 @@ export class DesktopSurface {
     if (helpers === null) throw new EngineError('ENGINE_FAILURE', `could not tell which processes the app (process ${pid}) started: looking for its token among the processes failed; quitting tries again`, { retryable: false });
     const owned = [...new Set([...(live ? [pid] : []), ...helpers])];
     if (!(await killed(owned, deadline, signal))) throw new EngineError('ENGINE_FAILURE', `the app (process ${pid}) or a process it started did not exit`, { retryable: false });
+    // One of them may have started another as the processes were listed: once they are gone, none can start more, and a
+    // second look finds it.
+    const late = owned.length === 0 || token === undefined ? [] : await this.requireDriver().processesCarrying(token);
+    if (late === null) throw new EngineError('ENGINE_FAILURE', `could not tell whether the app (process ${pid}) started a process as it quit: looking for its token among the processes failed; quitting tries again`, { retryable: false });
+    if (!(await killed(late, deadline, signal))) throw new EngineError('ENGINE_FAILURE', `a process the app (process ${pid}) started did not exit`, { retryable: false });
     this.driver?.forgetProcess(pid);
     this.dropProcess();
     if (this.home !== undefined) await rm(path.join(this.home, APP_FILE), { force: true }).catch(() => undefined);

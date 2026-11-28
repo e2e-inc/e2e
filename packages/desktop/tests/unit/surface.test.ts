@@ -258,6 +258,23 @@ describe('DesktopSurface: launching', () => {
     expect(await gone(theirs, 300)).toBe(false);
   });
 
+  it('quits a process the app started as its processes were listed', async () => {
+    const { surface, fake } = await launched({}, { observe: false });
+    const { token } = last<{ token: string }>(fake, 'launch')!;
+    const late = standIn();
+    const list = fake.processesCarrying.bind(fake);
+    let looks = 0;
+    fake.processesCarrying = async (carried: string) => {
+      const found = await list(carried);
+      looks += 1;
+      // Started just after the first list was taken.
+      if (looks === 1) fake.carriers.set(late, token);
+      return found;
+    };
+    await surface.endAttempt({ signal, timeoutMs: 5_000 });
+    expect(await gone(late)).toBe(true);
+  });
+
   it('keeps the app to quit again when the processes it started cannot be looked up', async () => {
     const { surface, fake } = await launched({}, { observe: false });
     const app = fake.pid;
@@ -2169,6 +2186,30 @@ describe('DesktopSurface: sweeping what killed workers left', () => {
       expect(existsSync(second)).toBe(false);
     } finally {
       for (const directory of [first, second]) rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('quits a process the left app started as the sweep listed the processes', async () => {
+    const dead = await deadPid();
+    const fake = fakeDriver();
+    const leaked = standIn();
+    const late = standIn();
+    fake.carriers.set(leaked, 'token-busy');
+    const left = leftDirectory(String(dead), { token: 'token-busy' });
+    const list = fake.processesCarrying.bind(fake);
+    let looks = 0;
+    fake.processesCarrying = async (carried: string) => {
+      const found = await list(carried);
+      looks += 1;
+      if (looks === 1) fake.carriers.set(late, 'token-busy');
+      return found;
+    };
+    try {
+      await initialized(fake);
+      expect([await gone(leaked), await gone(late)]).toEqual([true, true]);
+      expect(existsSync(left)).toBe(false);
+    } finally {
+      rmSync(left, { recursive: true, force: true });
     }
   });
 

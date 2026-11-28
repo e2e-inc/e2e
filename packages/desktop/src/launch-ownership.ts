@@ -141,7 +141,12 @@ export async function sweepStateDirectories(driver: DesktopDriver): Promise<void
       typeof pid !== 'number' &&
       owned.length === 0 &&
       (await stat(path.join(directory, APP_FILE)).then((info) => Date.now() - info.mtimeMs < LAUNCH_SETTLE_MS, () => false));
-    const settled = known && !settling && (await killed(owned, Date.now() + 2_000, AbortSignal.timeout(5_000)));
+    let settled = known && !settling && (await killed(owned, Date.now() + 2_000, AbortSignal.timeout(5_000)));
+    // One of them may have started another as the processes were listed: once they are gone, a second look finds it.
+    if (settled && owned.length > 0 && typeof launched.token === 'string' && launched.token !== '') {
+      const late = await driver.processesCarrying(launched.token);
+      settled = late !== null && (await killed(late, Date.now() + 2_000, AbortSignal.timeout(5_000)));
+    }
     await (settled ? rm(directory, { recursive: true, force: true }) : keepOnlyRecord(directory)).catch(() => undefined);
   }
 }
