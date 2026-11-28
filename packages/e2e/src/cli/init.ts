@@ -49,7 +49,8 @@ import {
   detectMobileBuilds,
   findNodeVersionFile,
   findRepositoryRoot,
-  targetsWithoutJob,
+  hasJob,
+  withoutJobNotices,
   gatewaysInConfig,
   getCiService,
   GITLAB_PIPELINE,
@@ -336,6 +337,9 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
     if (isCancelled(selectedEngines)) return cancel();
     // Preset order, whatever order they were toggled or typed in, so the config and telemetry read the same each time.
     engines = getEnginePresets().map(({ id }) => id).filter((id) => selectedEngines.includes(id));
+    for (const { label, host } of engines.map(getEnginePreset)) {
+      if (host !== undefined && host !== os.platform()) clack.log.warn(`${label} does not run on this operating system: pick the other targets here with --target`);
+    }
 
     // The gateway is a visible choice, not a runner default: the config imports
     // its provider package and constructs the model.
@@ -460,9 +464,9 @@ export async function init(root: string, options: InitOptions = {}): Promise<Ini
 
   const repositoryRoot = findRepositoryRoot(cwd, root);
   // A new config's engines are the ones just chosen; an existing config's are the ones its package.json declares, those this run adds for its imports included.
-  // Only engines a pipeline has a job for: an Electron target needs a display, so init writes no job for it.
+  // Only engines a pipeline has a job for: init writes none for an Electron target, which needs a display, or a macOS one, which needs a Mac with the Accessibility permission.
   const engineInstalled = existingConfig === undefined
-    ? engines.some((id) => id !== 'electron')
+    ? engines.some((id) => hasJob(getEnginePreset(id).platform))
     : declaresDependency(manifest, '@e2e-dev/web') || declaresDependency(manifest, '@e2e-dev/mobile');
   // Asked once: a later run finds e2e already running in some service's pipeline and leaves the question out.
   const setUp = CI_SERVICES.some((service) => service.locate(repositoryRoot).existing);
@@ -767,16 +771,15 @@ async function writePipeline(input: {
   let jobs: CiJobs;
   if (targets !== undefined) {
     jobs = ciJobs(targets, detectMobileBuilds(cwd, input.dependsOn));
-  } else if (input.dependsOn('@e2e-dev/web') && !input.dependsOn('@e2e-dev/mobile') && !input.dependsOn('@e2e-dev/electron')) {
+  } else if (input.dependsOn('@e2e-dev/web') && !input.dependsOn('@e2e-dev/mobile') && !noJobEngines().some(input.dependsOn)) {
     clack.log.warn(`The pipeline runs every target in one web job; run e2e init again once ${input.existingConfig} loads to split them`);
     jobs = { web: 'all' };
   } else {
     clack.log.warn(`No pipeline: the jobs are split by the config's targets; run e2e init again once ${input.existingConfig} loads`);
     return;
   }
-  const unrun = targets === undefined ? [] : targetsWithoutJob(targets);
-  if (unrun.length > 0) {
-    clack.log.warn(`No CI job runs ${unrun.map((target) => target.name).join(', ')}: an Electron app needs a display, so run it under xvfb-run on Linux; see ${DOCS_URL}/electron#run-in-ci-on-linux`);
+  for (const notice of targets === undefined ? [] : withoutJobNotices(targets)) {
+    clack.log.warn(notice);
   }
   if (jobs.web === undefined && jobs.ios === undefined && jobs.android === undefined) {
     clack.log.warn(`No web, iOS, or Android target to run in CI, so no pipeline; see ${DOCS_URL}/ci`);
@@ -855,6 +858,11 @@ function localPnpmMajor(): string {
   return major ?? 'latest';
 }
 
+/** The engine packages whose targets the pipeline has no job for, by which a config that does not load is judged. */
+function noJobEngines(): string[] {
+  return getEnginePresets().filter((preset) => !hasJob(preset.platform)).flatMap((preset) => Object.keys(preset.dependencies));
+}
+
 /**
  * What a new config still needs before an agent command such as `e2e explore`
  * can run on it: a model, the gateway's key in the environment, and an engine
@@ -866,8 +874,7 @@ function continueSteps(engines: readonly EngineId[], model: ScaffoldModel | unde
     ...(model === undefined ? ['add a model to agents in e2e.config.ts'] : []),
     ...(keys.length > 0 && !keys.some((key) => process.env[key] !== undefined) ? [`set ${keys[0]}`] : []),
     ...(engines.length === 0 ? ['add an engine target to e2e.config.ts'] : []),
-    ...(engines.includes('mobile') ? ['point the mobile target in e2e.config.ts at your app'] : []),
-    ...(engines.includes('electron') ? ['point app.appPath in e2e.config.ts at your Electron app'] : []),
+    ...engines.flatMap((id) => getEnginePreset(id).pointAtApp ?? []),
   ];
 }
 

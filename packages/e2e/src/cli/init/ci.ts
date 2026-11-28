@@ -13,6 +13,7 @@ import { resolvePlatform, targetName } from '@e2e-dev/core/lib/config/targets';
 import { isLoopbackHost } from '@e2e-dev/core/lib/internal/urls';
 import { runScriptCommand, type PackageManager } from '../../internal/package-manager.ts';
 import type { E2EConfig } from '../../run-types.ts';
+import { DOCS_URL } from '../docs-url.ts';
 import type { CiId } from './choices.ts';
 import { GATEWAYS, type GatewayPreset } from './gateways.ts';
 
@@ -196,7 +197,7 @@ export interface WorkflowContext {
 
 /**
  * The jobs a pipeline holds, one per platform. `web` runs every target that
- * is neither on a phone nor one no job can run (an Electron app), or every
+ * is neither on a phone nor one no job can run (an Electron or a macOS app), or every
  * target at all when the config has none of those (`'all'`, no `--target`);
  * `ios` and `android` name their targets. A platform with no targets gets no
  * job.
@@ -232,23 +233,39 @@ export interface CiTarget {
 /** Phone platforms run in their own job, on a runner with a simulator or an emulator. */
 const PHONES = new Set(['ios', 'android']);
 
-/** Platforms no job of the pipeline can run: an Electron app needs a display, which the web job's runner has none of. */
-const NO_JOB = new Set(['electron']);
+/**
+ * Platforms init writes no job for, each with what running it takes and the
+ * docs path that says how. An Electron app needs a display, which the web
+ * job's runner has none of; a macOS app needs a Mac whose CI agent holds the
+ * Accessibility permission.
+ */
+const NO_JOB: ReadonlyMap<string, { readonly needs: string; readonly docs: string }> = new Map([
+  ['electron', { needs: 'an Electron app needs a display, so run it under xvfb-run on Linux', docs: '/electron#run-in-ci-on-linux' }],
+  ['macos', { needs: 'a macOS app needs a Mac runner whose CI agent has the Accessibility permission', docs: '/desktop#set-up' }],
+]);
 
-/** The targets the pipeline leaves out, for the caller to say so. */
-export function targetsWithoutJob(targets: readonly CiTarget[]): readonly CiTarget[] {
-  return targets.filter((target) => NO_JOB.has(target.platform));
+/** Whether some job of the pipeline runs a target on this platform. */
+export function hasJob(platform: string): boolean {
+  return !NO_JOB.has(platform);
+}
+
+/** One line per platform the pipeline leaves out: its targets, what running them takes, and the docs page. */
+export function withoutJobNotices(targets: readonly CiTarget[]): readonly string[] {
+  return [...NO_JOB].flatMap(([platform, { needs, docs }]) => {
+    const names = targets.filter((target) => target.platform === platform).map((target) => target.name);
+    return names.length === 0 ? [] : [`No CI job runs ${names.join(', ')}: ${needs}; see ${DOCS_URL}${docs}`];
+  });
 }
 
 /**
  * The jobs for a config's targets. iOS and Android targets get a job each;
  * the rest, web and HTTP-only alike, run in the web job, which names them
  * with `--target` only when the config has targets it does not run. A target
- * no job can run (`targetsWithoutJob`) is in none.
+ * no job can run (`hasJob`) is in none.
  */
 export function ciJobs(targets: readonly CiTarget[], builds: { ios: IosBuild; android: AndroidBuild }): CiJobs {
   const named = (platform: string) => targets.filter((target) => target.platform === platform).map((target) => target.name);
-  const others = targets.filter((target) => !PHONES.has(target.platform) && !NO_JOB.has(target.platform)).map((target) => target.name);
+  const others = targets.filter((target) => !PHONES.has(target.platform) && hasJob(target.platform)).map((target) => target.name);
   return {
     ...(others.length === 0 ? {} : { web: others.length < targets.length ? others : 'all' }),
     ...(named('ios').length === 0 ? {} : { ios: { targets: named('ios'), build: builds.ios } }),

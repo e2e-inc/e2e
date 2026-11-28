@@ -7,7 +7,7 @@ import { CI_IDS } from '../../src/cli/init/choices.ts';
 import {
   CI_SERVICES,
   ciJobs,
-  targetsWithoutJob,
+  withoutJobNotices,
   configRunsScript,
   configStartsApp,
   configTargets,
@@ -311,12 +311,16 @@ describe('ciJobs', () => {
     expect(ciJobs([{ name: 'ios', platform: 'ios' }, { name: 'ipad', platform: 'ios' }], builds)).toEqual({ ios: { targets: ['ios', 'ipad'], build: builds.ios } });
   });
 
-  it('leaves an Electron target out of every job, and names the web job\'s targets once it does', () => {
-    const targets = [{ name: 'web', platform: 'web' }, { name: 'electron', platform: 'electron' }];
+  it('leaves an Electron and a macOS target out of every job, and names the web job\'s targets once it does', () => {
+    const targets = [{ name: 'web', platform: 'web' }, { name: 'electron', platform: 'electron' }, { name: 'macos', platform: 'macos' }, { name: 'mac-beta', platform: 'macos' }];
     expect(ciJobs(targets, builds)).toEqual({ web: ['web'] });
     expect(ciJobs([{ name: 'electron', platform: 'electron' }], builds)).toEqual({});
-    expect(targetsWithoutJob(targets)).toEqual([{ name: 'electron', platform: 'electron' }]);
-    expect(targetsWithoutJob([{ name: 'web', platform: 'web' }, { name: 'ios', platform: 'ios' }])).toEqual([]);
+    expect(ciJobs([{ name: 'macos', platform: 'macos' }], builds)).toEqual({});
+    expect(withoutJobNotices(targets)).toEqual([
+      'No CI job runs electron: an Electron app needs a display, so run it under xvfb-run on Linux; see https://e2e.com/docs/electron#run-in-ci-on-linux',
+      'No CI job runs macos, mac-beta: a macOS app needs a Mac runner whose CI agent has the Accessibility permission; see https://e2e.com/docs/desktop#set-up',
+    ]);
+    expect(withoutJobNotices([{ name: 'web', platform: 'web' }, { name: 'ios', platform: 'ios' }])).toEqual([]);
   });
 
   it('runs targets of other platforms, such as HTTP tests, in the web job, beside phone jobs too', () => {
