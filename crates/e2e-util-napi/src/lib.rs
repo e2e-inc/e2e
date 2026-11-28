@@ -134,7 +134,7 @@ impl NativeImage {
     #[napi(factory)]
     pub fn from_rgba(env: Env, data: &[u8], width: f64, height: f64) -> Result<Self> {
         let (width, height) = dimensions(width, height)?;
-        Self::adopt(&env, Rgba::new(width, height, data.to_vec()).map_err(invalid)?)
+        Self::adopt(&env, Rgba::copy_of(width, height, data).map_err(invalid)?)
     }
 
     /// A copy of the pixels, RGBA, rows top to bottom.

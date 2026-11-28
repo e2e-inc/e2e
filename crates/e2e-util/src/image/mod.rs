@@ -26,11 +26,14 @@ pub struct Rgba {
 impl Rgba {
     /// An image over `data`, which must hold exactly `width * height` RGBA pixels.
     pub fn new(width: u32, height: u32, data: Vec<u8>) -> Result<Self, ImageError> {
-        let expected = byte_len(width, height)?;
-        if data.len() != expected {
-            return Err(ImageError::Size(format!("a {width}x{height} image is {expected} bytes of RGBA, not {}", data.len())));
-        }
+        check_rgba_len(width, height, data.len())?;
         Ok(Self { width, height, data })
+    }
+
+    /// An image over a copy of `data`, made only once its size checks out.
+    pub fn copy_of(width: u32, height: u32, data: &[u8]) -> Result<Self, ImageError> {
+        check_rgba_len(width, height, data.len())?;
+        Ok(Self { width, height, data: data.to_vec() })
     }
 
     /// Bytes of pixel memory the image holds.
@@ -81,6 +84,15 @@ impl std::error::Error for ImageError {}
 /// resize that asks for gigabytes into an error before anything is allocated, since a failed allocation aborts the
 /// process the addon runs in.
 pub const MAX_IMAGE_BYTES: usize = 512 * 1024 * 1024;
+
+/// An error unless `len` is the RGBA byte length of a `width` by `height` image within [`MAX_IMAGE_BYTES`].
+fn check_rgba_len(width: u32, height: u32, len: usize) -> Result<(), ImageError> {
+    let expected = byte_len(width, height)?;
+    if len != expected {
+        return Err(ImageError::Size(format!("a {width}x{height} image is {expected} bytes of RGBA, not {len}")));
+    }
+    Ok(())
+}
 
 /// The RGBA byte length of a `width` by `height` image, or an error when it is over [`MAX_IMAGE_BYTES`].
 pub(crate) fn byte_len(width: u32, height: u32) -> Result<usize, ImageError> {
