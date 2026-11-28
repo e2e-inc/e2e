@@ -133,8 +133,8 @@ struct Walk {
     /// The app did not answer which element holds its focus in time: no node reads as focused, and the read is
     /// incomplete, never filled in from each element's own `AXFocused` (a table's cells report the table's focus).
     focus_unknown: bool,
-    /// The window's own title-bar buttons, as it names them (`AXCloseButton`, ...); `None` when it names none.
-    chrome: Option<Vec<Element>>,
+    /// The window's own title-bar buttons, as it names them (`AXCloseButton`, ...).
+    chrome: Vec<Element>,
     nodes: usize,
     complete: bool,
     /// Whether the deadline stopped the read.
@@ -602,12 +602,8 @@ impl Walk {
         };
         // The window's own title-bar buttons are window chrome, never the app's controls: the window names them
         // (`chrome`), so a button of the app's content with the same subrole (a tab's close button) stays. A window that
-        // names none falls back to the subrole.
-        let chrome = match &self.chrome {
-            Some(chrome) => chrome.contains(element),
-            None => roles::window_control_name(read.subrole.as_deref()).is_some(),
-        };
-        if !root && chrome {
+        // names none has none: AppKit names every title-bar button it draws.
+        if !root && self.chrome.contains(element) {
             return None;
         }
         let role = if root && read.role == "unknown" { "window" } else { read.role };
@@ -793,11 +789,9 @@ pub(crate) fn content_name(texts: &[String]) -> Option<String> {
     label(Some(texts.iter().map(|text| text.trim()).filter(|text| !text.is_empty()).collect::<Vec<_>>().join(" ")))
 }
 
-/// The title-bar buttons a window names as its own; `None` when it names none, so the walk falls back to their subrole.
-fn window_chrome(window: &Element) -> Option<Vec<Element>> {
-    let buttons: Vec<Element> =
-        ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"].iter().filter_map(|name| window.element(name)).collect();
-    (!buttons.is_empty()).then_some(buttons)
+/// The title-bar buttons a window names as its own.
+fn window_chrome(window: &Element) -> Vec<Element> {
+    ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"].iter().filter_map(|name| window.element(name)).collect()
 }
 
 /// Reads one window of a process.

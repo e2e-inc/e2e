@@ -105,17 +105,6 @@ fn base(ax_role: &str) -> &'static str {
     }
 }
 
-/// The name macOS draws for a window's title-bar button, which has no title of its own.
-pub fn window_control_name(subrole: Option<&str>) -> Option<&'static str> {
-    match subrole {
-        Some("AXCloseButton") => Some("Close"),
-        Some("AXMinimizeButton") => Some("Minimize"),
-        Some("AXZoomButton") => Some("Zoom"),
-        Some("AXFullScreenButton") => Some("Full Screen"),
-        _ => None,
-    }
-}
-
 /// Roles that are controls, and so get a ref whatever actions they list.
 pub fn interactive(role: &str) -> bool {
     matches!(
