@@ -1182,9 +1182,9 @@ export const test = base.extend<{}, { database: Database }>({
 - On Node.js, imports of the same ES module with different URL queries or
   fragments each get their own fixture instance. If an older version of e2e
   in the same process registered the module loader first, worker fixtures go
-  by file path, and those imports share one instance. Module variables start
-  over on each reload, so pass shared state to tests through the fixture
-  value.
+  by file path, and those imports can share one instance. Module variables
+  start over on each reload, so pass shared state to tests through the
+  fixture value.
 - On Bun, declare worker fixtures in an imported helper. A worker fixture
   declared in a test file gets a new instance each time Bun reloads the file,
   and the old instance stays set up until the worker ends.

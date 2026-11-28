@@ -208,7 +208,7 @@ each runtime handles that reload differently:
 - On Node.js, ES module imports with different URL queries or fragments each
   get their own fixture instance. If an older version of e2e in the same
   process registered the module loader first, worker fixtures go by file
-  path, and those imports share one instance.
+  path, and those imports can share one instance.
 - On Bun, a worker fixture declared in a test file gets a new instance each
   time Bun reloads the file. The old instance stays set up until the worker
   ends.
