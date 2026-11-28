@@ -1186,15 +1186,29 @@ export class DesktopSurface {
     if (binding.states?.hidden === true) throw notActionable(`node ${binding.id} is not on screen; scroll it into view first`);
     // With no ref, the driver cannot check the node is still there: the pointer goes where a fresh read of its window finds it now, or nowhere.
     // The box it was read with could hold what replaced it, and a node with a stable id may have moved.
-    const now = await this.capture(operation, binding.windowId, false, !binding.interactive);
-    if (now?.cutShort === true) throw partialRead(`whether node ${binding.id} is still on screen`);
-    // A read stopped at the depth limit left out what is below some nodes: a control at the center may be one of them.
-    if (kind === 'doubleTap' && now?.truncated === true) {
-      throw new EngineError('NODE_STALE', `the window was read only in part (it is deeper than the ${this.options.maxDepth} levels a snapshot reads, which desktop({ maxDepth }) raises, or holds more than the ${MAX_SNAPSHOT_NODES} elements it reads), so what is at the center of node ${binding.id} cannot be told`, { retryable: true });
+    const until = Date.now() + operation.timeoutMs;
+    const read = async (): Promise<{ readonly now: ProjectedScreen | undefined; readonly fresh: NodeBinding }> => {
+      const now = await this.capture({ ...operation, timeoutMs: Math.max(1, until - Date.now()) }, binding.windowId, false, !binding.interactive);
+      if (now?.cutShort === true) throw partialRead(`whether node ${binding.id} is still on screen`);
+      // A read stopped at the depth limit left out what is below some nodes: a control at the center may be one of them.
+      if (kind === 'doubleTap' && now?.truncated === true) {
+        throw new EngineError('NODE_STALE', `the window was read only in part (it is deeper than the ${this.options.maxDepth} levels a snapshot reads, which desktop({ maxDepth }) raises, or holds more than the ${MAX_SNAPSHOT_NODES} elements it reads), so what is at the center of node ${binding.id} cannot be told`, { retryable: true });
+      }
+      const fresh = [...(now?.bindings.values() ?? [])].find((candidate) => sameNode(candidate, binding));
+      if (fresh === undefined) throw new EngineError('NODE_STALE', `node ${binding.id} (${binding.role ?? 'unknown'}) is no longer on screen; observe again`, { retryable: true });
+      if (fresh.states?.hidden === true) throw notActionable(`node ${binding.id} is not on screen; scroll it into view first`);
+      return { now, fresh };
+    };
+    let { now, fresh } = await read();
+    // A disabled node takes no double-click: wait within the action's budget for it to be enabled, as the driver does for a
+    // control it clicks. A hover presses nothing and goes to a disabled node too.
+    if (kind === 'doubleTap') {
+      while (fresh.states?.disabled === true) {
+        if (Date.now() + LAUNCH_POLL_MS >= until) throw notActionable(`node ${binding.id} (${binding.role ?? 'unknown'}) is disabled`);
+        await sleep(LAUNCH_POLL_MS, operation.signal);
+        ({ now, fresh } = await read());
+      }
     }
-    const fresh = [...(now?.bindings.values() ?? [])].find((candidate) => sameNode(candidate, binding));
-    if (fresh === undefined) throw new EngineError('NODE_STALE', `node ${binding.id} (${binding.role ?? 'unknown'}) is no longer on screen; observe again`, { retryable: true });
-    if (fresh.states?.hidden === true) throw notActionable(`node ${binding.id} is not on screen; scroll it into view first`);
     const rect = fresh.rect;
     if (rect === undefined || rect.width <= 0 || rect.height <= 0) throw notActionable(`node ${binding.id} (${binding.role ?? 'unknown'}) has no box on screen to ${what}`);
     const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };

@@ -1302,6 +1302,19 @@ describe('DesktopSurface: acting', () => {
     expect(inputs(still.fake)).toEqual(['focusWindow', 'pointer']);
   });
 
+  it('waits for a disabled node with no ref before it double-clicks it, and refuses one that stays disabled', async () => {
+    const form = (states: string[]) => screen('w-mine', { name: 'Form', bounds: { x: 0, y: 0, width: 200, height: 200 }, children: [{ role: 'statictext', value: 'Hello', states, bounds: { x: 10, y: 10, width: 50, height: 20 } }] });
+    const placed = windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x: 0, y: 0, width: 200, height: 200 } }]);
+    const stays = await launched({ snapshot: [form(['disabled'])], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
+    const [off] = (await stays.surface.observe(operation(), undefined)).root.children!;
+    await expect(stays.surface.perform(off!.ref, { kind: 'doubleTap' }, { ...operation(), timeoutMs: 400 })).rejects.toMatchObject({ code: 'NOT_ACTIONABLE', message: expect.stringMatching(/is disabled/) });
+    expect(inputs(stays.fake)).toEqual([]);
+    const later = await launched({ snapshot: [form(['disabled']), form(['disabled']), form([])], listWindows: [placed] }, { observe: false, options: { physicalInput: true } });
+    const [on] = (await later.surface.observe(operation(), undefined)).root.children!;
+    await later.surface.perform(on!.ref, { kind: 'doubleTap' }, operation());
+    expect(inputs(later.fake)).toEqual(['focusWindow', 'pointer']);
+  });
+
   it('refuses a tap on a control the read found off screen, and scrolls one into view first when it can', async () => {
     const at = (hidden: boolean, actions: string[], role = 'button') =>
       screen('w-mine', {
