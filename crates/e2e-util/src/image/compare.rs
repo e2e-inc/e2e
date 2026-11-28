@@ -68,8 +68,8 @@ fn pixelmatch(img1: &[u8], img2: &[u8], mut output: Option<&mut [u8]>, width: us
     let len = width * height;
     debug_assert_eq!(img1.len(), len * 4);
     debug_assert_eq!(img2.len(), len * 4);
-    let a32 = words(img1);
-    let b32 = words(img2);
+    let a32 = pixels(img1);
+    let b32 = pixels(img2);
     if a32 == b32 {
         if let Some(output) = output.as_deref_mut() {
             for pos in (0..len * 4).step_by(4) {
@@ -86,7 +86,7 @@ fn pixelmatch(img1: &[u8], img2: &[u8], mut output: Option<&mut [u8]>, width: us
         let delta = if a32[i] == b32[i] { 0 } else { color_delta(img1, img2, pos, threshold, tables, &mut cache) };
         if delta != 0 {
             let (x, y) = (i % width, i / width);
-            let excluded_aa = antialiased(img1, x, y, width, height, &a32, &b32) || antialiased(img2, x, y, width, height, &b32, &a32);
+            let excluded_aa = antialiased(img1, x, y, width, height, a32, b32) || antialiased(img2, x, y, width, height, b32, a32);
             if excluded_aa {
                 if let Some(output) = output.as_deref_mut() {
                     draw_pixel(output, pos, AA_COLOR);
@@ -105,12 +105,13 @@ fn pixelmatch(img1: &[u8], img2: &[u8], mut output: Option<&mut [u8]>, width: us
     diff
 }
 
-/// Each pixel as one word, for the equality tests pixelmatch makes through a `Uint32Array`.
-fn words(bytes: &[u8]) -> Vec<u32> {
-    bytes.as_chunks::<4>().0.iter().map(|pixel| u32::from_ne_bytes(*pixel)).collect()
+/// Each pixel as one value, for the equality tests pixelmatch makes through a `Uint32Array`: a view, not a copy, since
+/// screenshot polling compares two full captures on every read.
+fn pixels(bytes: &[u8]) -> &[[u8; 4]] {
+    bytes.as_chunks::<4>().0
 }
 
-fn antialiased(img: &[u8], x1: usize, y1: usize, width: usize, height: usize, a32: &[u32], b32: &[u32]) -> bool {
+fn antialiased(img: &[u8], x1: usize, y1: usize, width: usize, height: usize, a32: &[[u8; 4]], b32: &[[u8; 4]]) -> bool {
     let x0 = x1.saturating_sub(1);
     let y0 = y1.saturating_sub(1);
     let x2 = if x1 + 1 < width { x1 + 1 } else { width - 1 };
@@ -149,7 +150,7 @@ fn antialiased(img: &[u8], x1: usize, y1: usize, width: usize, height: usize, a3
         || (has_many_siblings(a32, max_x, max_y, width, height) && has_many_siblings(b32, max_x, max_y, width, height))
 }
 
-fn has_many_siblings(img: &[u32], x1: usize, y1: usize, width: usize, height: usize) -> bool {
+fn has_many_siblings(img: &[[u8; 4]], x1: usize, y1: usize, width: usize, height: usize) -> bool {
     let pos1 = y1 * width + x1;
     let val = img[pos1];
     if x1 > 0 && x1 < width - 1 && y1 > 0 && y1 < height - 1 {
