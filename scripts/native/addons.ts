@@ -24,6 +24,17 @@ interface AddonSpec {
    * in `packages/<package>/npm/<platform>`.
    */
   readonly targets: Readonly<Record<string, string>>;
+  /**
+   * The TypeScript file NAPI-RS writes the addon's functions and argument
+   * objects into on every build, in the package. The package's loader is
+   * typed by it, so a call the Rust code no longer takes fails the typecheck.
+   */
+  readonly types: string;
+  /**
+   * The imports that file starts with: the types the crate's `ts_return_type`
+   * attributes name, which the package writes by hand.
+   */
+  readonly typeImports: readonly string[];
 }
 
 const ADDONS: Readonly<Record<string, AddonSpec>> = {
@@ -32,6 +43,8 @@ const ADDONS: Readonly<Record<string, AddonSpec>> = {
     package: 'desktop',
     file: 'desktop',
     targets: { 'aarch64-apple-darwin': 'darwin-arm64', 'x86_64-apple-darwin': 'darwin-x64' },
+    types: 'src/native.ts',
+    typeImports: ["import type { Envelope, Launched, RawWindow } from './driver.ts';", "import type { RawSnapshot } from './nodes.ts';"],
   },
 };
 

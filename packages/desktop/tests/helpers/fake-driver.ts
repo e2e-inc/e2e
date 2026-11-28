@@ -132,7 +132,7 @@ export class FakeDriver implements DesktopDriver {
     return this.startTimes.get(pid) ?? 1_000_000 + pid;
   }
 
-  processesCarrying(token: string): Promise<readonly number[] | null> {
+  processesCarrying(token: string): Promise<number[] | null> {
     this.calls.push({ method: 'processesCarrying', args: [token] });
     if (this.lookupFails) return Promise.resolve(null);
     return Promise.resolve([...this.carriers].filter(([pid, carried]) => carried === token && alive(pid)).map(([pid]) => pid));
@@ -183,20 +183,20 @@ export class FakeDriver implements DesktopDriver {
   /** The input id and budget of each `focusWindow` call, in order. */
   readonly focusOptions: { readonly inputId: number | undefined; readonly timeoutMs: number | undefined }[] = [];
 
-  focusWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>> {
-    this.focusOptions.push({ inputId, timeoutMs });
+  focusWindow(pid: number, windowId: string, inputId?: number | null, timeoutMs?: number | null): Promise<Envelope<unknown>> {
+    this.focusOptions.push({ inputId: inputId ?? undefined, timeoutMs: timeoutMs ?? undefined });
     return this.answer('focusWindow', [pid, windowId], ok({}));
   }
 
-  closeWindow(pid: number, windowId: string, _inputId?: number, _timeoutMs?: number): Promise<Envelope<unknown>> {
+  closeWindow(pid: number, windowId: string, _inputId?: number | null, _timeoutMs?: number | null): Promise<Envelope<unknown>> {
     return this.answer('closeWindow', [pid, windowId], ok({}));
   }
 
   /** The input id and budget of each `pointer` call, in order; its `args` keep the point and kind. */
   readonly pointerOptions: { readonly inputId: number | undefined; readonly timeoutMs: number | undefined; readonly target: PointerTarget | undefined }[] = [];
 
-  pointer(x: number, y: number, kind: string, inputId?: number, timeoutMs?: number, target?: PointerTarget): Promise<Envelope<unknown>> {
-    this.pointerOptions.push({ inputId, timeoutMs, target });
+  pointer(x: number, y: number, kind: string, inputId?: number | null, timeoutMs?: number | null, target?: PointerTarget | null): Promise<Envelope<unknown>> {
+    this.pointerOptions.push({ inputId: inputId ?? undefined, timeoutMs: timeoutMs ?? undefined, target: target ?? undefined });
     return this.answer('pointer', [x, y, kind], ok({}));
   }
 

@@ -113,7 +113,7 @@ pub struct LaunchOptions {
 }
 
 /// Starts a new instance of an app.
-#[napi(ts_return_type = "Promise<NativeEnvelope<NativeLaunched>>")]
+#[napi(ts_return_type = "Promise<Envelope<Launched>>")]
 pub async fn launch(options: LaunchOptions) -> Value {
     // The budget counts from the call, not from when a blocking thread picks the work up.
     let asked = Instant::now();
@@ -138,7 +138,7 @@ pub async fn launch(options: LaunchOptions) -> Value {
 }
 
 /// The windows of a process.
-#[napi(ts_return_type = "Promise<NativeEnvelope<NativeWindow[]>>")]
+#[napi(ts_return_type = "Promise<Envelope<readonly RawWindow[]>>")]
 pub async fn list_windows(pid: i32) -> Value {
     blocking(move || data(windows::list(pid)?)).await
 }
@@ -157,7 +157,7 @@ fn window_id(id: &str) -> Outcome<u32> {
 }
 
 /// One window's accessibility tree.
-#[napi(ts_return_type = "Promise<NativeEnvelope<NativeSnapshot>>")]
+#[napi(ts_return_type = "Promise<Envelope<RawSnapshot>>")]
 pub async fn snapshot(options: SnapshotOptions) -> Value {
     let deadline = deadline(options.timeout_ms);
     blocking(move || {
@@ -189,7 +189,7 @@ pub struct ActOptions {
 }
 
 /// One action on the element a ref names.
-#[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
+#[napi(ts_return_type = "Promise<Envelope<unknown>>")]
 pub async fn act(options: ActOptions) -> Value {
     let deadline = deadline(options.timeout_ms);
     blocking(move || {
@@ -246,7 +246,7 @@ pub struct PressOptions {
 
 /// Checks that a key combo can be pressed on this Mac's keyboard layout, the way `press` reads it, and sends nothing: a
 /// caller that moves focus first can refuse a combo the layout cannot type before anything changed.
-#[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
+#[napi(ts_return_type = "Promise<Envelope<unknown>>")]
 pub async fn check_combo(combo: String) -> Value {
     blocking(move || {
         input::parse_combo(&combo)?;
@@ -256,7 +256,7 @@ pub async fn check_combo(combo: String) -> Value {
 }
 
 /// Presses a key combo into a window.
-#[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
+#[napi(ts_return_type = "Promise<Envelope<unknown>>")]
 pub async fn press(options: PressOptions) -> Value {
     let deadline = deadline(options.timeout_ms);
     blocking(move || {
@@ -275,7 +275,7 @@ pub async fn press(options: PressOptions) -> Value {
 }
 
 /// Brings a window and its app forward. `inputId` names it, so `cancelInput` stops it before it changes the focus.
-#[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
+#[napi(ts_return_type = "Promise<Envelope<unknown>>")]
 pub async fn focus_window(pid: i32, window_id_text: String, input_id: Option<u32>, timeout_ms: Option<f64>) -> Value {
     let deadline = deadline(timeout_ms.unwrap_or(60_000.0));
     blocking(move || {
@@ -286,7 +286,7 @@ pub async fn focus_window(pid: i32, window_id_text: String, input_id: Option<u32
 }
 
 /// Closes a window as its close button does. `inputId` names it, so `cancelInput` stops it before the button is pressed.
-#[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
+#[napi(ts_return_type = "Promise<Envelope<unknown>>")]
 pub async fn close_window(pid: i32, window_id_text: String, input_id: Option<u32>, timeout_ms: Option<f64>) -> Value {
     let deadline = deadline(timeout_ms.unwrap_or(60_000.0));
     blocking(move || {
@@ -313,7 +313,7 @@ pub struct PointerTarget {
 /// Physical pointer input at a point on screen: `tap`, `doubleTap`, `secondaryTap`, or `hover`. `inputId` names it, so
 /// `cancelInput` stops what it has yet to send. With `target`, no click goes once another window, a new sheet, or
 /// another app took the focus from that window.
-#[napi(ts_return_type = "Promise<NativeEnvelope<Record<string, never>>>")]
+#[napi(ts_return_type = "Promise<Envelope<unknown>>")]
 pub async fn pointer(x: f64, y: f64, kind: String, input_id: Option<u32>, timeout_ms: Option<f64>, target: Option<PointerTarget>) -> Value {
     // No budget given: the call sends at once, as before `timeoutMs` was passed.
     let deadline = deadline(timeout_ms.unwrap_or(60_000.0));
@@ -343,7 +343,7 @@ pub struct ScreenshotOptions {
 }
 
 /// Captures a window into a PNG file; answers the display's scale.
-#[napi(ts_return_type = "Promise<NativeEnvelope<{ scale_factor: number }>>")]
+#[napi(ts_return_type = "Promise<Envelope<{ readonly scale_factor?: number }>>")]
 pub async fn screenshot(options: ScreenshotOptions) -> Value {
     let deadline = deadline(options.timeout_ms);
     blocking(move || {

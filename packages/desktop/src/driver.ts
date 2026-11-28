@@ -29,7 +29,12 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { EngineError } from '@e2e-dev/core/engine';
-import type { RawSnapshot, Rect } from './nodes.ts';
+import type * as native from './native.ts';
+import type { Rect } from './nodes.ts';
+
+export type { PointerTarget } from './native.ts';
+
+type Native = typeof native;
 
 /** How the driver says whether a call reached the app. */
 interface Disposition {
@@ -46,16 +51,6 @@ export interface DriverError {
 
 /** What a call resolves with. */
 export type Envelope<T> = { readonly ok: true; readonly data: T } | { readonly ok: false; readonly error: DriverError };
-
-/** The window a point was taken in, which must still take a click at it. */
-export interface PointerTarget {
-  readonly pid: number;
-  readonly windowId: string;
-  readonly sheet: boolean;
-  readonly sheetId?: string;
-  /** The point is on a node with no ref, which takes no click of its own: no control may be under it when it goes. */
-  readonly content?: boolean;
-}
 
 /** One window of a process, as `listWindows` answers. */
 export interface RawWindow {
@@ -92,57 +87,14 @@ export interface Launched {
   readonly running_before: readonly number[];
 }
 
-/** What the driver can do: one function per native call. */
-export interface DesktopDriver {
+/**
+ * What the driver can do: one function per native call, as the Rust code declares them. `native.ts` is written from
+ * the crate on every build, so a call or an option the crate no longer takes fails the typecheck here.
+ */
+export type DesktopDriver = Native & {
   /** The version of the package the driver came from, or `checkout build` for one built into this package's directory. */
   readonly version: string;
-  status(): { readonly accessibility: boolean; readonly screenRecording: boolean };
-  /** Whether the screen is locked; null when that cannot be told. */
-  screenLocked(): boolean | null;
-  /** When a process started, in microseconds since the epoch; null when it is not running. */
-  processStarted(pid: number): number | null;
-  /** Every process that carries the launch `token`, in its environment or its arguments; null when the processes cannot be listed. */
-  processesCarrying(token: string): Promise<readonly number[] | null>;
-  /** Drops the refs of a process that quit. */
-  forgetProcess(pid: number): void;
-  launch(options: {
-    path?: string;
-    bundleId?: string;
-    arguments: readonly string[];
-    environment: Readonly<Record<string, string>>;
-    token: string;
-    activate: boolean;
-    /** The whole launch's budget: `open`, then the search for the process it started. */
-    timeoutMs: number;
-    /** How long that search may take once `open` has exited. */
-    claimMs: number;
-    /** Names the launch, so `cancelInput` can stop it before it starts the app. */
-    inputId?: number;
-  }): Promise<Envelope<Launched>>;
-  listWindows(pid: number): Promise<Envelope<readonly RawWindow[]>>;
-  snapshot(options: { pid: number; windowId: string; maxDepth: number; interactive: boolean; timeoutMs: number }): Promise<Envelope<RawSnapshot>>;
-  /** `inputId` names the action, so `cancelInput` can stop it before it sends input. */
-  act(options: { ref: string; action: string; value?: string; direction?: string; pages?: number; physical?: boolean; inputId?: number; timeoutMs: number }): Promise<Envelope<unknown>>;
-  /** A fresh id for one call's input, unique across every worker thread of the process, which share the driver's cancel marks. */
-  inputId(): number;
-  /** Stops the action given `inputId`: it sends no input from then on. */
-  cancelInput(inputId: number): void;
-  /** `inputId` names the press, so `cancelInput` can stop it before it sends the key. */
-  press(options: { pid: number; windowId: string; combo: string; physical: boolean; inputId?: number; timeoutMs: number; focusedRef?: string }): Promise<Envelope<unknown>>;
-  /** Fails as `press` would for a combo this Mac's keyboard layout cannot type, and sends nothing. */
-  checkCombo(combo: string): Promise<Envelope<unknown>>;
-  /** `inputId` names the call, so `cancelInput` stops it before it changes the focus. */
-  focusWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
-  /** Closes a window as its close button does, and answers once it left the app's windows. `inputId` names the call, so `cancelInput` stops it before the button is pressed. */
-  closeWindow(pid: number, windowId: string, inputId?: number, timeoutMs?: number): Promise<Envelope<unknown>>;
-  /**
-   * `inputId` names the pointer input, so `cancelInput` stops what it has yet to send. With `target`, the window the
-   * point was taken in, no click goes once another window or app took the focus from it, or its sheet changed: `sheet`
-   * says whether one held the window's focus, and `sheetId` which.
-   */
-  pointer(x: number, y: number, kind: string, inputId?: number, timeoutMs?: number, target?: PointerTarget): Promise<Envelope<unknown>>;
-  screenshot(options: { windowId: string; path: string; timeoutMs: number }): Promise<Envelope<{ readonly scale_factor?: number }>>;
-}
+};
 
 /** The npm package that ships the driver built for each platform. */
 const PLATFORM_PACKAGES: Readonly<Record<string, string>> = {
@@ -174,7 +126,7 @@ export function loadNativeDriver(): DesktopDriver {
   ];
   for (const [specifier, version] of builds) {
     try {
-      return { ...(ownRequire(specifier) as Omit<DesktopDriver, 'version'>), version: version() };
+      return { ...(ownRequire(specifier) as Native), version: version() };
     } catch (cause) {
       failures.push(`${specifier}: ${(cause as Error).message.split('\n')[0] ?? ''}`);
     }

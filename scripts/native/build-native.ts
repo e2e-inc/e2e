@@ -9,12 +9,18 @@
  * (`packages/desktop/npm/darwin-*`) before it is published, with a stamp naming
  * that package's version, which its `prepublishOnly` checks. Needs a Rust
  * toolchain (`rustup`). A macOS target builds on macOS only.
+ *
+ * Every build also writes the addon's TypeScript types (`types` in
+ * `addons.ts`) from the crate's `#[napi]` items, the way `napi build --dts`
+ * does. The file is committed, and CI fails when a build changes it.
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { generateTypeDef } from '@napi-rs/cli';
 import { findAddon, addonFile, replaceAddon, scriptArgs } from './addons.ts';
 import { cargo } from './cargo.ts';
 
@@ -32,7 +38,11 @@ if (target.endsWith('-apple-darwin') && process.platform !== 'darwin') throw new
 
 const crate = addon.crateDir;
 const run = cargo(crate);
-const env = { ...run.env, MACOSX_DEPLOYMENT_TARGET: DEPLOYMENT_TARGET };
+// napi-derive writes what each `#[napi]` item looks like from TypeScript into this folder while the crate compiles.
+// Cargo would skip a crate it has already built, and leave the folder empty: `napi-build` reruns the crate's build
+// script when the second variable changes, which compiles the crate again.
+const typeDefs = mkdtempSync(path.join(tmpdir(), `${addon.crate}-types-`));
+const env = { ...run.env, MACOSX_DEPLOYMENT_TARGET: DEPLOYMENT_TARGET, NAPI_TYPE_DEF_TMP_FOLDER: typeDefs, [`NAPI_FORCE_BUILD_${addon.crate.replaceAll('-', '_').toUpperCase()}`]: String(Date.now()) };
 // A pinned toolchain installed before (another checkout's, or under a `RUSTUP_TOOLCHAIN` override) may lack this
 // target's standard library; adding one already there is a no-op.
 if (run.toolchain !== undefined) execFileSync('rustup', ['target', 'add', '--toolchain', run.toolchain, target], { cwd: crate, stdio: 'inherit', env });
@@ -40,6 +50,11 @@ execFileSync(run.file, [...run.prefix, 'build', '--release', '--locked', '--targ
 // Where cargo wrote it: `CARGO_TARGET_DIR` or a cargo config can move the target directory off the workspace's `target`.
 const metadata = JSON.parse(execFileSync(run.file, [...run.prefix, 'metadata', '--format-version', '1', '--no-deps'], { cwd: crate, encoding: 'utf8', env })) as { target_directory: string };
 const built = path.join(metadata.target_directory, target, 'release', library(addon.crate, target));
+const header = [`// Written by \`node scripts/native/build-native.ts ${addon.name}\` from crates/${addon.crate}. Do not edit.`, ...addon.typeImports, '', ''].join('\n');
+const { dts } = await generateTypeDef({ typeDefDir: typeDefs, cwd: crate, dtsHeader: header });
+rmSync(typeDefs, { recursive: true, force: true });
+if (dts.trim() === header.trim()) throw new Error(`the build of ${addon.crate} wrote no types`);
+writeFileSync(path.join(addon.packageDir, addon.types), dts);
 const name = addonFile(addon, platform);
 replaceAddon(built, path.join(addon.packageDir, name));
 if (values.out !== undefined) {

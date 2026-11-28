@@ -221,6 +221,9 @@ jobs:
       - run: node scripts/native/native-licenses.ts desktop --check
       - run: node scripts/native/build-native.ts desktop --target aarch64-apple-darwin
       - run: node scripts/native/build-native.ts desktop --target x86_64-apple-darwin
+      # Each build writes the driver's TypeScript types from the crate; the engine is typechecked against the copy in git.
+      - name: Check the committed driver types match the crate
+        run: git diff --exit-code -- packages/desktop/src/native.ts
       - name: Check each build's architecture
         working-directory: packages/desktop
         run: |
