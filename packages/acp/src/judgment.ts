@@ -25,15 +25,14 @@ You have no tools and need none. Reply with exactly the JSON value the message a
  * screens nothing looks at again.
  */
 const SESSION_BYTES = 400_000;
-/** What an image counts toward `SESSION_BYTES`. */
-const IMAGE_BYTES = 8_000;
-
 /** What an attempt's memory keeps for its judgments. */
 interface Judging {
   /** The session; one that is closed (a turn it could not finish, its size) is replaced by the next question. */
   held: HeldSession | undefined;
   /** What `held` was sent so far. */
   sent: number;
+  /** Whether a question's turn is in flight. */
+  asking: boolean;
   /** A session takes one prompt at a time, so each question waits for the one before it. */
   last: Promise<unknown>;
 }
@@ -56,7 +55,7 @@ export function createAnswer(launch: () => Promise<AgentLaunch>, registerLogin: 
 function judgingOf(memory: Map<string, unknown>, key: string): Judging {
   const existing = memory.get(key) as Judging | undefined;
   if (existing !== undefined) return existing;
-  const judging: Judging = { held: undefined, sent: 0, last: Promise.resolve() };
+  const judging: Judging = { held: undefined, sent: 0, asking: false, last: Promise.resolve() };
   memory.set(key, judging);
   return judging;
 }
@@ -70,8 +69,8 @@ function hold(judging: Judging, question: ExecutorQuestion, launch: () => Promis
     tools: [],
     attempt: question.attempt,
     signal: question.signal,
-    // A tool of the agent's own ends the turn; the answer then fails on what the turn reports.
-    ownTool: () => held.cancel(),
+    // A tool of the agent's own ends the turn, and the answer then fails on what the turn reports. One run after a turn ended has no answer to fail, so no later question gets this conversation.
+    ownTool: () => (judging.asking ? held.cancel() : held.close()),
   });
   judging.held = held;
   judging.sent = 0;
@@ -87,14 +86,16 @@ async function ask(judging: Judging, held: HeldSession, question: ExecutorQuesti
   // The runner redacted the evidence; only a key the agent's start or its saved login made known since is left to catch.
   const text = redactProviderKeys([held.introduced ? undefined : RULES, question.system, question.prompt].filter((part) => part !== undefined).join('\n\n'));
   held.introduced = true;
+  const encoded = images.map(encodeImage);
+  judging.asking = true;
   try {
     // The agent renews a login between turns: registered once the turn settles, before anything it said is redacted and returned.
-    const report = await untilAborted(session.prompt(text, images.map(encodeImage)), signal).finally(registerLogin);
+    const report = await untilAborted(session.prompt(text, encoded), signal).finally(registerLogin);
     if (report.ran.length > 0) {
       throw new AgentError('POLICY_DENIED', `The agent ran a tool of its own while answering (${report.ran.join(', ')}); a judgment reads only what the runner sent.`);
     }
     if (report.stopReason === 'refusal') throw new AgentError('MODEL_REFUSED', 'The ACP agent refused to answer the question');
-    judging.sent += Buffer.byteLength(text) + images.length * IMAGE_BYTES;
+    judging.sent += Buffer.byteLength(text) + encoded.reduce((total, image) => total + image.data.length, 0);
     if (judging.sent > SESSION_BYTES) held.close();
     return { ...turnUsage(session, report), text: redactProviderKeys(report.text) };
   } catch (error) {
@@ -103,5 +104,7 @@ async function ask(judging: Judging, held: HeldSession, question: ExecutorQuesti
     signal.throwIfAborted();
     if (error instanceof AgentError) throw error;
     throw new AgentError('MODEL_PROVIDER_FAILED', `The ACP agent session failed: ${message(error)}`, { cause: error });
+  } finally {
+    judging.asking = false;
   }
 }

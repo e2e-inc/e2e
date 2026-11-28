@@ -6,7 +6,11 @@ import type { AcpSession, PromptImage, TurnReport } from './session.ts';
 
 /** Waits for `promise`, or rejects when `signal` aborts first. */
 export function untilAborted<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(signal.reason);
+  if (signal.aborted) {
+    // Nobody waits on it any more: a later rejection must not go unhandled.
+    promise.catch(() => undefined);
+    return Promise.reject(signal.reason);
+  }
   let onAbort: (() => void) | undefined;
   const aborted = new Promise<never>((_, reject) => {
     onAbort = () => reject(signal.reason);

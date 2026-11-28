@@ -387,7 +387,7 @@ does.
     bound the turn.
   - `waitFor` and `extract` run on the agents entry's `judge` or `model`
     when it has one. Otherwise the agent answers them in a second session
-    per test that has no tools. There, `vision` needs an agent that takes
+    per test attempt that has no tools. There, `vision` needs an agent that takes
     images in a prompt.
   - An agents entry with an `executor` takes no `tools`, so the agent gets no
     project tools from `defineTool`.

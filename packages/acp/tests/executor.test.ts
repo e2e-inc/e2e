@@ -536,6 +536,19 @@ describe('acp', () => {
     expect(executor.name).toBe(extended.name);
   });
 
+  it('answers judgments in a session apart from the steps of the same attempt, with no tools', async () => {
+    const { executor, log } = scripted({ 'add a todo': [pass], 'Is the cart empty?': [{ say: '{"met":true}' }] });
+    const step = context();
+    cleanups.push(step.end);
+    await executor.runStep(step.ctx);
+    const answer = await executor.answer!({ system: 'Reply with JSON.', prompt: 'Is the cart empty?', images: [], attempt: step.ctx.attempt, signal: new AbortController().signal });
+    expect(answer.text).toBe('{"met":true}');
+    const sessions = log().filter((entry) => 'session' in entry).map((entry) => (entry['session'] as { tools: string[] }).tools);
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]).toContain('complete_step');
+    expect(sessions[1]).toEqual([]);
+  });
+
   it('refuses an extension tool under the name of one of the step tools', async () => {
     const tool = defineTool({ description: 'Mine', inputSchema: z.object({}), execute: async () => 'done' }, { mutates: false });
     for (const name of ['tap', 'complete_step']) {

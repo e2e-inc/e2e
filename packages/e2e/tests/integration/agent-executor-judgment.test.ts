@@ -29,6 +29,11 @@ test('repairs an answer that is not the JSON asked for', async ({ app, agent }) 
 });
 `;
 
+/** The screen a question carries. */
+function observed(question: ExecutorQuestion): string {
+  return /<observation[\s\S]*<\/observation>/.exec(question.prompt)?.[0] ?? '';
+}
+
 describe('judgments on a custom executor', () => {
   let app: FixtureApp;
   let outcome: RunOutcome;
@@ -45,8 +50,10 @@ describe('judgments on a custom executor', () => {
     },
     async answer(question) {
       questions.push(question);
-      if (question.prompt.includes('Late arrival')) {
-        return { text: JSON.stringify(judgment(true, 'The button is listed.')), modelId: 'house-1', inputTokens: 7, outputTokens: 3 };
+      if (question.prompt.includes('Late arrival button exists')) {
+        // Judged from the evidence, not the instruction: the button arrives after the page loads.
+        const met = observed(question).includes('Late arrival');
+        return { text: JSON.stringify(judgment(met, met ? 'The button is listed.' : 'No such button yet.')), modelId: 'house-1', inputTokens: 7, outputTokens: 3 };
       }
       // The first answer to the second test's question is prose; the runner asks again with the rejection.
       const repairing = question.prompt.includes('once more') && questions.filter((asked) => asked.prompt.includes('once more')).length === 1;
@@ -76,7 +83,8 @@ describe('judgments on a custom executor', () => {
   });
 
   it('asks in the attempt the steps run in, with the evidence and the response grammar in the text', () => {
-    const waited = questions.find((question) => question.prompt.includes('Late arrival'))!;
+    const waited = questions.findLast((question) => question.prompt.includes('Late arrival button exists'))!;
+    expect(observed(waited)).toContain('Late arrival');
     expect(waited.attempt.attemptId).toBe(stepAttempts[0]);
     expect(waited.system).toContain('exactly one JSON object');
     expect(waited.prompt).toContain('<observation ');
@@ -94,7 +102,7 @@ describe('judgments on a custom executor', () => {
     const steps = resultByTitle(outcome, 'judges on the executor').attempts[0]!.steps;
     const waited = steps.find((step) => step.api === 'agent.waitFor')!;
     expect(waited.status).toBe('passed');
-    expect(waited.model).toMatchObject({ provider: 'house-brain', model: 'house-1', endpoint: 'local', tokenAccounting: 'provider', calls: 1 });
+    expect(waited.model).toMatchObject({ provider: 'house-brain', model: 'house-1', endpoint: 'local', tokenAccounting: 'provider', calls: expect.any(Number) });
     expect(steps.find((step) => step.api === 'agent.extract')?.model).toMatchObject({ provider: 'house-brain', model: 'house-1', tokenAccounting: 'adapter-upper-bound' });
   });
 });

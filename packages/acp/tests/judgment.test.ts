@@ -48,15 +48,6 @@ describe('acp judgments', () => {
     await eventually(() => expect(() => process.kill(pid, 0)).toThrow());
   });
 
-  it('keeps judgments apart from the steps of the same attempt', async () => {
-    const { executor, log } = scripted({ 'Is the cart empty?': [{ say: '{"met":true}' }] });
-    const { asked } = question();
-    await executor.answer!(asked);
-    await executor.answer!(asked);
-    // One session so far, the judgment one: no step ran, so no step session started.
-    expect(log().filter((entry) => 'session' in entry)).toHaveLength(1);
-  });
-
   it('sends the screenshot of a question to an agent that takes images, and refuses one that does not', async () => {
     const pixels = { data: new Uint8Array([137, 80, 78, 71]), mediaType: 'image/png', width: 800, height: 600 };
     const seeing = scripted([[{ say: '{}' }]], { env: { ACP_IMAGES: '1' } });

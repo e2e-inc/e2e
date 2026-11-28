@@ -7,7 +7,8 @@ https://e2e.com/docs/<path>.
 `e2e explore` runs the agent against the app with a goal instead of a test
 file: see what it can do with an app before tests exist, hunt for regressions
 on a branch, or find what is worth turning into a test. It needs a config with
-a target and an agent that holds a model, nothing else. With no config, it
+a target and an agent that holds a model or runs on an `@e2e-dev/acp`
+executor, nothing else. With no config, it
 runs the `e2e init` wizard first in a terminal; without one (an agent's
 shell, CI) it fails with `CONFIG_NOT_FOUND`, so run `npx e2e init --yes` first.
 
