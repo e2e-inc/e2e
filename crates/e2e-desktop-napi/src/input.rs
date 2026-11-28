@@ -290,14 +290,20 @@ fn post(event: &CGEvent, route: Route) {
 pub fn press(combo: &Combo, route: Route) -> Outcome<()> {
     let source = source()?;
     let plain = !combo.flags.intersects(CGEventFlags::CGEventFlagCommand | CGEventFlags::CGEventFlagControl | CGEventFlags::CGEventFlagAlternate);
-    for down in [true, false] {
+    // Both events are made before either goes: a key-up that could not be made after the key-down went would be refused
+    // as nothing sent.
+    let event = |down: bool| -> Outcome<CGEvent> {
         let event =
             CGEvent::new_keyboard_event(source.clone(), combo.key.code, down).map_err(|_| Failure::refused(codes::INTERNAL, "could not create a key event"))?;
         event.set_flags(combo.flags);
         if let (true, Some(character)) = (plain, combo.key.character) {
             event.set_string(&character.to_string());
         }
-        post(&event, route);
+        Ok(event)
+    };
+    let events = [event(true)?, event(false)?];
+    for event in &events {
+        post(event, route);
         sleep(Duration::from_millis(4));
     }
     Ok(())
