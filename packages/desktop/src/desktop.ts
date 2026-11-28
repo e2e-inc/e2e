@@ -102,8 +102,9 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
   /**
    * Reads the open windows until `pick` finds what it looks for, or `waitMs`
    * ends. Each read gets the time left in the wait, and a match it brings back
-   * after the wait ended is not taken. A wait with no time left (a trigger
-   * that took all of it) still looks once, with the operation's own budget.
+   * after the wait ended is not taken. A wait with too little time left for a
+   * read (a trigger that took nearly all of it) still looks once, with the
+   * operation's own budget.
    * `timedOut` gets the last list read, and the failure of the last read when
    * it read none.
    */
@@ -113,7 +114,8 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
     let found: T | undefined;
     // A little before the step's own end, so the wait reports what it waited for rather than a bare timeout.
     const deadline = new Deadline(Math.max(1, waitMs - Math.min(WAIT_MARGIN_MS, waitMs / 10)));
-    const looksOnce = waitMs <= 0;
+    // Too little left for a read to answer in is no time left: a trigger that took nearly all of it gets the one look too.
+    const looksOnce = waitMs < WAIT_MARGIN_MS;
     await pollCondition({
       deadline,
       signal: operation.signal,
@@ -170,7 +172,7 @@ export function createDesktopFixture(surface: DesktopSurface, context: EngineFix
       // Activating it reads the windows again, within what is left of the call: a trigger that used all of it took the
       // one look with the operation's own budget, and so does its activation.
       const left = waitMs - (Date.now() - begun);
-      await surface.activateWindow(opened.id, left > 0 ? { ...operation, timeoutMs: left } : operation);
+      await surface.activateWindow(opened.id, left >= WAIT_MARGIN_MS ? { ...operation, timeoutMs: left } : operation);
       return handle(opened);
     },
     async window(which, options) {
