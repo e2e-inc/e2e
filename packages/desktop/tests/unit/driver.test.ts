@@ -125,7 +125,7 @@ describe('loadNativeDriver', () => {
       const driver = loadNativeDriver();
       expect(driver.version).toBe('checkout build');
       expect(typeof driver.status().accessibility).toBe('boolean');
-      // The loader casts the addon to the interface unchecked: a renamed export would fail only on a real app.
+      // The loader casts the addon to the types its build wrote (`native.ts`): one built from other sources would fail only on a real app.
       for (const name of NATIVE_FUNCTIONS) expect(typeof driver[name], name).toBe('function');
       // Input ids come from the addon, which every worker thread of the process shares with its cancel marks.
       const first = driver.inputId();

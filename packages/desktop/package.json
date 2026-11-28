@@ -43,7 +43,7 @@
   ],
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc --project tsconfig.build.json && node ../../scripts/stamp-dist.ts",
-    "build:native": "node ../../scripts/native/build-native.ts desktop",
+    "build:native": "node ../../scripts/native/build-native.ts desktop --types",
     "licenses:native": "node ../../scripts/native/native-licenses.ts desktop",
     "prepublishOnly": "node ../../scripts/check-dist.ts",
     "typecheck": "tsc --noEmit",
