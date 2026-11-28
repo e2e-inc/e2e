@@ -12,7 +12,7 @@
  * divergence.
  */
 
-import { isRelocatableDescriptor, MAIN_LIST_SHARE, relocateDescriptor, trackRelocationGroup, type RelocationFailure, type RelocationResult } from '../cache/relocate.ts';
+import { isRelocatableDescriptor, MAIN_LIST_SHARE, relocateDescriptor, relocationGroupCounter, type RelocationFailure, type RelocationResult } from '../cache/relocate.ts';
 import {
   isNodeAction,
   isTapActionName,
@@ -465,7 +465,11 @@ async function relocate(
   return settled ?? last;
 }
 
-/** Both ends of a drag as one look found them, and whether an end refused as a twin is still not found on it. */
+/**
+ * Both ends of a drag as one look found them, and whether an end refused as
+ * a twin is still not found on it. A source refused because its group lost
+ * a control leaves its slot empty.
+ */
 interface Ends {
   readonly screen: SemanticScreen;
   readonly ends: readonly [Relocated | undefined, Relocated | undefined];
@@ -489,6 +493,15 @@ interface Ends {
  * can be placed in on this look lets such a destination wait. If the source
  * loses a candidate during that wait, or is re-found without a visible box,
  * the drag stops.
+ *
+ * That guard is a count of the source's visible look-alikes, compared with
+ * the look before, as the `twinLeft` refusal is a count: an engine may
+ * renumber its nodes between looks, so nothing else tells them apart. It
+ * stops on purpose when the group grows and drops back (2, 3, 2) and when
+ * a twin stays listed but goes hidden: a control left, and it may have been
+ * the source. It cannot see a source and a twin that swap places at the
+ * same count; the recorded point then picks the twin, as it does among
+ * look-alikes on a single look (`placeWithin`).
  * Returns the last look judged; nothing when no look could be read.
  */
 async function relocateEnds(
@@ -500,7 +513,8 @@ async function relocateEnds(
 ): Promise<Ends | undefined> {
   const refused = new Set<TraceTargetDescriptor>();
   let latest: Ends | undefined;
-  let sourceGroup: ReturnType<typeof trackRelocationGroup>;
+  let countSources: ReturnType<typeof relocationGroupCounter>;
+  let sourceCount = 0;
   const judge = (descriptor: TraceTargetDescriptor, screen: SemanticScreen): { readonly relocated: Relocated; readonly wait: boolean } => {
     const result = relocateDescriptor(descriptor, screen.nodes);
     if (result.kind === 'found') {
@@ -517,14 +531,15 @@ async function relocateEnds(
     const from = source === undefined ? undefined : judge(source, screen);
     const listed = destination === undefined ? undefined : judge(destination, screen);
     const to = placesPoints && listed?.relocated.kind === 'found' && visibleBox(listed.relocated.node) === undefined ? STILL_LOADING : listed;
-    if (sourceGroup !== undefined) {
-      const count = sourceGroup.countIn(screen.nodes);
+    if (countSources !== undefined) {
+      const count = countSources(screen.nodes);
       const unplaceableSource = from?.relocated.kind === 'found' && visibleBox(from.relocated.node) === undefined;
-      if (count < sourceGroup.count || unplaceableSource) {
-        const lostSource: Relocated = { kind: 'failed', failure: 'target-ambiguous', candidates: [], screen, twinLeft: true };
-        return { screen, ends: [lostSource, to?.relocated], refused: true };
+      if (count < sourceCount || unplaceableSource) {
+        // The source slot stays empty: `refused` names the failure, and a
+        // source left in the slot would be placed and dragged.
+        return { screen, ends: [undefined, to?.relocated], refused: true };
       }
-      sourceGroup.count = count;
+      sourceCount = count;
     }
     const unresolved = (descriptor: TraceTargetDescriptor | undefined, judged: typeof from) =>
       descriptor !== undefined && refused.has(descriptor) && judged?.relocated.kind === 'failed';
@@ -534,9 +549,10 @@ async function relocateEnds(
       if (from.wait || waitingForDestination) {
         // A recorded position already says which twin the source is once the
         // count catches up (`retryable`), so its group is not held to a count.
-        if (waitingForDestination && sourceGroup === undefined && source !== undefined
+        if (waitingForDestination && countSources === undefined && source !== undefined
           && source.position === undefined && from.relocated.failure === 'target-ambiguous') {
-          sourceGroup = trackRelocationGroup(source, screen.nodes, (node) => visibleBox(node) !== undefined);
+          countSources = relocationGroupCounter(source, screen.nodes, (node) => visibleBox(node) !== undefined);
+          sourceCount = countSources?.(screen.nodes) ?? 0;
         }
         return undefined;
       }

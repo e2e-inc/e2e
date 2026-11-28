@@ -308,21 +308,19 @@ function tierMatches(tier: DescriptorTier, candidates: readonly DescribedNode[])
 }
 
 /**
- * Tracks the tier that first matched, even when a stronger or weaker tier
- * matches on a later observation. The caller defines which nodes can be used.
+ * A counter of the group a descriptor matched on `nodes`: how many nodes of
+ * a later observation the tier that matched here still matches, even when a
+ * stronger or weaker tier matches there. The caller defines which nodes
+ * count. Nothing when no tier matches.
  */
-export function trackRelocationGroup(
+export function relocationGroupCounter(
   descriptor: TraceTargetDescriptor,
   nodes: ReadonlyMap<string, RedactedNode>,
   eligible: (node: RedactedNode | undefined) => boolean,
-): { count: number; readonly countIn: (current: ReadonlyMap<string, RedactedNode>) => number } | undefined {
-  const { ids, tier } = matchingIds(descriptor, nodes);
+): ((current: ReadonlyMap<string, RedactedNode>) => number) | undefined {
+  const { tier } = matchingIds(descriptor, nodes);
   if (tier === undefined) return undefined;
-  return {
-    count: ids.filter((id) => eligible(nodes.get(id))).length,
-    countIn: (current) =>
-      tierMatches(tier, candidatesWithin(descriptor.within, current)).filter((id) => eligible(current.get(id))).length,
-  };
+  return (current) => tierMatches(tier, candidatesWithin(descriptor.within, current)).filter((id) => eligible(current.get(id))).length;
 }
 
 /**
