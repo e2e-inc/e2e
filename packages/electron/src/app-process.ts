@@ -165,9 +165,12 @@ export class AppProcess {
       let first = await window();
       opened = true;
       // Still inside the launch: an app that quits here, or a caller that stopped waiting, fails it.
-      await raceAbort(() => Promise.race([this.setUp(app, setup, first, left), quitEarly]), operation.signal, 'setting up the app');
+      const reported = await raceAbort(() => Promise.race([this.setUp(app, setup, left), quitEarly]), operation.signal, 'setting up the app');
       // A splash screen can close while the app is set up: the launch ends on a window that is there.
       while (first.isClosed()) first = await window();
+      const { appPath } = setup.app;
+      // The window the launch ends on, which need not be the first registered: that one may be a splash or a blank page.
+      this.directory = appDirectory({ reported, declared: appPath === undefined ? undefined : path.resolve(setup.projectRoot, appPath), firstDocument: first.url(), projectRoot: setup.projectRoot });
       // The window that loaded is the one read, not one still on its way.
       this.windows.show(open().indexOf(first));
     } catch (cause) {
@@ -183,8 +186,12 @@ export class AppProcess {
     }
   }
 
-  /** What a launch does once the app has `first`, a window that loaded: its main process connected, its downloads placed, its versions reported. */
-  private async setUp(app: RunningApp, setup: LaunchSetup, first: PageTarget, left: () => number): Promise<void> {
+  /**
+   * What a launch does once the app has a window that loaded: its main
+   * process connected, its downloads placed, its versions reported. Resolves
+   * to the app path the main process reports, or undefined when it cannot be asked.
+   */
+  private async setUp(app: RunningApp, setup: LaunchSetup, left: () => number): Promise<string | undefined> {
     // Only now is an app with no inspector known to have none: the address is printed before the app's own code runs.
     // One that printed it is being connected to, and that has a bound of its own.
     setTimeout(() => {
@@ -201,11 +208,7 @@ export class AppProcess {
     }
     const versions = await answerWithin(readVersions(app, main), left());
     if (versions !== undefined) setup.attempt.environment(versions);
-    const reported = main === undefined ? undefined : await answerWithin(main.evaluate(({ app: electronApp }) => electronApp.getAppPath(), undefined), Math.min(left(), ANSWER_MS));
-    const { appPath } = setup.app;
-    // The window the launch waited for, which need not be the first registered: that one may be a splash or a blank page.
-    const firstDocument = first.url();
-    this.directory = appDirectory({ reported, declared: appPath === undefined ? undefined : path.resolve(setup.projectRoot, appPath), firstDocument, projectRoot: setup.projectRoot });
+    return main === undefined ? undefined : await answerWithin(main.evaluate(({ app: electronApp }) => electronApp.getAppPath(), undefined), Math.min(left(), ANSWER_MS));
   }
 
   /** Starts the binary. Nothing is awaited: a binary that cannot start shows as a process that ended. */
