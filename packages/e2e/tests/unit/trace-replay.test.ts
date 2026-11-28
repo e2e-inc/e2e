@@ -742,78 +742,146 @@ describe('replayTrace: bare-point drags', () => {
     expect(drags).toEqual([{ from: { x: 100, y: 50 }, to: { x: 500, y: 50 } }]);
   });
 
-  it.each([
-    { label: 'waits for the destination when the source point resolves same-named candidates', twinX: 220, placeable: true },
-    { label: 'stops when same-named sources overlap at the recorded point', twinX: 25, placeable: false },
-    { label: 'refuses the remaining twin when the source leaves while waiting for the destination', twinX: 220, placeable: false, change: 'source-leaves' },
-    { label: 'refuses a twin that moves into the recorded point', twinX: 220, placeable: false, change: 'twin-moves' },
-    { label: 'stops when only the unrelated twin leaves', twinX: 220, placeable: false, change: 'twin-leaves' },
-    { label: 'stops when the source count drops from three to two', twinX: 220, placeable: false, change: 'three-to-two' },
-    { label: 'refuses a positioned source when the group drops to its recorded count', twinX: 220, placeable: false, change: 'positioned' },
-    { label: 'keeps waiting for a positioned source when its destination is already visible', twinX: 220, placeable: true, change: 'source-wait-only' },
-    { label: 'uses a recovered test ID when the same source group remains', twinX: 220, placeable: true, change: 'regain-id' },
-    { label: 'stops when the source no longer shares the originally matched test ID', twinX: 220, placeable: false, change: 'test-id-group-shrinks' },
-    { label: 'drags when the originally matched test ID group stays intact', twinX: 220, placeable: true, change: 'test-id-group-holds' },
-    { label: 'refuses a late destination that appears hidden', twinX: 220, placeable: false, change: 'hidden-destination' },
-    { label: 'refuses a recovered test ID on a hidden source', twinX: 220, placeable: false, change: 'hidden-id' },
-    { label: 'stops when the source becomes hidden and its twin moves into the point', twinX: 220, placeable: false, change: 'source-hides' },
-    { label: 'stops when the source loses its box and its twin moves into the point', twinX: 220, placeable: false, change: 'source-loses-box' },
-  ])('$label', async ({ twinX, placeable, change }) => {
+  describe('a drag between points whose destination is late', () => {
     const card: SemanticNode = { ref: { id: 'c', revision: 'r1' }, role: 'button', name: 'Card', rect: { x: 0, y: 0, width: 200, height: 100 } };
-    const twin: SemanticNode = { ...card, ref: { id: 'twin', revision: 'r1' }, rect: { x: twinX, y: 0, width: 200, height: 100 } };
     const lane: SemanticNode = { ref: { id: 'l', revision: 'r1' }, role: 'region', name: 'Done', rect: { x: 450, y: 0, width: 200, height: 100 } };
-    const sharedTestId = change === 'test-id-group-shrinks' || change === 'test-id-group-holds';
-    const sourceTarget = {
-      role: 'button',
-      name: 'Card',
-      ...(change === 'positioned' || change === 'source-wait-only' ? { position: { index: 0, of: 2 } } : {}),
-      ...(change === 'regain-id' || change === 'hidden-id' || sharedTestId ? { testId: 'card-primary' } : {}),
-    };
-    const drag: RecordedAction = {
-      name: 'dragAt',
-      summary: 'drag Card to Done',
-      from: { point: { x: 100, y: 50 }, within: { target: sourceTarget, fx: 0.5, fy: 0.5 } },
-      to: { point: { x: 550, y: 50 }, within: { target: { role: 'region', name: 'Done' }, fx: 0.5, fy: 0.5 } },
-      viewport: VIEWPORT,
-    };
-    const drags: unknown[] = [];
-    const host = makeHost({ onAction: (name, detail) => void (name === 'dragAt' && drags.push(detail)) });
-    const third: SemanticNode = { ...twin, ref: { id: 'third', revision: 'r1' }, rect: { x: 700, y: 0, width: 200, height: 100 } };
-    const movedCard = { ...card, rect: { x: 25, y: 0, width: 200, height: 100 } };
-    const before = change === 'three-to-two' || change === 'positioned' ? [card, twin, third] : [card, twin];
-    if (change === 'source-wait-only') before.push(third, lane);
-    if (sharedTestId) before.splice(0, 2, { ...card, testId: 'card-primary' }, { ...twin, testId: 'card-primary' });
-    let after = [movedCard, twin, lane];
-    if (change === 'source-leaves') after = [twin, lane];
-    if (change === 'twin-moves') after = [{ ...card, ref: twin.ref }, lane];
-    if (change === 'twin-leaves') after = [movedCard, lane];
-    if (change === 'positioned') after = [{ ...card, ref: twin.ref }, third, lane];
-    if (change === 'regain-id') after = [{ ...movedCard, testId: 'card-primary' }, twin, lane];
-    if (change === 'hidden-id') after = [card, twin, { ...third, testId: 'card-primary', states: { hidden: true } }, lane];
-    if (sharedTestId) after = [
-      { ...movedCard, testId: change === 'test-id-group-shrinks' ? 'updated-card-id' : 'card-primary' },
-      { ...twin, testId: 'card-primary' },
-      lane,
-    ];
-    if (change === 'hidden-destination') after = [movedCard, twin, { ...lane, states: { hidden: true } }];
-    if (change === 'source-hides') after = [{ ...card, states: { hidden: true } }, { ...card, ref: twin.ref }, lane];
-    if (change === 'source-loses-box') after = [{ ref: card.ref, role: 'button', name: 'Card' }, { ...card, ref: twin.ref }, lane];
-    host.capture = async () => screen(host.looks.length === 1 ? before : after);
+    /** The node under another id, as an engine lists a second control of the same kind. */
+    const as = (node: SemanticNode, id: string): SemanticNode => ({ ...node, ref: { id, revision: 'r1' } });
+    const at = (node: SemanticNode, x: number): SemanticNode => ({ ...node, rect: { x, y: 0, width: 200, height: 100 } });
+    const hidden = (node: SemanticNode): SemanticNode => ({ ...node, states: { hidden: true } });
+    const withTestId = (node: SemanticNode, testId: string): SemanticNode => ({ ...node, testId });
+    const twin = at(as(card, 'twin'), 220);
+    const third = at(as(card, 'third'), 700);
+    /** The card 25 pixels to the right, where a drag from its middle starts at x 125. */
+    const moved = at(card, 25);
+    /** The twin where the card was recorded, under the recorded point. */
+    const twinInPlace = as(card, 'twin');
+    const firstOfTwo = { position: { index: 0, of: 2 } };
+    const primary = { testId: 'card-primary' };
 
-    const outcome = await replayTrace(host, trace([drag]));
-    if (placeable) {
-      expect(outcome).toMatchObject({ completed: true, executed: 1 });
-      expect(drags).toEqual([{ from: { x: 125, y: 50 }, to: { x: 550, y: 50 } }]);
-      expect(host.looks).toEqual(['held-still', 'raw']);
-    } else {
-      expect(outcome).toMatchObject({
-        completed: false,
-        executed: 0,
-        stopReason: change === 'hidden-destination' ? 'target-not-found' : 'target-ambiguous',
-      });
-      expect(drags).toEqual([]);
-      expect(host.looks).toEqual(change === undefined ? ['held-still'] : ['held-still', 'raw']);
+    interface WaitCase {
+      readonly label: string;
+      /** What the recording kept of the source beside its role and name. */
+      readonly source?: Pick<TraceTargetDescriptor, 'position' | 'testId'>;
+      /** What each look shows, in order. */
+      readonly looks: readonly (readonly SemanticNode[])[];
+      /** Where the drag starts when the replay sends one. */
+      readonly dragsFrom?: { readonly x: number; readonly y: number };
+      /** Why the replay stops when it sends none. */
+      readonly stops?: 'target-ambiguous' | 'target-not-found';
     }
+
+    it.each<WaitCase>([
+      {
+        label: 'waits for the destination when the source point resolves same-named candidates',
+        looks: [[card, twin], [moved, twin, lane]],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'stops when same-named sources overlap at the recorded point',
+        looks: [[card, at(twin, 25)]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'refuses the remaining twin when the source leaves while waiting for the destination',
+        looks: [[card, twin], [twin, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'refuses a twin that moves into the recorded point',
+        looks: [[card, twin], [twinInPlace, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'stops when only the unrelated twin leaves',
+        looks: [[card, twin], [moved, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'stops when the source count drops from three to two',
+        looks: [[card, twin, third], [moved, twin, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'refuses a positioned source when the group drops to its recorded count',
+        source: firstOfTwo,
+        looks: [[card, twin, third], [twinInPlace, third, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'keeps waiting for a positioned source when its destination is already visible',
+        source: firstOfTwo,
+        looks: [[card, twin, third, lane], [moved, twin, lane]],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'uses a recovered test ID when the same source group remains',
+        source: primary,
+        looks: [[card, twin], [withTestId(moved, 'card-primary'), twin, lane]],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'stops when the source no longer shares the originally matched test ID',
+        source: primary,
+        looks: [
+          [withTestId(card, 'card-primary'), withTestId(twin, 'card-primary')],
+          [withTestId(moved, 'updated-card-id'), withTestId(twin, 'card-primary'), lane],
+        ],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'drags when the originally matched test ID group stays intact',
+        source: primary,
+        looks: [
+          [withTestId(card, 'card-primary'), withTestId(twin, 'card-primary')],
+          [withTestId(moved, 'card-primary'), withTestId(twin, 'card-primary'), lane],
+        ],
+        dragsFrom: { x: 125, y: 50 },
+      },
+      {
+        label: 'refuses a late destination that appears hidden',
+        looks: [[card, twin], [moved, twin, hidden(lane)]],
+        stops: 'target-not-found',
+      },
+      {
+        label: 'refuses a recovered test ID on a hidden source',
+        source: primary,
+        looks: [[card, twin], [card, twin, hidden(withTestId(third, 'card-primary')), lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'stops when the source becomes hidden and its twin moves into the point',
+        looks: [[card, twin], [hidden(card), twinInPlace, lane]],
+        stops: 'target-ambiguous',
+      },
+      {
+        label: 'stops when the source loses its box and its twin moves into the point',
+        looks: [[card, twin], [{ ref: card.ref, role: 'button', name: 'Card' }, twinInPlace, lane]],
+        stops: 'target-ambiguous',
+      },
+    ])('$label', async ({ source, looks, dragsFrom, stops }) => {
+      const drag: RecordedAction = {
+        name: 'dragAt',
+        summary: 'drag Card to Done',
+        from: { point: { x: 100, y: 50 }, within: { target: { role: 'button', name: 'Card', ...source }, fx: 0.5, fy: 0.5 } },
+        to: { point: { x: 550, y: 50 }, within: { target: { role: 'region', name: 'Done' }, fx: 0.5, fy: 0.5 } },
+        viewport: VIEWPORT,
+      };
+      const drags: unknown[] = [];
+      const host = makeHost({ onAction: (name, detail) => void (name === 'dragAt' && drags.push(detail)) });
+      host.capture = async () => screen(looks[Math.min(host.looks.length, looks.length) - 1]!);
+
+      const outcome = await replayTrace(host, trace([drag]));
+      if (stops === undefined) {
+        expect(outcome).toMatchObject({ completed: true, executed: 1 });
+        expect(drags).toEqual([{ from: dragsFrom, to: { x: 550, y: 50 } }]);
+      } else {
+        expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: stops });
+        expect(drags).toEqual([]);
+      }
+      // Each case ends on the last look it lists.
+      expect(host.looks).toEqual(['held-still', ...looks.slice(1).map(() => 'raw')]);
+    });
   });
 });
 
