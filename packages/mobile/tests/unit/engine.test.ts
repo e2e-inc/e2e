@@ -104,6 +104,77 @@ async function screenRootOf(h: Harness): Promise<SemanticNode> {
   return (await h.engine.observe!(operation())).root;
 }
 
+describe('local HarmonyOS target', () => {
+  const phone = { id: 'HDC-A', name: 'Mate', platform: 'harmonyos', kind: 'device', target: 'mobile', booted: true };
+  const other = { ...phone, id: 'HDC-B' };
+  const info = { runId: 'run-1', targetName: 'phone', projectRoot: PROJECT_ROOT, slots: 3, env: {}, signal: new AbortController().signal, headed: false, log: () => undefined };
+
+  it('exposes the installed-app session, tap and screenshots', () => {
+    const engine = mobile({ platform: 'harmonyos' });
+    expect(engine.workers).toBe(1);
+    expect(engine.grantsAllPermissions).not.toBe(true);
+    expect(engine.actions).toEqual(['tap']);
+    expect(engine.pointerActions).toEqual(['tap']);
+    expect(engine.keyboard).toBeUndefined();
+    expect(Object.keys(engine.session!)).toEqual(['restart']);
+    expect(Object.keys(engine.artifacts!)).toEqual(['screenshot']);
+    expect(() => engine.validateApp!({ bundleId: 'com.example.counter' }, info)).not.toThrow();
+    for (const app of [{}, { appPath: 'signed.hap' }, { bundleId: 'counter', appPath: 'signed.hap' }]) {
+      expect(() => engine.validateApp!(app, info)).toThrowError(expect.objectContaining({ code: 'INVALID_CONFIG' }));
+    }
+    expect(() => mobile({ platform: 'harmonyos', device: ['HDC-A', 'HDC-B'] })).toThrow(/one local phone/);
+  });
+
+  it.each([
+    { selection: undefined, inventory: [phone] },
+    { selection: 'Mate', inventory: [phone] },
+    { selection: 'HDC-A', inventory: [other, phone] },
+  ])('resolves $selection to the HDC serial before warm-up and retains it for the worker', async ({ selection, inventory }) => {
+    const h = harness({ platform: 'harmonyos', device: selection, bundleId: 'com.example.counter' });
+    h.fake.respond('devices.list', () => inventory);
+    const prepared = await h.prepare(info);
+    expect(prepared?.workers).toBe(1);
+    expect(h.fake.lastArgs('apps.open')).toEqual({ platform: 'harmonyos', serial: 'HDC-A', app: 'com.example.counter' });
+    await boot(h, 'phone', 0, prepared?.env);
+    expect(h.surface.selection()).toEqual({ platform: 'harmonyos', serial: 'HDC-A' });
+    expect(h.fake.methods()).toEqual(['devices.list', 'apps.open', 'devices.list']);
+  });
+
+  it('lets --device override the configured serial before opening an app', async () => {
+    const h = harness({ platform: 'harmonyos', device: phone.id });
+    h.fake.respond('devices.list', () => [phone, other]);
+    await h.prepare({ ...info, device: other.id });
+    expect(h.fake.lastArgs('apps.open')).toMatchObject({ serial: other.id });
+  });
+
+  it.each([
+    { inventory: [], error: /No connected/ },
+    { inventory: [{ ...phone, kind: 'emulator' }], error: /No connected/ },
+    { inventory: [{ ...phone, booted: false }], error: /No connected/ },
+    { inventory: [phone, other], error: /Multiple connected/ },
+    { inventory: [{ ...phone, claimedBy: { session: 'busy' } }], error: /held by session "busy"/ },
+  ])('refuses an unusable inventory before any device action', async ({ inventory, error }) => {
+    const h = harness({ platform: 'harmonyos' });
+    h.fake.respond('devices.list', () => inventory);
+    await expect(h.prepare(info)).rejects.toThrow(error);
+    await expect(boot(h)).rejects.toThrow(error);
+    expect(h.fake.methods()).toEqual(['devices.list', 'devices.list']);
+  });
+
+  it('refuses install, reinstall and uninstall before sending an app command', async () => {
+    const h = harness({ platform: 'harmonyos' });
+    const signal = info.signal;
+    for (const call of [
+      () => h.surface.installApp(undefined, {}, signal),
+      () => h.surface.installApp('signed.hap', { reinstall: true }, signal),
+      () => h.surface.uninstallApp('com.example.counter', signal),
+    ]) {
+      await expect(call()).rejects.toMatchObject({ code: 'UNSUPPORTED_CAPABILITY', retryable: false });
+    }
+    expect(h.fake.methods()).toEqual([]);
+  });
+});
+
 describe('manifest', () => {
   it('declares observation, actions, location, artifacts, the device fixture, and session hooks', () => {
     const pinned = harness().engine;
@@ -129,7 +200,7 @@ describe('manifest', () => {
     );
     // What `e2e mcp` passes when an agent names the package alone, or leaves the platform out.
     for (const options of [undefined, {}, { platform: 'tvos' }, { platform: 'iOS' }, { platform: 'Android' }]) {
-      expect(() => mobile(options as never)).toThrowError(expect.objectContaining({ code: 'INVALID_CONFIG', message: expect.stringContaining("mobile() needs platform: 'ios' or 'android'") }));
+      expect(() => mobile(options as never)).toThrowError(expect.objectContaining({ code: 'INVALID_CONFIG', message: expect.stringContaining("mobile() needs platform: 'ios', 'android', or 'harmonyos'") }));
     }
     expect(() => mobile({ platform: 'ios', app: 'x' } as never)).toThrowError(
       expect.objectContaining({ code: 'INVALID_CONFIG', message: expect.stringMatching(/^mobile\(\) has unknown key "app"/) }),

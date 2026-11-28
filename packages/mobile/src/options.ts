@@ -17,7 +17,7 @@ export type AgentDeviceClient = ReturnType<typeof createAgentDeviceClient>;
  */
 export type ClientFactory = (session: string, connection?: DeviceConnection) => AgentDeviceClient;
 
-export type MobilePlatform = 'ios' | 'android';
+export type MobilePlatform = 'ios' | 'android' | 'harmonyos';
 
 /** Every permission agent-device can grant, deny, or reset on an app: what a target's `app.permissions` and `device.openApp` may name. */
 export const DEVICE_PERMISSIONS = [
@@ -60,7 +60,8 @@ export interface MobileOptions<Platform extends MobilePlatform = MobilePlatform>
   /** Platform the target's device runs. */
   readonly platform: Platform;
   /**
-   * Device to use: a simulator or emulator by name, simulator UDID, or
+   * A HarmonyOS target accepts one HDC serial or phone name. Omit it when exactly one phone is connected.
+   * On iOS and Android, device to use: a simulator or emulator by name, simulator UDID, or
    * emulator serial (`emulator-5554`), or a connected phone by name. A list
    * is a pool: the engine declares one worker per entry and worker slot `n`
    * drives the `n`th, so `workers` at or above the pool size runs the target's

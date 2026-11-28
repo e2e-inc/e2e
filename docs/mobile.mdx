@@ -12,6 +12,20 @@ phones connected to your machine. It is built on
 [agent-device](https://github.com/callstack/agent-device). Tests use the
 same `agent`, `screen`, and `expect` APIs as browser tests.
 
+## Local HarmonyOS phone
+
+Connect an unlocked phone and check that DevEco's `hdc list targets` shows its serial. Sign and install the ArkUI app on the phone before running the suite. Add a target to your config:
+
+```ts
+{
+  name: 'harmony-phone',
+  engine: mobile({ platform: 'harmonyos' }),
+  app: { bundleId: 'com.example.e2ecounter' },
+}
+```
+
+With several phones connected, set `device` to one HDC serial or pass `--device <serial>` to the run. Each target uses one worker. The counter example in `packages/mobile/examples/harmonyos` uses `app.open()`, finds an ArkUI button by role and name, taps it and checks the updated text by test ID. The engine also exposes screenshots. HAP installation, video recording, hosted devices and emulator provisioning are outside this target's supported operations.
+
 ## Set up
 
 Install Xcode with an iOS simulator runtime, or the Android SDK with an

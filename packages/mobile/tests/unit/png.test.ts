@@ -1,6 +1,6 @@
 import { FilterType, Transformer } from '@napi-rs/image';
 import { describe, expect, it } from 'vitest';
-import { maskPng } from '../../src/png.ts';
+import { harmonyScreenshotPng, maskPng } from '../../src/png.ts';
 import { decodePng, encodePng, rawPng, type DecodedPng } from '../helpers/png.ts';
 
 function solid(width: number, height: number, channels: 3 | 4, value: number): DecodedPng {
@@ -57,4 +57,13 @@ describe('screenshot masking', () => {
     expect([...masked.pixels.subarray(0, 4)]).toEqual([0, 0, 0, 255]);
     expect([...masked.pixels.subarray(4, 8)]).toEqual([9, 9, 9, 255]);
   });
+});
+
+it('converts HDC JPEG captures to PNG and retains a native PNG', () => {
+  const png = encodePng(solid(4, 4, 4, 255));
+  const jpeg = new Transformer(png).jpegSync();
+  expect(harmonyScreenshotPng(png)).toBe(png);
+  const normalized = harmonyScreenshotPng(jpeg);
+  expect(Array.from(normalized.subarray(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  expect(decodePng(normalized)).toMatchObject({ width: 4, height: 4 });
 });

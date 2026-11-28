@@ -307,6 +307,11 @@ export default {
 } satisfies E2EConfig;
 ```
 
+- For an installed ArkUI app, use `mobile({ platform: 'harmonyos' })`
+  and set `app.bundleId`. Connect and unlock one phone, or select its HDC
+  serial with `--device` when several are connected. Use `app.open()`, tap
+  by role or test ID, and assert the updated text. Install the signed app
+  before the run.
 - `app.bundleId` is what `app.open()` launches fresh. `app.appPath` is the
   `.app` or `.apk` under test, but the engine installs nothing: a worker
   fixture with `auto: true` calls `device.installApp()` once per device.

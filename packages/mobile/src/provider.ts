@@ -25,12 +25,12 @@ import { isSlotBinding, type DeviceClientConfig, type DeviceDaemon, type DeviceS
 import { message } from './errors.ts';
 import { isLink } from './links.ts';
 import { cancelled } from './support.ts';
-import type { MobileOptions, MobilePlatform } from './options.ts';
+import type { MobilePlatform } from './options.ts';
 
 /** What the engine asks a provider for: one device for one worker slot of a run. */
 export interface DeviceRequest {
   /** Platform the target's device must run. */
-  readonly platform: MobilePlatform;
+  readonly platform: Exclude<MobilePlatform, 'harmonyos'>;
   /** The run id, for naming the session at the provider. */
   readonly runId: string;
   /** The target the device serves. */
@@ -242,7 +242,7 @@ export class LeasedDevices implements DeviceSource {
 
   constructor(
     private readonly provider: DeviceProvider,
-    private readonly options: Pick<MobileOptions, 'platform'>,
+    private readonly options: Pick<DeviceRequest, 'platform'>,
   ) {
     this.recorder = provider.record === undefined ? undefined : (provider as RecordingDeviceProvider);
   }

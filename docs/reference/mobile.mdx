@@ -80,7 +80,7 @@ The app under test is the target's `app`, not an engine option; see
 
 | Option | Type | Default |
 | --- | --- | --- |
-| [`platform`](#platform) | `'ios' \| 'android'` | required |
+| [`platform`](#platform) | `'ios' \| 'android' \| 'harmonyos'` | required |
 | [`device`](#device-option) | `string \| readonly string[] \| DeviceProvider` | every booted device |
 | [`session`](#session) | `string` | `e2e-<target name>`, with `-<hostId>` for a `launch()` host |
 | [`snapshot`](#snapshot) | `'full' \| 'interactive'` | `'full'` |
@@ -96,7 +96,7 @@ declaration.
 | --- | --- |
 | `INVALID_CONFIG` | An empty `device` list, a blank `device` name, or a blank or non-string list entry. |
 | `INVALID_CONFIG` | A `device` value that is neither a string, a list, nor a valid provider: a provider without a non-empty `name`, without `acquire()` or `release()`, or with a `record` that is not a function. |
-| `INVALID_CONFIG` | `platform` is missing or not `'ios'` or `'android'`; the match is case-sensitive. |
+| `INVALID_CONFIG` | `platform` is missing or outside `'ios'`, `'android'` and `'harmonyos'`; the match is case-sensitive. |
 | `INVALID_CONFIG` | A provided `snapshot` value is not `'full'` or `'interactive'`, or a provided `videoTouches` value is not a boolean. |
 | `INVALID_CONFIG` | An option `mobile()` does not take, such as `mobile({ app })` and the other old app options. The message names the nearest known option for a likely typo, or lists every option. |
 | `INVALID_CONFIG` | `settle` or `transition` is not a non-negative integer of milliseconds (`settle` may also be `false`). |
@@ -112,7 +112,8 @@ readonly platform: MobilePlatform;
 mobile({ platform: 'android' });
 ```
 
-- `'ios'` or `'android'`. Required.
+- Required. Choose `'ios'`, `'android'` or `'harmonyos'`.
+- A [local HarmonyOS phone](/mobile#local-harmonyos-phone) runs one worker against an installed app. Set `app.bundleId` and select a single phone by HDC serial or name.
 
 #### `device` option
 

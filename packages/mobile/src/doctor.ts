@@ -7,10 +7,10 @@
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
 import { obj, type EngineDoctorCheck, type EngineDoctorInfo } from '@e2e-dev/core/engine';
-import { runCommand } from './errors.ts';
+import { message, runCommand } from './errors.ts';
 import type { ClientFactory, MobileOptions } from './options.ts';
-import { deviceSelection } from './bindings.ts';
-import { isDeviceList } from './pool.ts';
+import { deviceSelection, type SlotBinding } from './bindings.ts';
+import { harmonyPhone, isDeviceList } from './pool.ts';
 import type { DeviceProvider } from './provider.ts';
 
 /** Checks that apply to the whole machine, reported once however many devices the target names. */
@@ -42,9 +42,19 @@ export async function mobileDoctor(options: MobileOptions, createClient: ClientF
   const reported = new Set<string>();
   for (const name of devices) {
     info.log(`agent-device doctor${name === undefined ? '' : ` for "${name}"`}`);
+    let binding: Pick<SlotBinding, 'device' | 'deviceId'> | undefined = name === undefined ? undefined : { device: name };
+    if (options.platform === 'harmonyos') {
+      try {
+        const phone = await harmonyPhone(client, name, session, info.signal);
+        binding = { deviceId: phone.id };
+      } catch (cause) {
+        if (info.signal.aborted) throw cause;
+        return [...checks, { id: 'device', status: 'fail', message: message(cause) }];
+      }
+    }
     const result = await runCommand(
       'doctor',
-      () => client.command.doctor(obj({ ...deviceSelection(options.platform, name === undefined ? undefined : { device: name }), targetApp, signal: info.signal })),
+      () => client.command.doctor(obj({ ...deviceSelection(options.platform, binding), targetApp, signal: info.signal })),
       info.signal,
     );
     for (const check of result.checks) {

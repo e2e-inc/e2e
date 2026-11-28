@@ -105,7 +105,7 @@ export function deviceSelection(
   const { device, deviceId } = binding ?? {};
   const id = deviceId ?? (device !== undefined && (UDID.test(device) || EMULATOR_SERIAL.test(device)) ? device : undefined);
   if (id === undefined) return obj({ platform, device });
-  return platform === 'android' ? { platform, serial: id } : { platform, udid: id };
+  return platform === 'ios' ? { platform, udid: id } : { platform, serial: id };
 }
 
 /**

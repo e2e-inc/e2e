@@ -632,6 +632,7 @@ export function projectSnapshot(
   raw: readonly RawNode[],
   options: {
     readonly mintId: () => string;
+    readonly arkUI?: boolean;
     readonly viewport?: ViewportSize | undefined;
     readonly refsGeneration?: number | undefined;
     readonly keyboard?: Rect | undefined;
@@ -675,8 +676,11 @@ export function projectSnapshot(
     const kids = children.get(position) ?? [];
     const blank = editable && !secure && (value === undefined || value === '') && nonEmpty(source.placeholder) === undefined;
     const folded = !android && blank ? foldedPlaceholder(source, kids, raw, children) : undefined;
+    // ArkUI exposes Button captions and Text content in value.
+    const arkText = options.arkUI && !secure && (kind === 'button' || kind === 'text') ? nonEmpty(value) : undefined;
     const label = folded === undefined ? nonEmpty(source.label) : folded.label;
-    const name = nonEmpty(source.contentDescription) ?? label;
+    const text = arkText ?? label;
+    const name = nonEmpty(source.contentDescription) ?? label ?? arkText;
     const placeholder = folded?.placeholder ?? nonEmpty(source.placeholder);
     const attributes = nodeAttributes(source, android, { identifier, placeholder });
     const projected: { node: SemanticNode | undefined } = { node: undefined };
@@ -713,13 +717,13 @@ export function projectSnapshot(
       // field answers `getByLabel` by that description and `getByText` by
       // what it shows. The model rendering elides `text` whenever it equals `name`.
       ...(name === undefined ? {} : { name }),
-      ...(label === undefined ? {} : { text: label }),
+      ...(text === undefined ? {} : { text }),
       // A secure field's value is never observed; the tree carries that it is
       // secure, not what it holds. Android echoes a text view's label as its
       // value, which would render every line twice, so that echo is dropped;
       // a field keeps a value equal to its label, since iOS names an
       // unlabeled field by its text and the value is what a test reads.
-      ...(secure || value === undefined || value === '' || (android && !editable && value === source.label)
+      ...(secure || value === undefined || value === '' || arkText === value || (android && !editable && value === source.label)
         ? {}
         : { value }),
       ...(secure ? { inputPurpose: 'password' as const } : {}),

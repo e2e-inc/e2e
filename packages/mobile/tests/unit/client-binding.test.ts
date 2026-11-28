@@ -6,7 +6,7 @@ import { createFakeClient } from '../helpers/fake-client.ts';
 const created = vi.hoisted(() => vi.fn());
 vi.mock('agent-device', async (original) => ({
   ...await original<typeof import('agent-device')>(),
-  createAgentDeviceClient: (config: unknown) => { created(config); return createFakeClient().client; },
+  createAgentDeviceClient: (config: unknown) => { created(config); return createFakeClient({ 'devices.list': () => [] }).client; },
 }));
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
 
@@ -37,4 +37,17 @@ it('carries a slot\'s kept session through the worker environment, and reads a b
   const kept: SlotBinding[] = [{ deviceId: 'B', session: 'e2e-ios-1' }];
   expect(decodeBindings(encodeBindings(kept))).toEqual(kept);
   expect(decodeBindings(JSON.stringify([{ deviceId: 'B', session: 7 }]))).toBeUndefined();
+});
+
+it('resolves HarmonyOS inventory on this host when an ambient remote daemon is configured', async () => {
+  vi.stubEnv('AGENT_DEVICE_DAEMON_BASE_URL', 'https://remote.example');
+  const engine = mobile({ platform: 'harmonyos' });
+  const preparation = engine.prepare!({
+    runId: 'run', targetName: 'phone', projectRoot: '/project', app: {}, slots: 1, headed: false,
+    env: {}, signal: new AbortController().signal, log() {},
+  });
+  await expect(preparation).rejects.toThrow(/No connected HarmonyOS phone/);
+  expect(created).toHaveBeenCalledWith({
+    session: 'e2e-phone-0', daemonBaseUrl: '', daemonAuthToken: '', daemonTransport: 'auto',
+  });
 });

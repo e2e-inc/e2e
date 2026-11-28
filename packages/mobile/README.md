@@ -8,6 +8,8 @@ on a device target unchanged; neither `e2e` nor `@e2e-dev/core` imports this pac
 To drive a device from a program without the test runner, import `mobile` from
 `@e2e-dev/mobile/engine` with [`@e2e-dev/core`](https://www.npmjs.com/package/@e2e-dev/core).
 
+For a local HarmonyOS phone, follow the [ArkUI counter example](./examples/harmonyos/README.md) to configure an installed app by bundle name and run it over HDC.
+
 ## Install
 
 Run `npx e2e init` and choose **Mobile (iOS/Android)** for a Settings

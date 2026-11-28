@@ -70,12 +70,12 @@ import {
 } from './nodes.ts';
 import { keyboardDragStart, keyboardShownIn, type KeyboardUnknown } from './keyboard.ts';
 import { DEVICE_PERMISSIONS, type AgentDeviceClient, type ClientFactory, type DevicePermission, type LaunchPermissions, type MobileOptions, type MobilePlatform, type PermissionState } from './options.ts';
-import { maskPng } from './png.ts';
+import { harmonyScreenshotPng, maskPng } from './png.ts';
 import { above, clipTo, dragToEdge, EDGE_DIRECTION, regionSignature } from './scroll-to.ts';
 import { mobileDoctor } from './doctor.ts';
 import { deviceLabel, deviceSelection, pinnedApp, type DeviceSelection, type SlotBinding } from './bindings.ts';
 import { assertAppId } from './links.ts';
-import { bootRequest, DevicePool } from './pool.ts';
+import { bootRequest, DevicePool, harmonyPhone } from './pool.ts';
 import { recordLease, travelledLease, type DeviceLease, type RecordingDeviceProvider } from './provider.ts';
 import {
   installedIdentity,
@@ -690,8 +690,14 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
       provider === undefined || lease === undefined
         ? undefined
         : { provider, lease, runId: info.runId, targetName: info.targetName, env: info.env };
-    const booted = await this.command('boot', (client) => client.devices.boot(bootRequest(this.selection())), info.signal);
-    this.bound = { session, deviceId: booted.id, deviceName: booted.device };
+    if (this.options.platform === 'harmonyos') {
+      const phone = await harmonyPhone(this.client, binding?.deviceId ?? binding?.device, session, info.signal);
+      this.device = { deviceId: phone.id };
+      this.bound = { session, deviceId: phone.id, deviceName: phone.name };
+    } else {
+      const booted = await this.command('boot', (client) => client.devices.boot(bootRequest(this.selection())), info.signal);
+      this.bound = { session, deviceId: booted.id, deviceName: booted.device };
+    }
     // Nothing is installed here: a device provider that installed the build
     // from `appPath` says so on the binding, and otherwise the suite installs
     // it where it wants to, with `device.installApp()`.
@@ -1048,6 +1054,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * Other explicit paths must exist on the runner.
    */
   async installApp(appPath: string | undefined, options: InstallAppOptions, signal: AbortSignal): Promise<InstalledApp> {
+    if (this.options.platform === 'harmonyos') throw unsupported('device.installApp is unavailable on HarmonyOS. Install the signed app before the run and set app.bundleId.');
     const build = appPath ?? this.app.appPath;
     if (build === undefined) throw invalidState("installApp needs a build: pass a path, or name one with the target's app.appPath");
     const resolved = path.resolve(this.projectRoot, build);
@@ -1086,6 +1093,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
    * `app.open()` asks for an install instead of launching an app that is gone.
    */
   async uninstallApp(app: string | undefined, signal: AbortSignal): Promise<boolean> {
+    if (this.options.platform === 'harmonyos') throw unsupported('device.uninstallApp is unavailable on HarmonyOS. Install the signed app before the run and set app.bundleId.');
     const target = this.appArgument('uninstallApp', app);
     const result = await this.command(`uninstall ${target}`, (client) => client.apps.uninstall({ ...this.selection(), app: target }), signal);
     // agent-device resolves display names too: compare the id it removed, not only the string the caller passed.
@@ -1204,6 +1212,7 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
   private project(raw: RawSnapshot): ProjectedScreen {
     const projected = {
       ...projectSnapshot(raw.nodes ?? [], {
+        arkUI: this.options.platform === 'harmonyos',
         mintId: () => {
           this.idCounter += 1;
           return `n${this.idCounter}`;
@@ -2067,7 +2076,10 @@ export class AgentDeviceSurface<Platform extends MobilePlatform = MobilePlatform
 
   /** Raw device pixels; cleanup follows the capture even when its caller abandons it. */
   private rawScreenshot(signal: AbortSignal, capture: ScreenshotCapture, budget: InputBudget): Promise<Uint8Array> {
-    return this.captureScreenshot(signal, async (shot, file) => new Uint8Array(readFileSync(shot.path ?? file)), capture, budget);
+    return this.captureScreenshot(signal, async (shot, file) => {
+      const bytes = readFileSync(shot.path ?? file);
+      return this.options.platform === 'harmonyos' ? harmonyScreenshotPng(bytes) : new Uint8Array(bytes);
+    }, capture, budget);
   }
 
   /**

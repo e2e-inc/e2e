@@ -19,9 +19,8 @@ metadata:
 e2e runs UI and API tests that mix agent instructions (`agent.act`,
 `agent.assert`, `agent.waitFor`, `agent.extract`) with exact actions and
 checks (`screen`, `app`, `browser`, `device`, `request`, `expect`). Engines:
-`@e2e-dev/web` (browsers), `@e2e-dev/mobile` (iOS/Android),
-`@e2e-dev/desktop` (macOS prototype), and `@e2e-dev/electron` (Electron
-apps).
+`@e2e-dev/web` (browsers), `@e2e-dev/mobile` (iOS, Android, and local HarmonyOS phones),
+`@e2e-dev/desktop` (macOS prototype), and `@e2e-dev/electron` (Electron apps).
 
 ## Start here: pick the reference for the job
 
