@@ -1802,6 +1802,13 @@ describe('DesktopSurface: points', () => {
     expect(fake.of('pointer')).toHaveLength(0);
   });
 
+  it('hovers a point when a panel took focus as the window came forward, which the driver checks is not on top there', async () => {
+    const list = (panel: boolean) => windows(() => [{ id: 'w-mine', is_focused: !panel, bounds: { x: 100, y: 100, width: 400, height: 300 } }, ...(panel ? [{ id: 'w-panel', is_focused: true, bounds: { x: 100, y: 120, width: 400, height: 200 } }] : [])]);
+    const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [list(false), list(false), list(false), list(true)] }, { options: { physicalInput: true } });
+    await surface.performAt({ x: 10, y: 250 }, { kind: 'hover' }, operation());
+    expect(fake.of('pointer').at(-1)?.args).toEqual([110, 350, 'hover']);
+  });
+
   it('measures a point from where the window is once it was brought forward', async () => {
     const at = (x: number) => windows(() => [{ id: 'w-mine', is_focused: true, bounds: { x, y: 200, width: 400, height: 300 } }]);
     const { surface, fake } = await launched({ snapshot: [renamed('macos/appkit-form', 'w-8032', 'w-mine')], listWindows: [at(100), at(100), at(100), at(500)] }, { options: { physicalInput: true } });

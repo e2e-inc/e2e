@@ -1209,12 +1209,14 @@ export class DesktopSurface {
     const focused = forward?.bounds;
     if (forward === undefined || focused === undefined) throw notActionable('the window the point was taken from closed as it was brought forward; observe again');
     // A click carries no window, only screen coordinates: if another window (a sheet, a panel the app raised) took focus as this one came forward, it could be the one under the point.
-    if (forward.is_focused !== true) throw notActionable('another window took focus as the window the point was taken from was brought forward, and could be under the point; observe again');
+    // A hover presses nothing: the driver refuses it only when another app's window, or another of this app's, is on top at the point, whichever has focus.
+    // A sheet is part of its window there, so a hover may land on one.
+    const hover = action.kind === 'hover';
+    if (!hover && forward.is_focused !== true) throw notActionable('another window took focus as the window the point was taken from was brought forward, and could be under the point; observe again');
     // A sheet counts as its window's focus, for keys. The point was taken on the sheet there then (in the observation, or as this action began when none came first): one that opened since could cover it, one that closed uncovered what was under it, and one in its place is another.
-    // A hover presses nothing: the driver refuses it only when another window, a sheet included, is on top at the point.
     const sheetThen = observed === undefined ? sheetKey(target) : observed.sheet;
     const sheetNow = sheetKey(forward);
-    if (action.kind !== 'hover' && !sameSheet(sheetNow, sheetThen)) {
+    if (!hover && !sameSheet(sheetNow, sheetThen)) {
       const what = sheetThen === undefined ? 'a sheet opened over the window' : sheetNow === undefined ? 'the sheet the point was taken on closed' : 'another sheet took the place of the one the point was taken on';
       throw notActionable(`${what} since the point was taken, and the click could land on something else; observe again`);
     }
