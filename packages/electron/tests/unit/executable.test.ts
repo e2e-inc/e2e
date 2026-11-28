@@ -12,6 +12,9 @@ chmodSync(path.join(root, 'run.sh'), 0o755);
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
+// What the developer running the tests has set, which no test may change.
+const ambientOverride = process.env['ELECTRON_OVERRIDE_DIST_PATH'];
+
 describe('the project\'s electron package', () => {
   it('starts the binary ELECTRON_OVERRIDE_DIST_PATH names, as Electron\'s own index.js does', async () => {
     const project = path.join(root, 'project');
@@ -28,7 +31,8 @@ describe('the project\'s electron package', () => {
     const env = { ELECTRON_OVERRIDE_DIST_PATH: override };
     expect(resolveExecutable(project, undefined, env)).toBe(path.join(override, 'electron'));
     expect(describeExecutable(project, undefined, env).status).toBe('pass');
-    expect(process.env['ELECTRON_OVERRIDE_DIST_PATH']).toBeUndefined();
+    // Read from the environment it is given, never this process's, whatever this process has.
+    expect(process.env['ELECTRON_OVERRIDE_DIST_PATH']).toBe(ambientOverride);
   });
 
   it('names the variable, and downloads nothing, when ELECTRON_OVERRIDE_DIST_PATH points where no binary is', async () => {
