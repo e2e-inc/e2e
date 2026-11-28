@@ -128,9 +128,9 @@ fn server_windows() -> Vec<ServerWindow> {
 
 /// The app's accessibility windows, front to back, each with its window server id when it has one.
 pub fn ax_windows(app: &Element) -> Outcome<Vec<(Element, Option<u32>)>> {
-    // Every window, however many a document app restored: one past a fixed cap would list but never read.
-    let count = app.count("AXWindows").unwrap_or(256).max(1);
-    match app.elements("AXWindows", count) {
+    // Every window, however many a document app restored, in one read: a count read first misses the last window when
+    // one opens between the two reads, and a minimized window has no on-screen window to stand in for it.
+    match app.elements("AXWindows", isize::MAX as usize) {
         Ok(windows) => Ok(windows
             .into_iter()
             .map(|element| {
