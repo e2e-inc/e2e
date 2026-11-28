@@ -405,8 +405,8 @@ Both forms take the [Screenshot options](#screenshot-options). `fullPage` and
 [`ScreenshotOptions`](#screenexpectation-and-screenshotoptions) describes
 each option.
 
-- `fullPage` compares the whole scrollable page. The web engine declares it;
-  the mobile and desktop engines don't. Masks land where their locators sit
+- `fullPage` compares the whole scrollable page. The web and Electron engines
+  declare it; the mobile and desktop engines don't. Masks land where their locators sit
   on the page, however far it's scrolled.
 - `clip` compares one rectangle in CSS pixels, measured from the viewport's
   top-left corner, or from the page's with `fullPage`. The part outside the

@@ -751,7 +751,7 @@ export interface ScreenshotClip {
 export interface AppScreenshotOptions {
   /**
    * The whole scrollable page rather than the viewport. Needs an engine that
-   * declares `fullPageScreenshots`, as the web engine does; any other fails
+   * declares `fullPageScreenshots`, as the web and Electron engines do; any other fails
    * with `UNSUPPORTED_CAPABILITY`.
    */
   fullPage?: boolean;

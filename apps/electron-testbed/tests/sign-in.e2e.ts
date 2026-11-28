@@ -354,6 +354,23 @@ test.describe('screenshots', () => {
     expect(blackShare(image, field!, image.width / width)).toBe(1);
   });
 
+  test('captures the whole page with the password field below the window painted over', async ({ app, screen, electron }) => {
+    const password = screen.getByTestId('password');
+    await password.fill(credentials.user('ada').password);
+    // A window shorter than the form leaves the password field below its bottom edge.
+    const scale = await electron.evaluate(({ BrowserWindow, screen: displays }) => {
+      const window = BrowserWindow.getAllWindows()[0]!;
+      window.setContentSize(window.getContentBounds().width, 60);
+      return displays.getDisplayMatching(window.getBounds()).scaleFactor;
+    });
+    await expect.poll(async () => (await password.boundingBox())!.y).toBeGreaterThan(60);
+    const field = await password.boundingBox();
+    const image = decode(new Uint8Array(readFileSync(await app.screenshot('whole', { fullPage: true }))));
+    const height = image.pixels.length / image.channels / image.width;
+    expect(height / scale).toBeGreaterThan(field!.y + field!.height);
+    expect(blackShare(image, field!, scale)).toBe(1);
+  });
+
   test('withholds a screenshot of a window whose password field no mask reaches', async ({ app, screen, electron }) => {
     await electron.waitForWindow(() => screen.getByRole('button', 'Open settings').tap());
     await expect(screen.getByRole('textbox', 'Vault key')).toHaveCount(1);

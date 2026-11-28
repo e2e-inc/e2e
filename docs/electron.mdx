@@ -362,8 +362,9 @@ The engine adds `--no-sandbox` on Linux automatically.
   (`PATH`, `HOME`, locale, temp, display); pass anything your app needs with
   `electron({ env })`.
 - **Password fields:** password values can't be read and are painted black in
-  screenshots. If a password field sits inside a closed shadow root where
-  masks can't reach, screenshots of that window are withheld.
+  screenshots, below the window's edge too in a `fullPage` one. If a password
+  field sits inside a closed shadow root where masks can't reach, screenshots
+  of that window are withheld.
 - **Local file boundary:** if a window navigates to a `file:` path outside
   your app's directory, the agent gets no observation and screenshots are
   refused. When `app.appPath` names a main script, the app's directory is

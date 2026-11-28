@@ -5,7 +5,7 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { Transformer } from '@napi-rs/image';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -547,6 +547,55 @@ describe('pixels', () => {
     await expect.poll(() => windows.open().length, { timeout: 10_000 }).toBe(2);
     await expect.poll(hidden, { timeout: 10_000 }).toEqual([false, false]);
     expect(await corner(windows.open().find((window) => window !== first)!)).toEqual([0, 0, 255]);
+  });
+
+  it('captures the whole page, one image pixel per CSS pixel, on a dense display, and says how far it is scrolled', async () => {
+    const page = `<body style="margin:0;overflow-x:hidden"><div style="height:2000px;background:rgb(255,0,0)"></div><div style="height:2000px;background:rgb(0,128,0)"></div></body>`;
+    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL('data:text/html,${page}'));`, ['--force-device-scale-factor=2']);
+    await launch();
+    const window = windows.require();
+    await window.page.evaluate(() => scrollTo(0, 2500));
+    const raw = await readWindow(new DevTools(), window);
+    const { pixels } = await withPixels(new DevTools(), raw, { root: { ref: { id: 'window', revision: '' }, role: 'document' }, viewport: { width: 0, height: 0 } }, { fullPage: true });
+    expect(pixels).toMatchObject({ height: 4000, scale: 1, scroll: { x: 0, y: 2500 } });
+    const rgba = new Transformer(pixels!.data).rawPixelsSync();
+    const channels = rgba.length / (pixels!.width * pixels!.height);
+    const at = (y: number): number[] => [...rgba.subarray(y * pixels!.width * channels, y * pixels!.width * channels + 3)];
+    expect(at(10)).toEqual([255, 0, 0]);
+    expect(at(3990)).toEqual([0, 128, 0]);
+    // The capture paints past the viewport without moving it.
+    expect(await window.page.evaluate(() => scrollY)).toBe(2500);
+  });
+
+  it('masks a password field and a nested document below the viewport in a whole-page screenshot', async () => {
+    const page = `<body style="margin:0;background:white"><div style="height:900px"></div><input type="password" value="hunter2" style="display:block;border:0;width:200px;height:40px;background:red"><div style="height:200px"></div>${RED_FRAME}<div style="height:200px"></div></body>`;
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`);
+    await launch();
+    const relative = await screenshotFile(new DevTools(), windows.require(), directory, 'page.png', () => undefined, { fullPage: true });
+    const image = new Transformer(readFileSync(path.join(directory, relative)));
+    const { width, height } = image.metadataSync();
+    const rgba = image.rawPixelsSync();
+    const channels = rgba.length / (width * height);
+    let red = 0;
+    for (let offset = 0; offset < rgba.length; offset += channels) if (rgba[offset]! > 200 && rgba[offset + 1]! < 50) red += 1;
+    expect(height).toBeGreaterThan(1300);
+    expect(red).toBe(0);
+    const field = (920 * width + 100) * channels;
+    expect([rgba[field], rgba[field + 1], rgba[field + 2]]).toEqual([0, 0, 0]);
+  });
+
+  it('cuts a whole-page screenshot to a clip in the page, and refuses one with nothing of the page inside it', async () => {
+    const page = `<body style="margin:0;overflow-x:hidden"><div style="height:1000px;background:rgb(255,0,0)"></div><div style="height:1000px;background:rgb(0,128,0)"></div></body>`;
+    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,${page}'));`);
+    await launch();
+    const window = windows.require();
+    const relative = await screenshotFile(new DevTools(), window, directory, 'clip.png', () => undefined, { fullPage: true, clip: { x: 10, y: 1500, width: 50, height: 40 } });
+    const image = new Transformer(readFileSync(path.join(directory, relative)));
+    expect(image.metadataSync()).toMatchObject({ width: 50, height: 40 });
+    const rgba = image.rawPixelsSync();
+    expect([rgba[0], rgba[1], rgba[2]]).toEqual([0, 128, 0]);
+    const outside = await screenshotFile(new DevTools(), window, directory, 'far.png', () => undefined, { fullPage: true, clip: { x: 0, y: 5000, width: 10, height: 10 } }).then(() => undefined, (error: unknown) => error);
+    expect(outside).toMatchObject({ code: 'INVALID_ARGUMENT', message: expect.stringContaining('is outside the') });
   });
 });
 

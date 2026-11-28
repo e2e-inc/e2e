@@ -27,6 +27,7 @@ import type {
   EngineDoctorInfo,
   EngineInitInfo,
   EngineObserveOptions,
+  EngineScreenshotOptions,
   EnginePrepareInfo,
   EngineSnapshot,
   LocatorAction,
@@ -288,7 +289,7 @@ export class ElectronSurface {
       const left = this.leftApp(raw.window);
       if (left !== undefined) throw new ConfigurationError('POLICY_DENIED', left);
       const snapshot = projectRead(raw, 'tree', this.projection());
-      return options?.pixels === true ? await withPixels(this.devtools, raw, snapshot) : snapshot;
+      return options?.pixels === true ? await withPixels(this.devtools, raw, snapshot, { fullPage: options.fullPage === true }) : snapshot;
     });
   }
 
@@ -614,13 +615,14 @@ export class ElectronSurface {
 
   // --- pixels ---
 
-  async screenshot(label: string | undefined, operation: OperationContext): Promise<string> {
+  /** The window's viewport, or with `options` its whole page, cut to their clip. */
+  async screenshot(label: string | undefined, operation: OperationContext, options?: EngineScreenshotOptions): Promise<string> {
     const window = this.requireWindow();
     const attempt = this.attempt;
     if (attempt === undefined) throw invalidState('a screenshot is taken inside a test');
     return await withBudget(operation, 'screenshot', async () => {
       this.artifactCounter += 1;
-      return await screenshotFile(this.devtools, window, attempt.artifactsDir, screenshotName(this.artifactCounter, label), () => this.leftApp(window));
+      return await screenshotFile(this.devtools, window, attempt.artifactsDir, screenshotName(this.artifactCounter, label), () => this.leftApp(window), options);
     });
   }
 

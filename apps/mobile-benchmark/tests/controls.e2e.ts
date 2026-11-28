@@ -5,7 +5,7 @@
  * assertion pairs with the status line the app prints.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import type { Screen } from 'e2e';
 import { expect, openScenario, test } from './fixtures.ts';
@@ -423,6 +423,20 @@ test.describe('control inventory', () => {
 
     await app.clearState();
     await expect(screen.getByTestId('Login Form')).toBeVisible();
+  });
+
+  test('a clip cuts the screen as a locator screenshot cuts its match, and a full page is refused', async ({ app, screen }) => {
+    const header = screen.getByTestId('inventory-header');
+    const box = await header.boundingBox();
+    expect(box).not.toBeNull();
+    // Both are cut from the device's screenshot at its own density, so a still header comes out the same bytes.
+    const clipped = await app.screenshot('header-clip', { clip: box! });
+    const matched = await header.screenshot('header-match');
+    expect(readFileSync(clipped).equals(readFileSync(matched))).toBe(true);
+    expect(await rejection(app.screenshot({ clip: { x: 0, y: 100_000, width: 10, height: 10 } }))).toMatchObject({ code: 'INVALID_ARGUMENT' });
+    // A device screen has no page past it to capture.
+    expect(await rejection(app.screenshot({ fullPage: true }))).toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
+    expect(await rejection(expect(screen).toHaveScreenshot('inventory-page', { fullPage: true }))).toMatchObject({ code: 'UNSUPPORTED_CAPABILITY' });
   });
 });
 
