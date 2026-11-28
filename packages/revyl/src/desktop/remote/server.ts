@@ -29,8 +29,8 @@ const HANDED = ['E2E_REVYL_COMPUTER', 'E2E_REVYL_APP'] as const;
 type Params = Record<string, unknown> & { app?: Record<string, unknown> };
 type Id = number | string;
 
-/** Requests whose answers are rewritten on the way back, by id. */
-const screenshots = new Set<Id>();
+/** Requests whose answers are rewritten on the way back, by id: each screenshot with the artifact directory of the attempt that asked for it. */
+const screenshots = new Map<Id, string>();
 const prepares = new Set<Id>();
 let attemptDir = ARTIFACTS;
 
@@ -58,7 +58,7 @@ const fromClient = frames(async (message) => {
   if (message.id === undefined || message.id === null || typeof params !== 'object' || params === null) return undefined;
   switch (message.method) {
     case 'artifacts/screenshot':
-      screenshots.add(message.id);
+      screenshots.set(message.id, attemptDir);
       return undefined;
     case 'lifecycle/startAttempt':
       attemptDir = path.join(ARTIFACTS, String(params['attemptId']).replace(/[^A-Za-z0-9_-]/g, '_'));
@@ -82,10 +82,12 @@ const fromClient = frames(async (message) => {
 /** The server's messages, with each screenshot's path replaced by its bytes and the workers' variables added to `prepare`'s answer. */
 const toClient = frames(async (message) => {
   if (message.method !== undefined || message.id === undefined || message.id === null || message.error !== undefined) return undefined;
-  if (screenshots.delete(message.id)) {
+  const dir = screenshots.get(message.id);
+  if (dir !== undefined) {
+    screenshots.delete(message.id);
     const written = (message.result as { path?: unknown } | null)?.path;
     if (typeof written !== 'string') return undefined;
-    return { ...message, result: { data: (await readFile(path.resolve(attemptDir, written))).toString('base64'), mediaType: 'image/png' } };
+    return { ...message, result: { data: (await readFile(path.resolve(dir, written))).toString('base64'), mediaType: 'image/png' } };
   }
   if (prepares.delete(message.id)) {
     const result = (message.result ?? {}) as { env?: Record<string, string> };

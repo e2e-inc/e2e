@@ -18,7 +18,9 @@ const ATTEMPTS = 3;
 const USER_AGENT = `e2e-revyl/${(createRequire(import.meta.url)('../../package.json') as { version: string }).version}`;
 
 /** States a computer never leaves for `active` again under the same run. */
-const ENDED = new Set(['failed', 'stopped', 'owner_lost', 'closing']);
+const ENDED = new Set(['failed', 'stopped', 'stopping', 'owner_lost', 'closing']);
+/** How long a computer gets to become active after a create or start. */
+const ACTIVE_TIMEOUT_MS = 600_000;
 
 /** What an `exec` printed and how it ended. */
 export interface ExecResult {
@@ -72,12 +74,14 @@ export class RevylComputerClient {
     return state;
   }
 
-  /** Waits until the computer runs; one that failed or stopped instead fails with Revyl's reason. */
+  /** Waits until the computer runs; one that failed or stopped instead, or is not active within 10 minutes, fails with Revyl's reason or its last state. */
   async waitUntilActive(id: string, signal: AbortSignal): Promise<void> {
+    const deadline = Date.now() + ACTIVE_TIMEOUT_MS;
     for (;;) {
       const { state, failureReason } = await this.#report(id, signal);
       if (state === 'active') return;
       if (state !== undefined && ENDED.has(state)) throw new Error(`Revyl computer ${id} is ${state}${failureReason === undefined ? '' : `: ${failureReason}`}`);
+      if (Date.now() >= deadline) throw new Error(`Revyl computer ${id} was not active within ${ACTIVE_TIMEOUT_MS / 60_000} minutes; its last state was ${state ?? 'not reported'}`);
       await sleep(2_000, signal);
     }
   }

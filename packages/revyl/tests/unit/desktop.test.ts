@@ -97,6 +97,9 @@ function context(overrides: Partial<TransportContext> = {}): TransportContext {
 
 const transport = (options: Partial<ComputerOptions> = {}) => computerTransport({ computer: undefined, lifetimeSeconds: 3600, packages: PACKAGES, ...options });
 
+/** The sessions an exchange closes, as the relay reports them ended. */
+const closed = (request: ExchangeRequest): ExchangeAnswer['exited'] => Object.fromEntries((request.close ?? []).map((id) => [id, { code: 0, signal: null, stderr: '' }]));
+
 /** Reads frames off a connection's input until `count` arrived. */
 async function read(connection: TransportConnection, count: number): Promise<Message[]> {
   const reader = new FrameReader();
@@ -116,6 +119,7 @@ describe('revylDesktop()', () => {
     ['a lifetime over a day', { lifetimeSeconds: 90_000 }],
     ["a desktop option the engine refuses", { maxDepth: 0 }],
     ['an unknown option', { headless: true }],
+    ['options that are not an object', null],
   ])('refuses %s with INVALID_CONFIG', (_, given) => {
     expect(() => revylDesktop(given as RevylDesktopOptions)).toThrow(expect.objectContaining({ code: 'INVALID_CONFIG' }));
   });
@@ -130,6 +134,18 @@ describe('revylDesktop()', () => {
     expect(engine.name).toBe('desktop');
     expect(engine.platform).toBe('macos');
     expect(engine.workers).toBe(1);
+  });
+
+  it('answers e2e doctor in this process, checking the key and the persistent computer, and starts nothing', async () => {
+    states = [{ state: 'failed', persistent: { state: 'stopped' } }];
+    const info = { targetName: 'mac', projectRoot: process.cwd(), app: { bundleId: 'com.apple.calculator' }, headed: false, signal: new AbortController().signal, log: () => undefined };
+    expect(await revylDesktop({ computer: COMPUTER }).doctor!({ ...info, env })).toEqual([
+      { id: 'revyl-api-key', status: 'pass', message: 'REVYL_API_KEY is set' },
+      { id: 'revyl-computer', status: 'pass', message: `Revyl computer ${COMPUTER} is stopped` },
+    ]);
+    expect(paths()).toEqual([`GET /api/v1/computer-runs/${COMPUTER}`]);
+    expect(await revylDesktop().doctor!({ ...info, env: {} })).toEqual([{ id: 'revyl-api-key', status: 'fail', message: expect.stringContaining('REVYL_API_KEY is not set') }]);
+    expect(paths()).toHaveLength(1);
   });
 });
 
@@ -202,6 +218,23 @@ describe('the Revyl computer transport', () => {
     await expect(transport({ computer: COMPUTER }).open(context())).rejects.toThrow(`Revyl computer ${COMPUTER} is stopping; run again once it has stopped`);
   });
 
+  it('fails a computer that starts stopping instead of running, and one not active within 10 minutes, naming its last state', async () => {
+    states = ['starting', 'stopping'];
+    await expect(transport().open(context())).rejects.toThrow(/is stopping$/);
+
+    states = ['starting'];
+    const start = Date.now();
+    let now = start;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => (now += 301_000));
+    onTestFinished(() => clock.mockRestore());
+    await expect(transport().open(context())).rejects.toThrow('was not active within 10 minutes; its last state was starting');
+  });
+
+  it('fails an app build it cannot archive before it leases a computer', async () => {
+    await expect(transport().open(context({ app: { appPath: '/nowhere/My.app' } }))).rejects.toThrow('archiving /nowhere/My.app');
+    expect(paths()).toEqual([]);
+  });
+
   it('stops the computer it created when setting it up fails, and names why', async () => {
     const scripted = globalThis.fetch;
     vi.stubGlobal('fetch', async (input: string, init: RequestInit) => {
@@ -246,16 +279,27 @@ describe('the Revyl computer transport', () => {
         const asked = new FrameReader().push(Buffer.from(bytes, 'base64'));
         output[id] = Buffer.concat(asked.map(({ message }) => frame({ id: message!.id!, result: { echoed: message!.method } }))).toString('base64');
       }
-      return { output, exited: {}, more: false };
+      return { output, exited: closed(request), more: false };
     };
     const connection = await transport({ computer: COMPUTER }).open(context({ role: 'worker', env: { ...env, E2E_REVYL_COMPUTER: COMPUTER } }));
     const answers = read(connection, 1);
     connection.output.write(frame({ id: 1, method: 'engine/observe', params: {} }));
 
     expect(await answers).toEqual([{ id: 1, result: { echoed: 'engine/observe' } }]);
+    expect(exchanges()[0]!.wait).toBe(0);
     const sent = exchanges().find((request) => request.input !== undefined && Object.keys(request.input).length > 0)!;
     expect(sent.wait).toBeGreaterThan(0);
     expect(Buffer.byteLength(JSON.stringify(sent))).toBeLessThan(16_384);
+    await connection.close(1000);
+  });
+
+  it('still closes a session on the Mac after its close ran out of time', async () => {
+    states = ['active'];
+    relay = (request) => ({ output: {}, exited: closed(request), more: false });
+    const connection = await transport().open(context({ role: 'worker', env: { ...env, E2E_REVYL_COMPUTER: COMPUTER } }));
+    await connection.close(0);
+    const opened = exchanges()[0]!.open![0]!.id;
+    await vi.waitFor(() => expect(exchanges().some((request) => request.close?.includes(opened))).toBe(true));
   });
 
   it('splits a large message across execs under the stdin bound, in order', async () => {
@@ -263,7 +307,7 @@ describe('the Revyl computer transport', () => {
     const received: Buffer[] = [];
     relay = (request) => {
       for (const bytes of Object.values(request.input ?? {})) received.push(Buffer.from(bytes, 'base64'));
-      return { output: {}, exited: {}, more: false };
+      return { output: {}, exited: closed(request), more: false };
     };
     const connection = await transport().open(context({ role: 'worker', env: { ...env, E2E_REVYL_COMPUTER: COMPUTER } }));
     const message = frame({ method: 'keyboard/type', params: { text: 'x'.repeat(40_000) } });
@@ -272,6 +316,7 @@ describe('the Revyl computer transport', () => {
 
     expect(received.length).toBeGreaterThan(1);
     expect(exchanges().every((request) => Buffer.byteLength(JSON.stringify(request)) < 16_384)).toBe(true);
+    await connection.close(1000);
   });
 
   it("ends a connection whose server exited, with the server's stderr for the error", async () => {
@@ -292,5 +337,15 @@ describe('FrameReader', () => {
     const messages = [...bytes].flatMap((byte) => reader.push(Buffer.from([byte])).map(({ message }) => message));
 
     expect(messages).toEqual([{ id: 1, method: 'a' }, { id: 2, result: 'é' }]);
+  });
+
+  it('reads a large message that arrives in many chunks whole, and refuses a body over 256 MiB', () => {
+    const bytes = frame({ id: 3, result: 'x'.repeat(500_000) });
+    const reader = new FrameReader();
+    const frames = [];
+    for (let offset = 0; offset < bytes.length; offset += 1000) frames.push(...reader.push(bytes.subarray(offset, offset + 1000)));
+    expect(frames.map(({ message }) => message)).toEqual([{ id: 3, result: 'x'.repeat(500_000) }]);
+
+    expect(() => new FrameReader().push(Buffer.from(`Content-Length: ${257 * 1024 * 1024}\r\n\r\n`))).toThrow('over the 268435456 a message may have');
   });
 });

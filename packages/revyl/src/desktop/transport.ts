@@ -47,6 +47,13 @@ export interface ComputerOptions {
   readonly packages: readonly string[];
 }
 
+/** An app build as it travels to the Mac: its bundle path here, its gzipped tar, and the tar's hash that names it there. */
+interface Build {
+  readonly bundle: string;
+  readonly data: Buffer;
+  readonly sha: string;
+}
+
 interface Lease {
   readonly id: string;
   release(): Promise<void>;
@@ -68,9 +75,11 @@ export function computerTransport(options: ComputerOptions): EngineTransport {
         const app = context.env[APP_ENV];
         return relayFor(id, client, command).open({ [COMPUTER_ENV]: id, ...(app === undefined ? {} : { [APP_ENV]: app }) });
       }
+      // Archived first, so a build that cannot be read fails before a computer is leased.
+      const build = context.app?.appPath === undefined ? undefined : await archive(path.resolve(context.cwd, context.app.appPath), context.signal);
       const lease = await acquire(client, options, context.signal);
       try {
-        const app = await setUp(client, lease.id, dir, options.packages, context);
+        const app = await setUp(client, lease.id, dir, options.packages, build, context.signal);
         const connection = relayFor(lease.id, client, command).open({ [COMPUTER_ENV]: lease.id, ...(app === undefined ? {} : { [APP_ENV]: app }) });
         return {
           input: connection.input,
@@ -180,9 +189,7 @@ function alive(pid: number): boolean {
  * `sudo`. The relay starts fresh under a LaunchAgent, which ends every
  * server an earlier run left.
  */
-async function setUp(client: RevylComputerClient, id: string, dir: string, packages: readonly string[], context: TransportContext): Promise<string | undefined> {
-  const signal = context.signal;
-  const build = context.app?.appPath === undefined ? undefined : await archive(path.resolve(context.cwd, context.app.appPath), signal);
+async function setUp(client: RevylComputerClient, id: string, dir: string, packages: readonly string[], build: Build | undefined, signal: AbortSignal): Promise<string | undefined> {
   const relative = (file: string): string => path.posix.relative('/Users/computer/workspace', file);
   const present = await shell(client, id, 'mkdir -p "$DIR" && if [ -n "$APP_SHA" ]; then if [ -d "$ROOT/apps/$APP_SHA" ]; then echo present; else rm -rf "$ROOT/apps/$APP_SHA.parts" && mkdir -p "$ROOT/apps/$APP_SHA.parts"; fi; fi', { ROOT, DIR: dir, APP_SHA: build?.sha ?? '' }, signal);
   for (const name of SCRIPTS) {
@@ -259,7 +266,7 @@ async function shell(client: RevylComputerClient, id: string, line: string, env:
  * the Mac so a computer keeps one copy per build. The hash is of the tar
  * itself, since gzip stamps each archive with the time it was made.
  */
-async function archive(bundle: string, signal: AbortSignal): Promise<{ readonly bundle: string; readonly data: Buffer; readonly sha: string }> {
+async function archive(bundle: string, signal: AbortSignal): Promise<Build> {
   const child = spawn('tar', ['-cf', '-', '-C', path.dirname(bundle), path.basename(bundle)], { signal, stdio: ['ignore', 'pipe', 'pipe'] });
   const chunks: Buffer[] = [];
   let stderr = '';

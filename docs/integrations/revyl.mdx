@@ -325,7 +325,9 @@ one copy of each build.
   other.
 - The engine on the Mac receives the run's environment, as any
   [engine server](/reference/engine-protocol#engine-servers) does, through Revyl's API.
-- `e2e doctor` creates or starts a computer to check, like a run does.
+- `e2e doctor` checks `REVYL_API_KEY` and the state of the persistent
+  computer `computer` names, without starting one. It doesn't check the
+  Mac's own setup, which the run does when it starts.
 - When the run ends, the provider stops each computer it created or
   started. If the run itself dies, Revyl stops the computer after
   `lifetimeSeconds`, and the next run on the same machine stops it sooner.

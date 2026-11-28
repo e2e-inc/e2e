@@ -47,5 +47,5 @@ it('keeps the ./desktop entry off @e2e-dev/mobile, @e2e-dev/web, and agent-devic
   const imported = packagesImportedBy('desktop.ts');
 
   expect(imported).toContain('@e2e-dev/desktop/engine');
-  expect([...imported].filter((name) => name === '@e2e-dev/mobile' || name === '@e2e-dev/web' || name.includes('agent-device'))).toEqual([]);
+  expect([...imported].filter((name) => /^@e2e-dev\/(mobile|web)(\/|$)/.test(name) || name.includes('agent-device'))).toEqual([]);
 });

@@ -7,6 +7,8 @@
  */
 
 const DELIMITER = Buffer.from('\r\n\r\n', 'ascii');
+/** The largest message body a reader takes: far above a screenshot's, so a length past it is a broken stream, not a message. */
+const MAX_BODY_BYTES = 256 * 1024 * 1024;
 
 /** A JSON-RPC message, as far as framing needs to know it. */
 export interface Message {
@@ -23,25 +25,43 @@ export interface Frame {
   readonly message: Message | undefined;
 }
 
-/** Splits a byte stream into frames, keeping a frame cut between chunks for the next chunk. */
+/**
+ * Splits a byte stream into frames, keeping a frame cut between chunks for
+ * the next chunk. The pieces of a frame are joined once it is whole, not on
+ * every chunk.
+ */
 export class FrameReader {
-  #buffer: Buffer = Buffer.alloc(0);
+  #pieces: Buffer[] = [];
+  #length = 0;
+  /** Bytes the frame at the front needs in all, once its header is read. */
+  #needed = 0;
 
-  /** The frames `chunk` completes, in order. Bytes that are no frame pass through as one, for the peer's own reader to refuse. */
+  /** The frames `chunk` completes, in order. Bytes that are no frame pass through as one, for the peer's own reader to refuse. A body longer than 256 MiB throws. */
   push(chunk: Buffer): Frame[] {
-    this.#buffer = this.#buffer.length === 0 ? chunk : Buffer.concat([this.#buffer, chunk]);
+    this.#pieces.push(chunk);
+    this.#length += chunk.length;
+    if (this.#length < this.#needed) return [];
+    let buffer = this.#pieces.length === 1 ? this.#pieces[0]! : Buffer.concat(this.#pieces, this.#length);
     const frames: Frame[] = [];
+    this.#needed = 0;
     for (;;) {
-      const end = this.#buffer.indexOf(DELIMITER);
-      if (end === -1) return frames;
+      const end = buffer.indexOf(DELIMITER);
+      if (end === -1) break;
       const start = end + DELIMITER.length;
-      const length = /content-length:\s*(\d+)/i.exec(this.#buffer.subarray(0, end).toString('ascii'))?.[1];
+      const length = /content-length:\s*(\d+)/i.exec(buffer.subarray(0, end).toString('ascii'))?.[1];
+      if (length !== undefined && Number(length) > MAX_BODY_BYTES) throw new Error(`a frame declares ${length} body bytes, over the ${MAX_BODY_BYTES} a message may have`);
       const size = length === undefined ? start : start + Number(length);
-      if (this.#buffer.length < size) return frames;
-      const bytes = this.#buffer.subarray(0, size);
-      this.#buffer = this.#buffer.subarray(size);
+      if (buffer.length < size) {
+        this.#needed = size;
+        break;
+      }
+      const bytes = buffer.subarray(0, size);
+      buffer = buffer.subarray(size);
       frames.push({ bytes, message: length === undefined ? undefined : parse(bytes.subarray(start).toString('utf8')) });
     }
+    this.#pieces = buffer.length === 0 ? [] : [buffer];
+    this.#length = buffer.length;
+    return frames;
   }
 }
 

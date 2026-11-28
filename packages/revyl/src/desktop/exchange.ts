@@ -114,11 +114,12 @@ export class ComputerRelay {
       input: session.fromServer,
       output,
       diagnostics: () => describe(session.exit),
+      // A close that runs out of time leaves the session to the loop, which still sends its close and lets go of it once the server ended.
       close: async (timeoutMs) => {
         session.closing = true;
         this.#kick();
         await Promise.race([session.ended, new Promise((resolve) => setTimeout(resolve, Math.max(0, timeoutMs)).unref())]);
-        this.#sessions.delete(session);
+        if (session.exit !== undefined) this.#sessions.delete(session);
       },
     };
   }
@@ -150,7 +151,10 @@ export class ComputerRelay {
       } catch (cause) {
         // Nothing reaches these servers any more: each connection fails with the reason.
         const reason = `reaching the engine server on Revyl computer ${this.computerId} failed: ${cause instanceof Error ? cause.message : String(cause)}`;
-        for (const session of live) session.finish({ code: null, signal: null, stderr: reason });
+        for (const session of live) {
+          session.finish({ code: null, signal: null, stderr: reason });
+          if (session.closing) this.#sessions.delete(session);
+        }
         return;
       }
       for (const session of live) {
@@ -158,6 +162,7 @@ export class ComputerRelay {
         if (bytes !== undefined) session.receive(Buffer.from(bytes, 'base64'));
         const exit = answer.exited[session.id];
         if (exit !== undefined) session.finish(exit);
+        if (session.exit !== undefined && session.closing) this.#sessions.delete(session);
       }
       this.#more = answer.more;
     }

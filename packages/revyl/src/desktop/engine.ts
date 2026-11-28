@@ -6,8 +6,20 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import { desktop, type DesktopOptions } from '@e2e-dev/desktop/engine';
-import { ConfigurationError, connectEngine, describeEngine, type EngineHandle, type JsonValue } from 'e2e/engine';
+import {
+  ConfigurationError,
+  connectEngine,
+  describeEngine,
+  serveEngine,
+  type EngineDoctorCheck,
+  type EngineHandle,
+  type JsonValue,
+  type TransportConnection,
+} from 'e2e/engine';
+import { revylCredentials } from '../credentials.ts';
+import { RevylComputerClient } from './client.ts';
 import { computerTransport } from './transport.ts';
 
 /** Revyl's computer ids are UUIDs. */
@@ -36,6 +48,9 @@ export interface RevylDesktopOptions extends DesktopOptions {
  * and `REVYL_API_URL` when set.
  */
 export function revylDesktop(options: RevylDesktopOptions = {}): EngineHandle {
+  if (typeof options !== 'object' || options === null || Array.isArray(options)) {
+    throw new ConfigurationError('INVALID_CONFIG', 'revylDesktop: options must be an object');
+  }
   const { computer: named, lifetimeSeconds = 3600, ...desktopOptions } = options;
   // A blank id, as an unset variable in CI reads, names no computer.
   const computer = typeof named === 'string' && named.trim() === '' ? undefined : named;
@@ -47,13 +62,50 @@ export function revylDesktop(options: RevylDesktopOptions = {}): EngineHandle {
   }
   // Built here only to check the options and describe the engine the Mac serves.
   const local = desktop(desktopOptions);
+  const remote = computerTransport({ computer, lifetimeSeconds, packages: enginePackages() });
   return connectEngine({
     manifest: describeEngine(local),
-    transport: computerTransport({ computer, lifetimeSeconds, packages: enginePackages() }),
+    transport: {
+      label: remote.label,
+      // `e2e doctor` leases nothing: this process answers it, checking Revyl's side instead of this machine's.
+      open: async (context) => (context.role === 'doctor' ? inProcess({ ...local, doctor: (info) => revylChecks(computer, info.env, info.signal) }) : remote.open(context)),
+    },
     // What the Mac's \`desktop()\` gets, without the unset options JSON cannot carry.
     initializationOptions: Object.fromEntries(Object.entries(desktopOptions).filter(([, value]) => value !== undefined)) as JsonValue,
     ...(local.validateApp === undefined ? {} : { validateApp: local.validateApp }),
   });
+}
+
+/** What `e2e doctor` checks without leasing a computer: the API key, and the state of the persistent computer the config names. */
+async function revylChecks(computer: string | undefined, env: Readonly<Record<string, string | undefined>>, signal: AbortSignal): Promise<EngineDoctorCheck[]> {
+  let client: RevylComputerClient;
+  try {
+    client = new RevylComputerClient(revylCredentials(env));
+  } catch (cause) {
+    return [{ id: 'revyl-api-key', status: 'fail', message: cause instanceof Error ? cause.message : String(cause) }];
+  }
+  const key: EngineDoctorCheck = { id: 'revyl-api-key', status: 'pass', message: 'REVYL_API_KEY is set' };
+  if (computer === undefined) return [key, { id: 'revyl-computer', status: 'pass', message: 'each run creates a Revyl Mac and stops it at the end' }];
+  const state = await client.state(computer, signal).catch((cause: unknown) => (cause instanceof Error ? cause : new Error(String(cause))));
+  if (state instanceof Error) return [key, { id: 'revyl-computer', status: 'fail', message: `Revyl computer ${computer}: ${state.message}` }];
+  if (state === 'active' || state === 'stopped') return [key, { id: 'revyl-computer', status: 'pass', message: `Revyl computer ${computer} is ${state}` }];
+  if (state === 'starting') return [key, { id: 'revyl-computer', status: 'warn', message: `Revyl computer ${computer} is starting; a run waits for it` }];
+  return [key, { id: 'revyl-computer', status: 'fail', message: `Revyl computer ${computer} is ${state}; a run fails until it has stopped` }];
+}
+
+/** A connection to `engine` served in this process. */
+function inProcess(engine: EngineHandle): TransportConnection {
+  const toServer = new PassThrough();
+  const fromServer = new PassThrough();
+  const served = serveEngine(engine, { input: toServer, output: fromServer });
+  return {
+    input: fromServer,
+    output: toServer,
+    close: async (timeoutMs) => {
+      toServer.end();
+      await Promise.race([served, new Promise((resolve) => setTimeout(resolve, timeoutMs).unref())]);
+    },
+  };
 }
 
 /** `@e2e-dev/desktop` and the `@e2e-dev/core` it runs on, at the versions this project has, as npm installs them on the Mac. */
