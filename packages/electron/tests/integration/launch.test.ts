@@ -413,6 +413,19 @@ describe('an app with no inspector', () => {
   });
 });
 
+/**
+ * An app whose one window shows `page`, at `scale` device pixels per CSS pixel. The page is a file beside the main
+ * script, so none of its text becomes part of the script's code.
+ */
+function pageApp(page: string, { width, height, scale }: { readonly width: number; readonly height: number; readonly scale: number }): Launched {
+  const launched = appWith(
+    `app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: ${width}, height: ${height} }).loadFile(require('node:path').join(__dirname, 'page.html')));`,
+    [`--force-device-scale-factor=${scale}`],
+  );
+  writeFileSync(path.join(launched.directory, 'page.html'), page);
+  return launched;
+}
+
 describe('pixels', () => {
   it('withholds the pixels when the page takes the masks away', async () => {
     const page = `<body style="margin:0"><iframe style="border:0;width:300px;height:200px" srcdoc="<body style=margin:0;background:red>"></iframe><script>new MutationObserver((records) => { for (const record of records) for (const node of record.addedNodes) if (node.popover) node.remove(); }).observe(document.documentElement, { childList: true });</script></body>`;
@@ -551,7 +564,7 @@ describe('pixels', () => {
 
   it('captures the whole page, one image pixel per CSS pixel, on a dense display, and says how far it is scrolled', async () => {
     const page = `<body style="margin:0;overflow-x:hidden"><div style="height:2000px;background:rgb(255,0,0)"></div><div style="height:2000px;background:rgb(0,128,0)"></div></body>`;
-    const { windows, launch } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 400, height: 300 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=2']);
+    const { windows, launch } = pageApp(page, { width: 400, height: 300, scale: 2 });
     await launch();
     const window = windows.require();
     await window.page.evaluate(() => scrollTo(0, 2500));
@@ -583,7 +596,7 @@ describe('pixels', () => {
   it('masks a password field and a nested document below the viewport in a whole-page screenshot', async () => {
     const page = `<body style="margin:0;background:white"><div style="height:900px"></div>${PASSWORD}<div style="height:200px"></div>${RED_FRAME}<div style="height:200px"></div></body>`;
     // One image pixel per CSS pixel, so the field's place in the page is its place in the file.
-    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=1']);
+    const { windows, launch, directory } = pageApp(page, { width: 300, height: 200, scale: 1 });
     await launch();
     const relative = await screenshotFile(new DevTools(), windows.require(), directory, 'page.png', () => undefined, { fullPage: true });
     const image = inspect(readFileSync(path.join(directory, relative)));
@@ -596,7 +609,7 @@ describe('pixels', () => {
   it('masks fields above, below, and fixed to the bottom of a scrolled window in a whole-page screenshot', async () => {
     const fixed = '<input type="password" value="pinned" style="position:fixed;bottom:0;left:0;border:0;width:200px;height:30px;background:red">';
     const page = `<body style="margin:0;background:white"><div style="height:100px"></div>${PASSWORD}<div style="height:900px"></div>${PASSWORD}<div style="height:300px"></div>${fixed}</body>`;
-    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=1']);
+    const { windows, launch, directory } = pageApp(page, { width: 300, height: 200, scale: 1 });
     await launch();
     const window = windows.require();
     await window.page.evaluate(() => scrollTo(0, 500));
@@ -610,7 +623,7 @@ describe('pixels', () => {
 
   it('captures the whole page and its clip at the window\'s zoom, and reads the pixels back at one per CSS pixel', async () => {
     const page = `<body style="margin:0;background:white"><div style="height:900px"></div>${PASSWORD}<div style="height:640px"></div></body>`;
-    const { app, windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=1']);
+    const { app, windows, launch, directory } = pageApp(page, { width: 300, height: 200, scale: 1 });
     await launch();
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.setZoomFactor(1.5), undefined);
     const window = windows.require();
@@ -627,7 +640,7 @@ describe('pixels', () => {
 
   it('refuses a whole-page capture past the pixels Electron paints in one screenshot, and takes a clip of it', async () => {
     const page = `<body style="margin:0;background:white"><div style="height:20000px"></div></body>`;
-    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=1']);
+    const { windows, launch, directory } = pageApp(page, { width: 300, height: 200, scale: 1 });
     await launch();
     const window = windows.require();
     const refused = await screenshotFile(new DevTools(), window, directory, 'tall.png', () => undefined, { fullPage: true }).then(() => undefined, (error: unknown) => error);
@@ -638,7 +651,7 @@ describe('pixels', () => {
 
   it('cuts a whole-page screenshot to a clip in the page, and refuses one with nothing of the page inside it', async () => {
     const page = `<body style="margin:0;overflow-x:hidden"><div style="height:1000px;background:rgb(255,0,0)"></div><div style="height:1000px;background:rgb(0,128,0)"></div></body>`;
-    const { windows, launch, directory } = appWith(`app.whenReady().then(() => new BrowserWindow({ show: ${SHOWN}, width: 300, height: 200 }).loadURL('data:text/html,' + ${JSON.stringify(encodeURIComponent(page))}));`, ['--force-device-scale-factor=1']);
+    const { windows, launch, directory } = pageApp(page, { width: 300, height: 200, scale: 1 });
     await launch();
     const window = windows.require();
     const relative = await screenshotFile(new DevTools(), window, directory, 'clip.png', () => undefined, { fullPage: true, clip: { x: 10, y: 1500, width: 50, height: 40 } });
