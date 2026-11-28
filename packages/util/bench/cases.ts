@@ -1,9 +1,11 @@
 /**
  * The pixel work e2e does on a step, each as the JavaScript did it
  * (`tests/reference.ts`: `@napi-rs/image` and loops on the JavaScript
- * thread) and as `@e2e-dev/util` does it, on real browser screenshots.
+ * thread; for the mobile mask, `@e2e-dev/mobile`'s previous `maskPng`) and as
+ * `@e2e-dev/util` does it, on real browser screenshots.
  */
 
+import { previousMaskPng } from '../../mobile/tests/helpers/previous-mask.ts';
 import { decodePng, NativeImage, processPng } from '../src/index.ts';
 import * as reference from '../tests/reference.ts';
 import { screenshots } from '../tests/screenshots.ts';
@@ -35,7 +37,9 @@ export async function cases(): Promise<readonly Case[]> {
     { x: 1172, y: 136, width: 72, height: 38 },
     { x: 840, y: 400, width: 120, height: 300 },
   ];
-  const phoneMasks = [{ x: 60.4, y: 300.2, width: 900.7, height: 120.3 }].map((rect) => ({
+  const phoneRects = [{ x: 60.4, y: 300.2, width: 900.7, height: 120.3 }];
+  // `maskPng` rounds each rectangle outward before it paints.
+  const phoneMasks = phoneRects.map((rect) => ({
     x: Math.floor(rect.x),
     y: Math.floor(rect.y),
     width: Math.ceil(rect.x + rect.width) - Math.floor(rect.x),
@@ -87,7 +91,8 @@ export async function cases(): Promise<readonly Case[]> {
     {
       name: 'mask 1170x2532 phone screenshot',
       when: 'every masked mobile screenshot (maskPng)',
-      old: () => reference.encodePng(reference.fillBoxes(reference.decodePng(phone), phoneMasks, [0, 0, 0])),
+      // The engine's own code before this package, which painted in place, not core's copying fillBoxes.
+      old: () => previousMaskPng(phone, phoneRects),
       native: () => processPng(phone, { fill: { boxes: phoneMasks, color: [0, 0, 0] }, output: 'png' }),
     },
   ];
