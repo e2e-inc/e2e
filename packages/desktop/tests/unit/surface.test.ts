@@ -355,6 +355,19 @@ describe('DesktopSurface: launching', () => {
     expect(await gone(late)).toBe(true);
   });
 
+  it('stops at once a quit cancelled while it waited behind a launch still running', async () => {
+    const { surface } = await initialized({ launch: [spawnApp({ sleepMs: 4_000 })] });
+    const opening = surface.restart({ ...operation(), timeoutMs: 600 }).catch(() => undefined);
+    const controller = new AbortController();
+    const closing = surface.closeApp(controller.signal, 10_000);
+    setTimeout(() => controller.abort(), 100);
+    await opening;
+    const started = Date.now();
+    await expect(closing).rejects.toMatchObject({ code: 'CANCELLED' });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    await surface.endAttempt({ signal, timeoutMs: 10_000 });
+  });
+
   it('keeps a launch pending when the look for its late app is cancelled, so the next quit still finds it', async () => {
     const { surface, fake } = await initialized({ launch: [failure('TIMEOUT', 'delivered_unverified', 'no new process carries the token', { kind: 'unclaimed' })] });
     await expect(surface.restart(operation())).rejects.toMatchObject({ code: 'ACTION_MAY_HAVE_COMMITTED' });

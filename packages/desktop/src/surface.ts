@@ -1526,6 +1526,8 @@ function byPreference(windows: readonly RawWindow[]): RawWindow[] {
 
 /** The driver's answer within `ms`, or `timeout`; a cancelled wait answers at once. */
 async function settleWithin<T>(promise: Promise<T>, ms: number, signal: AbortSignal): Promise<T | 'timeout'> {
+  // A signal that already fired fires no abort event: the wait would run its whole time.
+  if (signal.aborted) return 'timeout';
   let timer: NodeJS.Timeout | undefined;
   let onAbort: (() => void) | undefined;
   const limit = new Promise<'timeout'>((resolve) => {
