@@ -59,8 +59,8 @@ const built = path.join(metadata.target_directory, target, 'release', library(ad
 if (typeDefs !== undefined) {
   const { generateTypeDef } = await import('@napi-rs/cli');
   const header = [`// Written by \`node scripts/native/build-native.ts ${addon.name} --types\` from crates/${addon.crate}. Do not edit.`, ...addon.typeImports, '', ''].join('\n');
-  const { dts } = await generateTypeDef({ typeDefDir: typeDefs, cwd: crate, dtsHeader: header });
-  if (dts.trim() === header.trim()) throw new Error(`the build of ${addon.crate} wrote no types`);
+  const { dts, exports } = await generateTypeDef({ typeDefDir: typeDefs, cwd: crate, dtsHeader: header });
+  if (exports.length === 0) throw new Error(`the build of ${addon.crate} wrote no types`);
   writeFileSync(path.join(addon.packageDir, addon.types), dts);
 }
 const name = addonFile(addon, platform);
