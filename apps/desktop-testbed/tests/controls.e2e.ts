@@ -230,9 +230,12 @@ test.describe('controls window', () => {
     ['Cancel', 'Kept the draft'],
     ['Delete', 'Deleted the draft'],
   ] as const) {
-    test(`taps ${button} in a SwiftUI alert, which closes it`, async ({ screen }) => {
+    test(`taps ${button} in a SwiftUI alert, which closes it`, async ({ screen, desktop }) => {
       await screen.getByRole('button', 'Delete draft…').tap();
       await expect(screen.getByText('Delete draft?')).toBeVisible();
+      // The alert is a sheet on the Controls window, not a window of its own.
+      const titles = await Promise.all((await desktop.windows()).map((window) => window.title()));
+      expect(titles.toSorted()).toEqual(['Controls', 'Sign In']);
       // SwiftUI answers the press with an error once it closed the alert: the tap still passes, as it landed.
       await screen.getByRole('button', button).tap();
       await expect(screen.getByTestId('controls-status')).toHaveText(effect);
